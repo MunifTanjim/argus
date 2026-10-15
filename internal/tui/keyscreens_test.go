@@ -235,7 +235,7 @@ func TestKeymapSectionsByComponent(t *testing.T) {
 			{"session dock", withFocus(waitingSession(), sessionDock), "session-dock"},
 			{"create picker", createTestModel(t), "project-tree"},
 			{"retarget picker", withPopup(projectsTestModel(), retargetPicker{pick: newBranchPicker()}), ""},
-			{"spawn flow", spawnOverHome(), ""},
+			{"spawn flow", spawnOverHome(), "spawn"},
 			{"live screen", liveScreenModel(), ""},
 		}
 		if trOf(detail).historyView != histDetail {

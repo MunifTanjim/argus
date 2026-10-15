@@ -143,6 +143,7 @@ keys come from a default keymap, for example `P` runs `:toggle pin<CR>`. The
 | `transcript` | A session transcript, its entry detail, and its redaction list |
 | `visual` | Selecting text in a session transcript or its entry detail |
 | `session-dock` | The reply, question, or permission prompt of a session |
+| `spawn` | The new session flow |
 | `file` | An open file or diff |
 | `file-tree` | The Files tab |
 | `changes` | The Changes tab |
@@ -212,7 +213,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 |---|---|---|---|
 | `answer note` | session-dock | `n` |  |
 | `answer submit` | session-dock | `<CR>` |  |
-| `back` | changes, file, file-tree, history, home, logs, node, project, project-tree, session-dock, sidebar-sessions, terminals, transcript, visual, workspace | `<Esc>` |  |
+| `back` | changes, file, file-tree, history, home, logs, node, project, project-tree, session-dock, sidebar-sessions, spawn, terminals, transcript, visual, workspace | `<Esc>` |  |
 | `copy` | transcript, visual | `y` |  |
 | `cursor down` | visual | `<Down>` `j` |  |
 | `cursor first-non-blank` | visual | `^` |  |
@@ -225,6 +226,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `cursor word-next` | visual | `w` |  |
 | `cursor word-prev` | visual | `b` |  |
 | `cycle group-by` | home |  | `zg` |
+| `filter-directories` | spawn | `/` |  |
 | `filter-projects` | node, project, project-tree | `/` |  |
 | `filter-sessions` | home, sidebar-sessions, workspace | `/` |  |
 | `focus down` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><C-j>` `<C-w><Down>` `<C-w>j` |  |
@@ -237,20 +239,20 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `focus up` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><C-k>` `<C-w><Up>` `<C-w>k` |  |
 | `fold close` | changes, file-tree, project-tree, transcript | `<Left>` `h` `zc` |  |
 | `fold open` | changes, file-tree, project-tree, transcript | `<Right>` `l` `zo` |  |
-| `goto bottom` | changes, file, file-tree, history, home, logs, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `G` |  |
-| `goto top` | changes, file, file-tree, history, home, logs, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `gg` |  |
+| `goto bottom` | changes, file, file-tree, history, home, logs, project-tree, sidebar-sessions, spawn, terminals, transcript, visual, workspace | `G` |  |
+| `goto top` | changes, file, file-tree, history, home, logs, project-tree, sidebar-sessions, spawn, terminals, transcript, visual, workspace | `gg` |  |
 | `help` | changes (over the workspace pane), file (over the workspace pane), file-tree (over the workspace pane), history (project list), home, logs, node, project, project-tree, sidebar-sessions, terminals, workspace |  | `g?` |
 | `hover` | changes, file-tree, project-tree, sidebar-sessions |  | `K` |
-| `next` | changes, file-tree, history, home, project-tree, session-dock, sidebar-sessions, terminals, transcript, workspace | `<Down>` `j` |  |
+| `next` | changes, file-tree, history, home, project-tree, session-dock, sidebar-sessions, spawn, terminals, transcript, workspace | `<Down>` `j` |  |
 | `next diff-file` | file |  | `]f` |
 | `next prompt` | transcript | `}` |  |
 | `node wakelock` | node, project-tree |  | `w` |
-| `open` | changes, file-tree, history, home, project-tree, sidebar-sessions, terminals, transcript, workspace | `<CR>` |  |
+| `open` | changes, file-tree, history, home, project-tree, sidebar-sessions, spawn, terminals, transcript, workspace | `<CR>` |  |
 | `open live-screen` | session-dock, transcript |  | `<C-t>` |
 | `open palette` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace |  | `<C-k>` |
 | `open setup-log` | project-tree, workspace |  | `L` |
 | `open tmux-pane` | home, workspace |  | `O` |
-| `prev` | changes, file-tree, history, home, project-tree, session-dock, sidebar-sessions, terminals, transcript, workspace | `<Up>` `k` |  |
+| `prev` | changes, file-tree, history, home, project-tree, session-dock, sidebar-sessions, spawn, terminals, transcript, workspace | `<Up>` `k` |  |
 | `prev diff-file` | file |  | `[f` |
 | `prev prompt` | transcript | `{` |  |
 | `project forget` | project-tree |  | `F` |
@@ -262,10 +264,10 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `redaction save` | transcript |  | `W` |
 | `refresh` | changes, file, file-tree, history, home, node, project, project-tree, sidebar-sessions, terminals, workspace |  | `gr` |
 | `scroll down` | file, logs, transcript | `<Down>` `j` |  |
-| `scroll half-page-down` | changes, file, file-tree, history, home, logs, project-tree, session-dock, sidebar-sessions, terminals, transcript, visual, workspace | `<C-d>` |  |
-| `scroll half-page-up` | changes, file, file-tree, history, home, logs, project-tree, session-dock, sidebar-sessions, terminals, transcript, visual, workspace | `<C-u>` |  |
-| `scroll page-down` | changes, file, file-tree, history, home, logs, project-tree, session-dock, terminals, transcript, visual, workspace | `<C-f>` `<PageDown>` |  |
-| `scroll page-up` | changes, file, file-tree, history, home, logs, project-tree, session-dock, terminals, transcript, visual, workspace | `<C-b>` `<PageUp>` |  |
+| `scroll half-page-down` | changes, file, file-tree, history, home, logs, project-tree, session-dock, sidebar-sessions, spawn, terminals, transcript, visual, workspace | `<C-d>` |  |
+| `scroll half-page-up` | changes, file, file-tree, history, home, logs, project-tree, session-dock, sidebar-sessions, spawn, terminals, transcript, visual, workspace | `<C-u>` |  |
+| `scroll page-down` | changes, file, file-tree, history, home, logs, project-tree, session-dock, spawn, terminals, transcript, visual, workspace | `<C-f>` `<PageDown>` |  |
+| `scroll page-up` | changes, file, file-tree, history, home, logs, project-tree, session-dock, spawn, terminals, transcript, visual, workspace | `<C-b>` `<PageUp>` |  |
 | `scroll up` | file, logs, transcript | `<Up>` `k` |  |
 | `session kill` | home, sidebar-sessions, workspace |  | `dd` |
 | `session load-more` | history |  | `m` |

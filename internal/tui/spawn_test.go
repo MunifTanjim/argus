@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -510,5 +511,89 @@ func TestSpawnPaste(t *testing.T) {
 	m = mm.(model)
 	if spawnOf(m).prompt.Value() != url {
 		t.Fatalf("prompt after paste = %q, want %q", spawnOf(m).prompt.Value(), url)
+	}
+}
+
+func manyDirs(n int) []session.HistoryProject {
+	out := make([]session.HistoryProject, n)
+	for i := range out {
+		out[i] = session.HistoryProject{Label: fmt.Sprintf("p%d", i), Cwd: fmt.Sprintf("/src/p%d", i)}
+	}
+	return out
+}
+
+// The dir list takes the list keys: G, gg, and half-page jumps.
+func TestSpawnDirListKeys(t *testing.T) {
+	m := openSpawn(t, &spawnPickClient{projects: manyDirs(30)})
+	m.width, m.height = 80, 40
+	m = typeKeys(m, "G")
+	if got := spawnOf(m).cursor; got != 30 { // the trailing "Custom path…" row
+		t.Fatalf("G: cursor=%d want 30", got)
+	}
+	m = typeKeys(m, "gg")
+	if got := spawnOf(m).cursor; got != 0 {
+		t.Fatalf("gg: cursor=%d want 0", got)
+	}
+	m = pressKeys(m, ctrlKey('d'))
+	down := spawnOf(m).cursor
+	if down <= 0 {
+		t.Fatalf("<C-d>: cursor=%d, want it to move down", down)
+	}
+	m = pressKeys(m, ctrlKey('u'))
+	if got := spawnOf(m).cursor; got != 0 {
+		t.Fatalf("<C-u>: cursor=%d want 0", got)
+	}
+}
+
+// / filters the dirs by label or path; enter keeps the filter and picks from
+// the filtered list; esc clears it without leaving the flow.
+func TestSpawnDirFilter(t *testing.T) {
+	c := &spawnPickClient{projects: []session.HistoryProject{
+		{Label: "argus", Cwd: "/home/u/argus"},
+		{Label: "web", Cwd: "/srv/web"},
+		{Label: "cmp", Cwd: "/home/u/cmp"},
+	}}
+	m := openSpawn(t, c)
+	m.width, m.height = 80, 24
+	m = typeKeys(m, "/srv")
+	if dirs := spawnOf(m).shownDirs(); len(dirs) != 1 || dirs[0].Label != "web" {
+		t.Fatalf("filter by path: %+v", dirs)
+	}
+	if out := spawnView(m); strings.Contains(out, "argus") || !strings.Contains(out, "Custom path") {
+		t.Fatalf("filtered view should hide argus and keep Custom path:\n%s", out)
+	}
+	m = pressKeys(m, keyMsg("esc"))
+	if !spawnOpen(m) || spawnOf(m).dirQuery != "" || len(spawnOf(m).shownDirs()) != 3 {
+		t.Fatalf("esc should clear the filter and stay open: open=%v query=%q", spawnOpen(m), spawnOf(m).dirQuery)
+	}
+	m = typeKeys(m, "/cmp")
+	m = pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // keep the filter
+	if spawnOf(m).filter.on || spawnOf(m).dirQuery != "cmp" {
+		t.Fatalf("enter should keep the filter: on=%v query=%q", spawnOf(m).filter.on, spawnOf(m).dirQuery)
+	}
+	m = pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // pick
+	if spawnOf(m).step != spawnStepPrompt || spawnOf(m).cwd.Value() != "/home/u/cmp" {
+		t.Fatalf("pick from filtered list: step=%v cwd=%q", spawnOf(m).step, spawnOf(m).cwd.Value())
+	}
+}
+// Esc clears a kept filter before it leaves the flow.
+func TestSpawnDirFilterEscClearsFirst(t *testing.T) {
+	c := &spawnPickClient{projects: []session.HistoryProject{
+		{Label: "argus", Cwd: "/home/u/argus"},
+		{Label: "cmp", Cwd: "/home/u/cmp"},
+	}}
+	m := openSpawn(t, c)
+	m = typeKeys(m, "/cmp")
+	m = pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // keep the filter
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "esc clear filter") {
+		t.Fatalf("footer with a kept filter should offer clearing it: %q", f)
+	}
+	m = pressKeys(m, keyMsg("esc"))
+	if !spawnOpen(m) || spawnOf(m).dirQuery != "" || len(spawnOf(m).shownDirs()) != 2 {
+		t.Fatalf("esc should clear the kept filter and stay open: open=%v query=%q", spawnOpen(m), spawnOf(m).dirQuery)
+	}
+	m = pressKeys(m, keyMsg("esc"))
+	if spawnOpen(m) {
+		t.Fatal("a second esc should leave the flow")
 	}
 }

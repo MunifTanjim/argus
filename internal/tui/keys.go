@@ -124,6 +124,12 @@ var listKeys = struct {
 	GroupBy:       nm("cycle group-by", "zg", "group"),
 }
 
+var spawnKeys = struct {
+	Filter binding
+}{
+	Filter: nb("filter-directories", "/", "filter"),
+}
+
 var terminalKeys = struct {
 	Spawn, Rename, Kill binding
 }{
@@ -410,7 +416,7 @@ var upgradeKeys = struct {
 
 func keySets() []any {
 	return []any{listKeys, projectsKeys, fileViewKeys, transcriptKeys, redactListKeys,
-		detailKeys, visualKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, upgradeKeys}
+		detailKeys, visualKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, upgradeKeys, spawnKeys}
 }
 
 func allBindingSets() []any { return append(keySets(), textInputSets()...) }
