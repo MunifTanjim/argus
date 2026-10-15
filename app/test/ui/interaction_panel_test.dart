@@ -6,21 +6,14 @@ import 'package:argus/core/result.dart';
 import 'package:argus/data/session_repository.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/state/respond_params.dart';
-import 'package:argus/ui/respond_sheet.dart';
+import 'package:argus/ui/interaction_panel.dart';
 import '../support/fake_session_repository.dart';
 
 class _RecordingControl extends FakeSessionRepository {
   final respondCalls = <Map<String, dynamic>>[];
-  final inputCalls = <List<String>>[];
   @override
   Future<Result<void>> respond(Map<String, dynamic> params) async {
     respondCalls.add(params);
-    return const Result.ok(null);
-  }
-
-  @override
-  Future<Result<void>> sendInput(String sessionId, String text) async {
-    inputCalls.add([sessionId, text]);
     return const Result.ok(null);
   }
 }
@@ -41,11 +34,13 @@ Session _session(Map<String, dynamic> interaction, {String agent = 'claude'}) =>
       'interaction': interaction,
     })) as Map<String, dynamic>);
 
-Future<void> _pumpSheet(
+Future<void> _pumpPanel(
     WidgetTester tester, Session s, SessionRepository c) async {
   await tester.pumpWidget(ProviderScope(
     overrides: [sessionRepositoryProvider.overrideWithValue(c)],
-    child: MaterialApp(home: Scaffold(body: RespondSheet(session: s))),
+    child: MaterialApp(
+        home: Scaffold(
+            body: SizedBox(height: 600, child: InteractionPanel(session: s)))),
   ));
   await tester.pump();
 }
@@ -53,7 +48,7 @@ Future<void> _pumpSheet(
 void main() {
   testWidgets('permission allow sends option_value allow', (tester) async {
     final c = _RecordingControl();
-    await _pumpSheet(
+    await _pumpPanel(
         tester, _session({'kind': 'permission', 'tool_name': 'Bash'}), c);
     await tester.tap(find.text('Allow'));
     await tester.pumpAndSettle();
@@ -64,7 +59,7 @@ void main() {
   testWidgets('permission heading uses the tool display name',
       (tester) async {
     final c = _RecordingControl();
-    await _pumpSheet(
+    await _pumpPanel(
         tester,
         _session({'kind': 'permission', 'tool_name': 'exec_command'},
             agent: 'codex'),
@@ -75,7 +70,7 @@ void main() {
   testWidgets('permission renders formatted tool detail, not raw JSON',
       (tester) async {
     final c = _RecordingControl();
-    await _pumpSheet(
+    await _pumpPanel(
         tester,
         _session({
           'kind': 'permission',
@@ -94,7 +89,7 @@ void main() {
   testWidgets('permission deny reveals reason and sends option_value deny',
       (tester) async {
     final c = _RecordingControl();
-    await _pumpSheet(
+    await _pumpPanel(
         tester, _session({'kind': 'permission', 'tool_name': 'Bash'}), c);
     await tester.tap(find.text('Deny'));
     await tester.pump();
@@ -108,7 +103,7 @@ void main() {
   testWidgets('plan approve sends option_value allow with kind plan',
       (tester) async {
     final c = _RecordingControl();
-    await _pumpSheet(tester, _session({'kind': 'plan', 'plan': '# Plan'}), c);
+    await _pumpPanel(tester, _session({'kind': 'plan', 'plan': '# Plan'}), c);
     await tester.tap(find.text('Allow'));
     await tester.pumpAndSettle();
     expect(c.respondCalls.single['kind'], 'plan');
@@ -118,7 +113,7 @@ void main() {
   testWidgets('long plan scrolls without overflow', (tester) async {
     final c = _RecordingControl();
     final longPlan = List.generate(200, (i) => 'Step $i: do the thing').join('\n\n');
-    await _pumpSheet(tester, _session({'kind': 'plan', 'plan': longPlan}), c);
+    await _pumpPanel(tester, _session({'kind': 'plan', 'plan': longPlan}), c);
     await tester.pumpAndSettle();
     // No RenderFlex overflow exception, the detail is scrollable, and the
     // action button stays rendered (pinned below the scroll area).
@@ -137,7 +132,7 @@ void main() {
         {'label': 'Deny', 'value': 'deny', 'reject': true},
       ],
     });
-    await _pumpSheet(tester, s, c);
+    await _pumpPanel(tester, s, c);
     expect(find.text('Allow'), findsOneWidget);
     expect(find.text('Deny'), findsOneWidget);
     await tester.tap(find.text('Allow'));
@@ -146,85 +141,20 @@ void main() {
     expect(c.respondCalls.single['kind'], 'permission');
   });
 
-  testWidgets('idle reply sends input', (tester) async {
+  testWidgets('a decision stays inline after it is sent', (tester) async {
     final c = _RecordingControl();
-    await _pumpSheet(tester, _session({'kind': 'idle'}), c);
-    await tester.enterText(find.byType(TextField), 'next task');
-    await tester.tap(find.text('Send'));
+    await _pumpPanel(
+        tester, _session({'kind': 'permission', 'tool_name': 'Bash'}), c);
+    await tester.tap(find.text('Allow'));
     await tester.pumpAndSettle();
-    expect(c.inputCalls.single, ['mac:%1', 'next task']);
-  });
-
-  testWidgets('idle draft survives sheet close and reopen', (tester) async {
-    final c = _RecordingControl();
-    final container = ProviderContainer(
-        overrides: [sessionRepositoryProvider.overrideWithValue(c)]);
-    addTearDown(container.dispose);
-    final s = _session({'kind': 'idle'});
-
-    Future<void> pumpSheet() => tester.pumpWidget(UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(home: Scaffold(body: RespondSheet(session: s))),
-        ));
-
-    await pumpSheet();
-    await tester.pump();
-    await tester.enterText(find.byType(TextField), 'draft reply');
-    await tester.pump();
-
-    // Close the sheet: replace it with an empty tree so its state disposes.
-    await tester.pumpWidget(UncontrolledProviderScope(
-      container: container,
-      child: const MaterialApp(home: Scaffold(body: SizedBox())),
-    ));
-    await tester.pump();
-
-    await pumpSheet();
-    await tester.pump();
-
-    expect(find.text('draft reply'), findsOneWidget);
-  });
-
-  testWidgets('idle draft cleared after a successful send', (tester) async {
-    final c = _RecordingControl();
-    final container = ProviderContainer(
-        overrides: [sessionRepositoryProvider.overrideWithValue(c)]);
-    addTearDown(container.dispose);
-    final s = _session({'kind': 'idle'});
-
-    await tester.pumpWidget(UncontrolledProviderScope(
-      container: container,
-      child: MaterialApp(
-        home: Builder(
-          builder: (ctx) => Scaffold(
-            body: Center(
-              child: ElevatedButton(
-                onPressed: () => showRespondSheet(ctx, s),
-                child: const Text('open'),
-              ),
-            ),
-          ),
-        ),
-      ),
-    ));
-
-    await tester.tap(find.text('open'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'next task');
-    await tester.tap(find.text('Send'));
-    await tester.pumpAndSettle();
-    expect(c.inputCalls.single, ['mac:%1', 'next task']);
-
-    await tester.tap(find.text('open'));
-    await tester.pumpAndSettle();
-    final field = tester.widget<TextField>(find.byType(TextField));
-    expect(field.controller!.text, isEmpty);
+    expect(c.respondCalls, hasLength(1));
+    expect(find.byType(InteractionPanel), findsOneWidget); // no route was popped
   });
 
   testWidgets('permission deny with blank reason omits reason key',
       (tester) async {
     final c = _RecordingControl();
-    await _pumpSheet(
+    await _pumpPanel(
         tester, _session({'kind': 'permission', 'tool_name': 'Bash'}), c);
     await tester.tap(find.text('Deny'));
     await tester.pump();
@@ -233,15 +163,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(c.respondCalls.single['option_value'], 'deny');
     expect(c.respondCalls.single.containsKey('reason'), isFalse);
-  });
-
-  testWidgets('idle reply with blank text does not send', (tester) async {
-    final c = _RecordingControl();
-    await _pumpSheet(tester, _session({'kind': 'idle'}), c);
-    // do not enter any text, tap Send immediately
-    await tester.tap(find.text('Send'));
-    await tester.pumpAndSettle();
-    expect(c.inputCalls, isEmpty);
   });
 
   group('question', () {
@@ -270,7 +191,7 @@ void main() {
     testWidgets('allow_notes hides type-your-own and sends a note',
         (tester) async {
       final c = _RecordingControl();
-      await _pumpSheet(tester, notesSession(), c);
+      await _pumpPanel(tester, notesSession(), c);
       expect(find.text(otherLabel), findsNothing);
       await tester.tap(find.text('Large'));
       await tester.pump();
@@ -288,13 +209,13 @@ void main() {
     testWidgets('allow_notes question shows no custom answer field',
         (tester) async {
       final c = _RecordingControl();
-      await _pumpSheet(tester, notesSession(), c);
+      await _pumpPanel(tester, notesSession(), c);
       expect(find.widgetWithText(TextField, 'Your answer'), findsNothing);
     });
 
     testWidgets('clearing the note removes it', (tester) async {
       final c = _RecordingControl();
-      await _pumpSheet(tester, notesSession(), c);
+      await _pumpPanel(tester, notesSession(), c);
       await tester.tap(find.text('Small'));
       await tester.tap(find.text('Add note'));
       await tester.pump();
@@ -310,16 +231,16 @@ void main() {
     testWidgets('questions without allow_notes show no note button',
         (tester) async {
       final c = _RecordingControl();
-      await _pumpSheet(tester, questionSession(), c);
+      await _pumpPanel(tester, questionSession(), c);
       expect(find.text('Add note'), findsNothing);
       expect(find.text(otherLabel), findsOneWidget);
     });
 
     testWidgets('cancel_interrupts questions offer interrupt instead of chat', (tester) async {
       final c = _RecordingControl();
-      await _pumpSheet(tester, questionSession(), c);
+      await _pumpPanel(tester, questionSession(), c);
       expect(find.text('Chat about this'), findsOneWidget);
-      await _pumpSheet(
+      await _pumpPanel(
           tester,
           _session({
             'kind': 'question',
@@ -345,7 +266,7 @@ void main() {
 
     testWidgets('allow_unanswered submits after confirmation', (tester) async {
       final c = _RecordingControl();
-      await _pumpSheet(
+      await _pumpPanel(
           tester,
           _session({
             'kind': 'question',
@@ -378,7 +299,7 @@ void main() {
 
     testWidgets('responds echo the request_id', (tester) async {
       final c = _RecordingControl();
-      await _pumpSheet(
+      await _pumpPanel(
           tester,
           _session({
             'kind': 'question',
@@ -402,7 +323,7 @@ void main() {
     testWidgets('partial answers submit without confirmation unless allowed',
         (tester) async {
       final c = _RecordingControl();
-      await _pumpSheet(
+      await _pumpPanel(
           tester,
           _session({
             'kind': 'question',
@@ -428,7 +349,7 @@ void main() {
 
     testWidgets('single-select submits chosen label', (tester) async {
       final c = _RecordingControl();
-      await _pumpSheet(tester, questionSession(), c);
+      await _pumpPanel(tester, questionSession(), c);
       await tester.tap(find.text('B'));
       await tester.pump();
       await tester.tap(find.text('Submit'));
@@ -438,7 +359,7 @@ void main() {
 
     testWidgets('submit disabled until an answer exists', (tester) async {
       final c = _RecordingControl();
-      await _pumpSheet(tester, questionSession(), c);
+      await _pumpPanel(tester, questionSession(), c);
       await tester.tap(find.text('Submit'));
       await tester.pumpAndSettle();
       expect(c.respondCalls, isEmpty);
@@ -446,7 +367,7 @@ void main() {
 
     testWidgets('multi-select collects toggled labels', (tester) async {
       final c = _RecordingControl();
-      await _pumpSheet(tester, questionSession(multi: true), c);
+      await _pumpPanel(tester, questionSession(multi: true), c);
       await tester.tap(find.text('A'));
       await tester.tap(find.text('B'));
       await tester.pump();
@@ -460,7 +381,7 @@ void main() {
     testWidgets('single-select renders descriptions and previews',
         (tester) async {
       final c = _RecordingControl();
-      await _pumpSheet(
+      await _pumpPanel(
           tester,
           _session({
             'kind': 'question',

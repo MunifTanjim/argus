@@ -7,39 +7,23 @@ import '../data/session_repository.dart';
 import '../models/entry.dart';
 import '../models/enums.dart';
 import '../models/session.dart';
-import '../state/prompt_drafts.dart';
 import '../state/respond_params.dart';
 import '../state/respond_view_model.dart';
 import 'code_block.dart';
 import 'theme.dart';
 import 'tool_detail.dart';
 import 'tool_registry.dart';
-import 'voice_input_field.dart';
 
-/// Opens the respond sheet for [session]'s pending interaction.
-Future<void> showRespondSheet(BuildContext context, Session session) {
-  return showModalBottomSheet<void>(
-    context: context,
-    useRootNavigator: true,
-    isScrollControlled: true,
-    builder: (sheetCtx) => Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(sheetCtx).viewInsets.bottom,
-      ),
-      child: RespondSheet(session: session),
-    ),
-  );
-}
-
-class RespondSheet extends ConsumerStatefulWidget {
-  const RespondSheet({super.key, required this.session});
+/// The pending permission, plan or question of [session], answered inline.
+class InteractionPanel extends ConsumerStatefulWidget {
+  const InteractionPanel({super.key, required this.session});
   final Session session;
 
   @override
-  ConsumerState<RespondSheet> createState() => _RespondSheetState();
+  ConsumerState<InteractionPanel> createState() => _InteractionPanelState();
 }
 
-class _RespondSheetState extends ConsumerState<RespondSheet> {
+class _InteractionPanelState extends ConsumerState<InteractionPanel> {
   late final RespondViewModel _vm;
   bool _denying = false;
   final _text = TextEditingController();
@@ -50,12 +34,6 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
     super.initState();
     _vm = RespondViewModel(ref.read(sessionRepositoryProvider));
     _vm.respond.addListener(_onCommand);
-    _vm.sendInput.addListener(_onCommand);
-    if (widget.session.interaction?.kind == InteractionKind.idle) {
-      final draft = ref.read(promptDraftsProvider.notifier).get(_sid);
-      _text.text = draft;
-      _text.selection = TextSelection.collapsed(offset: draft.length);
-    }
   }
 
   void _onCommand() {
@@ -71,7 +49,6 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
   @override
   void dispose() {
     _vm.respond.removeListener(_onCommand);
-    _vm.sendInput.removeListener(_onCommand);
     _vm.dispose();
     _text.dispose();
     super.dispose();
@@ -83,25 +60,16 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
   Future<void> _respond(Map<String, dynamic> params) =>
       _finish(_vm.respond, () => _vm.respond.execute(params));
 
-  Future<void> _sendInput(String text) => _finish(
-    _vm.sendInput,
-    () => _vm.sendInput.execute((sessionId: _sid, text: text)),
-    onOk: () => ref.read(promptDraftsProvider.notifier).clear(_sid),
-  );
-
-  /// Runs [exec], then pops on success or shows the error from [cmd]. [onOk] runs
-  /// before the pop, while the widget is still mounted.
   Future<void> _finish(
     Command<void> cmd,
-    Future<void> Function() exec, {
-    VoidCallback? onOk,
-  }) async {
+    Future<void> Function() exec,
+  ) async {
     await exec();
     if (!mounted) return;
     switch (cmd.result) {
       case Ok():
-        onOk?.call();
-        Navigator.of(context).pop();
+        setState(() => _denying = false);
+        _text.clear();
       case Error(:final error):
         ScaffoldMessenger.of(
           context,
@@ -115,23 +83,12 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
   Widget build(BuildContext context) {
     final ix = widget.session.interaction;
     if (ix == null) return const SizedBox.shrink();
-    return SafeArea(
-      // Align with heightFactor 1.0 caps width without forcing full height, so
-      // the modal sheet shrink-wraps its content instead of covering the page.
-      child: Align(
-        alignment: Alignment.topCenter,
-        heightFactor: 1.0,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: _body(ix),
-            ),
-          ),
-        ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: _body(ix),
       ),
     );
   }
@@ -143,7 +100,7 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
       case InteractionKind.plan:
         return _serverDecision(ix, 'plan');
       case InteractionKind.idle:
-        return _idle();
+        return const [];
       case InteractionKind.question:
         return _questions(ix);
       case InteractionKind.unknown:
@@ -276,41 +233,6 @@ class _RespondSheetState extends ConsumerState<RespondSheet> {
         ),
     ];
   }
-
-  List<Widget> _idle() => [
-    VoiceInputField(
-      controller: _text,
-      onChanged: (v) => ref.read(promptDraftsProvider.notifier).set(_sid, v),
-      field: (suffixIcon) => TextField(
-        controller: _text,
-        autofocus: true,
-        minLines: 1,
-        maxLines: 6,
-        onChanged: (v) => ref.read(promptDraftsProvider.notifier).set(_sid, v),
-        decoration: InputDecoration(
-          labelText: 'Reply',
-          border: const OutlineInputBorder(),
-          suffixIcon: suffixIcon,
-        ),
-      ),
-    ),
-    const SizedBox(height: 12),
-    FilledButton(
-      onPressed: _busy
-          ? null
-          : () {
-              final t = _text.text.trim();
-              if (t.isEmpty) return;
-              _sendInput(t);
-            },
-      child: const Text('Send'),
-    ),
-    if (_busy)
-      const Padding(
-        padding: EdgeInsets.only(top: 12),
-        child: LinearProgressIndicator(),
-      ),
-  ];
 
   /// Asks whether to submit with unanswered questions, as Codex does.
   Future<bool> _confirmUnanswered(int count) async {
