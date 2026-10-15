@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
@@ -48,6 +50,8 @@ type spawnState struct {
 	agent        string                   // chosen agent id ("" = node default)
 	agents       []api.AgentInfo          // agents launchable on the node; nil while probing
 	cursor       int                      // list cursor (node, agent, and dir steps)
+	filter       filterPrompt             // dir step: editing dirQuery
+	dirQuery     string                   // dir step: shown dirs match this in label or cwd
 	custom       bool                     // dir step: free-text path entry active
 	cwd          textinput.Model          // resolved working directory
 	prompt       textarea.Model           // initial prompt (mandatory; multi-line via shift+enter)
@@ -71,15 +75,30 @@ func newSpawnPromptArea() textarea.Model {
 	return withWordMotion(ta)
 }
 
-// dirCursorMax is the dir-step selectable row count: one per project plus the
-// trailing "Custom path…" row.
-func (s spawnState) dirCursorMax() int { return len(s.dirs) + 1 }
+func (s spawnState) shownDirs() []session.HistoryProject {
+	q := strings.ToLower(s.dirQuery)
+	if q == "" {
+		return s.dirs
+	}
+	var out []session.HistoryProject
+	for _, p := range s.dirs {
+		if strings.Contains(strings.ToLower(p.Label), q) || strings.Contains(strings.ToLower(p.Cwd), q) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// dirCursorMax is the dir-step selectable row count: one per shown project
+// plus the trailing "Custom path…" row.
+func (s spawnState) dirCursorMax() int { return len(s.shownDirs()) + 1 }
 
 // enterDirStep filters projects to the chosen node, positions at the most recent,
 // and falls into custom path entry when there are no projects.
 func (s *spawnState) enterDirStep() {
 	s.step = spawnStepDir
 	s.dirs = projectsForNode(s.allProjects, s.nodeID)
+	s.dirQuery, s.filter = "", filterPrompt{}
 	s.cursor = 0
 	if len(s.dirs) == 0 {
 		s.custom = true

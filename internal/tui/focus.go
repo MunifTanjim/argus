@@ -57,7 +57,9 @@ func (m model) runKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if p := m.popups.front(); p != nil {
 		return m.popupKey(p, msg)
 	}
-	if m.focusedComp().raw(&ctx{m: &m}) {
+	// A section without focus keys (the spawn flow) keeps every key, as it
+	// has no command line either.
+	if c := m.focusedComp(); c.raw(&ctx{m: &m}) || len(sectionLists[c.section()].focus) == 0 {
 		return m.componentKey(msg)
 	}
 	if m.hovered != "" && msg.String() == "esc" {

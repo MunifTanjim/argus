@@ -15,8 +15,13 @@ type spawnComp struct {
 	back container // the focus to return to when the flow ends
 }
 
-func (s spawnComp) section() string           { return "" }
-func (s spawnComp) raw(*ctx) bool             { return true }
+func (s spawnComp) section() string { return "spawn" }
+
+// raw while typing; the list steps take resolved keys.
+func (s spawnComp) raw(*ctx) bool {
+	return s.step == spawnStepPrompt || s.step == spawnStepDir && s.custom || s.filter.on
+}
+
 func (s spawnComp) spins(*ctx) bool           { return false }
 func (s spawnComp) fullScreen(*ctx) fullLevel { return notFull }
 func (s spawnComp) footer(*ctx) []binding     { return nil }
@@ -124,20 +129,58 @@ func (s spawnComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 	return s, nil
 }
 
+// listKey reports whether msg was a list key.
+func (s *spawnComp) listKey(c *ctx, msg tea.KeyPressMsg, n int) bool {
+	m, k, step := c.m, listKeys, c.m.cardListPageStep()
+	switch {
+	case m.matches(msg, k.Up):
+		s.cursor = cursorUp(s.cursor)
+	case m.matches(msg, k.Down):
+		s.cursor = cursorDown(s.cursor, n)
+	case m.matches(msg, k.Top):
+		s.cursor = 0
+	case m.matches(msg, k.Bottom):
+		s.cursor = cursorBottom(n)
+	case m.matches(msg, k.HalfUp):
+		s.cursor = max(0, s.cursor-step)
+	case m.matches(msg, k.HalfDown):
+		s.cursor = min(cursorBottom(n), s.cursor+step)
+	case m.matches(msg, k.PageUp):
+		s.cursor = cursorBy(s.cursor, -2*step, n)
+	case m.matches(msg, k.PageDown):
+		s.cursor = cursorBy(s.cursor, 2*step, n)
+	case m.matches(msg, k.Open):
+		return true
+	}
+	return false
+}
+
 func (s spawnComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
-	if msg.String() == "esc" {
+	if s.filter.on {
+		var cmd tea.Cmd
+		s.filter, cmd, s.dirQuery = s.filter.handleKey(msg)
+		s.dirQuery = strings.TrimSpace(s.dirQuery)
+		s.cursor = min(s.cursor, cursorBottom(s.dirCursorMax()))
+		return s, cmd, true
+	}
+	// Typed keys stay literal, so only esc leaves while typing.
+	back := msg.String() == "esc"
+	if !s.raw(c) {
+		back = c.m.matches(msg, listKeys.Back)
+	}
+	switch {
+	case back && s.step == spawnStepDir && !s.custom && s.dirQuery != "":
+		// A kept filter clears first, as in every other list.
+		s.dirQuery, s.cursor = "", 0
+		return s, nil, true
+	case back:
 		s.end(c)
 		return s, nil, true
 	}
 	var cmd tea.Cmd
 	switch s.step {
 	case spawnStepNode:
-		switch msg.String() {
-		case "up", "k":
-			s.cursor = cursorUp(s.cursor)
-		case "down", "j":
-			s.cursor = cursorDown(s.cursor, len(s.nodes))
-		case "enter":
+		if s.listKey(c, msg, len(s.nodes)) {
 			if s.cursor < len(s.nodes) {
 				n := s.nodes[s.cursor]
 				if !n.Capabilities.SpawnSession {
@@ -151,12 +194,7 @@ func (s spawnComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, b
 		if s.agents == nil {
 			break // still probing; ignore keys but esc
 		}
-		switch msg.String() {
-		case "up", "k":
-			s.cursor = cursorUp(s.cursor)
-		case "down", "j":
-			s.cursor = cursorDown(s.cursor, len(s.agents))
-		case "enter":
+		if s.listKey(c, msg, len(s.agents)) {
 			if s.cursor < len(s.agents) {
 				s.agent = s.agents[s.cursor].ID
 				cmd = s.afterAgentStep(c)
@@ -171,14 +209,13 @@ func (s spawnComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, b
 			s.cwd, cmd = s.cwd.Update(msg)
 			break
 		}
-		switch msg.String() {
-		case "up", "k":
-			s.cursor = cursorUp(s.cursor)
-		case "down", "j":
-			s.cursor = cursorDown(s.cursor, s.dirCursorMax())
-		case "enter":
-			if s.cursor < len(s.dirs) {
-				s.cwd.SetValue(s.dirs[s.cursor].Cwd)
+		if c.m.matches(msg, spawnKeys.Filter) {
+			s.filter, cmd = s.filter.start(s.dirQuery)
+			break
+		}
+		if s.listKey(c, msg, s.dirCursorMax()) {
+			if dirs := s.shownDirs(); s.cursor < len(dirs) {
+				s.cwd.SetValue(dirs[s.cursor].Cwd)
 				cmd = s.enterPrompt(c)
 				break
 			}
@@ -267,13 +304,22 @@ func (s spawnComp) view(c *ctx, w, h int) string {
 				asstStyle.Render(ci.View())
 			break
 		}
-		cards := make([]string, 0, s.dirCursorMax())
-		for i, p := range s.dirs {
+		dirs := s.shownDirs()
+		cards := make([]string, 0, len(dirs)+1)
+		for i, p := range dirs {
 			cards = append(cards, spawnChoiceRow(p.Label, p.Cwd, i == s.cursor, cardW))
 		}
-		cards = append(cards, spawnChoiceRow("Custom path…", "", s.cursor == len(s.dirs), cardW))
-		body = StyleSecondaryBold.Render("Choose a directory") + "\n\n" +
-			renderCardList(c.below(4), "spawn", cards, s.cursor, max(1, avail-2))
+		cards = append(cards, spawnChoiceRow("Custom path…", "", s.cursor == len(dirs), cardW))
+		head := StyleSecondaryBold.Render("Choose a directory")
+		switch {
+		case s.filter.on:
+			head += "\n" + s.filter.view()
+		case s.dirQuery != "":
+			head += dimStyle.Render("  /" + s.dirQuery)
+		}
+		rows := strings.Count(head, "\n") + 2 // head and the blank line
+		body = head + "\n\n" +
+			renderCardList(c.below(2+rows), "spawn", cards, s.cursor, max(1, avail-rows))
 	case spawnStepPrompt:
 		head := StyleSecondaryBold.Render("Initial prompt") + " " + dimStyle.Render("(required)")
 		rows := avail - 2
@@ -293,7 +339,7 @@ func (s spawnComp) view(c *ctx, w, h int) string {
 	return centerBlock(title+"\n\n"+body, cardW, w)
 }
 
-func (s spawnComp) footerText(*ctx) string {
+func (s spawnComp) footerText(c *ctx) string {
 	switch {
 	case s.step == spawnStepAgent && s.agents == nil:
 		return dimStyle.Render("esc cancel")
@@ -301,6 +347,12 @@ func (s spawnComp) footerText(*ctx) string {
 		return dimStyle.Render("type a path · enter confirm · esc cancel")
 	case s.step == spawnStepPrompt:
 		return dimStyle.Render("enter launch · shift+enter/^j newline · esc cancel")
+	case s.step == spawnStepDir:
+		esc := "esc cancel"
+		if s.dirQuery != "" {
+			esc = "esc clear filter"
+		}
+		return dimStyle.Render("↑/↓ move · " + c.m.keyTextOn(s.section(), spawnKeys.Filter) + " filter · enter select · " + esc)
 	}
 	return dimStyle.Render("↑/↓ move · enter select · esc cancel")
 }
