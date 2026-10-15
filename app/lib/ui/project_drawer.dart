@@ -15,6 +15,7 @@ import 'project_actions.dart';
 import 'settings_screen.dart';
 import 'shell_drawer.dart';
 import 'sidebar_sessions_list.dart';
+import 'spawn_dialog.dart';
 import 'theme.dart';
 
 const _amber = Color(0xFFd79921);
@@ -58,6 +59,12 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
   void _select(String? workspaceId) {
     ref.read(scopeProvider.notifier).state = workspaceId;
     _close();
+  }
+
+  void _newSession() {
+    final ax = ActionContext.of(context);
+    _close();
+    ax.navigator.push(spawnRoute());
   }
 
   void _openSettings() {
@@ -178,13 +185,14 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
             style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
           ),
         ),
-        // Hidden on Sessions but still laid out, so the header keeps its height.
-        Visibility(
-          visible: ref.watch(leftSidebarTabProvider) == LeftSidebarTab.projects,
-          maintainSize: true,
-          maintainAnimation: true,
-          maintainState: true,
-          child: PopupMenuButton<String>(
+        if (ref.watch(leftSidebarTabProvider) == LeftSidebarTab.sessions)
+          IconButton(
+            tooltip: 'New session',
+            icon: const Icon(Icons.add),
+            onPressed: _newSession,
+          )
+        else
+          PopupMenuButton<String>(
             tooltip: 'Tree options',
             onSelected: (v) {
               final notifier = ref.read(treeViewProvider.notifier);
@@ -209,7 +217,6 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
               const PopupMenuItem(value: 'refresh', child: Text('Refresh')),
             ],
           ),
-        ),
       ],
     ),
   );
@@ -299,7 +306,9 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
   ) {
     switch (r.kind) {
       case TreeRowKind.node:
-        final badges = r.folded ? _badges(sumActivity(act, r.workspaceIds)) : null;
+        final badges = r.folded
+            ? _badges(sumActivity(act, r.workspaceIds))
+            : null;
         return Padding(
           padding: const EdgeInsets.fromLTRB(8, 10, 8, 0),
           child: InkWell(
