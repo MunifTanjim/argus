@@ -14,7 +14,7 @@ import (
 func runSpawnReplies(m model, cmd tea.Cmd) model {
 	for _, msg := range execCmd(cmd) {
 		switch msg.(type) {
-		case spawnNodesMsg, spawnAgentsMsg:
+		case spawnNodesMsg, spawnAgentsMsg, spawnDirsMsg:
 			var next tea.Cmd
 			m, next = upd(m, msg)
 			m = runSpawnReplies(m, next)
@@ -162,7 +162,7 @@ func TestSpawnReplyUnderTheLiveScreenWaitsForTheLeave(t *testing.T) {
 	m, _ := liveSession(t)
 	focus, n := m.focused, len(m.main)
 	m = openScreen(t, m)
-	m, _ = upd(m, spawnNodesMsg{projects: []session.HistoryProject{{Label: "p", Cwd: "/p"}}, cwd: "/x"})
+	m, _ = upd(m, spawnNodesMsg{projects: []session.HistoryProject{{Label: "p", Cwd: "/p"}}})
 	if _, ok := m.liveScreen(); !ok || len(m.main) != n+2 {
 		t.Fatalf("the spawn reply: top = %#v stack %d, want the live screen on top of %d", m.main.top(), len(m.main), n+2)
 	}
@@ -183,7 +183,7 @@ func TestSpawnReplyDropsAnArmedHomeKill(t *testing.T) {
 	if homeOf(m).killID == "" {
 		t.Fatal("dd on Home should arm the kill")
 	}
-	m, _ = upd(m, spawnNodesMsg{projects: []session.HistoryProject{{Label: "p", Cwd: "/p"}}, cwd: "/x"})
+	m, _ = upd(m, spawnNodesMsg{projects: []session.HistoryProject{{Label: "p", Cwd: "/p"}}})
 	if homeOf(m).killID != "" {
 		t.Error("the spawn reply should drop the kill hidden under the flow")
 	}

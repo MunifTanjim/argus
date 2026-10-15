@@ -56,6 +56,10 @@ class FakeSessionRepository implements SessionRepository {
       const Result.ok(<AgentInfo>[]);
 
   @override
+  Future<Result<DirCompletion>> completeDir(String? nodeId, String path) async =>
+      const Result.ok(DirCompletion(home: '', paths: []));
+
+  @override
   Future<Result<ResumeOutcome>> resume({
     String? nodeId,
     required String agent,

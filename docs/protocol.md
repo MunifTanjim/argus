@@ -594,7 +594,7 @@ The client picks the node for each call:
 | Node from composite `terminal_id` | `terminal.kill`, `terminal.rename`, `terminal.open` with `terminal_id` |
 | Node from composite `workspace_id` | `workspace.changedFiles`, `workspace.diff`, `workspace.listDir`, `workspace.readFile`, `workspace.commits`, `workspace.commitFiles`, `workspace.remove`, `workspace.setTarget`, `workspace.runSetup`, `workspace.setupLog` |
 | Node from composite `project_id` | `workspace.create`, `project.rename`, `project.setHidden`, `project.setPinned`, `project.forget`, `project.branches`, `project.prs`, `project.issues` |
-| Node from `node_id` param | `sessions.spawn`, `sessions.resume`, `agents.list`, `sessions.exportBundle`, `sessions.historySessions`, `sessions.historyTranscript`, `sessions.historyToolDetail`, `terminal.create` |
+| Node from `node_id` param | `sessions.spawn`, `sessions.resume`, `agents.list`, `sessions.exportBundle`, `sessions.historySessions`, `sessions.historyTranscript`, `sessions.historyToolDetail`, `terminal.create`, `host.completeDir` |
 | Node that owns the `sub_id` or `term_id` | `transcript.unsubscribe`, `terminal.input`, `terminal.resize`, `terminal.close` |
 | Node from `node_id` param, or the gateway when `node_id` is empty | `server.checkUpgrade`, `server.upgrade`, `server.restart` |
 | The gateway | `ping`, `server.info`, `nodes.list`, `relay.open`, `relay.close`, `trustlog.sync`, `push.vapidKey`, `clients.*`, `pushport.setToken` |
@@ -1221,15 +1221,24 @@ unix socket and on relay channels.
 | `sessions.focus`        | request      | `SessionRef`                     | `null`                       |
 | `session.rename`        | request      | `{ session_id, name }`           | `{ name, applied }`          |
 | `agents.list`           | request      | `{ node_id? }`                   | `{ agents: AgentInfo[] }`    |
+| `host.completeDir`      | request      | `{ node_id?, path }`             | `{ home, paths: string[] }`  |
 | `sessions.tasks`        | request      | `SessionRef`                     | `{ tasks: Task[] }`          |
 | `tasks.changed`         | notification | `{ sub_id, session_id }`         | —                            |
 | `sessions.exportBundle` | request      | `ExportBundleParams`             | `{ filename, data: bytes }`  |
 
 For a headless agent (opencode, codex), `pane_id` in the `sessions.spawn` result is
-an empty string. `sessions.spawn` and `sessions.resume` reject (`-32600`) a `cwd`
-that is relative, does not exist, is not a directory, or cannot be entered on the
-node; `terminal.open` with a `session_id` rejects a session whose directory is any
-of these.
+an empty string. A `cwd` of `~` or one that starts with `~/` is resolved against
+the node user's home directory. `sessions.spawn` and `sessions.resume`
+reject (`-32600`) a `cwd` that is relative, does not exist, is not a directory, or
+cannot be entered on the node; `terminal.open` with a `session_id` rejects a
+session whose directory is any of these.
+
+`host.completeDir` returns the node user's home directory as `home`. `paths` holds
+the subdirectories of `path`'s parent whose names start with `path`'s last
+segment, sorted, at most 200. Each is `path`'s parent as given, then the name and
+a `/`. Names that start with `.` are included only when the last segment also
+starts with `.`. A leading `~` in `path` names the home directory, and an empty
+`path` lists the home directory. A relative or unreadable `path` gives no paths.
 
 ```ts
 SessionRef { session_id: string }

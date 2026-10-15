@@ -148,6 +148,7 @@ const (
 	MethodProjectChanged     = "project.changed"     // notification: empty params (server→client); refetch project.list
 	MethodHostInfo           = "host.info"           // request: HostInfoParams; result: HostInfo
 	MethodHostSetWakelock    = "host.setWakelock"    // request: HostSetWakelockParams; result: HostWakelock
+	MethodHostCompleteDir    = "host.completeDir"    // request: HostCompleteDirParams; result: HostCompleteDirResult
 	// Locked-mode control: local unix-socket only. remoteDispatch rejects every
 	// lock.* method, so only the CLI (which dials the unix socket) can invoke these.
 	MethodLockInit               = "lock.init"               // request: LockInitParams; result: LockInitResult
@@ -709,6 +710,21 @@ type HostWakelock struct {
 type HostSetWakelockParams struct {
 	NodeID string `json:"node_id,omitempty"`
 	Until  string `json:"until,omitempty"`
+}
+
+// HostCompleteDirParams.Path may lead with "~" for the node user's home.
+type HostCompleteDirParams struct {
+	NodeID string `json:"node_id,omitempty"`
+	Path   string `json:"path"`
+}
+
+// HostCompleteDirResult lists the subdirectories, sorted, in Path's parent that
+// start with Path's last segment, each as Path's parent (as given) plus the name
+// and a trailing slash. An empty Path lists Home. Home is the node user's home
+// directory.
+type HostCompleteDirResult struct {
+	Home  string   `json:"home"`
+	Paths []string `json:"paths"`
 }
 
 type SpawnParams struct {

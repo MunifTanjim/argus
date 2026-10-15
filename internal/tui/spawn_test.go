@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
@@ -17,7 +18,10 @@ import (
 type spawnPickClient struct {
 	nodes       []api.NodeInfo
 	projects    []session.HistoryProject
-	agents      []api.AgentInfo // agents.list reply (no spawnable agent → step skipped)
+	agents      []api.AgentInfo     // agents.list reply (no spawnable agent → step skipped)
+	homes       map[string]string   // host.completeDir home by node_id
+	subdirs     map[string][]string // host.completeDir names by path
+	completed   []string            // host.completeDir node_ids, in call order
 	spawnCalled bool
 	spawnNodeID string
 	spawnCwd    string
@@ -39,6 +43,18 @@ func (c *spawnPickClient) Call(method string, params, out any) error {
 		if p, ok := out.(*api.AgentsListResult); ok {
 			*p = api.AgentsListResult{Agents: c.agents}
 		}
+	case api.MethodHostCompleteDir:
+		p := params.(api.HostCompleteDirParams)
+		c.completed = append(c.completed, p.NodeID)
+		home, path := c.homes[p.NodeID], p.Path
+		if path == "" {
+			path = home + "/"
+		}
+		res := api.HostCompleteDirResult{Home: home}
+		for _, n := range c.subdirs[path] {
+			res.Paths = append(res.Paths, path[:strings.LastIndexByte(path, '/')+1]+n+"/")
+		}
+		*out.(*api.HostCompleteDirResult) = res
 	case api.MethodSessionSpawn:
 		c.spawnCalled = true
 		if sp, ok := params.(api.SpawnParams); ok {
@@ -74,7 +90,7 @@ func openSpawn(t *testing.T, c *spawnPickClient) model {
 		t.Fatal("newSessionCmd returned no command")
 	}
 	mm, agentsCmd := m.Update(cmd())
-	return pumpAgents(t, mm.(model), agentsCmd)
+	return runSpawnReplies(mm.(model), agentsCmd)
 }
 
 // Multi-node: node step first; choosing a node filters the dir list; the spawn
@@ -335,15 +351,44 @@ func TestSpawnLocalNodeWithTmuxSkipsToDir(t *testing.T) {
 	}
 }
 
-// Empty history drops into free-text path entry seeded with the fallback cwd.
+// Empty history drops into free-text path entry seeded with the node's home.
 func TestSpawnEmptyHistoryGoesToCustom(t *testing.T) {
-	c := &spawnPickClient{}
+	c := &spawnPickClient{homes: map[string]string{"": "/home/u"}}
 	m := openSpawn(t, c)
 	if spawnOf(m).step != spawnStepDir || !spawnOf(m).custom {
 		t.Fatalf("empty history → custom; step=%v custom=%v", spawnOf(m).step, spawnOf(m).custom)
 	}
-	if spawnOf(m).cwd.Value() == "" {
-		t.Fatal("custom cwd should be seeded with the fallback")
+	if got := spawnOf(m).cwd.Value(); got != "/home/u/" {
+		t.Fatalf("custom cwd = %q, want the node's home /home/u/", got)
+	}
+}
+
+// The custom path row on a remote node seeds that node's home, not this one's.
+func TestSpawnCustomPathSeedsChosenNodeHome(t *testing.T) {
+	c := &spawnPickClient{
+		nodes: []api.NodeInfo{
+			{ID: "local", Capabilities: api.NodeCapabilities{SpawnSession: true}},
+			{ID: "remote", Capabilities: api.NodeCapabilities{SpawnSession: true}},
+		},
+		projects: []session.HistoryProject{{NodeID: "remote", Label: "p", Cwd: "/srv/p"}},
+		homes:    map[string]string{"local": "/Users/me", "remote": "/home/remote"},
+	}
+	m := openSpawn(t, c)
+	mm, cmd := m.handleKey(tea.KeyPressMsg{Code: 'j', Text: "j"}) // the remote node
+	m = runSpawnReplies(mm.(model), cmd)
+	mm, cmd = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = runSpawnReplies(mm.(model), cmd)
+	mm, cmd = m.handleKey(tea.KeyPressMsg{Code: 'j', Text: "j"}) // the "Custom path…" row
+	m = runSpawnReplies(mm.(model), cmd)
+	mm, cmd = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = runSpawnReplies(mm.(model), cmd)
+	if got := spawnOf(m).cwd.Value(); got != "/home/remote/" {
+		t.Fatalf("custom cwd = %q, want the remote node's home", got)
+	}
+	for _, id := range c.completed {
+		if id != "remote" {
+			t.Fatalf("completions asked of %v, want only the remote node", c.completed)
+		}
 	}
 }
 
@@ -576,6 +621,7 @@ func TestSpawnDirFilter(t *testing.T) {
 		t.Fatalf("pick from filtered list: step=%v cwd=%q", spawnOf(m).step, spawnOf(m).cwd.Value())
 	}
 }
+
 // Esc clears a kept filter before it leaves the flow.
 func TestSpawnDirFilterEscClearsFirst(t *testing.T) {
 	c := &spawnPickClient{projects: []session.HistoryProject{
@@ -595,5 +641,103 @@ func TestSpawnDirFilterEscClearsFirst(t *testing.T) {
 	m = pressKeys(m, keyMsg("esc"))
 	if spawnOpen(m) {
 		t.Fatal("a second esc should leave the flow")
+	}
+}
+
+// pumpSpawnDirs feeds the completion replies among cmd's messages back in,
+// skipping commands that wait (cursor blink ticks).
+func pumpSpawnDirs(m model, cmd tea.Cmd) model {
+	if cmd == nil {
+		return m
+	}
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+	var msg tea.Msg
+	select {
+	case msg = <-done:
+	case <-time.After(50 * time.Millisecond):
+		return m
+	}
+	switch msg := msg.(type) {
+	case tea.BatchMsg:
+		for _, c := range msg {
+			m = pumpSpawnDirs(m, c)
+		}
+	case spawnDirsDueMsg, spawnDirsMsg:
+		var next tea.Cmd
+		m, next = upd(m, msg)
+		m = pumpSpawnDirs(m, next)
+	}
+	return m
+}
+
+func cwdMatches(m model) []string {
+	s := spawnOf(m)
+	return s.cwd.MatchedSuggestions()
+}
+
+// Typing asks the node for matches; ↓ moves the marked match and tab accepts
+// it, after which its children are offered.
+func TestSpawnCustomPathCompletes(t *testing.T) {
+	c := &spawnPickClient{
+		homes: map[string]string{"": "/home/u"},
+		subdirs: map[string][]string{
+			"/home/u/":      {"Dev", "Docs", "src"},
+			"/home/u/D":     {"Dev", "Docs"},
+			"/home/u/Docs/": {"notes"},
+		},
+	}
+	m := openSpawn(t, c)
+	m.width, m.height = 80, 24
+	defer func(d time.Duration) { spawnDirsDebounce = d }(spawnDirsDebounce)
+	spawnDirsDebounce = time.Millisecond
+	press := func(k tea.KeyPressMsg) {
+		t.Helper()
+		mm, cmd := m.handleKey(k)
+		m = pumpSpawnDirs(mm.(model), cmd)
+	}
+	if got := cwdMatches(m); len(got) != 3 {
+		t.Fatalf("home's children = %v, want 3", got)
+	}
+	press(tea.KeyPressMsg{Code: 'D', Text: "D"})
+	press(tea.KeyPressMsg{Code: tea.KeyDown})
+	view := ansi.Strip(spawnView(m))
+	if !strings.Contains(view, "  Dev/") || !strings.Contains(view, "› Docs/") || strings.Contains(view, "src/") {
+		t.Fatalf("matches under the input should list Dev/ and mark Docs/:\n%s", view)
+	}
+	press(tea.KeyPressMsg{Code: tea.KeyTab})
+	if got := spawnOf(m).cwd.Value(); got != "/home/u/Docs/" {
+		t.Fatalf("tab accepted %q, want /home/u/Docs/", got)
+	}
+	if got := cwdMatches(m); len(got) != 1 || got[0] != "/home/u/Docs/notes/" {
+		t.Fatalf("after accepting, matches = %v, want Docs' children", got)
+	}
+}
+
+// Edits in quick succession ask for completions once, for the final path.
+func TestSpawnCustomPathDebouncesCompletion(t *testing.T) {
+	c := &spawnPickClient{homes: map[string]string{"": "/home/u"}}
+	m := openSpawn(t, c)
+	asked := len(c.completed)
+	var dues []spawnDirsDueMsg
+	for _, r := range "De" {
+		mm, cmd := m.handleKey(tea.KeyPressMsg{Code: r, Text: string(r)})
+		m = mm.(model)
+		for _, msg := range execCmd(cmd) {
+			if due, ok := msg.(spawnDirsDueMsg); ok {
+				dues = append(dues, due)
+			}
+		}
+	}
+	if len(dues) != 2 || len(c.completed) != asked {
+		t.Fatalf("typing scheduled %d requests and sent %d, want 2 scheduled and none sent", len(dues), len(c.completed)-asked)
+	}
+	if _, cmd := upd(m, dues[0]); cmd != nil {
+		t.Fatal("the superseded edit's debounce should not ask for completions")
+	}
+	_, cmd := upd(m, dues[1])
+	msgs := execCmd(cmd)
+	if len(msgs) != 1 || msgs[0].(spawnDirsMsg).path != "/home/u/De" {
+		t.Fatalf("the latest edit's debounce: %v, want one request for /home/u/De", msgs)
 	}
 }

@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"path"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -33,8 +35,8 @@ func (s spawnComp) layer() layer              { return overLayer }
 
 // newSpawn starts the full flow. A lone node without tmux stays on the node
 // step so its disabled state is visible rather than auto-selected.
-func newSpawn(c *ctx, nodes []api.NodeInfo, projects []session.HistoryProject, fallbackCwd string) (spawnComp, tea.Cmd) {
-	s := spawnComp{spawnState: spawnState{nodes: nodes, allProjects: projects, fallbackCwd: fallbackCwd}}
+func newSpawn(c *ctx, nodes []api.NodeInfo, projects []session.HistoryProject) (spawnComp, tea.Cmd) {
+	s := spawnComp{spawnState: spawnState{nodes: nodes, allProjects: projects}}
 	s.cwd = newSpawnCwdInput()
 	if len(nodes) >= 2 {
 		s.step = spawnStepNode
@@ -94,11 +96,37 @@ func (s *spawnComp) enterPrompt(c *ctx) tea.Cmd {
 func (s *spawnComp) afterAgentStep(c *ctx) tea.Cmd {
 	if !s.fixedCwd {
 		s.enterDirStep()
+		if len(s.dirs) == 0 {
+			return s.startCustom(c)
+		}
 		return nil
 	}
 	cmd := s.enterPrompt(c)
 	s.prompt.SetValue(s.presetPrompt)
 	return cmd
+}
+
+// startCustom asks with an empty path so the node's reply seeds the input with
+// its home and offers the home's children.
+func (s *spawnComp) startCustom(c *ctx) tea.Cmd {
+	s.custom = true
+	s.cwd.SetValue("")
+	s.cwd.SetSuggestions(nil)
+	return tea.Batch(s.cwd.Focus(), c.m.fetchSpawnDirs(s.nodeID, ""))
+}
+
+// spawnDirsDebounce is how long the custom path must stay unchanged before its
+// completions are asked for.
+var spawnDirsDebounce = 300 * time.Millisecond
+
+// completeCwd's request is superseded by a later edit's.
+func (s *spawnComp) completeCwd(before string) tea.Cmd {
+	if s.cwd.Value() == before {
+		return nil
+	}
+	s.dirsSeq++
+	seq := s.dirsSeq
+	return tea.Tick(spawnDirsDebounce, func(time.Time) tea.Msg { return spawnDirsDueMsg{seq: seq} })
 }
 
 func (s spawnComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
@@ -115,6 +143,23 @@ func (s spawnComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 			return s, cmd
 		}
 		s.agents = msg.agents // cursor stays 0 (set by startAgentStep; frozen while loading)
+	case spawnDirsDueMsg:
+		if s.step == spawnStepDir && s.custom && msg.seq == s.dirsSeq {
+			return s, c.m.fetchSpawnDirs(s.nodeID, s.cwd.Value())
+		}
+	case spawnDirsMsg:
+		if s.step != spawnStepDir || !s.custom || msg.nodeID != s.nodeID || msg.err != nil {
+			return s, nil
+		}
+		v := s.cwd.Value()
+		switch {
+		case msg.path == "" && v == "" && msg.res.Home != "":
+			s.cwd.SetValue(strings.TrimSuffix(msg.res.Home, "/") + "/")
+			s.cwd.CursorEnd()
+			s.cwd.SetSuggestions(msg.res.Paths)
+		case msg.path == v: // skip a stale reply: one for the current value is coming
+			s.cwd.SetSuggestions(msg.res.Paths)
+		}
 	case tea.PasteMsg:
 		switch {
 		case s.step == spawnStepPrompt:
@@ -123,7 +168,9 @@ func (s spawnComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 			// A path is one line: strip line breaks so a pasted CRLF or LF cannot
 			// submit or corrupt it.
 			cleaned := strings.NewReplacer("\r", "", "\n", "").Replace(msg.Content)
-			s.cwd.SetValue(s.cwd.Value() + cleaned)
+			before := s.cwd.Value()
+			s.cwd.SetValue(before + cleaned)
+			return s, s.completeCwd(before)
 		}
 	}
 	return s, nil
@@ -206,7 +253,9 @@ func (s spawnComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, b
 				cmd = s.enterPrompt(c)
 				break
 			}
+			before := s.cwd.Value()
 			s.cwd, cmd = s.cwd.Update(msg)
+			cmd = tea.Batch(cmd, s.completeCwd(before))
 			break
 		}
 		if c.m.matches(msg, spawnKeys.Filter) {
@@ -220,9 +269,7 @@ func (s spawnComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, b
 				break
 			}
 			// the trailing "Custom path…" row
-			s.custom = true
-			s.cwd.SetValue(s.fallbackCwd)
-			cmd = s.cwd.Focus()
+			cmd = s.startCustom(c)
 		}
 	case spawnStepPrompt:
 		if msg.String() == "enter" {
@@ -301,7 +348,7 @@ func (s spawnComp) view(c *ctx, w, h int) string {
 			ci := s.cwd
 			ci.SetWidth(cardW - 1)
 			body = StyleSecondaryBold.Render("Working directory") + "\n\n" +
-				asstStyle.Render(ci.View())
+				asstStyle.Render(ci.View()) + s.dirSuggestionsView(cardW, avail-3)
 			break
 		}
 		dirs := s.shownDirs()
@@ -339,12 +386,36 @@ func (s spawnComp) view(c *ctx, w, h int) string {
 	return centerBlock(title+"\n\n"+body, cardW, w)
 }
 
+func (s spawnComp) dirSuggestionsView(w, rows int) string {
+	matches := s.cwd.MatchedSuggestions()
+	if len(matches) == 0 || rows < 2 {
+		return ""
+	}
+	cur := s.cwd.CurrentSuggestionIndex()
+	rows-- // the blank line
+	start := 0
+	if len(matches) > rows {
+		start = min(max(0, cur-rows/2), len(matches)-rows)
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	for i := start; i < min(len(matches), start+rows); i++ {
+		name := path.Base(matches[i]) + "/"
+		if i == cur {
+			b.WriteString("\n" + cursorStyle.Render(truncate("› "+name, w)))
+		} else {
+			b.WriteString("\n" + dimStyle.Render(truncate("  "+name, w)))
+		}
+	}
+	return b.String()
+}
+
 func (s spawnComp) footerText(c *ctx) string {
 	switch {
 	case s.step == spawnStepAgent && s.agents == nil:
 		return dimStyle.Render("esc cancel")
 	case s.step == spawnStepDir && s.custom:
-		return dimStyle.Render("type a path · enter confirm · esc cancel")
+		return dimStyle.Render("type a path · tab complete · ↑/↓ cycle · enter confirm · esc cancel")
 	case s.step == spawnStepPrompt:
 		return dimStyle.Render("enter launch · shift+enter/^j newline · esc cancel")
 	case s.step == spawnStepDir:
@@ -381,9 +452,9 @@ func (m model) spawnAt() int {
 // beginSpawn opens the full flow, in place of one already open. The reply that
 // starts it can arrive while the live screen shows; the flow then waits under
 // the screen, which keeps every key.
-func (m model) beginSpawn(nodes []api.NodeInfo, projects []session.HistoryProject, fallbackCwd string) (model, tea.Cmd) {
+func (m model) beginSpawn(nodes []api.NodeInfo, projects []session.HistoryProject) (model, tea.Cmd) {
 	c := &ctx{m: &m}
-	s, cmd := newSpawn(c, nodes, projects, fallbackCwd)
+	s, cmd := newSpawn(c, nodes, projects)
 	switch i, top := m.spawnAt(), len(m.main)-1; {
 	case i >= 0:
 		s.back = m.main[i].(spawnComp).back

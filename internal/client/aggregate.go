@@ -67,6 +67,7 @@ var nodeAddressed = map[string]bool{
 	api.MethodTerminalCreate:            true,
 	api.MethodHostInfo:                  true,
 	api.MethodHostSetWakelock:           true,
+	api.MethodHostCompleteDir:           true,
 }
 
 // serverAddressed methods go to the node named by node_id, or to the gateway

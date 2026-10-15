@@ -53,9 +53,9 @@ type spawnState struct {
 	filter       filterPrompt             // dir step: editing dirQuery
 	dirQuery     string                   // dir step: shown dirs match this in label or cwd
 	custom       bool                     // dir step: free-text path entry active
+	dirsSeq      int                      // custom path edits; only the latest one's completion request fires
 	cwd          textinput.Model          // resolved working directory
 	prompt       textarea.Model           // initial prompt (mandatory; multi-line via shift+enter)
-	fallbackCwd  string                   // seeds custom path / empty-history case
 	fixedCwd     bool                     // cwd preset by the caller; skip the dir step
 	presetPrompt string                   // seeds the prompt step
 }
@@ -63,6 +63,7 @@ type spawnState struct {
 func newSpawnCwdInput() textinput.Model {
 	ti := textinput.New()
 	ti.Prompt = ""
+	ti.ShowSuggestions = true
 	return ti
 }
 
@@ -93,16 +94,10 @@ func (s spawnState) shownDirs() []session.HistoryProject {
 // plus the trailing "Custom path…" row.
 func (s spawnState) dirCursorMax() int { return len(s.shownDirs()) + 1 }
 
-// enterDirStep filters projects to the chosen node, positions at the most recent,
-// and falls into custom path entry when there are no projects.
+// enterDirStep starts on the most recent project.
 func (s *spawnState) enterDirStep() {
 	s.step = spawnStepDir
 	s.dirs = projectsForNode(s.allProjects, s.nodeID)
 	s.dirQuery, s.filter = "", filterPrompt{}
 	s.cursor = 0
-	if len(s.dirs) == 0 {
-		s.custom = true
-		s.cwd.SetValue(s.fallbackCwd)
-		s.cwd.Focus()
-	}
 }
