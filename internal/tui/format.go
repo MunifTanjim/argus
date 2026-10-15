@@ -166,10 +166,15 @@ func (m model) multiAgent() bool {
 	return false
 }
 
-func (m model) sessionCard(s session.Session, selected bool, cardW int, showAgent, showNode bool) string {
+// sessionCard draws a selected card with the heavy border: bright while its pane
+// has focus, gray otherwise, so the selection stays visible.
+func (m model) sessionCard(s session.Session, selected, focused bool, cardW int, showAgent, showNode bool) string {
 	border, chrome := ColorBorder, cardRounded
-	if selected {
+	switch {
+	case selected && focused:
 		border, chrome = ColorFocus, cardHeavy
+	case selected:
+		border, chrome = ColorTextDim, cardHeavy
 	}
 	innerW := max(cardW-4, 10)
 

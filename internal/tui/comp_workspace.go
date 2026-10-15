@@ -217,17 +217,12 @@ func (p workspaceComp) sessions(c *ctx, w, avail int) string {
 		}
 		return block + dimStyle.Render("no sessions in this workspace")
 	}
-	focused := m.focused == mainPane
 	cardW := min(w, maxCardWidth)
 	cards := make([]string, len(ss))
 	for i, s := range ss {
-		cards[i] = m.sessionCard(s, focused && i == p.cursor, cardW, true, s.Status == session.StatusAwaitingInput && m.grouped())
+		cards[i] = m.sessionCard(s, i == p.cursor, m.mainFocused(), cardW, true, s.Status == session.StatusAwaitingInput && m.grouped())
 	}
-	cursor := 0
-	if focused {
-		cursor = p.cursor
-	}
-	return block + renderCardList(c.below(strings.Count(block, "\n")), "workspace:"+p.ws, cards, cursor, avail)
+	return block + renderCardList(c.below(strings.Count(block, "\n")), "workspace:"+p.ws, cards, p.cursor, avail)
 }
 
 func (p workspaceComp) footerPrompt(c *ctx) string {

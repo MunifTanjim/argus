@@ -182,7 +182,7 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 			}
 		}
 		prev = sec
-		l.add(i, m.sessionCard(s, i == sel, cardW, showAgent, grouped && !sec.namesHost))
+		l.add(i, m.sessionCard(s, i == sel, m.mainFocused(), cardW, showAgent, grouped && !sec.namesHost))
 	}
 	lines := l.window(c.below(lipgloss.Height(title)+1), sel, max(1, ht-chrome))
 	return centerBlock(title+"\n\n"+strings.Join(lines, "\n"), cardW, w)
