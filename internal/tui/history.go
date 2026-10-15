@@ -187,17 +187,20 @@ func historyWidth(w int) int {
 	return max(30, min(containerWidthOf(w), 78))
 }
 
-// historyCardChrome returns a history card's border color and glyphs (heavy bright
-// border when selected), matching live session cards.
-func historyCardChrome(sel bool) (color.Color, cardChrome) {
-	if sel {
+// historyCardChrome returns a history card's border color and glyphs, matching
+// live session cards: heavy when selected, bright only while focused.
+func historyCardChrome(sel, focused bool) (color.Color, cardChrome) {
+	switch {
+	case sel && focused:
 		return ColorFocus, cardHeavy
+	case sel:
+		return ColorTextDim, cardHeavy
 	}
 	return ColorBorder, cardRounded
 }
 
-func historyProjectRow(p session.HistoryProject, sel bool, w int) string {
-	border, chrome := historyCardChrome(sel)
+func historyProjectRow(p session.HistoryProject, sel, focused bool, w int) string {
+	border, chrome := historyCardChrome(sel, focused)
 	titleLeft := dimStyle.Render("○") + " " + headlineStyle(sel).Render(p.Label)
 	titleRight := dimStyle.Render(relTime(p.LastActivity))
 
@@ -243,8 +246,8 @@ func groupProjectsByNode(ps []session.HistoryProject) []session.HistoryProject {
 	return out
 }
 
-func historySessionRow(s session.HistorySession, sel bool, w int, showAgent bool) string {
-	border, chrome := historyCardChrome(sel)
+func historySessionRow(s session.HistorySession, sel, focused bool, w int, showAgent bool) string {
+	border, chrome := historyCardChrome(sel, focused)
 	title := historySessionTitle(s)
 	titleLeft := dimStyle.Render("○") + " " + headlineStyle(sel).Render(title)
 	titleRight := dimStyle.Render(relTime(s.LastActivity))

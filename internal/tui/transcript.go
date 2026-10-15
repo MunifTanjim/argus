@@ -306,7 +306,7 @@ func gutterBar(selected, focused bool) string {
 // renderRow renders a display row of the main stream (no centering).
 func (m tview) renderRow(r displayRow, selected bool) string {
 	if r.isControl() {
-		return controlBlock(r, selected, m.c.m.historyFocused(), m.c.m.transcriptWidth())
+		return controlBlock(r, selected, m.c.m.mainFocused(), m.c.m.transcriptWidth())
 	}
 	return m.renderEntry(r.entry, selected)
 }
@@ -314,7 +314,7 @@ func (m tview) renderRow(r displayRow, selected bool) string {
 // renderEntry renders entry i of the main stream (no centering).
 func (m tview) renderEntry(i int, selected bool) string {
 	e := m.transcript.entries[i]
-	return m.entryBlock(e, m.entryExpanded(e), selected, m.c.m.historyFocused(), false, m.c.m.transcriptWidth())
+	return m.entryBlock(e, m.entryExpanded(e), selected, m.c.m.mainFocused(), false, m.c.m.transcriptWidth())
 }
 
 // entryBlock renders one entry, gutter included, at width. full shows a tool's
@@ -591,7 +591,7 @@ type rowEntry struct {
 // layoutEntries separates rows with a blank line, as in the agent TUIs.
 func (m tview) layoutEntries() (lines []string, first []int) {
 	bodyW, containerW := m.c.m.bodyWidth(), m.c.m.containerWidth()
-	focused := m.c.m.historyFocused()
+	focused := m.c.m.mainFocused()
 	rows := m.displayRows()
 	first = make([]int, len(rows))
 	for i, dr := range rows {

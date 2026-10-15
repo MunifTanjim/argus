@@ -272,7 +272,7 @@ func (h historyComp) projectsView(c *ctx, w, ht int) string {
 	cards := make([]string, len(h.projects))
 	prevNode := ""
 	for i, p := range h.projects {
-		card := historyProjectRow(p, i == h.projCursor, cardW)
+		card := historyProjectRow(p, i == h.projCursor, c.m.mainFocused(), cardW)
 		if i == 0 || p.NodeID != prevNode {
 			card = historyNodeHeader(p) + "\n" + card
 		}
@@ -301,7 +301,7 @@ func (h historyComp) sessionsView(c *ctx, w, ht int) string {
 	showAgent := historyMultiAgent(h.sessions)
 	cards := make([]string, len(h.sessions))
 	for i, s := range h.sessions {
-		cards[i] = historySessionRow(s, i == h.sessCursor, cardW, showAgent)
+		cards[i] = historySessionRow(s, i == h.sessCursor, c.m.mainFocused(), cardW, showAgent)
 	}
 	body := renderCardList(c.below(lipgloss.Height(title)+1), "history-sessions", cards, h.sessCursor, max(1, ht-4))
 	return centerBlock(title+"\n\n"+body, cardW, w)

@@ -12,9 +12,9 @@ import (
 // A live transcript is a history region over the session region: the input, or
 // the pending prompt in its place.
 
-// historyFocused reports whether the history region (not the dock) holds focus.
-func (m model) historyFocused() bool {
-	return m.focused != sessionDock
+// mainFocused reports whether the main pane has focus and no popup covers it.
+func (m model) mainFocused() bool {
+	return m.focused == mainPane && len(m.popups) == 0
 }
 
 // historyBody renders the top region (transcript or detail sub-view).

@@ -130,9 +130,12 @@ func (m tview) redactListBody() string {
 	for i, lit := range m.redact.literals {
 		marker := "  "
 		row := dimStyle.Render(lit)
-		if i == m.redact.listCursor {
+		switch {
+		case i == m.redact.listCursor && m.c.m.mainFocused():
 			marker = cursorStyle.Render("▸ ")
 			row = cursorStyle.Render(lit)
+		case i == m.redact.listCursor:
+			marker = dimStyle.Render("▸ ")
 		}
 		b.WriteString(marker + row)
 		if i < len(m.redact.literals)-1 {
