@@ -846,3 +846,21 @@ func TestSendInputErrorFlashes(t *testing.T) {
 		t.Fatalf("flash = %q, want the send error", m.flash)
 	}
 }
+
+func TestSendInputErrorRestoresDraft(t *testing.T) {
+	m := sessionModel(nil)
+	m.client = &failingClient{err: errString("s1: session is busy")}
+	m.dock.reply.SetValue("hello there")
+	msg := m.sendInputCmd("s1", "hello there")()
+	m.dock.reply.SetValue("")
+	m, _ = upd(m, msg)
+	if got := m.dock.reply.Value(); got != "hello there" {
+		t.Fatalf("draft = %q, want the sent text restored", got)
+	}
+
+	m.dock.reply.SetValue("newer")
+	m, _ = upd(m, msg)
+	if got := m.dock.reply.Value(); got != "newer" {
+		t.Fatalf("draft = %q, want the newer draft kept", got)
+	}
+}

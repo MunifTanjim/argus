@@ -318,3 +318,63 @@ func TestTabHintSitsAtTheRightOfTheEmptyInput(t *testing.T) {
 		t.Fatalf("empty input = %q (width %d), want the marker left and the hint at the right edge of %d", got, lipgloss.Width(got), m.containerWidth())
 	}
 }
+
+func TestEnterWhileWorkingKeepsTheDraft(t *testing.T) {
+	m := sessionModel(nil)
+	rc := &recordingClient{}
+	m.client = rc
+	s := m.sessions["s1"]
+	s.Status = session.StatusWorking
+	m.sessions["s1"] = s
+	m = pressKeys(m, keyMsg("tab"), keyMsg("h"), keyMsg("i"), keyMsg("enter"))
+	if m.dock.reply.Value() != "hi" || m.focused != sessionDock {
+		t.Fatalf("Enter while working: draft %q focus %v, want the draft kept in focus", m.dock.reply.Value(), m.focused)
+	}
+	if rc.count(api.MethodSessionInput) != 0 {
+		t.Fatal("a prompt was sent while working")
+	}
+	if m.flash != "wait for idle to send" {
+		t.Fatalf("flash = %q", m.flash)
+	}
+	m.width = 120
+	if strings.Contains(ansi.Strip(m.currentFooter()), "submit") {
+		t.Fatalf("the footer offers submit while sending is blocked: %q", ansi.Strip(m.currentFooter()))
+	}
+}
+
+func TestAPromptArrivingMidDraftTakesNoKeys(t *testing.T) {
+	m := sessionModel(nil)
+	rc := &recordingClient{}
+	m.client = rc
+	m = pressKeys(m, keyMsg("tab"), keyMsg("h"), keyMsg("i"))
+	m = withInteraction(m, dockPermission)
+	if m.focused != mainPane {
+		t.Fatalf("focus = %v, want the transcript once a prompt takes the input's place", m.focused)
+	}
+	m = pressKeys(m, keyMsg("enter"))
+	if rc.count(api.MethodSessionRespond) != 0 {
+		t.Fatal("Enter typed for the draft answered the prompt")
+	}
+	m = withInteraction(m, nil)
+	if m.dock.reply.Value() != "hi" {
+		t.Fatalf("draft = %q, want it kept", m.dock.reply.Value())
+	}
+}
+
+func TestTranscriptOffersAnswerOnlyForAPendingPrompt(t *testing.T) {
+	has := func(m model) bool {
+		for _, b := range m.focusedComp().footer(&ctx{m: &m}) {
+			if b.name == transcriptKeys.Answer.name {
+				return true
+			}
+		}
+		return false
+	}
+	m := withFocus(sessionModel(nil), mainPane)
+	if has(withInteraction(m, &session.Interaction{Kind: session.InteractionIdle})) {
+		t.Error("an idle interaction shows the input; the transcript must not offer answer")
+	}
+	if !has(withInteraction(m, dockPermission)) {
+		t.Error("a permission prompt must offer answer")
+	}
+}

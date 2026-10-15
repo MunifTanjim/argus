@@ -148,7 +148,7 @@ func (d dockComp) view(c *ctx, w, h int) string {
 func (d dockComp) footer(c *ctx) []binding {
 	if c.m.composing() {
 		var binds []binding
-		if c.m.sessions[c.m.liveSessionID()].AcceptsInput() {
+		if s := c.m.sessions[c.m.liveSessionID()]; s.AcceptsInput() && promptReady(s) {
 			binds = append(binds, promptKeys.Submit)
 		}
 		return append(binds, promptKeys.Read, sessionKeys.Raw)
@@ -247,6 +247,11 @@ func (m *model) syncPromptDraft() {
 	if k != m.dock.key {
 		m.dock.resetPromptState()
 		m.dock.key = k
+		// A prompt taking the input's place must not take keys typed for the
+		// draft: Enter there would answer it.
+		if m.focused == sessionDock && !m.composing() {
+			m.focused = mainPane
+		}
 	}
 }
 

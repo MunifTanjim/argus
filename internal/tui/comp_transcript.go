@@ -198,7 +198,7 @@ func (t transcriptComp) footer(c *ctx) []binding {
 		return []binding{detailKeys.Collapse, detailKeys.Drill, sessionKeys.Raw}
 	}
 	binds := []binding{transcriptKeys.PromptNext, transcriptKeys.Collapse, transcriptKeys.Detail, transcriptKeys.Bottom}
-	if v.c.m.sessionInteraction() != nil {
+	if !v.c.m.composing() {
 		binds = append(binds, transcriptKeys.Answer)
 	}
 	if v.c.m.sessions[t.sessionID].Status == session.StatusStarting {
