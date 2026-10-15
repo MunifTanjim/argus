@@ -27,6 +27,8 @@ var transcriptTable = []keyTableEntry{
 	{transcriptKeys.Expand, tview.actExpand},
 	{transcriptKeys.Detail, tview.actDrill},
 	{transcriptKeys.Copy, tview.actCopyCard},
+	{transcriptKeys.Visual, func(m tview, _ tea.KeyPressMsg) tea.Cmd { return m.startVisual(false) }},
+	{transcriptKeys.VisualLine, func(m tview, _ tea.KeyPressMsg) tea.Cmd { return m.startVisual(true) }},
 }
 
 func (m tview) isPromptRow(r displayRow) bool {

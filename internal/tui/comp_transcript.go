@@ -63,7 +63,13 @@ func newHistoryTranscript(p session.HistoryProject, s session.HistorySession) tr
 	return t
 }
 
-func (t transcriptComp) section() string       { return "transcript" }
+func (t transcriptComp) section() string {
+	if t.visualActive() {
+		return "visual"
+	}
+	return "transcript"
+}
+
 func (t transcriptComp) spins(*ctx) bool       { return false }
 func (t transcriptComp) offers(*ctx) []binding { return nil }
 func (t transcriptComp) pageStep(c *ctx) int   { return c.m.listPageStep() }
@@ -85,6 +91,9 @@ func (t transcriptComp) close(c *ctx) tea.Cmd { return t.bind(c).closeStreams() 
 // commands follows liveKey and historyKey: the redaction list takes every key
 // it does not use, and the card detail reads its own keys.
 func (t transcriptComp) commands(c *ctx) []binding {
+	if t.visualActive() {
+		return bindingsOf(visualKeys)
+	}
 	v := t.bind(c)
 	var out []any
 	switch {
@@ -110,11 +119,15 @@ func (t transcriptComp) commands(c *ctx) []binding {
 func (t transcriptComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
 	v := t.bind(c)
 	var cmd tea.Cmd
-	if t.live {
+	switch {
+	case t.visualActive():
+		cmd = v.visualKey(msg)
+	case t.live:
 		cmd = v.liveKey(msg)
-	} else {
+	default:
 		cmd = v.historyKey(msg)
 	}
+	v.dropStaleVisual()
 	return t, cmd, true
 }
 
@@ -171,8 +184,10 @@ func (t transcriptComp) paneHeader(c *ctx, w int) (string, int) {
 	return sessionHeader(c.m.sessions[t.sessionID], c.m.paneHeadStyle()), centerGutter(containerWidthOf(w), w) + contentPadX
 }
 
+// footerPrompt is empty in visual mode, which takes every key a prompt would
+// wait for.
 func (t transcriptComp) footerPrompt(c *ctx) string {
-	if t.live {
+	if t.live || t.visualActive() {
 		return ""
 	}
 	if s := t.bind(c).redactPrompt(); s != "" {
@@ -182,6 +197,9 @@ func (t transcriptComp) footerPrompt(c *ctx) string {
 }
 
 func (t transcriptComp) footerText(c *ctx) string {
+	if t.visualActive() {
+		return t.bind(c).visualModeLine()
+	}
 	base := c.m.footer(t.footer(c)...)
 	if t.live {
 		return base
@@ -317,11 +335,11 @@ func (m tview) closeStreams() tea.Cmd {
 }
 
 func (m tview) updateMsg(msg tea.Msg) tea.Cmd {
+	defer m.dropStaleVisual() // new rows can fold a selection's row away
 	switch msg := msg.(type) {
 	case transcriptMsg:
 		prevID, wasLast := m.currentRowID()
-		// Tail-follow only if the view was already pinned to the bottom.
-		atBottom := m.transcript.scroll >= m.maxScroll()
+		atBottom := m.streamFollows()
 		m.setEntries(msg.entries)
 		m.transcript.err = msg.err
 		m.restoreEntryCursor(prevID, atBottom, wasLast)
@@ -337,7 +355,7 @@ func (m tview) updateMsg(msg tea.Msg) tea.Cmd {
 			return m.refetchStaleToolBodies(msg.delta.Entries, msg.ref.agentID)
 		}
 		prevID, wasLast := m.currentRowID()
-		atBottom := m.transcript.scroll >= m.maxScroll()
+		atBottom := m.streamFollows()
 		cmd := m.applyEntryDelta(msg.delta)
 		m.restoreEntryCursor(prevID, atBottom, wasLast)
 		return cmd
@@ -399,6 +417,14 @@ func (m tview) updateMsg(msg tea.Msg) tea.Cmd {
 		m.redact.tempPath = ""
 	}
 	return nil
+}
+
+// tailFollows reports whether a pane follows new lines at its tail: it was
+// pinned to the bottom and holds no visual selection, which keeps the view.
+func tailFollows(pinned bool, sel *selection) bool { return pinned && sel == nil }
+
+func (m tview) streamFollows() bool {
+	return tailFollows(m.transcript.scroll >= m.maxScroll(), m.transcript.visual)
 }
 
 func isHistory(t transcriptComp) bool { return !t.live }
@@ -466,7 +492,9 @@ func (m *model) editTranscript(i int, f func(v tview) tea.Cmd) tea.Cmd {
 		return nil
 	}
 	c := &ctx{m: m}
-	cmd := f(t.bind(c))
+	v := t.bind(c)
+	cmd := f(v)
+	v.dropStaleVisual() // an edit can fold a selection's row away
 	m.main = m.main.replaceAt(i, t)
 	return tea.Batch(cmd, m.apply(c))
 }
@@ -537,6 +565,9 @@ func (t transcriptComp) workspace(c *ctx) string {
 
 // menu offers copy for the card under the cursor when it has source to copy.
 func (t transcriptComp) menu(c *ctx) []binding {
+	if t.visualActive() {
+		return []binding{visualKeys.Copy, visualKeys.Back}
+	}
 	v := t.bind(c)
 	if e, _, ok := v.copyTarget(); !ok || !v.hasSource(e) {
 		return nil

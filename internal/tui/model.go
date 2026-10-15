@@ -129,6 +129,7 @@ type transcriptState struct {
 	expanded    map[string]bool     // entry id -> expanded
 	rows        map[rowRef]rowEntry // rendered row lines
 	runs        map[string]bool     // run key -> expanded, overriding verboseTranscript
+	visual      *selection          // visual-mode selection in the stream; nil outside visual mode
 }
 
 // renderCache is what the transcript and the dock draw markdown and code with.

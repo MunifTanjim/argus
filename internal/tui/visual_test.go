@@ -2,10 +2,13 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/transcript"
@@ -202,6 +205,532 @@ func TestMenuCopyEntryCopies(t *testing.T) {
 	}
 }
 
+func visualModel(entries ...transcript.Entry) model {
+	if len(entries) == 0 {
+		entries = []transcript.Entry{
+			{ID: "u1", Kind: transcript.EntryUser, Text: "please list files"},
+			{ID: "t1", Kind: transcript.EntryText, Text: "alpha beta gamma"},
+		}
+	}
+	m := copyModel(entries...)
+	m.View()
+	return m
+}
+
+func TestVisualEntersAndExits(t *testing.T) {
+	m := visualModel()
+	m = typeKeys(m, "v")
+	if !trOf(m).visualActive() || m.screen() != "visual" {
+		t.Fatalf("v: active=%v screen=%q, want visual", trOf(m).visualActive(), m.screen())
+	}
+	m = typeKeys(m, "v")
+	if trOf(m).visualActive() {
+		t.Error("v in charwise visual must exit")
+	}
+	m = typeKeys(m, "V")
+	if s := trOf(m).transcript.visual; s == nil || !s.linewise {
+		t.Fatal("V must enter linewise visual")
+	}
+	m = typeKeys(m, "v")
+	if s := trOf(m).transcript.visual; s == nil || s.linewise {
+		t.Error("v in linewise visual must switch to charwise")
+	}
+	m, _ = upd(m, keyMsg("esc"))
+	if trOf(m).visualActive() {
+		t.Error("esc must exit visual")
+	}
+	if viewOf(m) != viewSession {
+		t.Error("esc in visual must not leave the transcript")
+	}
+}
+
+func TestVisualCopyWord(t *testing.T) {
+	got := captureClipboard(t)
+	m := visualModel(transcript.Entry{ID: "t1", Kind: transcript.EntryText, Text: "alpha beta gamma"})
+	m = typeKeys(m, "vwe")
+	m, cmd := typeKeysCmd(m, "y")
+	runAll(m, cmd)
+	if len(*got) != 1 || (*got)[0] != "alpha beta" {
+		t.Fatalf("clipboard = %q, want %q", *got, "alpha beta")
+	}
+	if trOf(m).visualActive() {
+		t.Error("y must exit visual")
+	}
+}
+
+func TestVisualCopyWholeCardMatchesSource(t *testing.T) {
+	got := captureClipboard(t)
+	text := strings.Repeat("lorem ipsum dolor ", 12)
+	m := visualModel(transcript.Entry{ID: "t1", Kind: transcript.EntryText, Text: strings.TrimSpace(text)})
+	m = typeKeys(m, "V")
+	m = typeKeys(m, "G")
+	m, cmd := typeKeysCmd(m, "y")
+	runAll(m, cmd)
+	if len(*got) != 1 || (*got)[0] != strings.TrimSpace(text) {
+		t.Fatalf("clipboard = %q, want the paragraph rejoined without icon or indent", *got)
+	}
+}
+
+func TestVisualHLMoveNotFold(t *testing.T) {
+	m := visualModel()
+	m = typeKeys(m, "v")
+	before := trOf(m).transcript.expanded
+	m = typeKeys(m, "lh")
+	if !trOf(m).visualActive() {
+		t.Fatal("h and l must stay in visual")
+	}
+	if len(trOf(m).transcript.expanded) != len(before) {
+		t.Error("h and l must not fold in visual")
+	}
+}
+
+// reversedCells reports, for each cell of the first screen line holding
+// text, whether it is drawn in reverse video, starting at text's first cell.
+func reversedCells(t *testing.T, screen, text string) []bool {
+	t.Helper()
+	for _, line := range strings.Split(screen, "\n") {
+		plain := ansi.Strip(line)
+		i := strings.Index(plain, text)
+		if i < 0 {
+			continue
+		}
+		return reversedAt(line, ansi.StringWidth(plain[:i]), len(text))
+	}
+	t.Fatalf("no line holds %q", text)
+	return nil
+}
+
+func TestVisualPaintsSelection(t *testing.T) {
+	m := visualModel(transcript.Entry{ID: "t1", Kind: transcript.EntryText, Text: "alpha beta gamma"})
+	if slices.Contains(reversedCells(t, m.View().Content, "alpha beta gamma"), true) {
+		t.Fatal("nothing is reversed before visual mode")
+	}
+	m = typeKeys(m, "vw")
+	// The selection runs from the a of alpha to the b of beta, inclusive.
+	got := reversedCells(t, m.View().Content, "alpha beta gamma")
+	for x, rev := range got {
+		if want := x <= len("alpha "); rev != want {
+			t.Errorf("cell %d (%q) reversed = %v, want %v", x, "alpha beta gamma"[x], rev, want)
+		}
+	}
+}
+
+func TestVisualSurvivesLiveAppend(t *testing.T) {
+	got := captureClipboard(t)
+	var entries []transcript.Entry
+	for i := range 40 {
+		entries = append(entries, transcript.Entry{ID: fmt.Sprintf("f%d", i), Kind: transcript.EntryText, Text: "filler"})
+	}
+	entries = append(entries, transcript.Entry{ID: "t1", Kind: transcript.EntryText, Text: "alpha beta gamma"})
+	m := visualModel(entries...)
+	m = typeKeys(m, "G") // pinned to the bottom
+	m = typeKeys(m, "ve")
+	scroll, cursor := trOf(m).transcript.scroll, trOf(m).transcript.cursor
+	if scroll == 0 {
+		t.Fatal("the transcript must overflow the view for this test")
+	}
+	es := append(slices.Clone(trOf(m).transcript.entries),
+		transcript.Entry{ID: "t2", Kind: transcript.EntryText, Text: "new entry"},
+		transcript.Entry{ID: "t3", Kind: transcript.EntryText, Text: "another entry"})
+	m, _ = onTr(m, func(v tview) tea.Cmd {
+		return v.updateMsg(transcriptMsg{id: v.sessionID, entries: es})
+	})
+	if !trOf(m).visualActive() {
+		t.Fatal("an appended entry must not end visual mode")
+	}
+	if s, c := trOf(m).transcript.scroll, trOf(m).transcript.cursor; s != scroll || c != cursor {
+		t.Errorf("scroll, cursor = %d, %d after the append, want %d, %d (no tail-follow in visual mode)", s, c, scroll, cursor)
+	}
+	m, cmd := typeKeysCmd(m, "y")
+	runAll(m, cmd)
+	if len(*got) != 1 || (*got)[0] != "alpha" {
+		t.Errorf("clipboard = %q, want the same text as before the append", *got)
+	}
+}
+
+func TestVisualEndsWhenRowVanishes(t *testing.T) {
+	m := visualModel()
+	m = typeKeys(m, "Gv")
+	m, _ = onTr(m, func(v tview) tea.Cmd {
+		return v.updateMsg(transcriptMsg{id: v.sessionID, entries: v.transcript.entries[:1]})
+	})
+	if trOf(m).visualActive() {
+		t.Error("visual must end when its row is gone")
+	}
+	if m.flash != "" {
+		t.Errorf("flash = %q, want none", m.flash)
+	}
+}
+
+func TestVisualSurvivesResize(t *testing.T) {
+	got := captureClipboard(t)
+	m := visualModel(transcript.Entry{ID: "t1", Kind: transcript.EntryText, Text: strings.TrimSpace(strings.Repeat("word ", 60))})
+	m = typeKeys(m, "vjjl")
+	m, _ = upd(m, tea.WindowSizeMsg{Width: 40, Height: m.height})
+	m.View()
+	if !trOf(m).visualActive() {
+		t.Fatal("a resize must not end visual mode")
+	}
+	m, cmd := typeKeysCmd(m, "y")
+	runAll(m, cmd)
+	if len(*got) != 1 {
+		t.Fatalf("clipboard = %q, want one copy after the resize", *got)
+	}
+	// The cursor stays on the card's third line, second cell, of the rewrapped
+	// card, so the copy is two full lines of words and the first two cells of
+	// the third: "wo".
+	text := (*got)[0]
+	words := strings.Fields(strings.TrimSuffix(text, "wo"))
+	if !strings.HasSuffix(text, " wo") || len(words) < 2 || strings.Count(text, "\n") != 0 {
+		t.Errorf("clipboard = %q, want rejoined words ending in the third line's first two cells", text)
+	}
+	for _, w := range words {
+		if w != "word" {
+			t.Errorf("clipboard = %q holds %q, want only the card's words", text, w)
+			break
+		}
+	}
+	if per := len(words) / 2; len(words)%2 != 0 || per*len("word ") > 40 {
+		t.Errorf("clipboard = %q, want two lines of the 40-wide layout", text)
+	}
+}
+
+// noChrome fails when copied text holds the cursor gutter or an icon glyph
+// (icons are private-use runes).
+func noChrome(t *testing.T, text string) {
+	t.Helper()
+	for _, r := range text {
+		if r == '▌' || unicode.In(r, unicode.Co) {
+			t.Errorf("copy %q holds chrome rune %q", text, r)
+		}
+	}
+}
+
+func TestVisualCopyWholeUserPrompt(t *testing.T) {
+	got := captureClipboard(t)
+	m := visualModel(transcript.Entry{ID: "u1", Kind: transcript.EntryUser, Text: "please list files"})
+	m = typeKeys(m, "VG")
+	m, cmd := typeKeysCmd(m, "y")
+	runAll(m, cmd)
+	// The band's header line is card text as displayed; the band's padding,
+	// the gutter, and the band's inner pad are not.
+	want := Icon.User.Glyph + " You\nplease list files"
+	if len(*got) != 1 || (*got)[0] != want {
+		t.Fatalf("clipboard = %q, want %q", *got, want)
+	}
+}
+
+func TestVisualCopyWholeToolCard(t *testing.T) {
+	got := captureClipboard(t)
+	m := visualModel(transcript.Entry{ID: "x1", Kind: transcript.EntryTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`, Result: "a\nb"})
+	// Unfold the run, step onto the tool, and expand it.
+	m = typeKeys(m, "ljl")
+	v := tvIn(m)
+	lines, first := v.layoutEntries()
+	r, ok := v.cursorRow()
+	if !ok || r.isControl() {
+		t.Fatal("the cursor must be on the tool card")
+	}
+	c := trOf(m).transcript.cursor
+	end := len(lines)
+	if c+1 < len(first) {
+		end = first[c+1]
+	}
+	// V on the card's first line, then down to its last text line (the row's
+	// final line is the blank separator).
+	m = typeKeys(m, "V"+strings.Repeat("j", end-first[c]-2))
+	m, cmd := typeKeysCmd(m, "y")
+	runAll(m, cmd)
+	if len(*got) != 1 {
+		t.Fatalf("clipboard = %q, want one copy", *got)
+	}
+	text := (*got)[0]
+	noChrome(t, text)
+	if !strings.HasPrefix(text, "Bash\n") || !strings.HasSuffix(text, "\na\nb") {
+		t.Errorf("clipboard = %q, want the card's text from its header to the result", text)
+	}
+}
+
+func TestVisualSurvivesExpandAbove(t *testing.T) {
+	got := captureClipboard(t)
+	m := visualModel(
+		transcript.Entry{ID: "x1", Kind: transcript.EntryTool, ToolName: "Bash", ToolInput: `{"command":"ls"}`, Result: "a\nb"},
+		transcript.Entry{ID: "t1", Kind: transcript.EntryText, Text: "alpha beta gamma"},
+	)
+	m = typeKeys(m, "G")
+	m = typeKeys(m, "vwe")
+	before := tvIn(m).displayRows()
+	m, _ = onTr(m, func(v tview) tea.Cmd {
+		for _, r := range v.displayRows() {
+			if r.kind == runSummary {
+				v.transcript.runs[r.run.key] = true
+			}
+		}
+		return nil
+	})
+	m.View()
+	if after := tvIn(m).displayRows(); len(after) <= len(before) {
+		t.Fatalf("rows %d -> %d, want the run above to unfold", len(before), len(after))
+	}
+	if !trOf(m).visualActive() {
+		t.Fatal("unfolding a card above must not end visual mode")
+	}
+	m, cmd := typeKeysCmd(m, "y")
+	runAll(m, cmd)
+	if len(*got) != 1 || (*got)[0] != "alpha beta" {
+		t.Errorf("clipboard = %q, want %q", *got, "alpha beta")
+	}
+}
+
+func TestVisualNeedsText(t *testing.T) {
+	m := copyModel()
+	m = typeKeys(m, "v")
+	if trOf(m).visualActive() || m.screen() != "transcript" {
+		t.Errorf("v on an empty transcript: active=%v screen=%q", trOf(m).visualActive(), m.screen())
+	}
+}
+
+func TestVisualFooterNamesTheMode(t *testing.T) {
+	m := typeKeys(visualModel(), "v")
+	if !strings.Contains(viewText(m), "VISUAL") {
+		t.Error("the footer must name visual mode")
+	}
+	m = typeKeys(m, "V")
+	if !strings.Contains(viewText(m), "VISUAL LINE") {
+		t.Error("the footer must name linewise visual mode")
+	}
+}
+
+func detailVisualModel(t *testing.T) model {
+	t.Helper()
+	v := detailTestModel(traceFixture("general",
+		transcript.Entry{ID: "i1", Kind: transcript.EntryText, Text: "inner alpha beta"},
+		transcript.Entry{ID: "i2", Kind: transcript.EntryText, Text: "second item"}))
+	m := withFocus(*v.c.m, mainPane)
+	m.View()
+	return m
+}
+
+func TestDetailVisualCopy(t *testing.T) {
+	got := captureClipboard(t)
+	m := detailVisualModel(t)
+	m = typeKeys(m, "ve")
+	if m.screen() != "visual" {
+		t.Fatalf("screen = %q, want visual", m.screen())
+	}
+	m, cmd := typeKeysCmd(m, "y")
+	runAll(m, cmd)
+	if len(*got) != 1 || (*got)[0] != "inner" {
+		t.Fatalf("clipboard = %q, want %q", *got, "inner")
+	}
+}
+
+func TestDetailVisualEscStaysInDetail(t *testing.T) {
+	m := typeKeys(detailVisualModel(t), "V")
+	m, _ = upd(m, keyMsg("esc"))
+	if trOf(m).visualActive() {
+		t.Fatal("esc must end visual")
+	}
+	if trOf(m).historyView != histDetail {
+		t.Error("esc in visual must not pop the detail frame")
+	}
+}
+
+func TestDetailVisualLinewiseAcrossItems(t *testing.T) {
+	got := captureClipboard(t)
+	m := detailVisualModel(t)
+	m = typeKeys(m, "VG")
+	m, cmd := typeKeysCmd(m, "y")
+	runAll(m, cmd)
+	if len(*got) != 1 || !strings.Contains((*got)[0], "inner alpha beta") || !strings.Contains((*got)[0], "second item") {
+		t.Fatalf("clipboard = %q, want both items", *got)
+	}
+}
+
+// followFrame is called directly on the top frame: it is what a streamed
+// subagent frame runs when its entries grow.
+func TestDetailVisualHoldsOnFollowFrame(t *testing.T) {
+	got := captureClipboard(t)
+	var items []transcript.Entry
+	for i := range 40 {
+		items = append(items, transcript.Entry{ID: fmt.Sprintf("f%d", i), Kind: transcript.EntryText, Text: "filler"})
+	}
+	items = append(items, transcript.Entry{ID: "t1", Kind: transcript.EntryText, Text: "alpha beta gamma"})
+	v := detailTestModel(traceFixture("general", items...))
+	m := withFocus(*v.c.m, mainPane)
+	m.View()
+	m = typeKeys(m, "G") // pinned to the bottom
+	m = typeKeys(m, "ve")
+	f := trOf(m).transcript.detailStack[len(trOf(m).transcript.detailStack)-1]
+	scroll, cursor := f.scroll, f.cursor
+	if scroll == 0 {
+		t.Fatal("the frame must overflow the view for this test")
+	}
+	es := append(slices.Clone(f.items),
+		transcript.Entry{ID: "t2", Kind: transcript.EntryText, Text: "new entry"},
+		transcript.Entry{ID: "t3", Kind: transcript.EntryText, Text: "another entry"})
+	m, _ = onTr(m, func(v tview) tea.Cmd {
+		v.followFrame(v.topFrame(), es)
+		return nil
+	})
+	if !trOf(m).visualActive() {
+		t.Fatal("new entries must not end visual mode")
+	}
+	f = trOf(m).transcript.detailStack[len(trOf(m).transcript.detailStack)-1]
+	if f.scroll != scroll || f.cursor != cursor {
+		t.Errorf("scroll, cursor = %d, %d after follow, want %d, %d (no tail-follow in visual mode)", f.scroll, f.cursor, scroll, cursor)
+	}
+	m, cmd := typeKeysCmd(m, "y")
+	runAll(m, cmd)
+	if len(*got) != 1 || (*got)[0] != "alpha" {
+		t.Errorf("clipboard = %q, want the same text as before the follow", *got)
+	}
+}
+
+// A selection in a detail frame is not the stream's: stream entries arriving
+// under it still tail-follow.
+func TestDetailVisualKeepsStreamPinned(t *testing.T) {
+	var entries []transcript.Entry
+	for i := range 40 {
+		entries = append(entries, transcript.Entry{ID: fmt.Sprintf("f%d", i), Kind: transcript.EntryText, Text: "filler"})
+	}
+	entries = append(entries, transcript.Entry{ID: "t1", Kind: transcript.EntryText, Text: "alpha beta gamma"})
+	m := visualModel(entries...)
+	m = typeKeys(m, "G")
+	if tvIn(m).transcript.scroll == 0 || tvIn(m).transcript.scroll != tvIn(m).maxScroll() {
+		t.Fatal("the transcript must overflow and be pinned for this test")
+	}
+	m, _ = upd(m, keyMsg("enter"))
+	if trOf(m).historyView != histDetail {
+		t.Fatal("enter must open the detail view")
+	}
+	m = typeKeys(m, "V")
+	if !trOf(m).visualActive() {
+		t.Fatal("V must start visual in the detail view")
+	}
+	appendStream := func(m model, ids ...string) model {
+		es := slices.Clone(trOf(m).transcript.entries)
+		for _, id := range ids {
+			es = append(es, transcript.Entry{ID: id, Kind: transcript.EntryText, Text: "new " + id})
+		}
+		m, _ = onTr(m, func(v tview) tea.Cmd {
+			return v.updateMsg(transcriptMsg{id: v.sessionID, entries: es})
+		})
+		return m
+	}
+	m = appendStream(m, "n1", "n2")
+	m, _ = upd(m, keyMsg("esc"))
+	m, _ = upd(m, keyMsg("esc"))
+	if trOf(m).historyView != histTranscript {
+		t.Fatal("esc twice must return to the stream")
+	}
+	m.View()
+	if s, ms := tvIn(m).transcript.scroll, tvIn(m).maxScroll(); s != ms {
+		t.Fatalf("stream scroll = %d, want pinned at %d", s, ms)
+	}
+	m = appendStream(m, "n3", "n4")
+	if s, ms := tvIn(m).transcript.scroll, tvIn(m).maxScroll(); s != ms {
+		t.Errorf("after a further append: stream scroll = %d, want pinned at %d", s, ms)
+	}
+}
+
+func TestDetailVisualBodyFrame(t *testing.T) {
+	got := captureClipboard(t)
+	text := strings.Repeat("lorem ipsum dolor sit amet ", 12) + "tail"
+	v := detailTestModel(transcript.Entry{ID: "u1", Kind: transcript.EntryUser, Text: text})
+	if v.topFrame().items != nil {
+		t.Fatal("fixture should open a body frame")
+	}
+	m := withFocus(*v.c.m, mainPane)
+	m.View()
+	m = typeKeys(m, "ve")
+	if m.screen() != "visual" {
+		t.Fatalf("screen = %q, want visual", m.screen())
+	}
+	m, cmd := typeKeysCmd(m, "y")
+	runAll(m, cmd)
+	if len(*got) != 1 || (*got)[0] != "You" { // the body's heading, from its first column
+		t.Fatalf("charwise clipboard = %q, want %q", *got, "You")
+	}
+	m = typeKeys(m, "VGojj") // the text lines, below the heading and its blank line
+	m, cmd = typeKeysCmd(m, "y")
+	runAll(m, cmd)
+	if len(*got) != 2 {
+		t.Fatalf("clipboard = %q, want a second copy", *got)
+	}
+	c := (*got)[1]
+	if c != text {
+		t.Errorf("linewise clipboard = %q, want the prompt with its wraps rejoined", c)
+	}
+}
+
+// noSelection reports whether no frame and not the stream holds a selection.
+func noSelection(m model) bool {
+	tr := trOf(m)
+	if tr.transcript.visual != nil {
+		return false
+	}
+	for _, f := range tr.transcript.detailStack {
+		if f.visual != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func manyTexts(n int) []transcript.Entry {
+	es := make([]transcript.Entry, n)
+	for i := range es {
+		es[i] = transcript.Entry{ID: fmt.Sprintf("t%d", i), Kind: transcript.EntryText, Text: fmt.Sprintf("line %d", i)}
+	}
+	return es
+}
+
+func mainCenter(m model) (x, y int) {
+	r := m.mainRect()
+	return (r.Min.X + r.Max.X) / 2, (r.Min.Y + r.Max.Y) / 2
+}
+
+func TestWheelInStreamVisualScrolls(t *testing.T) {
+	m := withMouse(visualModel(manyTexts(40)...))
+	m = typeKeys(m, "v")
+	if !trOf(m).visualActive() {
+		t.Fatal("v must start visual mode")
+	}
+	before, scroll := *trOf(m).transcript.visual, trOf(m).transcript.scroll
+	x, y := mainCenter(m)
+	m, _ = wheelAt(m, x, y, 20)
+	if trOf(m).transcript.scroll == scroll {
+		t.Error("the wheel must scroll in visual mode")
+	}
+	if s := trOf(m).transcript.visual; s == nil || *s != before {
+		t.Error("the wheel must leave the selection as it was")
+	}
+}
+
+func TestWheelInDetailVisualScrolls(t *testing.T) {
+	v := detailTestModel(traceFixture("general", manyTexts(40)...))
+	m := withMouse(withFocus(*v.c.m, mainPane))
+	m.View()
+	m = typeKeys(m, "v")
+	if !trOf(m).visualActive() {
+		t.Fatal("v must start visual mode")
+	}
+	top := func(m model) detailFrame {
+		st := trOf(m).transcript.detailStack
+		return st[len(st)-1]
+	}
+	before, scroll := *top(m).visual, top(m).scroll
+	x, y := mainCenter(m)
+	m, _ = wheelAt(m, x, y, 10)
+	if top(m).scroll == scroll {
+		t.Error("the wheel must scroll the detail in visual mode")
+	}
+	if s := top(m).visual; s == nil || *s != before {
+		t.Error("the wheel must leave the selection as it was")
+	}
+}
+
 func TestMenuOffersNoCopyWithoutSource(t *testing.T) {
 	m := withMouse(copyModel(
 		transcript.Entry{ID: "t1", Kind: transcript.EntryText, Text: "hi"},
@@ -232,5 +761,49 @@ func TestMenuOnBodyFrameOffersCopy(t *testing.T) {
 	m := withMouse(withFocus(*v.c.m, mainPane))
 	if got := m.applicable(trOf(m).menu(&ctx{m: &m})); len(got) != 1 || got[0].name != detailKeys.Copy.name {
 		t.Errorf("body frame menu = %v, want copy", got)
+	}
+}
+
+func TestFoldCommandInVisualEndsIt(t *testing.T) {
+	m := runModel(true)
+	m = withTr(m, func(t *transcriptComp) {
+		v := t.bind(&ctx{m: &m})
+		t.transcript.cursor = rowIndexOf(t.transcript.entries, v.displayRows(), rowRef{id: "x1"})
+	})
+	m = typeKeys(m, "v")
+	if !trOf(m).visualActive() {
+		t.Fatal("v must start visual mode")
+	}
+	m, _ = upd(m, cmdMsg(projectsKeys.ToggleVerbose.name))
+	if trOf(m).visualActive() || !noSelection(m) {
+		t.Error("folding the selection's row away must end visual mode")
+	}
+}
+
+func TestVisualShowsPendingKeyHint(t *testing.T) {
+	m := typeKeys(visualModel(), "vg")
+	if got, want := m.currentFooter(), asstStyle.Render(m.keyHint()); got != want {
+		t.Errorf("footer = %q, want the pending key hint %q", ansi.Strip(got), ansi.Strip(want))
+	}
+	m = typeKeys(m, "g")
+	if !strings.Contains(ansi.Strip(m.currentFooter()), "VISUAL") {
+		t.Error("after the sequence completes the footer must name visual mode again")
+	}
+}
+
+func TestDetailVisualRegistersOneCloseZone(t *testing.T) {
+	m := nestedDetail(true)
+	m = typeKeys(m, "v")
+	m.View()
+	n := 0
+	for _, a := range m.hits.areas {
+		for _, z := range a.zones {
+			if z.target.kind == hitClose {
+				n++
+			}
+		}
+	}
+	if n != 1 {
+		t.Errorf("close zones = %d, want 1", n)
 	}
 }

@@ -30,6 +30,7 @@ type detailFrame struct {
 	expanded        map[int]bool    // by item index, not display row
 	runs            map[string]bool // run key -> expanded, overriding verboseTranscript
 	focused         bool            // single-item focus frame: no further drilling
+	visual          *selection      // visual-mode selection; nil outside visual mode
 
 	// Identity header for a subagent's drilled-in trace frame.
 	subagentType   string
@@ -94,7 +95,7 @@ func (m tview) toggleFrameRun(f *detailFrame, r displayRow) tea.Cmd {
 		f.cursor = i
 	}
 	lines, first := m.frameLines(f, m.c.m.transcriptWidth())
-	total, h := len(lines), m.detailBodyHeight(f)
+	total, h := len(lines), m.detailWindowHeight(f)
 	start, end := f.cursorSpan(first, total)
 	f.scroll = windowScroll(total, start, end, h, f.scroll)
 	if !on {
@@ -245,6 +246,8 @@ var detailTable = []keyTableEntry{
 	{detailKeys.Top, tview.actDetailTop},
 	{detailKeys.Bottom, tview.actDetailBottom},
 	{detailKeys.Copy, tview.actCopyCard},
+	{detailKeys.Visual, func(m tview, _ tea.KeyPressMsg) tea.Cmd { return m.startVisual(false) }},
+	{detailKeys.VisualLine, func(m tview, _ tea.KeyPressMsg) tea.Cmd { return m.startVisual(true) }},
 }
 
 func (m tview) actDetailDown(tea.KeyPressMsg) tea.Cmd {
@@ -494,7 +497,9 @@ func (f *detailFrame) detailHeaderText(width int) string {
 	return strings.Join(subagentHeaderLines(f.subagentType, f.subagentName, f.subagentStatus, f.subagentInput, width), "\n")
 }
 
-func (m tview) detailBodyHeight(f *detailFrame) int {
+// detailWindowHeight is the item lines the cursor keeps in view, assuming a
+// breadcrumb and a scroll indicator.
+func (m tview) detailWindowHeight(f *detailFrame) int {
 	h := max(1, m.viewportHeight()-3) // breadcrumb(2) + hint(1)
 	if header := f.detailHeaderText(m.c.m.transcriptWidth() - detailGutter); header != "" {
 		h = max(1, h-(len(strings.Split(header, "\n"))+1)) // header lines + trailing blank
@@ -518,13 +523,7 @@ func itemSpan(i int, first []int, total int) (int, int) {
 
 func (m tview) itemAtLine(f *detailFrame, line int) int {
 	first, _ := m.frameItemStarts(f, m.c.m.transcriptWidth())
-	idx := 0
-	for i, s := range first {
-		if s <= line {
-			idx = i
-		}
-	}
-	return idx
+	return rowAtLine(first, line)
 }
 
 func (m tview) detailCursorVisible(f *detailFrame) bool {
@@ -536,12 +535,12 @@ func (m tview) detailCursorVisible(f *detailFrame) bool {
 		return false
 	}
 	start, end := itemSpan(f.cursor, first, total)
-	return start < f.scroll+m.detailBodyHeight(f) && end > f.scroll
+	return start < f.scroll+m.detailWindowHeight(f) && end > f.scroll
 }
 
 func (m tview) firstVisibleItem(f *detailFrame) int {
 	first, _ := m.frameItemStarts(f, m.c.m.transcriptWidth())
-	h := m.detailBodyHeight(f)
+	h := m.detailWindowHeight(f)
 	for i, s := range first {
 		if s >= f.scroll && s < f.scroll+h {
 			return i
@@ -552,7 +551,7 @@ func (m tview) firstVisibleItem(f *detailFrame) int {
 
 func (m tview) lastVisibleItem(f *detailFrame) int {
 	first, _ := m.frameItemStarts(f, m.c.m.transcriptWidth())
-	h := m.detailBodyHeight(f)
+	h := m.detailWindowHeight(f)
 	last := -1
 	for i, s := range first {
 		if s >= f.scroll && s < f.scroll+h {
@@ -572,7 +571,7 @@ func (m tview) ensureDetailVisible() {
 	}
 	lines, first := m.frameLines(f, m.c.m.transcriptWidth())
 	start, end := f.cursorSpan(first, len(lines))
-	f.scroll = windowScroll(len(lines), start, end, m.detailBodyHeight(f), f.scroll)
+	f.scroll = windowScroll(len(lines), start, end, m.detailWindowHeight(f), f.scroll)
 }
 
 func (m tview) frameMaxScroll(f *detailFrame) int {
@@ -616,6 +615,31 @@ func scrollHint(above, below, width int) string {
 		Align(lipgloss.Right).Render(txt)
 }
 
+// detailPrefix is what sits above a frame's items: the breadcrumb and the
+// subagent header, with rows the lines it takes.
+func (m tview) detailPrefix(f *detailFrame) (prefix string, rows int) {
+	cw := m.c.m.transcriptWidth()
+	// Align the breadcrumb/header with item text, which sits past the accent gutter.
+	gutter := strings.Repeat(" ", detailGutter)
+	if crumb := m.detailCrumbLine(cw - detailGutter); crumb != "" {
+		prefix = indentBlock(crumb, gutter) + "\n\n"
+	}
+	if header := f.detailHeaderText(cw - detailGutter); header != "" {
+		prefix += indentBlock(header, gutter) + "\n\n"
+	}
+	return prefix, strings.Count(prefix, "\n")
+}
+
+// detailBodyHeight is the lines total item lines get under a prefix of rows
+// lines; overflow reserves one for the scroll indicator.
+func (m tview) detailBodyHeight(rows, total int) (h int, overflow bool) {
+	h = max(1, m.viewportHeight()-rows)
+	if total <= h {
+		return h, false
+	}
+	return max(1, h-1), true
+}
+
 // detailBody renders the active frame: breadcrumb + item list sliced to the
 // viewport (a row reserved for the scroll indicator on overflow), centered.
 func (m tview) detailBody() string {
@@ -625,45 +649,37 @@ func (m tview) detailBody() string {
 		return m.c.m.center(dimStyle.Render("(nothing to show)"), m.c.m.containerWidth())
 	}
 	lines, first := m.frameLines(f, cw)
-	// Align the breadcrumb/header with item text, which sits past the accent gutter.
-	gutter := strings.Repeat(" ", detailGutter)
-	crumb := m.detailCrumbLine(cw - detailGutter)
-	h := m.viewportHeight()
-	bodyH := h
-	prefix := ""
-	if crumb != "" {
-		prefix = indentBlock(crumb, gutter) + "\n\n"
-		bodyH = max(1, h-2)
-	}
-	if header := f.detailHeaderText(cw - detailGutter); header != "" {
-		prefix += indentBlock(header, gutter) + "\n\n"
-		bodyH = max(1, bodyH-(len(strings.Split(header, "\n"))+1))
-	}
-	rows := strings.Count(prefix, "\n")
-	if len(lines) <= bodyH {
+	prefix, rows := m.detailPrefix(f)
+	m.hitCrumbClose(cw - detailGutter)
+	ch, overflow := m.detailBodyHeight(rows, len(lines))
+	if !overflow {
 		m.hitItems(f, first, len(lines), rows, 0, len(lines))
-		return m.c.m.center(prefix+strings.Join(lines, "\n"), m.c.m.containerWidth())
+		return m.c.m.center(prefix+strings.Join(m.paintVisual(lines), "\n"), m.c.m.containerWidth())
 	}
-	ch := max(1, bodyH-1) // reserve a row for the scroll indicator
-	scroll := min(f.scroll, len(lines)-ch)
-	if scroll < 0 {
-		scroll = 0
-	}
+	scroll := max(0, min(f.scroll, len(lines)-ch))
 	end := scroll + ch
 	m.hitItems(f, first, len(lines), rows, scroll, end)
-	body := strings.Join(lines[scroll:end], "\n")
+	body := strings.Join(m.paintVisual(lines[scroll:end]), "\n")
 	hint := scrollHint(scroll, len(lines)-end, cw)
 	return m.c.m.center(prefix+body+"\n"+hint, m.c.m.containerWidth())
 }
 
 // detailCrumbLine ends the breadcrumb with a close button when the mouse is on.
+// It only draws; hitCrumbClose records the button.
 func (m tview) detailCrumbLine(w int) string {
 	if !m.c.m.mouse {
 		return truncateLine(m.detailBreadcrumb(), w)
 	}
-	x := centerGutter(m.c.m.containerWidth(), m.c.m.bodyWidth()) + detailGutter + w - 1
-	m.c.hitZone(uv.Rect(x, 0, 1, 1), hitTarget{kind: hitClose})
 	return spaceBetween(truncateLine(m.detailBreadcrumb(), max(1, w-2)), StyleDim.Render(glyphClose), w)
+}
+
+// hitCrumbClose records the breadcrumb's close button, the last of w cells.
+func (m tview) hitCrumbClose(w int) {
+	if !m.c.m.mouse {
+		return
+	}
+	x := m.c.m.transcriptTextX() + w - 1
+	m.c.hitZone(uv.Rect(x, 0, 1, 1), hitTarget{kind: hitClose})
 }
 
 func (m tview) hitItems(f *detailFrame, first []int, total, rows, scroll, end int) {
@@ -794,7 +810,7 @@ func wrapDim(text string, width int) string {
 func (m tview) followFrame(f *detailFrame, entries []transcript.Entry) {
 	first := len(f.items) == 0
 	wasLast := first || f.cursor == len(m.frameRows(f))-1
-	atBottom := first || f.scroll >= m.frameMaxScroll(f)
+	atBottom := tailFollows(first || f.scroll >= m.frameMaxScroll(f), f.visual)
 	ref := m.frameRowID(f)
 	f.items = entries
 	f.cursor = restoreRowCursor(f.items, m.frameRows(f), ref, f.cursor, atBottom && wasLast)

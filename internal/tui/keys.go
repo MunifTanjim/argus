@@ -198,6 +198,7 @@ var transcriptKeys = struct {
 	Top, Bottom, Collapse, Expand, Detail, Copy                                      binding
 	Answer, Export, Back, Resume                                                     binding
 	Redact, RedactSave, RedactList                                                   binding
+	Visual, VisualLine                                                               binding
 }{
 	ScrollUp:   nb("scroll up", "<Up> k", "scroll"),
 	ScrollDown: nb("scroll down", "<Down> j", ""),
@@ -220,24 +221,56 @@ var transcriptKeys = struct {
 	Redact:     nm("redaction add", "d", "redact"),
 	RedactList: nm("redaction list", "D", "redactions"),
 	RedactSave: nm("redaction save", "W", "save redacted"),
+	Visual:     nb("visual char", "v", "visual"),
+	VisualLine: nb("visual line", "V", ""),
 }
 
 var detailKeys = struct {
 	Up, Down, HalfUp, HalfDown, PageUp, PageDown, Top, Bottom, Collapse, Expand, Drill, Back, Copy binding
+	Visual, VisualLine                                                                             binding
 }{
-	Up:       nb("prev", "<Up> k", "move"),
-	Down:     nb("next", "<Down> j", ""),
-	HalfUp:   nb("scroll half-page-up", "<C-u>", ""),
-	HalfDown: nb("scroll half-page-down", "<C-d>", ""),
-	PageUp:   nb("scroll page-up", "<C-b> <PageUp>", ""),
-	PageDown: nb("scroll page-down", "<C-f> <PageDown>", ""),
-	Top:      nb("goto top", "gg", ""),
-	Bottom:   nb("goto bottom", "G", ""),
-	Collapse: nb("fold close", "h <Left> zc", "fold"),
-	Expand:   nb("fold open", "l <Right> zo", ""),
-	Drill:    nb("open", "<CR>", "drill"),
-	Back:     nb("back", "<Esc>", "back"),
-	Copy:     nb("copy", "y", "copy"),
+	Up:         nb("prev", "<Up> k", "move"),
+	Down:       nb("next", "<Down> j", ""),
+	HalfUp:     nb("scroll half-page-up", "<C-u>", ""),
+	HalfDown:   nb("scroll half-page-down", "<C-d>", ""),
+	PageUp:     nb("scroll page-up", "<C-b> <PageUp>", ""),
+	PageDown:   nb("scroll page-down", "<C-f> <PageDown>", ""),
+	Top:        nb("goto top", "gg", ""),
+	Bottom:     nb("goto bottom", "G", ""),
+	Collapse:   nb("fold close", "h <Left> zc", "fold"),
+	Expand:     nb("fold open", "l <Right> zo", ""),
+	Drill:      nb("open", "<CR>", "drill"),
+	Back:       nb("back", "<Esc>", "back"),
+	Copy:       nb("copy", "y", "copy"),
+	Visual:     nb("visual char", "v", "visual"),
+	VisualLine: nb("visual line", "V", ""),
+}
+
+var visualKeys = struct {
+	Left, Right, Up, Down, WordNext, WordPrev, WordEnd, LineStart, FirstNonBlank, LineEnd binding
+	Top, Bottom, HalfUp, HalfDown, PageUp, PageDown, Swap, Char, Line, Copy, Back         binding
+}{
+	Left:          nb("cursor left", "h <Left>", "move"),
+	Right:         nb("cursor right", "l <Right>", ""),
+	Up:            nb("cursor up", "k <Up>", ""),
+	Down:          nb("cursor down", "j <Down>", ""),
+	WordNext:      nb("cursor word-next", "w", ""),
+	WordPrev:      nb("cursor word-prev", "b", ""),
+	WordEnd:       nb("cursor word-end", "e", ""),
+	LineStart:     nb("cursor line-start", "0", ""),
+	FirstNonBlank: nb("cursor first-non-blank", "^", ""),
+	LineEnd:       nb("cursor line-end", "$", ""),
+	Top:           nb("goto top", "gg", ""),
+	Bottom:        nb("goto bottom", "G", ""),
+	HalfUp:        nb("scroll half-page-up", "<C-u>", ""),
+	HalfDown:      nb("scroll half-page-down", "<C-d>", ""),
+	PageUp:        nb("scroll page-up", "<C-b> <PageUp>", ""),
+	PageDown:      nb("scroll page-down", "<C-f> <PageDown>", ""),
+	Swap:          nb("visual swap", "o", "other end"),
+	Char:          nb("visual char", "v", ""),
+	Line:          nb("visual line", "V", ""),
+	Copy:          nb("copy", "y", "copy"),
+	Back:          nb("back", "<Esc>", "cancel"),
 }
 
 // sessionKeys are the keys a live transcript and the session dock take before
@@ -376,7 +409,7 @@ var upgradeKeys = struct {
 
 func keySets() []any {
 	return []any{listKeys, projectsKeys, fileViewKeys, transcriptKeys, redactListKeys,
-		detailKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, upgradeKeys}
+		detailKeys, visualKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, upgradeKeys}
 }
 
 func allBindingSets() []any { return append(keySets(), textInputSets()...) }

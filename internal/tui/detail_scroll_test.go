@@ -150,7 +150,7 @@ func TestDetailUpReanchorsToViewport(t *testing.T) {
 	if got := m.topFrame().scroll; got != 0 {
 		t.Fatalf("Up should not move the viewport when re-anchoring: scroll 0 -> %d", got)
 	}
-	if start := m.cursorLineStart(); start >= m.detailBodyHeight(m.topFrame()) {
+	if start := m.cursorLineStart(); start >= m.detailWindowHeight(m.topFrame()) {
 		t.Fatalf("Up should select a visible item, cursor start=%d below viewport", start)
 	}
 }
