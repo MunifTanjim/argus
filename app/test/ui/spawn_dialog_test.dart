@@ -143,6 +143,25 @@ void main() {
     expect(find.text('/home/u/argus'), findsNothing);
   });
 
+  testWidgets('directories gone from the node are not offered',
+      (tester) async {
+    await tester.pumpWidget(_app([
+      const HistoryProject(
+          projectDir: '/a', cwd: '/home/u/gone', label: 'gone',
+          sessionCount: 1, lastActivity: '2026-06-29T10:00:00Z',
+          missing: true),
+      const HistoryProject(
+          projectDir: '/b', cwd: '/home/u/argus', label: 'argus',
+          sessionCount: 1, lastActivity: '2026-06-01T10:00:00Z'),
+    ]));
+    await tester.pumpAndSettle();
+    // The newer but missing directory is skipped as the default too.
+    expect(find.text('argus'), findsOneWidget);
+    await tester.tap(find.text('argus'));
+    await tester.pumpAndSettle();
+    expect(find.text('gone'), findsNothing);
+  });
+
   testWidgets('directory filter matches the path', (tester) async {
     await tester.pumpWidget(_app([
       const HistoryProject(

@@ -472,6 +472,18 @@ func TestProjectsForNodeDedupesCwd(t *testing.T) {
 	}
 }
 
+func TestProjectsForNodeDropsMissing(t *testing.T) {
+	all := []session.HistoryProject{
+		{Label: "gone", Cwd: "/a", NodeID: "work", Missing: true},
+		{Label: "argus", Cwd: "/a", NodeID: "home"},
+		{Label: "old", Cwd: "/b", NodeID: "home", Missing: true},
+	}
+	got := projectsForNode(all, "")
+	if len(got) != 1 || got[0].Label != "argus" {
+		t.Fatalf("missing dirs should be dropped before dedupe, got %+v", got)
+	}
+}
+
 // A pasted PR link must land in the prompt buffer; the custom path drops newlines.
 func TestSpawnPaste(t *testing.T) {
 	c := &spawnPickClient{projects: []session.HistoryProject{{Label: "p", Cwd: "/p"}}}

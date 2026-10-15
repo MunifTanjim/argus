@@ -3,7 +3,10 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -17,6 +20,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/spawn"
 	"github.com/MunifTanjim/argus/internal/tmux"
 	"github.com/MunifTanjim/argus/internal/transcript"
+	"golang.org/x/sys/unix"
 )
 
 // Session-facing RPC handlers: reads from the registry and tmux control of panes.
@@ -342,6 +346,10 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 	if err != nil {
 		return nil, err
 	}
+	// Checked for every agent; tmux would silently fall back to $HOME.
+	if err := d.cwdError("cannot spawn", p.Cwd); err != nil {
+		return nil, err
+	}
 	// A Spawner agent (headless, e.g. opencode) has no pane process: create the
 	// session over its service API and register it under the canonical agent-keyed
 	// id. This path needs no tmux, so it runs ahead of the pane-spawn tmux guard.
@@ -380,6 +388,43 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 	sid := string(session.TmuxServerArgus) + ":" + paneID
 	go d.rescanUntilRegistered(sid)
 	return api.SpawnResult{SessionID: sid, PaneID: paneID}, nil
+}
+
+// dirMissing marks a history project whose cwd is gone; other stat errors (e.g.
+// permissions) do not hide it.
+func dirMissing(cwd string) bool {
+	if cwd == "" {
+		return false
+	}
+	fi, err := os.Stat(cwd)
+	if err != nil {
+		return errors.Is(err, fs.ErrNotExist)
+	}
+	return !fi.IsDir()
+}
+
+// cwdError rejects a cwd tmux would silently swap for $HOME: one that is
+// relative, missing, not a directory, or not enterable. An empty cwd is left to
+// the caller.
+func (d *Node) cwdError(action, cwd string) error {
+	if cwd == "" {
+		return nil
+	}
+	var reason string
+	switch fi, err := os.Stat(cwd); {
+	case !filepath.IsAbs(cwd):
+		reason = "is not an absolute path"
+	case errors.Is(err, fs.ErrNotExist), err == nil && !fi.IsDir():
+		reason = "does not exist"
+	case err != nil, unix.Access(cwd, unix.X_OK) != nil:
+		reason = "is not accessible"
+	default:
+		return nil
+	}
+	return &api.RPCError{
+		Code:    api.CodeInvalidRequest,
+		Message: fmt.Sprintf("%s: directory %s %s on node %s", action, cwd, reason, d.label),
+	}
 }
 
 // rescanUntilRegistered rescans discovery with backoff until the given session id
@@ -454,6 +499,9 @@ func (d *Node) handleSessionResume(ctx context.Context, params json.RawMessage) 
 			Message: "cannot resume: session working directory is unknown",
 		}
 	}
+	if err := d.cwdError("cannot resume", p.Cwd); err != nil {
+		return nil, err
+	}
 	if !d.caps.SpawnSession {
 		return nil, &api.RPCError{
 			Code:    api.CodeInvalidRequest,
@@ -493,6 +541,9 @@ func (d *Node) handleSessionResume(ctx context.Context, params json.RawMessage) 
 func (d *Node) spawnAndAdopt(ctx context.Context, agent, agentSessionID, cwd, existingID string) (string, error) {
 	if cwd == "" {
 		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "cannot open terminal: session working directory is unknown"}
+	}
+	if err := d.cwdError("cannot open terminal", cwd); err != nil {
+		return "", err
 	}
 	if !d.caps.SpawnSession {
 		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "terminal unavailable: tmux not found on node " + d.label}

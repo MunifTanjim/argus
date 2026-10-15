@@ -155,13 +155,11 @@ func newRenderCache(hasDark bool) renderCache {
 type historyState struct {
 	project     session.HistoryProject
 	title       string                 // header for the open historical transcript
-	openSession session.HistorySession // retained for export metadata
+	openSession session.HistorySession // retained for export metadata and resume
 	// openNodeID/openPath/openAgent route per-tool detail fetches to the right adapter.
-	openNodeID    string
-	openPath      string
-	openAgent     string // owning agent of the open transcript, for read routing
-	openSessionID string // agent session id of the open transcript, for resume
-	openResumable bool   // whether the open session can be resumed
+	openNodeID string
+	openPath   string
+	openAgent  string // owning agent of the open transcript, for read routing
 }
 
 func newModel(client Client, hasDark bool, logs *logbuf.Buffer) model {

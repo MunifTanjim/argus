@@ -36,6 +36,18 @@ func TestHistResumeGatingUnknownCwd(t *testing.T) {
 	}
 }
 
+func TestHistResumeGatingMissingDir(t *testing.T) {
+	p := session.HistoryProject{NodeID: "n1", Cwd: "/gone", Missing: true}
+	m := withHistorySessions(model{}, p, session.HistorySessionPage{Items: []session.HistorySession{{SessionID: "s1", Agent: "claude", Resumable: true}}})
+	mm, cmd := m.baseKey(keyMsg("R"))
+	if cmd != nil {
+		t.Fatal("missing-directory session must not issue a resume command")
+	}
+	if !strings.Contains(mm.(model).flash, "no longer exists") {
+		t.Fatalf("expected missing-directory flash, got %q", mm.(model).flash)
+	}
+}
+
 func TestHistorySessionsViewShowsFlash(t *testing.T) {
 	m := model{width: 80, height: 24, left: leftSidebarState{hidden: true}}
 	m = withHistorySessions(m, session.HistoryProject{Label: "proj", Cwd: "/tmp"}, session.HistorySessionPage{Items: []session.HistorySession{
@@ -117,8 +129,8 @@ func TestHistoryTranscriptRoundTripKeepsTheSessions(t *testing.T) {
 	m, _ = upd(m, histSessionsMsg{projectDir: "/a", page: histPage("s1", "s2")})
 	m = typeKeys(m, "j")
 	m, _ = upd(m, keyMsg("enter"))
-	if viewOf(m) != viewHistoryTranscript || trOf(m).history.openSessionID != "s2" {
-		t.Fatalf("enter should open s2: view=%v open=%q", viewOf(m), trOf(m).history.openSessionID)
+	if viewOf(m) != viewHistoryTranscript || trOf(m).history.openSession.SessionID != "s2" {
+		t.Fatalf("enter should open s2: view=%v open=%q", viewOf(m), trOf(m).history.openSession.SessionID)
 	}
 	m, _ = upd(m, histSessionsMsg{projectDir: "/a", offset: 2, page: histPage("s3")})
 	m, _ = upd(m, keyMsg("esc"))

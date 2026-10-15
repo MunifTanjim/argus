@@ -9,14 +9,13 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// projectsForNode keeps projects belonging to nodeID (preserving order); an
-// empty nodeID keeps all. Deduped by cwd: the same path can appear on multiple
-// nodes or repeat in history.
+// projectsForNode dedupes by cwd: the same path can appear on multiple nodes or
+// repeat in history.
 func projectsForNode(all []session.HistoryProject, nodeID string) []session.HistoryProject {
 	out := make([]session.HistoryProject, 0, len(all))
 	seen := make(map[string]struct{}, len(all))
 	for _, p := range all {
-		if nodeID != "" && p.NodeID != nodeID {
+		if p.Missing || nodeID != "" && p.NodeID != nodeID {
 			continue
 		}
 		if _, dup := seen[p.Cwd]; dup {

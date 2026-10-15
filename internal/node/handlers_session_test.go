@@ -55,7 +55,8 @@ func TestHandleSessionSpawnHeadlessUsesServiceNoTmux(t *testing.T) {
 	d.caps.SpawnSession = false // no tmux; the service path must not require it
 	d.adapters["fake"] = fs
 
-	params, _ := json.Marshal(api.SpawnParams{Agent: "fake", Cwd: "/repo", Prompt: "hi"})
+	repo := t.TempDir()
+	params, _ := json.Marshal(api.SpawnParams{Agent: "fake", Cwd: repo, Prompt: "hi"})
 	res, err := d.handleSessionSpawn(context.Background(), params)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
@@ -67,7 +68,7 @@ func TestHandleSessionSpawnHeadlessUsesServiceNoTmux(t *testing.T) {
 	if sr.PaneID != "" {
 		t.Fatalf("PaneID = %q, want empty (no pane spawned)", sr.PaneID)
 	}
-	if fs.gotCwd != "/repo" || fs.gotPrompt != "hi" {
+	if fs.gotCwd != repo || fs.gotPrompt != "hi" {
 		t.Fatalf("SpawnSession args: cwd=%q prompt=%q", fs.gotCwd, fs.gotPrompt)
 	}
 }
@@ -77,7 +78,7 @@ func TestHandleSessionSpawnHeadlessSurfacesError(t *testing.T) {
 	d := newNode(map[session.TmuxServer]*tmux.Client{})
 	d.adapters["fake"] = fs
 
-	params, _ := json.Marshal(api.SpawnParams{Agent: "fake", Cwd: "/repo", Prompt: "hi"})
+	params, _ := json.Marshal(api.SpawnParams{Agent: "fake", Cwd: t.TempDir(), Prompt: "hi"})
 	_, err := d.handleSessionSpawn(context.Background(), params)
 	if err == nil || !strings.Contains(err.Error(), "service unavailable") {
 		t.Fatalf("expected wrapped spawn error, got %v", err)
@@ -119,7 +120,7 @@ func TestHandleSessionSpawnNonHeadlessRequiresTmux(t *testing.T) {
 	d := newNode(map[session.TmuxServer]*tmux.Client{})
 	d.caps.SpawnSession = false
 
-	params, _ := json.Marshal(api.SpawnParams{Agent: "claude", Cwd: "/repo", Prompt: "hi"})
+	params, _ := json.Marshal(api.SpawnParams{Agent: "claude", Cwd: t.TempDir(), Prompt: "hi"})
 	_, err := d.handleSessionSpawn(context.Background(), params)
 	if err == nil || !strings.Contains(err.Error(), "tmux not found") {
 		t.Fatalf("expected tmux guard error, got %v", err)
@@ -533,4 +534,90 @@ func TestHandleNodeIdentifyTip(t *testing.T) {
 			t.Errorf("Tip = %x, want empty", got.Tip)
 		}
 	})
+}
+
+func TestHandleSessionSpawnRejectsMissingDir(t *testing.T) {
+	fs := &fakeSpawner{id: "ses_x"}
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.label = "boxy"
+	d.adapters["fake"] = fs
+	gone := filepath.Join(t.TempDir(), "gone")
+
+	params, _ := json.Marshal(api.SpawnParams{Agent: "fake", Cwd: gone, Prompt: "hi"})
+	_, err := d.handleSessionSpawn(context.Background(), params)
+	if err == nil || !strings.Contains(err.Error(), "does not exist on node boxy") {
+		t.Fatalf("expected missing-directory error, got %v", err)
+	}
+	if fs.gotPrompt != "" {
+		t.Fatal("SpawnSession must not run for a missing directory")
+	}
+}
+
+func TestHandleSessionResumeRejectsMissingDir(t *testing.T) {
+	d := New()
+	d.caps.SpawnSession = true
+	d.label = "boxy"
+	gone := filepath.Join(t.TempDir(), "gone")
+	raw, _ := json.Marshal(api.ResumeParams{Agent: "claude", AgentSessionID: "x", Cwd: gone})
+	_, err := d.handleSessionResume(context.Background(), raw)
+	if err == nil || !strings.Contains(err.Error(), "cannot resume: directory "+gone) {
+		t.Fatalf("expected missing-directory error, got %v", err)
+	}
+}
+
+func TestDirMissing(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "f")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		cwd  string
+		want bool
+	}{
+		{"", false},
+		{dir, false},
+		{file, true},
+		{filepath.Join(dir, "gone"), true},
+	} {
+		if got := dirMissing(tc.cwd); got != tc.want {
+			t.Errorf("dirMissing(%q) = %v, want %v", tc.cwd, got, tc.want)
+		}
+	}
+}
+
+func TestCwdError(t *testing.T) {
+	d := New()
+	d.label = "boxy"
+	dir := t.TempDir()
+	file := filepath.Join(dir, "f")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	locked := filepath.Join(dir, "locked")
+	if err := os.Mkdir(locked, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		cwd  string
+		want string // "" for no error
+	}{
+		{"", ""},
+		{dir, ""},
+		{"rel/dir", "is not an absolute path"},
+		{filepath.Join(dir, "gone"), "does not exist on node boxy"},
+		{file, "does not exist on node boxy"},
+		{locked, "is not accessible on node boxy"},
+	} {
+		if tc.cwd == locked && os.Geteuid() == 0 {
+			continue // root enters any directory
+		}
+		err := d.cwdError("cannot spawn", tc.cwd)
+		switch {
+		case tc.want == "" && err != nil:
+			t.Errorf("cwdError(%q) = %v, want none", tc.cwd, err)
+		case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+			t.Errorf("cwdError(%q) = %v, want %q", tc.cwd, err, tc.want)
+		}
+	}
 }

@@ -12,6 +12,7 @@ type HistoryProject struct {
 	LastActivity string `json:"last_activity"`        // RFC3339 (UTC) newest transcript mod time
 	NodeID       string `json:"node_id,omitempty"`    // origin machine (gateway-stamped)
 	NodeLabel    string `json:"node_label,omitempty"` // origin machine label (gateway-stamped)
+	Missing      bool   `json:"missing,omitempty"`    // Cwd no longer exists on its node
 }
 
 // HistorySession is one past session within a project, for the History session list.

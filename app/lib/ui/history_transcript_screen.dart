@@ -70,11 +70,12 @@ class _HistoryTranscriptScreenState
 
   @override
   Widget build(BuildContext context) {
-    // A resume needs the original working directory; some sessions (e.g.
-    // antigravity) have an unknown cwd and can't be reopened in place.
-    // A node older than the app's minimum may not understand the request.
+    // Resume reopens in the original cwd, which some sessions (e.g.
+    // antigravity) don't record. A node older than the app's minimum may not
+    // understand the request.
     final canResume = widget.session.resumable &&
         (widget.project?.cwd.isNotEmpty ?? false) &&
+        !(widget.project?.missing ?? false) &&
         !ref.watch(outdatedNodeIdsProvider
             .select((ids) => ids.contains(widget.session.nodeId)));
     return Scaffold(
