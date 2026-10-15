@@ -40,7 +40,6 @@ func (d dockComp) section() string { return "session-dock" }
 
 // raw is always true: every key in the dock is text or a choice.
 func (d dockComp) raw(*ctx) bool             { return true }
-func (d dockComp) spins(*ctx) bool           { return false }
 func (d dockComp) fullScreen(*ctx) fullLevel { return notFull }
 func (d dockComp) close(*ctx) tea.Cmd        { return nil }
 func (d dockComp) offers(*ctx) []binding     { return nil }
@@ -197,9 +196,15 @@ func (m model) composing() bool {
 	return ix == nil || ix.Kind == session.InteractionIdle
 }
 
-// dockRules are the region's top and bottom rules.
+// dockRules are the region's rules: activity on top, model and effort below.
 func (m model) dockRules(w int, c color.Color) (top, bottom string) {
-	return dockRule("", "", w, c), dockRule("", "", w, c)
+	s := m.sessions[m.liveSessionID()]
+	return dockRule("", m.dockStatusLabel(s), w, c), dockRule("", modelEffortLabel(s.Summary), w, c)
+}
+
+// spins while the session works: the top rule's spinner and timer advance.
+func (d dockComp) spins(c *ctx) bool {
+	return c.m.sessions[c.m.liveSessionID()].Status == session.StatusWorking
 }
 
 func (m model) dockFocused() bool {
