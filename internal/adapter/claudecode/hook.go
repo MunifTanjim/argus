@@ -31,6 +31,9 @@ type hookPayload struct {
 	Source string `json:"source"`
 	// Name is SessionRename's new name.
 	Name string `json:"name"`
+	// ModelInfo's model id and effort (nil: not reported; "": none).
+	Model  string  `json:"model"`
+	Effort *string `json:"effort"`
 }
 
 // statusFor maps a hook event to a session status. ok is false when the event
@@ -106,6 +109,19 @@ func permissionInteraction(p hookPayload, autoMode bool) *session.Interaction {
 			},
 		}
 	}
+}
+
+// modelUpdate is the live model a ModelInfo event reports, or nil when it
+// names neither a model nor an effort.
+func modelUpdate(p hookPayload) *registry.ModelUpdate {
+	if p.Model == "" && p.Effort == nil {
+		return nil
+	}
+	u := &registry.ModelUpdate{Effort: p.Effort}
+	if p.Model != "" {
+		u.Name, u.Color = modelDisplayName(p.Model), modelColorHex(p.Model)
+	}
+	return u
 }
 
 // EventName returns the resolved hook event name (the explicit arg, else the
@@ -286,6 +302,10 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 	if event == "SessionRename" {
 		name = strings.TrimSpace(p.Name)
 	}
+	var model *registry.ModelUpdate
+	if event == "ModelInfo" {
+		model = modelUpdate(p)
+	}
 
 	return reg.ApplyHook(registry.HookUpdate{
 		Agent:              Agent,
@@ -301,5 +321,6 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 		Summary:            sum,
 		Interaction:        ix,
 		ReplaceInteraction: replace,
+		Model:              model,
 	})
 }
