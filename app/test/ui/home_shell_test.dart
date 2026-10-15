@@ -608,6 +608,43 @@ void main() {
     expect(find.byType(WorkspaceScreen), findsOneWidget);
   });
 
+  testWidgets('Workspace leaves the session for its workspace', (tester) async {
+    final c = await _shell(tester);
+    c.read(sessionsProvider.notifier).replaceAll([
+      _session('s1', workspaceId: 'A:w1'),
+      _session('s2', workspaceId: 'A:w2'),
+    ]);
+    await tester.pump();
+    await tester.tap(_card('s2'));
+    await _pumpRoute(tester);
+    c.read(workspaceTabProvider('A:w2').notifier).state = WorkspaceTab.files;
+
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await _pumpRoute(tester);
+    await tester.tap(find.text('Workspace'));
+    await _pumpRoute(tester);
+    expect(c.read(scopeProvider), 'A:w2');
+    // The workspace keeps its own tab.
+    expect(c.read(workspaceTabProvider('A:w2')), WorkspaceTab.files);
+    expect(find.byType(WorkspaceScreen), findsOneWidget);
+    expect(_detailInShell, findsNothing);
+
+    await _switchTo(tester, c, null);
+    expect(_detailInShell, findsNothing);
+  });
+
+  testWidgets('Workspace under the session\'s own workspace closes the session', (tester) async {
+    final c = await _shell(tester);
+    await _openSessionIn(tester, c, 'A:w2');
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await _pumpRoute(tester);
+    await tester.tap(find.text('Workspace'));
+    await _pumpRoute(tester);
+    expect(c.read(scopeProvider), 'A:w2');
+    expect(find.byType(WorkspaceScreen), findsOneWidget);
+    expect(_detailInShell, findsNothing);
+  });
+
   testWidgets('a session opened from memory stays remembered', (tester) async {
     final c = await _shell(tester);
     await _openSessionIn(tester, c, 'A:w2');
