@@ -185,13 +185,14 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
             style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
           ),
         ),
-        if (ref.watch(leftSidebarTabProvider) == LeftSidebarTab.sessions)
+        if (ref.watch(leftSidebarTabProvider) == LeftSidebarTab.sessions) ...[
+          _workspaceOnlyToggle(),
           IconButton(
             tooltip: 'New session',
             icon: const Icon(Icons.add),
             onPressed: _newSession,
-          )
-        else
+          ),
+        ] else
           PopupMenuButton<String>(
             tooltip: 'Tree options',
             onSelected: (v) {
@@ -220,6 +221,22 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
       ],
     ),
   );
+
+  Widget _workspaceOnlyToggle() {
+    final ws = ref.watch(shownWorkspaceProvider);
+    final on = ref.watch(sidebarSessionsWorkspaceFilterProvider) != null;
+    return IconButton(
+      tooltip: 'This workspace only',
+      isSelected: on,
+      icon: const Icon(Icons.filter_alt_outlined),
+      selectedIcon: const Icon(Icons.filter_alt),
+      onPressed: ws == null
+          ? null
+          : () =>
+                ref.read(sidebarSessionsWorkspaceOnlyProvider.notifier).state =
+                    !on,
+    );
+  }
 
   // The menu item takes the tap; the checkbox only shows the state.
   Widget _menuToggle(String label, bool on) => Row(

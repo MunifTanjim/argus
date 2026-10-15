@@ -64,23 +64,30 @@ class _MemKv implements SecureKv {
   Future<void> delete(String key) async => m.remove(key);
 }
 
-Session _sess(String id, String status, {String? ws, String agent = 'claude'}) =>
-    Session.fromJson(
-  jsonDecode(jsonEncode({
-    'id': id,
-    'agent': agent,
-    'name': 'name-$id',
-    'status': status,
-    'source': 'hooked',
-    'workspace_id': ?ws,
-    'tmux': {
-      'server': 'argus',
-      'pane_id': '%1',
-      'session_name': 's',
-      'window_index': 0,
-      'current_path': '/p',
-    },
-  })) as Map<String, dynamic>,
+Session _sess(
+  String id,
+  String status, {
+  String? ws,
+  String agent = 'claude',
+}) => Session.fromJson(
+  jsonDecode(
+        jsonEncode({
+          'id': id,
+          'agent': agent,
+          'name': 'name-$id',
+          'status': status,
+          'source': 'hooked',
+          'workspace_id': ?ws,
+          'tmux': {
+            'server': 'argus',
+            'pane_id': '%1',
+            'session_name': 's',
+            'window_index': 0,
+            'current_path': '/p',
+          },
+        }),
+      )
+      as Map<String, dynamic>,
 );
 
 Future<ProviderContainer> _pump(
@@ -115,7 +122,9 @@ Future<ProviderContainer> _pump(
 }
 
 void main() {
-  testWidgets('the Sessions tab lists live sessions and is remembered', (tester) async {
+  testWidgets('the Sessions tab lists live sessions and is remembered', (
+    tester,
+  ) async {
     final kv = _MemKv();
     final c = await _pump(tester, _tree(), kv: kv);
     c.read(sessionsProvider.notifier).replaceAll([
@@ -133,8 +142,14 @@ void main() {
     expect(kv.m['leftSidebar.tab'], 'sessions');
   });
 
-  testWidgets('the agent shows only when listed sessions mix agents', (tester) async {
-    final c = await _pump(tester, _tree(), kv: _MemKv({'leftSidebar.tab': 'sessions'}));
+  testWidgets('the agent shows only when listed sessions mix agents', (
+    tester,
+  ) async {
+    final c = await _pump(
+      tester,
+      _tree(),
+      kv: _MemKv({'leftSidebar.tab': 'sessions'}),
+    );
     c.read(sessionsProvider.notifier).replaceAll([
       _sess('A:s1', 'idle', ws: 'A:w1'),
       _sess('A:s2', 'dead', agent: 'codex'),
@@ -157,28 +172,38 @@ void main() {
   });
 
   testWidgets('unmounting on the Sessions tab throws nothing', (tester) async {
-    final c = ProviderContainer(overrides: [
-      gatewayProvider.overrideWithValue(null),
-      leftSidebarTabStoreProvider.overrideWithValue(LeftSidebarTabStore(_MemKv())),
-    ]);
+    final c = ProviderContainer(
+      overrides: [
+        gatewayProvider.overrideWithValue(null),
+        leftSidebarTabStoreProvider.overrideWithValue(
+          LeftSidebarTabStore(_MemKv()),
+        ),
+      ],
+    );
     addTearDown(c.dispose);
     // Chosen before the drawer mounts, so the Projects filter is never built.
     await c.read(leftSidebarTabProvider.notifier).set(LeftSidebarTab.sessions);
-    await tester.pumpWidget(UncontrolledProviderScope(
-      container: c,
-      child: const MaterialApp(home: Scaffold(body: ProjectDrawer())),
-    ));
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: c,
+        child: const MaterialApp(home: Scaffold(body: ProjectDrawer())),
+      ),
+    );
     await tester.pump();
-    await tester.pumpWidget(UncontrolledProviderScope(
-      container: c,
-      child: const MaterialApp(home: SizedBox()),
-    ));
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: c,
+        child: const MaterialApp(home: SizedBox()),
+      ),
+    );
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('tapping a session asks the shell to open it', (tester) async {
     final c = await _pump(tester, _tree());
-    c.read(sessionsProvider.notifier).replaceAll([_sess('A:s1', 'idle', ws: 'A:w1')]);
+    c.read(sessionsProvider.notifier).replaceAll([
+      _sess('A:s1', 'idle', ws: 'A:w1'),
+    ]);
     await tester.tap(find.text('Sessions'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('name-A:s1'));
@@ -194,21 +219,24 @@ void main() {
     expect(find.byType(NodeScreen), findsOneWidget);
   });
 
-  testWidgets('the info button has a 40 px hit area and does not fold the node', (
-    tester,
-  ) async {
-    final c = await _pump(tester, _tree());
-    final button = find.ancestor(
-      of: find.byIcon(Icons.info_outline),
-      matching: find.byType(InkWell),
-    ).first;
-    final size = tester.getSize(button);
-    expect(size.width, greaterThanOrEqualTo(40));
-    expect(size.height, greaterThanOrEqualTo(40));
-    await tester.tap(find.bySemanticsLabel('Node info'));
-    await tester.pumpAndSettle();
-    expect(c.read(treeViewProvider).folded, isNot(contains('A')));
-  });
+  testWidgets(
+    'the info button has a 40 px hit area and does not fold the node',
+    (tester) async {
+      final c = await _pump(tester, _tree());
+      final button = find
+          .ancestor(
+            of: find.byIcon(Icons.info_outline),
+            matching: find.byType(InkWell),
+          )
+          .first;
+      final size = tester.getSize(button);
+      expect(size.width, greaterThanOrEqualTo(40));
+      expect(size.height, greaterThanOrEqualTo(40));
+      await tester.tap(find.bySemanticsLabel('Node info'));
+      await tester.pumpAndSettle();
+      expect(c.read(treeViewProvider).folded, isNot(contains('A')));
+    },
+  );
 
   testWidgets('shows Home, projects, and two-line workspace rows', (
     tester,
@@ -410,29 +438,91 @@ void main() {
     expect(find.widgetWithText(TextField, 'argus'), findsOneWidget);
   });
 
+  testWidgets('the Sessions tab narrows to the shown session\'s workspace', (
+    tester,
+  ) async {
+    final c = await _pump(tester, _tree());
+    c.read(sessionsProvider.notifier).replaceAll([
+      _sess('A:s1', 'awaiting_input', ws: 'A:w1'),
+      _sess('A:s2', 'idle', ws: 'A:w2'),
+      _sess('A:s3', 'idle', ws: 'A:w1'),
+      _sess('A:s4', 'idle'),
+    ]);
+    await tester.tap(find.text('Sessions'));
+    await tester.pumpAndSettle();
+    IconButton toggle() => tester.widget<IconButton>(
+      find.ancestor(
+        of: find.byTooltip('This workspace only'),
+        matching: find.byType(IconButton),
+      ),
+    );
+    // No session shown, or one without a workspace: nothing to narrow to.
+    expect(toggle().onPressed, isNull);
+    c.read(shownSessionProvider.notifier).state = 'A:s4';
+    await tester.pumpAndSettle();
+    expect(toggle().onPressed, isNull);
+
+    c.read(shownSessionProvider.notifier).state = 'A:s1';
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('This workspace only'));
+    await tester.pumpAndSettle();
+    expect(toggle().isSelected, isTrue);
+    expect(find.text('name-A:s1'), findsOneWidget);
+    expect(find.text('name-A:s3'), findsOneWidget);
+    expect(find.text('name-A:s2'), findsNothing);
+    expect(find.text('name-A:s4'), findsNothing);
+
+    // The text filter looks only inside the workspace.
+    await tester.enterText(find.byType(TextField), 's2');
+    await tester.pumpAndSettle();
+    expect(find.text('no sessions match "s2"'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '');
+    await tester.pumpAndSettle();
+
+    // With no session shown, every session is listed again.
+    c.read(shownSessionProvider.notifier).state = null;
+    await tester.pumpAndSettle();
+    expect(toggle().isSelected, isFalse);
+    expect(find.text('name-A:s2'), findsOneWidget);
+
+    c.read(shownSessionProvider.notifier).state = 'A:s2';
+    await tester.pumpAndSettle();
+    expect(find.text('name-A:s1'), findsNothing);
+    expect(find.text('name-A:s2'), findsOneWidget);
+    await tester.tap(find.byTooltip('This workspace only'));
+    await tester.pumpAndSettle();
+    expect(find.text('name-A:s1'), findsOneWidget);
+    expect(find.text('name-A:s4'), findsOneWidget);
+  });
+
   testWidgets('a long-press on a session shows its details', (tester) async {
     final c = await _pump(tester, _tree());
     c.read(sessionsProvider.notifier).replaceAll([
-      Session.fromJson(jsonDecode(jsonEncode({
-        'id': 'A:s1',
-        'agent': 'claude',
-        'name': 'fix-login',
-        'status': 'awaiting_input',
-        'status_label': 'needs input',
-        'source': 'hooked',
-        'offline': true,
-        'cwd': '/src/argus',
-        'branch': 'main',
-        'node_label': 'mbp',
-        'summary': {'task': 'fix the login bug'},
-        'tmux': {
-          'server': 'default',
-          'pane_id': '%3',
-          'session_name': 'work',
-          'window_index': 0,
-          'current_path': '/src/argus',
-        },
-      })) as Map<String, dynamic>),
+      Session.fromJson(
+        jsonDecode(
+              jsonEncode({
+                'id': 'A:s1',
+                'agent': 'claude',
+                'name': 'fix-login',
+                'status': 'awaiting_input',
+                'status_label': 'needs input',
+                'source': 'hooked',
+                'offline': true,
+                'cwd': '/src/argus',
+                'branch': 'main',
+                'node_label': 'mbp',
+                'summary': {'task': 'fix the login bug'},
+                'tmux': {
+                  'server': 'default',
+                  'pane_id': '%3',
+                  'session_name': 'work',
+                  'window_index': 0,
+                  'current_path': '/src/argus',
+                },
+              }),
+            )
+            as Map<String, dynamic>,
+      ),
     ]);
     await tester.tap(find.text('Sessions'));
     await tester.pumpAndSettle();
@@ -455,10 +545,15 @@ void main() {
 
   testWidgets('switching tabs keeps the header height', (tester) async {
     await _pump(tester, _tree());
-    final before = tester.getTopLeft(find.byType(SegmentedButton<LeftSidebarTab>));
+    final before = tester.getTopLeft(
+      find.byType(SegmentedButton<LeftSidebarTab>),
+    );
     await tester.tap(find.text('Sessions'));
     await tester.pumpAndSettle();
-    expect(tester.getTopLeft(find.byType(SegmentedButton<LeftSidebarTab>)), before);
+    expect(
+      tester.getTopLeft(find.byType(SegmentedButton<LeftSidebarTab>)),
+      before,
+    );
     expect(find.byTooltip('Tree options').hitTestable(), findsNothing);
   });
 

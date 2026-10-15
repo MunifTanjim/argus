@@ -19,7 +19,8 @@ See [Single Machine](/guide/single-machine) for the node it connects to,
 - **Sessions**: the session list, with live status. You can group it by host,
   project, workspace, agent, or status.
 - **Left sidebar**: your projects and workspaces, or every live session with
-  the ones that need you first. Open a session from either.
+  the ones that need you first. Open a session from either. You can limit the
+  sessions to the workspace of the session you have open.
 - **Transcript**: the full conversation, with foldable sections and tool-call details.
 - **Live screen**: a session's terminal. You can type into it.
 - **History**: past projects and sessions. You can resume a session.
@@ -290,6 +291,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `toggle show-gone` | node, project, project-tree, workspace |  | `zx` |
 | `toggle show-hidden` | node, project, project-tree, workspace |  | `z.` |
 | `toggle verbose-transcript` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace |  |  |
+| `toggle workspace-only` | sidebar-sessions |  | `zw` |
 | `transcript export` | history, transcript |  | `E` |
 | `upgrade gateway` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace |  |  |
 | `upgrade node` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace |  |  |
