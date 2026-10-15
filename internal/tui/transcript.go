@@ -326,34 +326,44 @@ func (m tview) renderEntry(i int, selected bool) string {
 // entryBlock renders one entry, gutter included, at width. full shows a tool's
 // whole body (the focused detail frame) instead of the first lines.
 func (m tview) entryBlock(e transcript.Entry, expanded, selected, focused, full bool, width int) string {
-	iw := max(width-detailGutter, 10)
-	var body string
-	if e.Kind == transcript.EntryUser {
-		body = userBand(e, expanded, iw)
-	} else {
-		body = m.entryContent(e, expanded, full, iw)
-	}
-	return indentBlock(body, gutterBar(selected, focused))
+	block, _ := m.entryLayout(e, expanded, selected, focused, full, width)
+	return block
 }
 
-func (m tview) entryContent(e transcript.Entry, expanded, full bool, iw int) string {
+// entryLayout is entryBlock plus what each run of its lines copies in a line
+// selection (see cardSpan).
+func (m tview) entryLayout(e transcript.Entry, expanded, selected, focused, full bool, width int) (string, []cardSpan) {
+	iw := max(width-detailGutter, 10)
+	var body string
+	var spans []cardSpan
+	if e.Kind == transcript.EntryUser {
+		body, spans = userBand(e, expanded, iw)
+	} else {
+		body, spans = m.entryContent(e, expanded, full, iw)
+	}
+	return indentBlock(body, gutterBar(selected, focused)), spans
+}
+
+func (m tview) entryContent(e transcript.Entry, expanded, full bool, iw int) (string, []cardSpan) {
 	switch e.Kind {
 	case transcript.EntryText:
-		return hang(Icon.Output.Render(), m.c.m.renderMD(e.Text, max(iw-2, 10)))
+		block := hang(Icon.Output.Render(), m.c.m.renderMD(e.Text, max(iw-2, 10)))
+		return block, []cardSpan{textSpan(block, e.Text)}
 	case transcript.EntryThinking:
 		head := Icon.Thinking.Render() + " " + StyleDim.Render("Thinking…")
 		if !expanded || strings.TrimSpace(e.Text) == "" {
-			return head
+			return head, chromeSpans(1)
 		}
-		return head + "\n" + indentBlock(wrapDim(e.Text, iw-2), "  ")
+		body := indentBlock(wrapDim(e.Text, iw-2), "  ")
+		return head + "\n" + body, append(chromeSpans(1), textSpan(body, e.Text))
 	case transcript.EntryTurnEnd:
-		return turnEndLine(e, iw)
+		return turnEndLine(e, iw), nil
 	case transcript.EntrySystem:
 		return systemRow(e, expanded, iw)
 	case transcript.EntryShell:
 		return m.shellRow(e, expanded, iw)
 	case transcript.EntryCompact:
-		return renderCompact(e, iw)
+		return renderCompact(e, iw), nil
 	case transcript.EntrySubagent:
 		if s, ok := soleSubagent(e); ok && s.IsTeammate {
 			return m.teammateRow(e, s, expanded || full, iw)
@@ -363,41 +373,50 @@ func (m tview) entryContent(e transcript.Entry, expanded, full bool, iw int) str
 }
 
 // callRow renders a tool, skill, or subagent op.
-func (m tview) callRow(e transcript.Entry, expanded, full bool, iw int) string {
+func (m tview) callRow(e transcript.Entry, expanded, full bool, iw int) (string, []cardSpan) {
 	row := itemRow(m.agent(), e)
 	if drillable(e) {
 		row += "  " + StyleDim.Render("↵")
 	}
 	row = truncateLine(row, iw)
 	if !expanded {
-		return row
+		return row, chromeSpans(1)
 	}
 	var body string
+	var spans []cardSpan
 	if s, ok := soleSubagent(e); ok && e.Kind == transcript.EntrySubagent && !isAgentRefTool(e.ToolName) {
 		// The row above already names the agent; under it go only the status
 		// and the Input section from the spawn's header block.
 		parts := subagentHeaderLines(s.Type, s.Name, "", s.Desc, iw-2)[1:]
+		if len(parts) > 0 { // the Input label, then the input
+			full, _ := m.filledTool(e)
+			spans = append(chromeSpans(1), wholeSpan(linesIn(parts[0])-1, full.ToolInput))
+		}
 		if s.Status != "" {
 			parts = append([]string{StyleSecondary.Render("[" + s.Status + "]")}, parts...)
+			spans = append(chromeSpans(1), spans...)
 		}
 		if !s.HasTrace {
 			if b := m.toolBody(e, iw-2); b != "" {
 				parts = append(parts, b)
+				spans = append(spans, m.toolSpan(e, b, iw-2, false))
 			}
 		}
 		body = strings.Join(parts, "\n")
 	} else {
 		body = hardWrap(m.toolBody(e, iw-2), iw-2)
+		spans = []cardSpan{m.toolSpan(e, body, iw-2, true)}
 	}
 	if !full {
 		if t, hidden := truncateLines(body, maxCollapsedLines); hidden > 0 {
 			body = t + "\n" + hiddenHint(hidden)
+			spans = append(clipSpans(spans, maxCollapsedLines), chromeSpans(1)...)
 		}
 	}
 	if body == "" {
-		return row
+		return row, chromeSpans(1)
 	}
-	return row + "\n" + indentBlock(body, "  ")
+	return row + "\n" + indentBlock(body, "  "), append(chromeSpans(1), spans...)
 }
 
 // hang prefixes a block's first line with icon and indents the rest under it.
@@ -423,7 +442,7 @@ func userLineCount(text string, width int) int {
 
 // userBand renders a prompt as a full-width shaded band. Every piece carries
 // the background so inner style resets don't punch holes in the band.
-func userBand(e transcript.Entry, expanded bool, iw int) string {
+func userBand(e transcript.Entry, expanded bool, iw int) (string, []cardSpan) {
 	bg := lipgloss.NewStyle().Background(ColorUserBg)
 	textW := max(iw-4, 10)
 	head := bg.Foreground(Icon.User.Color).Render(Icon.User.Glyph) +
@@ -433,9 +452,11 @@ func userBand(e transcript.Entry, expanded bool, iw int) string {
 	lines := []string{head + bg.Render(strings.Repeat(" ", gap)) + clock}
 
 	body := xansi.Wrap(strings.TrimRight(strings.ReplaceAll(e.Text, "\r", ""), "\n"), textW, "")
+	spans := append(chromeSpans(2), textSpan(body, e.Text)) // the top padding and the header
 	if !expanded {
 		if t, hidden := truncateLines(body, maxCollapsedLines); hidden > 0 {
 			body = t + "\n" + bg.Foreground(ColorTextDim).Render(hiddenText(hidden))
+			spans = append(clipSpans(spans, 2+maxCollapsedLines), chromeSpans(1)...)
 		}
 	}
 	text := bg.Foreground(ColorTextPrimary)
@@ -450,7 +471,7 @@ func userBand(e transcript.Entry, expanded bool, iw int) string {
 		lines[i] = bg.Render("  ") + l + bg.Render(strings.Repeat(" ", pad+2))
 	}
 	blank := bg.Render(strings.Repeat(" ", textW+4)) // top and bottom padding
-	return blank + "\n" + strings.Join(lines, "\n") + "\n" + blank
+	return blank + "\n" + strings.Join(lines, "\n") + "\n" + blank, append(spans, chromeSpans(1)...)
 }
 
 // turnEndLine renders a finished turn's footer as a dim rule carrying its stats.
@@ -488,7 +509,7 @@ func turnEndLine(e transcript.Entry, width int) string {
 	return rule(2) + " " + label + " " + rule(width-lipgloss.Width(label)-4)
 }
 
-func systemRow(e transcript.Entry, expanded bool, iw int) string {
+func systemRow(e transcript.Entry, expanded bool, iw int) (string, []cardSpan) {
 	icon, label := Icon.System, StyleSecondary.Render("System")
 	if e.IsError {
 		icon, label = Icon.SystemErr, lipgloss.NewStyle().Foreground(ColorError).Render("System")
@@ -497,13 +518,16 @@ func systemRow(e transcript.Entry, expanded bool, iw int) string {
 	if e.Label != "" { // preview after the timestamp (e.g. "Recap")
 		head += "  " + StyleDim.Render(e.Label)
 	}
+	spans := chromeSpans(1)
 	if expanded && e.Detail != "" {
-		head += "\n" + indentBlock(wrapDim(strings.TrimRight(e.Detail, "\n"), iw-2), "  ")
+		body := indentBlock(wrapDim(strings.TrimRight(e.Detail, "\n"), iw-2), "  ")
+		head += "\n" + body
+		spans = append(spans, textSpan(body, e.Detail))
 	}
-	return head
+	return head, spans
 }
 
-func (m tview) shellRow(e transcript.Entry, expanded bool, iw int) string {
+func (m tview) shellRow(e transcript.Entry, expanded bool, iw int) (string, []cardSpan) {
 	label := StylePrimaryBold.Render("Shell")
 	if e.IsError {
 		label = lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("Shell")
@@ -514,17 +538,22 @@ func (m tview) shellRow(e transcript.Entry, expanded bool, iw int) string {
 		cmd, hidden = truncateLines(cmd, maxCollapsedLines)
 	}
 	out += "\n" + indentBlock(StyleSecondaryBold.Render("$")+" "+cmd, "  ")
+	spans := append(chromeSpans(1), wholeSpan(linesIn(cmd), e.Text))
 	if hidden > 0 {
 		out += "\n" + indentBlock(hiddenHint(hidden), "  ")
+		spans = append(spans, chromeSpans(1)...)
 	}
 	if expanded && e.Detail != "" {
 		res := "Result"
 		if e.IsError {
 			res = "Error"
 		}
-		out += "\n\n" + indentBlock(sectionLabel(res, e.IsError)+"\n"+m.c.m.execCommandResultBody(e.Detail, iw-2), "  ")
+		result := m.c.m.execCommandResultBody(e.Detail, iw-2)
+		out += "\n\n" + indentBlock(sectionLabel(res, e.IsError)+"\n"+result, "  ")
+		spans = append(spans, chromeSpans(2)...) // the blank line and the label
+		spans = append(spans, textSpan(result, e.Detail))
 	}
-	return out
+	return out, spans
 }
 
 // teammateWrapWidth is the markdown wrap width of an agent message's body at a
@@ -532,21 +561,23 @@ func (m tview) shellRow(e transcript.Entry, expanded bool, iw int) string {
 func teammateWrapWidth(width int) int { return max(width-detailGutter-2, 10) }
 
 // teammateRow renders an agent message: a teammate's, or a subagent's report.
-func (m tview) teammateRow(e transcript.Entry, s transcript.Subagent, expanded bool, iw int) string {
+func (m tview) teammateRow(e transcript.Entry, s transcript.Subagent, expanded bool, iw int) (string, []cardSpan) {
 	head := Icon.Teammate.Render() + " " + lipgloss.NewStyle().Bold(true).Foreground(teamColor(s.Color)).Render(s.Name)
 	if s.Idle {
-		return head + " " + StyleSecondary.Render("is done")
+		return head + " " + StyleSecondary.Render("is done"), chromeSpans(1)
 	}
 	if strings.TrimSpace(e.Text) == "" {
-		return head
+		return head, chromeSpans(1)
 	}
 	body := m.c.m.renderMD(e.Text, max(iw-2, 10))
+	spans := append(chromeSpans(1), textSpan(body, e.Text))
 	if !expanded {
 		if t, hidden := truncateLines(body, maxCollapsedLines); hidden > 0 {
 			body = t + "\n" + hiddenHint(hidden)
+			spans = append(clipSpans(spans, 1+maxCollapsedLines), chromeSpans(1)...)
 		}
 	}
-	return head + "\n" + indentBlock(body, "  ")
+	return head + "\n" + indentBlock(body, "  "), spans
 }
 
 func renderCompact(e transcript.Entry, width int) string {

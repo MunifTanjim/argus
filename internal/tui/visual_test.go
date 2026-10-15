@@ -267,7 +267,20 @@ func TestVisualCopyWholeCardMatchesSource(t *testing.T) {
 	m, cmd := typeKeysCmd(m, "y")
 	runAll(m, cmd)
 	if len(*got) != 1 || (*got)[0] != strings.TrimSpace(text) {
-		t.Fatalf("clipboard = %q, want the paragraph rejoined without icon or indent", *got)
+		t.Fatalf("clipboard = %q, want the source without icon or indent", *got)
+	}
+}
+
+func TestVisualCopiesMarkdownSource(t *testing.T) {
+	got := captureClipboard(t)
+	md := "use **bold** and `code` here"
+	m := visualModel(transcript.Entry{ID: "t1", Kind: transcript.EntryText, Text: md})
+	m, cmd := typeKeysCmd(m, "Vy")
+	runAll(m, cmd)
+	m, cmd = typeKeysCmd(m, "vwowey") // "bold", from its first cell to its last
+	runAll(m, cmd)
+	if len(*got) != 2 || (*got)[0] != md || (*got)[1] != "bold" {
+		t.Fatalf("clipboard = %q, want %q then %q", *got, md, "bold")
 	}
 }
 
@@ -446,8 +459,10 @@ func TestVisualCopyWholeToolCard(t *testing.T) {
 	}
 	text := (*got)[0]
 	noChrome(t, text)
-	if !strings.HasPrefix(text, "Bash\n") || !strings.HasSuffix(text, "\na\nb") {
-		t.Errorf("clipboard = %q, want the card's text from its header to the result", text)
+	// The header and label are not in the source, so they copy as shown,
+	// around the raw input and the result; the separator rule is left out.
+	if want := "Bash\n{\"command\":\"ls\"}\nResult\na\nb"; text != want {
+		t.Errorf("clipboard = %q, want %q", text, want)
 	}
 }
 
@@ -660,7 +675,7 @@ func TestDetailVisualBodyFrame(t *testing.T) {
 	}
 	c := (*got)[1]
 	if c != text {
-		t.Errorf("linewise clipboard = %q, want the prompt with its wraps rejoined", c)
+		t.Errorf("linewise clipboard = %q, want the prompt as written", c)
 	}
 }
 
@@ -995,6 +1010,108 @@ func TestDetailVisualRegistersOneCloseZone(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("close zones = %d, want 1", n)
+	}
+}
+
+// lineCopy is what a line selection copies from the line holding the nth
+// from text to the line holding the nth to text.
+func lineCopy(t *testing.T, m model, from string, fn int, to string, tn int) string {
+	t.Helper()
+	vt, ok := tvIn(m).visualTarget()
+	if !ok {
+		t.Fatal("no visual target")
+	}
+	find := func(text string, nth int) int {
+		for l := range vt.s.lines {
+			if strings.Contains(strings.Join(vt.s.cells(l), ""), text) {
+				if nth == 0 {
+					return l
+				}
+				nth--
+			}
+		}
+		t.Fatalf("no line with %q", text)
+		return 0
+	}
+	a, b := find(from, fn), find(to, tn)
+	return vt.s.selectedText(&selection{anchor: vt.s.pos(absPos{a, 0}), cursor: vt.s.pos(absPos{b, 0}), linewise: true}, vt.source)
+}
+
+func TestVisualLineCopyPrompt(t *testing.T) {
+	text := "You should **fix** it.\nThank You"
+	m := visualModel(transcript.Entry{ID: "u1", Kind: transcript.EntryUser, Text: text})
+	head := Icon.User.Glyph + " You"
+	if got := lineCopy(t, m, "You", 0, "Thank", 0); got != head+"\n"+text {
+		t.Errorf("whole card: got %q, want %q", got, head+"\n"+text)
+	}
+	if got := lineCopy(t, m, "You", 0, "You", 0); got != head {
+		t.Errorf("header line: got %q, want %q", got, head)
+	}
+	if got := lineCopy(t, m, "Thank", 0, "Thank", 0); got != "Thank You" {
+		t.Errorf("second line: got %q, want %q", got, "Thank You")
+	}
+	m = visualModel(transcript.Entry{ID: "u1", Kind: transcript.EntryUser, Text: "Can You help with this"})
+	if got := lineCopy(t, m, "Can", 0, "Can", 0); got != "Can You help with this" {
+		t.Errorf("prompt line: got %q", got)
+	}
+}
+
+func expandedTool(e transcript.Entry) model {
+	return typeKeys(visualModel(e), "ljl")
+}
+
+func TestVisualLineCopyTool(t *testing.T) {
+	input := `{"command":"git status --short","description":"Show status"}`
+	m := expandedTool(transcript.Entry{ID: "x1", Kind: transcript.EntryTool, ToolName: "Bash", ToolInput: input, Result: "M status.go\nM b.go"})
+	if got := lineCopy(t, m, "$ git", 0, "$ git", 0); got != input {
+		t.Errorf("command line: got %q, want the raw input", got)
+	}
+	if got := lineCopy(t, m, "# Show", 0, "$ git", 0); got != input {
+		t.Errorf("input lines: got %q, want the raw input once", got)
+	}
+	if got := lineCopy(t, m, "M status.go", 0, "M b.go", 0); got != "M status.go\nM b.go" {
+		t.Errorf("result lines: got %q", got)
+	}
+	if got := lineCopy(t, m, "M b.go", 0, "M b.go", 0); got != "M b.go" {
+		t.Errorf("last result line: got %q", got)
+	}
+	want := "Bash\n" + input + "\nResult\nM status.go\nM b.go"
+	if got := lineCopy(t, m, "Bash", 0, "M b.go", 0); got != want {
+		t.Errorf("whole card: got %q, want %q", got, want)
+	}
+
+	// An input that holds text like a result does not move the result's start.
+	input = `{"command":"grep -rn probe-a internal","description":"Find probe-b"}`
+	m = expandedTool(transcript.Entry{ID: "x1", Kind: transcript.EntryTool, ToolName: "Bash", ToolInput: input, Result: "probe-a probe-b\nother line"})
+	if got := lineCopy(t, m, "$ grep", 0, "$ grep", 0); got != input {
+		t.Errorf("probe-like command line: got %q, want the raw input", got)
+	}
+	want = "Bash\n" + input + "\nResult\nprobe-a probe-b\nother line"
+	if got := lineCopy(t, m, "Bash", 0, "other line", 0); got != want {
+		t.Errorf("probe-like whole card: got %q, want %q", got, want)
+	}
+
+	m = expandedTool(transcript.Entry{ID: "x1", Kind: transcript.EntryTool, ToolName: "Read", ToolInput: `{"file_path":"/tmp/a.go"}`, Result: "1\tpackage a\n2\tfunc A() {}"})
+	if got := lineCopy(t, m, "/tmp/a.go", 0, "/tmp/a.go", 0); got != `{"file_path":"/tmp/a.go"}` {
+		t.Errorf("read path: got %q, want the raw input", got)
+	}
+	if got := lineCopy(t, m, "package", 0, "func", 0); got != "1\tpackage a\n2\tfunc A() {}" {
+		t.Errorf("read result: got %q", got)
+	}
+	if got := lineCopy(t, m, "Read", 0, "Read", 0); got != "Read" {
+		t.Errorf("read header: got %q", got)
+	}
+}
+
+func TestVisualLineCopyMarkdown(t *testing.T) {
+	m := visualModel(transcript.Entry{ID: "t1", Kind: transcript.EntryText, Text: "1. a\n1. b\n1. c\n\nSee section 2. later and 3. too"})
+	if got := lineCopy(t, m, "2. b", 0, "2. b", 0); got != "1. b" {
+		t.Errorf("renumbered item: got %q, want %q", got, "1. b")
+	}
+	md := "use **bold**, then `code`. and _em_: done"
+	m = visualModel(transcript.Entry{ID: "t1", Kind: transcript.EntryText, Text: md})
+	if got := lineCopy(t, m, "done", 0, "done", 0); got != md {
+		t.Errorf("markup and punctuation: got %q, want %q", got, md)
 	}
 }
 

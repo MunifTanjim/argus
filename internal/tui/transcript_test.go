@@ -322,7 +322,7 @@ func TestRenderDetailShell(t *testing.T) {
 		Text:   "echo hi",
 		Detail: "Exit code: 0\nOutput:\nworld\n",
 	}
-	out := m.renderDetail(c)
+	out, _ := m.renderDetail(c)
 	if !strings.Contains(out, "Shell") {
 		t.Fatalf("detail should show the Shell header:\n%s", out)
 	}

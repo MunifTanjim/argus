@@ -48,7 +48,9 @@ agent or you wrote it.
 To copy part of the text, press `v` to select by character or `V` to select by
 line, move with the Vim motions `h` `j` `k` `l`, `w` `b` `e`, `0` `^` `$`, `gg`
 `G`, and the page keys, and press `y` to copy. `o` jumps to the other end of
-the selection, and `<Esc>` cancels.
+the selection, and `<Esc>` cancels. A line selection copies the text as it was
+written, with its markdown and original lines; a character selection copies the
+text as shown.
 
 With the mouse on, drag across text to select it, then press `y` or open the
 menu with a right click to copy. Copying sets the system clipboard, and the
