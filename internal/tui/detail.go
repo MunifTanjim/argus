@@ -23,6 +23,7 @@ type detailFrame struct {
 	agentID         string             // subagent whose items this frame lists ("" = main transcript); for tool-body fetches
 	items           []transcript.Entry // nil for a body frame
 	body            string             // pre-rendered body (user/system/shell entries)
+	entry           transcript.Entry   // the entry a body frame renders
 	cursor          int                // selected display row index (see frameRows)
 	scroll          int                // top line offset
 	defaultExpanded bool
@@ -163,7 +164,7 @@ func (m tview) drillEntry(e transcript.Entry, agentID string) tea.Cmd {
 	switch e.Kind {
 	case transcript.EntryUser, transcript.EntrySystem, transcript.EntryShell:
 		m.transcript.detailStack = append(m.transcript.detailStack,
-			detailFrame{label: "detail", body: m.c.m.renderDetail(e)})
+			detailFrame{label: "detail", body: m.c.m.renderDetail(e), entry: e})
 		return nil
 	}
 	m.transcript.detailStack = append(m.transcript.detailStack, detailFrame{
@@ -243,6 +244,7 @@ var detailTable = []keyTableEntry{
 	{detailKeys.PageUp, tview.actDetailPageUp},
 	{detailKeys.Top, tview.actDetailTop},
 	{detailKeys.Bottom, tview.actDetailBottom},
+	{detailKeys.Copy, tview.actCopyCard},
 }
 
 func (m tview) actDetailDown(tea.KeyPressMsg) tea.Cmd {

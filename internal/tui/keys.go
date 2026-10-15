@@ -195,7 +195,7 @@ var createKeys = struct {
 
 var transcriptKeys = struct {
 	ScrollUp, ScrollDown, PromptNext, PromptPrev, HalfUp, HalfDown, PageUp, PageDown binding
-	Top, Bottom, Collapse, Expand, Detail                                            binding
+	Top, Bottom, Collapse, Expand, Detail, Copy                                      binding
 	Answer, Export, Back, Resume                                                     binding
 	Redact, RedactSave, RedactList                                                   binding
 }{
@@ -212,6 +212,7 @@ var transcriptKeys = struct {
 	Collapse:   nb("fold close", "h <Left> zc", "fold"),
 	Expand:     nb("fold open", "l <Right> zo", ""),
 	Detail:     nb("open", "<CR>", "detail"),
+	Copy:       nb("copy", "y", "copy"),
 	Answer:     nm("focus prompt", "<Tab>", "answer"),
 	Export:     nm("transcript export", "E", "export"),
 	Back:       nb("back", "<Esc>", "back"),
@@ -222,7 +223,7 @@ var transcriptKeys = struct {
 }
 
 var detailKeys = struct {
-	Up, Down, HalfUp, HalfDown, PageUp, PageDown, Top, Bottom, Collapse, Expand, Drill, Back binding
+	Up, Down, HalfUp, HalfDown, PageUp, PageDown, Top, Bottom, Collapse, Expand, Drill, Back, Copy binding
 }{
 	Up:       nb("prev", "<Up> k", "move"),
 	Down:     nb("next", "<Down> j", ""),
@@ -236,6 +237,7 @@ var detailKeys = struct {
 	Expand:   nb("fold open", "l <Right> zo", ""),
 	Drill:    nb("open", "<CR>", "drill"),
 	Back:     nb("back", "<Esc>", "back"),
+	Copy:     nb("copy", "y", "copy"),
 }
 
 // sessionKeys are the keys a live transcript and the session dock take before

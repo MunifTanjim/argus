@@ -534,3 +534,15 @@ func (t transcriptComp) workspace(c *ctx) string {
 	}
 	return c.m.sessions[t.sessionID].WorkspaceID
 }
+
+// menu offers copy for the card under the cursor when it has source to copy.
+func (t transcriptComp) menu(c *ctx) []binding {
+	v := t.bind(c)
+	if e, _, ok := v.copyTarget(); !ok || !v.hasSource(e) {
+		return nil
+	}
+	if t.historyView == histDetail {
+		return []binding{detailKeys.Copy}
+	}
+	return []binding{transcriptKeys.Copy}
+}
