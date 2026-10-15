@@ -1658,6 +1658,7 @@ Session {
   transcript_path?:   string
   status:             "discovered" | "starting" | "working" | "awaiting_input" | "idle" | "dead"
   status_label?:      string          // "awaiting" for awaiting_input, else the status
+  status_since?:      string          // RFC 3339; when status last changed
   source:             "discovered" | "spawned" | "hooked"
   frontend?:          "tmux" | "vscode" | "external"
   input_mode?:        "pane" | "api"
