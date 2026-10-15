@@ -10,6 +10,7 @@ import '../models/session.dart';
 import '../push/notifications.dart';
 import '../state/control.dart';
 import '../state/gateway.dart';
+import '../state/navigation.dart';
 import '../state/projects.dart';
 import '../state/sessions.dart';
 import '../state/tasks.dart';
@@ -165,6 +166,14 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     super.dispose();
   }
 
+  // The pops forget the details they close; clearing the remembered session
+  // keeps the workspace from reopening a detail over it.
+  void _showWorkspace(String workspaceId) {
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    ref.read(rememberedSessionsProvider.notifier).clear(workspaceId);
+    ref.read(scopeProvider.notifier).state = workspaceId;
+  }
+
   @override
   Widget build(BuildContext context) {
     // Re-open on reconnect (new RpcClient ⇒ stale sub_id).
@@ -284,6 +293,8 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                     builder: (_) => SessionTasksScreen(session: live),
                   ),
                 );
+              } else if (value == 'workspace' && hasWorkspace) {
+                _showWorkspace(wsId);
               } else if (value == 'changes' && hasWorkspace) {
                 Navigator.of(context).push(
                   MaterialPageRoute(
@@ -316,6 +327,14 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                   ),
                 ),
               if (hasWorkspace) ...const [
+                PopupMenuItem<String>(
+                  value: 'workspace',
+                  child: ListTile(
+                    leading: Icon(Icons.workspaces_outlined),
+                    title: Text('Workspace'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
                 PopupMenuItem<String>(
                   value: 'changes',
                   child: ListTile(
