@@ -152,3 +152,35 @@ func TestHistorySessionsStampResumable(t *testing.T) {
 		}
 	}
 }
+
+type fakeHistoryAdapter struct {
+	adapter.Adapter
+	projects []session.HistoryProject
+}
+
+func (f fakeHistoryAdapter) Agent() string { return "fake" }
+func (f fakeHistoryAdapter) ListHistoryProjects() ([]session.HistoryProject, error) {
+	return f.projects, nil
+}
+
+func TestHandleHistoryProjectsMarksMissingDirs(t *testing.T) {
+	here := t.TempDir()
+	gone := filepath.Join(here, "gone")
+	d := New()
+	d.adapterList = []adapter.Adapter{fakeHistoryAdapter{projects: []session.HistoryProject{
+		{ProjectDir: "a", Cwd: here},
+		{ProjectDir: "b", Cwd: gone},
+		{ProjectDir: "c"}, // unknown cwd is not missing
+	}}}
+	res, err := d.handleHistoryProjects(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, p := range res.([]session.HistoryProject) {
+		got[p.ProjectDir] = p.Missing
+	}
+	if got["a"] || !got["b"] || got["c"] {
+		t.Fatalf("missing flags = %v, want only b", got)
+	}
+}

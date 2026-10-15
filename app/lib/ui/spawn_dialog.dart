@@ -211,12 +211,12 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
 
     final allProjects = ref.watch(historyProjectsProvider).value ??
         const <HistoryProject>[];
-    // Most recent first; dedupe by cwd since the same path can appear on
-    // multiple nodes (or repeat in history).
+    // Dedupe by cwd: the same path can appear on multiple nodes or repeat in
+    // history.
     final seenCwds = <String>{};
     final projects = [
       for (final p in allProjects)
-        if (_nodeId == null || (p.nodeId ?? '') == _nodeId)
+        if (!p.missing && (_nodeId == null || (p.nodeId ?? '') == _nodeId))
           if (seenCwds.add(p.cwd)) p,
     ];
     // Drop a stale selection from another node's list.

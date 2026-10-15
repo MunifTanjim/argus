@@ -1226,7 +1226,10 @@ unix socket and on relay channels.
 | `sessions.exportBundle` | request      | `ExportBundleParams`             | `{ filename, data: bytes }`  |
 
 For a headless agent (opencode, codex), `pane_id` in the `sessions.spawn` result is
-an empty string.
+an empty string. `sessions.spawn` and `sessions.resume` reject (`-32600`) a `cwd`
+that is relative, does not exist, is not a directory, or cannot be entered on the
+node; `terminal.open` with a `session_id` rejects a session whose directory is any
+of these.
 
 ```ts
 SessionRef { session_id: string }
@@ -1715,6 +1718,7 @@ HistoryProject {
   session_count:   number
   last_activity:   string
   node_id?, node_label?: string
+  missing?:        boolean   // cwd no longer exists on the node
 }
 
 HistorySessionPage {

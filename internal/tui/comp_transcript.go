@@ -51,14 +51,12 @@ func newLiveTranscript(sessionID string) transcriptComp {
 func newHistoryTranscript(p session.HistoryProject, s session.HistorySession) transcriptComp {
 	t := newTranscript()
 	t.history = historyState{
-		project:       p,
-		title:         historySessionTitle(s),
-		openSession:   s,
-		openNodeID:    p.NodeID,
-		openPath:      s.TranscriptPath,
-		openAgent:     s.Agent,
-		openSessionID: s.SessionID,
-		openResumable: s.Resumable,
+		project:     p,
+		title:       historySessionTitle(s),
+		openSession: s,
+		openNodeID:  p.NodeID,
+		openPath:    s.TranscriptPath,
+		openAgent:   s.Agent,
 	}
 	return t
 }
@@ -309,7 +307,7 @@ func (m tview) historyKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.historyView == histTranscript && !m.c.m.viewer && m.c.m.matches(msg, transcriptKeys.Resume) {
 		h := m.history
-		return historyResume(m.c, h.openResumable, h.openNodeID, h.openAgent, h.openSessionID, h.project.Cwd)
+		return historyResume(m.c, h.openSession, h.project)
 	}
 	if m.historyView == histDetail {
 		return m.handleDetailKey(msg)

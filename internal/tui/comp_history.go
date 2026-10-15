@@ -167,7 +167,7 @@ func (h historyComp) sessionsKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 	case m.matches(msg, k.Resume):
 		if h.sessCursor < n {
 			s := h.sessions[h.sessCursor]
-			cmd = historyResume(c, s.Resumable, h.project.NodeID, s.Agent, s.SessionID, h.project.Cwd)
+			cmd = historyResume(c, s, h.project)
 		}
 	case m.matches(msg, transcriptKeys.Export):
 		if h.sessCursor < n {

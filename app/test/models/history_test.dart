@@ -11,7 +11,8 @@ const _fullProjectJson = '''
   "session_count": 42,
   "last_activity": "2026-06-21T10:00:00Z",
   "node_id": "macbook",
-  "node_label": "MacBook"
+  "node_label": "MacBook",
+  "missing": true
 }
 ''';
 
@@ -88,6 +89,7 @@ void main() {
       expect(p.lastActivity, '2026-06-21T10:00:00Z');
       expect(p.nodeId, 'macbook');
       expect(p.nodeLabel, 'MacBook');
+      expect(p.missing, isTrue);
     });
 
     test('parses a project with optionals omitted', () {
@@ -101,6 +103,7 @@ void main() {
       expect(p.lastActivity, '2026-06-20T08:00:00Z');
       expect(p.nodeId, isNull);
       expect(p.nodeLabel, isNull);
+      expect(p.missing, isFalse);
     });
   });
 

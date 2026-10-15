@@ -56,12 +56,14 @@ HistorySession _session({
       resumable: resumable,
     );
 
-HistoryProject _project({required String cwd}) => HistoryProject(
+HistoryProject _project({required String cwd, bool missing = false}) =>
+    HistoryProject(
       projectDir: '/home/user/project',
       cwd: cwd,
       label: 'Project',
       sessionCount: 1,
       lastActivity: '',
+      missing: missing,
     );
 
 Widget _app(
@@ -140,6 +142,16 @@ void main() {
     final repo = _FakeHistoryRepository(const <Entry>[]);
     await tester.pumpWidget(_app(repo, _session(resumable: true),
         project: _project(cwd: '')));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byTooltip('Resume'), findsNothing);
+  });
+
+  testWidgets('hides resume button when the directory is gone',
+      (tester) async {
+    final repo = _FakeHistoryRepository(const <Entry>[]);
+    await tester.pumpWidget(_app(repo, _session(resumable: true),
+        project: _project(cwd: '/home/user/project', missing: true)));
     await tester.pump();
     await tester.pump();
     expect(find.byTooltip('Resume'), findsNothing);
