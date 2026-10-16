@@ -321,6 +321,7 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
               minLines: 3,
               maxLines: null,
               keyboardType: TextInputType.multiline,
+              textCapitalization: TextCapitalization.sentences,
               onChanged: (v) => setState(() => _prompt = v),
             ),
           ),

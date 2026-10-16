@@ -292,6 +292,7 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
             controller: _tryIt,
             minLines: 3,
             maxLines: 6,
+            textCapitalization: TextCapitalization.sentences,
             decoration: InputDecoration(
               hintText: 'Hold the mic and speak',
               border: const OutlineInputBorder(),

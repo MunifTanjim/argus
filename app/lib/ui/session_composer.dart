@@ -236,6 +236,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
                   controller: _text,
                   minLines: 1,
                   maxLines: 6,
+                  textCapitalization: TextCapitalization.sentences,
                   onChanged: _onChanged,
                   decoration: InputDecoration(
                     hintText: 'Reply',
