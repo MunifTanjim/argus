@@ -128,6 +128,11 @@ void main() {
 
       expect(container.read(sessionsProvider), isNotEmpty);
       expect(container.read(equivocationProvider), isTrue);
+      expect(
+        container.read(sessionsLoadingProvider),
+        isTrue,
+        reason: 'sessions are not known while the first dial is under way',
+      );
 
       // Disconnect: setting credentials to null rebuilds gatewayProvider
       // (returning null) and disposes the old instance, triggering onDispose.
@@ -145,6 +150,11 @@ void main() {
         container.read(equivocationProvider),
         isFalse,
         reason: 'equivocation must be reset after gateway dispose',
+      );
+      expect(
+        container.read(sessionsLoadingProvider),
+        isFalse,
+        reason: 'loading must be reset after gateway dispose',
       );
     },
   );

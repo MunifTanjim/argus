@@ -37,6 +37,7 @@ void main() {
     final client = E2EClient(link.incoming, link.send, await generateKeyPair(),
         genesisHash: _b('enforcement_genesis_head'));
     await client.connect();
+    await client.channelsSettled;
     expect(client.connectedNodeIds.toSet(), {'A'});
     await client.close();
   });

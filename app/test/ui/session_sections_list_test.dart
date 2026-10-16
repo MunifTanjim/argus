@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:argus/models/enums.dart';
 import 'package:argus/models/project.dart';
 import 'package:argus/models/session.dart';
+import 'package:argus/state/gateway.dart';
 import 'package:argus/state/grouping.dart';
 import 'package:argus/state/projects.dart';
 import 'package:argus/ui/agent_badge.dart';
@@ -43,9 +44,13 @@ class _SeededProjects extends ProjectsNotifier {
   ProjectsState build() => const ProjectsState(projects: _projects, loaded: true);
 }
 
-Future<void> _pump(WidgetTester tester, GroupBy by, List<Session> sessions) =>
+Future<void> _pump(WidgetTester tester, GroupBy by, List<Session> sessions,
+        {bool loading = false}) =>
     tester.pumpWidget(ProviderScope(
-      overrides: [projectsProvider.overrideWith(_SeededProjects.new)],
+      overrides: [
+        projectsProvider.overrideWith(_SeededProjects.new),
+        sessionsLoadingProvider.overrideWith((ref) => loading),
+      ],
       child: MaterialApp(
         home: Scaffold(
           body: SessionSectionsList(sessions: sessions, groupBy: by),
@@ -57,6 +62,25 @@ Finder _inHeaders(Finder f) =>
     find.descendant(of: find.byType(SectionLabel), matching: f);
 
 void main() {
+  testWidgets('an empty list shows a spinner while sessions load',
+      (tester) async {
+    await _pump(tester, GroupBy.host, const [], loading: true);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.text('No sessions.'), findsNothing);
+  });
+
+  testWidgets('an empty list shows the empty text once loaded',
+      (tester) async {
+    await _pump(tester, GroupBy.host, const []);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.text('No sessions.'), findsOneWidget);
+  });
+
+  testWidgets('a non-empty list ignores loading', (tester) async {
+    await _pump(tester, GroupBy.host, [_s('s1')], loading: true);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
+
   testWidgets('project headers lead with a project icon', (tester) async {
     await _pump(tester, GroupBy.project, [_s('s1', ws: 'w1')]);
     expect(_inHeaders(find.byType(RepoIcon)), findsOneWidget);

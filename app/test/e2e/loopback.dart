@@ -32,6 +32,10 @@ class LoopbackNode {
   /// Lets a test hold one node's response open while another answers.
   Completer<void>? gate;
 
+  /// When set, the node waits for this gate before answering the handshake, so
+  /// a test can hold its channel open while others connect.
+  Completer<void>? handshakeGate;
+
   /// The trust-log tip this node reports over its authenticated channel in
   /// answer to node.identify. Settable so a test can make a node advertise an
   /// off-chain tip to drive the client's tip-consistency check.
@@ -42,6 +46,7 @@ class LoopbackNode {
   Future<void> onClientFrame(RpcMessage m) async {
     final chanId = (m.route as Map)['chan_id'] as String;
     if (m.method == methodE2EHandshake) {
+      await handshakeGate?.future;
       final msg1 = handshakeFromFrame(RelayFrame.fromMessage(m));
       final (sess, _, msg2) = await HandshakeState.respond(
         staticKey: keyPair,

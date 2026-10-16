@@ -85,6 +85,8 @@ Future<GatewayClient> buildE2EClient(
       onTrustAdvance?.call(client);
     },
   );
+  // Channels open in the background so a session's transcript waits only for
+  // its own node, not the slowest one.
   await client.connect();
   final head = client.trustChainBytes;
   // If connect() throws after an in-progress trust advance, the save below is
@@ -174,6 +176,11 @@ final connErrorProvider = StateProvider<String?>((ref) => null);
 /// Polled from the client on the trust-resync cadence; reset on disconnect.
 final equivocationProvider = StateProvider<bool>((ref) => false);
 
+/// Whether the sessions are not yet known: a dial is under way or the
+/// connect-time load is in flight. An empty list then means "not loaded", not
+/// "no sessions".
+final sessionsLoadingProvider = StateProvider<bool>((ref) => false);
+
 Future<void> loadSessions(GatewayClient client, SessionsNotifier store) =>
     _loadSessions(client, store, 'sessions.list');
 
@@ -186,13 +193,14 @@ Future<void> _loadSessions(
   String method,
 ) async {
   if (client is E2EClient) {
-    // Progressive: render each node's sessions as it responds so one slow node
-    // does not block the list. Drop disconnected nodes' sessions first.
-    store.retainNodes(client.connectedNodeIds);
+    // Drop disconnected nodes' sessions, keeping still-opening ones until their
+    // open settles.
+    store.retainNodes({...client.connectedNodeIds, ...client.openingNodeIds});
     await client.forEachNodeSessions(
       method,
       (nodeId, sessions) => store.mergeNode(nodeId, parseSessions(sessions)),
     );
+    store.retainNodes(client.connectedNodeIds);
     return;
   }
   store.replaceAll(parseSessions(await client.call(method)));
@@ -220,6 +228,10 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   final connState = ref.read(connStateProvider.notifier);
   final connError = ref.read(connErrorProvider.notifier);
   final equivocation = ref.read(equivocationProvider.notifier);
+  final sessionsLoading = ref.read(sessionsLoadingProvider.notifier);
+  // Bumped per connect so a superseded client's load cannot clear the flag
+  // for the current one.
+  var loadGen = 0;
   final trustSignature = ref.read(trustSignatureProvider.notifier);
   final profileStore = ref.read(profileStoreProvider);
   final testResults = ref.read(connectionTestResultsProvider.notifier);
@@ -249,7 +261,15 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
             return client;
           }),
     onConnected: (client) async {
-      await loadSessions(client, store);
+      // Not awaited, so an open session subscribes as soon as the link is up
+      // instead of after every node's list.
+      final gen = ++loadGen;
+      sessionsLoading.state = true;
+      unawaited(
+        loadSessions(client, store).whenComplete(() {
+          if (gen == loadGen) sessionsLoading.state = false;
+        }),
+      );
       unawaited(projects.load(client));
       unawaited(terminals.load(client));
       client.notifications.listen((m) {
@@ -274,6 +294,11 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   final statesSub = manager.states.listen((s) {
     connState.state = s;
     connError.state = s == ConnState.failed ? manager.failureMessage : null;
+    if (s == ConnState.connecting) sessionsLoading.state = true;
+    if (s == ConnState.failed) {
+      loadGen++;
+      sessionsLoading.state = false;
+    }
   });
   // Start the equivocation poll only for E2E connections. For plaintext,
   // equivocationOf always returns false anyway, but we skip the timer entirely.
@@ -293,6 +318,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
     Future.microtask(() {
       equivocation.state = false;
       trustSignature.state = '';
+      sessionsLoading.state = false;
       store.clear();
       projects.clear();
       terminals.clear();
