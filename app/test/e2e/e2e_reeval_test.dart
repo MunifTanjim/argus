@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -33,6 +34,7 @@ void main() {
       onTrustChainAdvance: (c) async => advanced = c,
     );
     await client.connect();
+    await client.channelsSettled;
     expect(client.connectedNodeIds.toSet(), {'A', 'B'});
 
     link.trustChain = _b(v, 'reeval_revoke_b_chain');
@@ -56,11 +58,35 @@ void main() {
     final client = E2EClient(link.incoming, link.send, await keyPairFromSeed(_b(v, 'enforcement_client_seed')),
         tofu: true, onTrustChainAdvance: (c) async => advances++);
     await client.connect();
+    await client.channelsSettled;
     expect(client.connectedNodeIds.toSet(), {'A', 'B'});
 
     await client.resyncNow();
     expect(client.connectedNodeIds.toSet(), {'A', 'B'});
     expect(advances, 0);
+    await client.close();
+  });
+
+  test('a node revoked while its channel opens is dropped', () async {
+    final v = _tl();
+    final aKp = await keyPairFromSeed(_b(v, 'enforcement_node_a_seed'));
+    final bKp = await keyPairFromSeed(_b(v, 'enforcement_node_b_seed'));
+    final a = LoopbackNode('A', aKp, (m, p) => Uint8List.fromList(utf8.encode('null')));
+    final b = LoopbackNode('B', bKp, (m, p) => Uint8List.fromList(utf8.encode('null')));
+    b.handshakeGate = Completer<void>();
+    final link = MultiNodeLoopbackLink({'A': a, 'B': b},
+        trustChain: _b(v, 'reeval_initial_chain'));
+
+    final client = E2EClient(link.incoming, link.send, await keyPairFromSeed(_b(v, 'enforcement_client_seed')),
+        tofu: true, onTrustChainAdvance: (c) async {});
+    await client.connect();
+    expect(client.openingNodeIds, contains('B'));
+    link.trustChain = _b(v, 'reeval_revoke_b_chain');
+    await client.resyncNow(); // B's handshake is still held
+    b.handshakeGate!.complete();
+    await client.channelsSettled;
+
+    expect(client.connectedNodeIds.toSet(), {'A'});
     await client.close();
   });
 }

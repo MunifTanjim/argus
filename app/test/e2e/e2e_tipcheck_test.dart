@@ -39,6 +39,7 @@ void main() {
       tofu: true,
     );
     await client.connect();
+    await client.channelsSettled;
     expect(client.connectedNodeIds.toSet(), {'A', 'B'});
     for (var i = 0; i < 3; i++) {
       await client.resyncNow(); // > miss threshold
@@ -70,6 +71,7 @@ void main() {
       tofu: true,
     );
     await client.connect();
+    await client.channelsSettled;
     expect(client.connectedNodeIds.toSet(), {'A', 'B'});
     for (var i = 0; i < 4; i++) {
       await client.resyncNow();

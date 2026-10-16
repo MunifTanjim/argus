@@ -124,6 +124,8 @@ void main() {
 
       await client.connect();
 
+      await client.channelsSettled;
+
       // Channel should be open to the plaintext node.
       expect(
         client.connectedNodeIds,

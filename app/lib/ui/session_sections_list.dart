@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/project.dart';
 import '../models/session.dart';
 import '../state/control.dart';
+import '../state/gateway.dart';
 import '../state/grouping.dart';
 import '../state/projects.dart';
 import '../state/session_filter.dart';
@@ -63,6 +64,14 @@ class SessionSectionsList extends ConsumerWidget {
         sessions.map((s) => s.agent).where((a) => a.isNotEmpty).toSet().length >
         1;
     if (sections.isEmpty) {
+      if (sessions.isEmpty && ref.watch(sessionsLoadingProvider)) {
+        return ListView(
+          children: const [
+            SizedBox(height: 120),
+            Center(child: CircularProgressIndicator()),
+          ],
+        );
+      }
       return ListView(
         children: [
           const SizedBox(height: 120),

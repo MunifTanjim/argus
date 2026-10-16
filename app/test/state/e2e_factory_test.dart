@@ -26,7 +26,11 @@ void main() {
     final link = MultiNodeLoopbackLink({'A': node});
     final kv = _MemKv();
     final c = await buildE2EClient(link.incoming, link.send, ClientIdentityStore(kv), TrustChainStore(kv));
-    expect((c as E2EClient).connectedNodeIds, contains('A'));
+    // Channels open in the background, so A may still be opening.
+    final e2e = c as E2EClient;
+    expect({...e2e.connectedNodeIds, ...e2e.openingNodeIds}, contains('A'));
+    await e2e.call('sessions.list');
+    expect(e2e.connectedNodeIds, contains('A'));
     await c.close();
   });
 

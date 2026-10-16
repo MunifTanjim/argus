@@ -195,6 +195,7 @@ void main() {
     final lnk = MultiNodeLoopbackLink({'A': a});
     final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
     await client.connect();
+    await client.channelsSettled;
     final got = client.aggregatedEvents.firstWhere((e) => e.method == 'session.event');
     a.emitNotification('session.event', _json({'type': 'updated', 'session': {'id': 's1'}}));
     final ev = await got.timeout(const Duration(seconds: 2));
@@ -209,6 +210,7 @@ void main() {
     final lnk = MultiNodeLoopbackLink({'A': a});
     final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
     await client.connect();
+    await client.channelsSettled;
     final got = client.aggregatedEvents.firstWhere((e) => e.method == 'terminal.changed');
     a.emitNotification('terminal.changed', _json({}));
     final ev = await got.timeout(const Duration(seconds: 2));
@@ -221,6 +223,7 @@ void main() {
     final lnk = MultiNodeLoopbackLink({'A': a});
     final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
     await client.connect();
+    await client.channelsSettled;
     final got = client.aggregatedEvents.firstWhere((e) => e.method == 'transcript.delta');
     a.emitNotification('transcript.delta', _json({'sub_id': 'x', 'chunks': []}));
     final ev = await got.timeout(const Duration(seconds: 2));
