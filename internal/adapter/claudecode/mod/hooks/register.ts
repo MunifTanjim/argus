@@ -51,9 +51,7 @@ export const register: Register = (on, options) => {
   on('classic.SessionStart', async ($, e, next) => {
     await forward($, 'SessionStart', e)
     startPolling($)
-    lastModel = ''
-    lastEffort = undefined
-    await reportModel($, await $.session.model().catch(() => ''))
+    await resendState($)
     return next(e)
   })
     .catch(($, e, next) => next(e))
@@ -69,6 +67,17 @@ export const register: Register = (on, options) => {
   on('classic.Stop', async ($, e, next) => (await forward($, 'Stop', e), next(e)))
     .catch(($, e, next) => next(e))
   on('classic.SessionEnd', async ($, e, next) => (await forward($, 'SessionEnd', e), next(e)))
+    .catch(($, e, next) => next(e))
+  on('classic.SubagentStart', async ($, e, next) => {
+    const { agent_id, agent_type } = e as Record<string, unknown>
+    await reportSubagents($, { started: { id: String(agent_id ?? ''), type: String(agent_type ?? '') } })
+    return next(e)
+  })
+    .catch(($, e, next) => next(e))
+  on('classic.SubagentStop', async ($, e, next) => {
+    await reportSubagents($, { stopped: String((e as Record<string, unknown>).agent_id ?? '') })
+    return next(e)
+  })
     .catch(($, e, next) => next(e))
   on('classic.PostModelSwitch', async ($, e, next) => {
     await reportModel($, String((e as Record<string, unknown>).to_model ?? ''))
@@ -166,6 +175,7 @@ export const register: Register = (on, options) => {
         ...(await sessionFields($)),
         stop_hook_active: false,
       })
+      await reportSubagents($)
     }
     return done
   }).catch(($, e, next) => next(e))
@@ -173,6 +183,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     startPolling($)
+    await reportSubagents($)
     return started
   })
 }
@@ -291,6 +302,38 @@ async function reportModel($: EngineInterface, model: string, effort?: string): 
   }
 }
 
+// argusd replaces its set with this one. started and stopped fix up the hook's
+// own agent, which $.agent.list may not show yet or still show. Never throws.
+async function reportSubagents(
+  $: EngineInterface,
+  change: { started?: { id: string; type: string }; stopped?: string } = {},
+): Promise<void> {
+  try {
+    const listed = await $.agent.list()
+    const subagents = listed
+      .filter(a => ['pending', 'running', 'waiting'].includes(a.status) && !a.teammateId && !a.parentId && a.id !== change.stopped)
+      .map(a => ({ id: a.id, type: a.type, ...(a.name ? { name: a.name } : {}), desc: a.description }))
+    const { started } = change
+    if (started && !listed.some(a => a.id === started.id)) {
+      subagents.push({ id: started.id, type: started.type, desc: '' })
+    }
+    await forward($, 'Subagents', { hook_event_name: 'Subagents', ...(await sessionFields($)), subagents })
+  } catch {
+    // argusd hears of it on the next event
+  }
+}
+
+// Send argusd the live model and subagents it keeps in memory again, unchanged
+// or not. Never throws.
+async function resendState($: EngineInterface): Promise<void> {
+  lastModel = ''
+  lastEffort = undefined
+  await Promise.all([
+    $.session.model().catch(() => '').then(model => reportModel($, model)),
+    reportSubagents($),
+  ])
+}
+
 function startPolling($: EngineInterface): void {
   if (socketPath === '') return
   pollGen++
@@ -300,18 +343,14 @@ function startPolling($: EngineInterface): void {
 // A loop whose gen is no longer current still runs the commands its in-flight
 // poll already received, then stops.
 // A poll that succeeds after a failure means argusd may have restarted, losing
-// the live model it kept in memory: report the model again.
+// the live model and subagents it kept in memory: report them again.
 function schedulePoll($: EngineInterface, delayMs: number, retryMs: number, gen: number, failed = false): void {
   $.clock.after(delayMs, async () => {
     if (gen !== pollGen) return
     try {
       const out = await post($, '/claude/poll', { sessionId: await $.session.id() })
       const { commands } = JSON.parse(out) as { commands?: Command[] }
-      if (failed) {
-        lastModel = ''
-        lastEffort = undefined
-        await reportModel($, await $.session.model().catch(() => ''))
-      }
+      if (failed) await resendState($)
       for (const c of commands ?? []) await run($, c)
       if (gen === pollGen) schedulePoll($, 0, RETRY_MIN_MS, gen)
     } catch {
