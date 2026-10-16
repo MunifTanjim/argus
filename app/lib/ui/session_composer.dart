@@ -12,6 +12,7 @@ import '../models/session.dart';
 import '../state/prompt_drafts.dart';
 import '../state/respond_view_model.dart';
 import 'interaction_panel.dart';
+import 'running_subagents_sheet.dart';
 import 'status_style.dart';
 import 'theme.dart';
 import 'voice_input_field.dart';
@@ -78,6 +79,9 @@ String? modelLine(Summary? s) {
   ];
   return parts.isEmpty ? null : parts.join(' · ');
 }
+
+/// The least tap target width a touch control gets.
+const _countTapWidth = 48.0;
 
 /// The prompt input, or the pending prompt in its place, between a status line
 /// and a model line.
@@ -280,7 +284,10 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
           else
             status,
           body,
-          _rule(label: modelLine(s.summary)),
+          _rule(
+            label: modelLine(s.summary),
+            leading: s.subagents.isEmpty ? null : _subagentCount(s),
+          ),
         ],
       ),
     );
@@ -341,8 +348,34 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
         ),
       );
 
+  // The tap target is only as tall as the model line, so the composer never
+  // shifts when the count shows.
+  Widget _subagentCount(Session s) => InkWell(
+        onTap: () =>
+            showRunningSubagents(context, sessionId: s.id, agent: s.agent),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: _countTapWidth),
+          child: Center(
+            child: ColoredBox(
+              color: AppColors.canvas,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.smart_toy_outlined,
+                      size: 14, color: AppColors.dim),
+                  const SizedBox(width: 4),
+                  Text('${s.subagents.length}',
+                      style: mono.copyWith(color: AppColors.dim)),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      );
+
   // A divider with a label set into its right end, like the TUI's rules.
-  Widget _rule({String? label, Widget? trailing, bool alert = false}) {
+  Widget _rule(
+      {String? label, Widget? leading, Widget? trailing, bool alert = false}) {
     final bg = alert ? AppColors.awaitingSurface : AppColors.canvas;
     final line = Divider(
         height: 1, color: alert ? AppColors.awaitingBorder : AppColors.border);
@@ -375,6 +408,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
       color: bg,
       child: Row(children: [
         SizedBox(width: 12, child: line),
+        ?leading,
         Expanded(child: label != null ? onLine(label) : line),
         ?trailing,
         SizedBox(width: 12, child: line),
