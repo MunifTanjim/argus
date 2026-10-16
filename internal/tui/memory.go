@@ -224,16 +224,21 @@ func (m *model) focusTree() {
 		return
 	}
 	m.focused = leftSidebar
-	m.left.tree.follow(m.mainRow())
+	m.followOpen()
 }
 
 // The spawn flow returns focus to the tree, so the cursor stays on the row the
 // flow started from.
 func (m model) leaveTree(was container) model {
 	if was == leftSidebar && m.focused != leftSidebar && m.spawnAt() < 0 {
-		m.left.tree.follow(m.mainRow())
+		m.followOpen()
 	}
 	return m
+}
+
+func (m *model) followOpen() {
+	m.left.tree.follow(m.mainRow())
+	m.left.sessions = m.left.sessions.follow(&ctx{m: m}, m.liveSessionID())
 }
 
 func (m model) homePane() homeComp {
