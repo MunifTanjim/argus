@@ -9,6 +9,8 @@ import 'package:argus/models/enums.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/ui/interaction_panel.dart';
 import 'package:argus/ui/session_composer.dart';
+import 'package:argus/ui/status_style.dart';
+import 'package:argus/ui/theme.dart';
 import '../support/fake_session_repository.dart';
 
 class _Recording extends FakeSessionRepository {
@@ -185,11 +187,22 @@ void main() {
     await t.pump();
     expect(find.byType(InteractionPanel), findsOneWidget);
     expect(find.byType(TextField), findsNothing);
+    Color? labelColor() =>
+        t.widget<Text>(find.text('Permission: Bash')).style?.color;
+    expect(labelColor(), AppColors.dim);
     await t.tap(find.byTooltip('Collapse'));
     await t.pump();
     expect(find.byType(InteractionPanel), findsNothing);
-    expect(find.text('Permission: Bash'), findsOneWidget);
+    expect(labelColor(), statusColor(SessionStatus.awaitingInput));
     await t.tap(find.byTooltip('Expand'));
+    await t.pump();
+    expect(find.byType(InteractionPanel), findsOneWidget);
+    await t.tap(find.byTooltip('Collapse'));
+    await t.pump();
+    await t.tap(find.text('Permission: Bash'));
+    await t.pump();
+    expect(find.byType(InteractionPanel), findsOneWidget);
+    await t.tap(find.text('Permission: Bash'));
     await t.pump();
     expect(find.byType(InteractionPanel), findsOneWidget);
     await _pump(t, _s(), repo, container: container);
@@ -241,6 +254,44 @@ void main() {
     await t.pump();
     expect(find.text('Two'), findsOneWidget);
     expect(submit().onPressed, isNull);
+  });
+
+  testWidgets('collapsing keeps the answers so far', (t) async {
+    await _pump(t, _s(status: 'awaiting_input', interaction: question('One')),
+        _Recording());
+    await t.pump();
+    await t.tap(find.text('A'));
+    await t.pump();
+    FilledButton submit() =>
+        t.widget<FilledButton>(find.widgetWithText(FilledButton, 'Submit'));
+    expect(submit().onPressed, isNotNull);
+    await t.tap(find.byTooltip('Collapse'));
+    await t.pump();
+    expect(find.byType(InteractionPanel), findsNothing);
+    await t.tap(find.byTooltip('Expand'));
+    await t.pump();
+    expect(submit().onPressed, isNotNull);
+  });
+
+  testWidgets('collapsing a prompt being typed in closes the keyboard',
+      (t) async {
+    await _pump(
+        t,
+        _s(status: 'awaiting_input', interaction: {
+          'kind': 'permission',
+          'tool_name': 'Bash'
+        }),
+        _Recording());
+    await t.pump();
+    await t.tap(find.text('Deny'));
+    await t.pump();
+    expect(t.testTextInput.isVisible, isTrue);
+    await t.tap(find.byTooltip('Collapse'));
+    await t.pump();
+    expect(t.testTextInput.isVisible, isFalse);
+    await t.tap(find.byTooltip('Expand'));
+    await t.pump();
+    expect(find.byType(TextField), findsOneWidget);
   });
 
   testWidgets('a new permission opens with its options, not deny mode',
@@ -315,6 +366,35 @@ void main() {
     await t.tap(find.byTooltip('Expand'));
     await t.pump();
     expect(panel(), closeTo(800 * 0.6, 1));
+  });
+
+  testWidgets('a prompt that changes mid-drag stays open', (t) async {
+    t.view.physicalSize = const Size(400, 800);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    final repo = _Recording();
+    final container = ProviderContainer(
+        overrides: [sessionRepositoryProvider.overrideWithValue(repo)]);
+    addTearDown(container.dispose);
+    await _pump(t, _s(status: 'awaiting_input', interaction: question('One')),
+        repo,
+        container: container);
+    await t.pump();
+    final gesture =
+        await t.startGesture(t.getCenter(find.text('Question').first));
+    for (var i = 0; i < 3; i++) {
+      await gesture.moveBy(const Offset(0, -10));
+      await t.pump();
+    }
+    await _pump(t, _s(status: 'awaiting_input', interaction: question('Two')),
+        repo,
+        container: container);
+    await t.pump();
+    await gesture.moveBy(const Offset(0, -5));
+    await t.pump();
+    await gesture.up();
+    expect(find.byType(InteractionPanel), findsOneWidget);
+    expect(find.text('Two'), findsOneWidget);
   });
 
   testWidgets('a prompt never shrinks below its buttons', (t) async {
