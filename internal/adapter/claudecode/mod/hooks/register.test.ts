@@ -409,6 +409,79 @@ test("a subagent's turn end is not reported", OPTIONS, async ($, on) => {
   expect(sent.length).toBe(0)
 })
 
+type Listed = { id: string; type: string; description: string; status: string; teammateId?: string; parentId?: string }
+
+function subagentEvents(sent: Sent[]) {
+  return sent.filter(s => s.body.event === 'Subagents').map(s => s.body.payload as Record<string, unknown>)
+}
+
+const START = { agent_id: 'a1', agent_type: 'Explore', session_id: 's1', transcript_path: '/t/s1.jsonl', cwd: '/w' }
+
+test('reports running subagents when one starts', OPTIONS, async ($, on) => {
+  world(on)
+  on('agent.list', () => ({ value: [{ id: 'a1', type: 'Explore', description: 'map code', status: 'running' }] as Listed[] }) as never)
+  const sent = argusd(on, () => ({}))
+  on('classic.SubagentStart', () => ({}))
+  await $.classic.SubagentStart(START as never)
+  const events = subagentEvents(sent)
+  expect(events.length).toBe(1)
+  expect(events[0]).toEqual(expect.objectContaining({ hook_event_name: 'Subagents', session_id: 's1', cwd: '/w' }))
+  expect(events[0].subagents).toEqual([{ id: 'a1', type: 'Explore', desc: 'map code' }])
+})
+
+test('a starting subagent not yet listed is still reported', OPTIONS, async ($, on) => {
+  world(on)
+  on('agent.list', () => ({ value: [] as Listed[] }) as never)
+  const sent = argusd(on, () => ({}))
+  on('classic.SubagentStart', () => ({}))
+  await $.classic.SubagentStart(START as never)
+  expect(subagentEvents(sent)[0].subagents).toEqual([{ id: 'a1', type: 'Explore', desc: '' }])
+})
+
+test('a stopping subagent is left out even while still listed', OPTIONS, async ($, on) => {
+  world(on)
+  on('agent.list', () => ({ value: [{ id: 'a1', type: 'Explore', description: 'map code', status: 'running' }] as Listed[] }) as never)
+  const sent = argusd(on, () => ({}))
+  on('classic.SubagentStop', () => ({}))
+  await $.classic.SubagentStop({ agent_id: 'a1', agent_type: 'Explore', session_id: 's1' } as never)
+  expect(subagentEvents(sent)[0].subagents).toEqual([])
+})
+
+test('only running top-level subagents are reported', OPTIONS, async ($, on) => {
+  world(on)
+  const l = (id: string, status: string, extra: Partial<Listed> = {}): Listed => ({ id, type: 'Explore', description: id, status, ...extra })
+  on('agent.list', () => ({
+    value: [
+      l('c', 'completed'), l('k', 'killed'), l('i', 'idle'),
+      l('t', 'running', { teammateId: 'tm' }), l('n', 'running', { parentId: 'p' }),
+      l('p1', 'pending'), l('r', 'running'), l('w', 'waiting'),
+    ],
+  }) as never)
+  const sent = argusd(on, () => ({}))
+  on('classic.SubagentStart', () => ({}))
+  await $.classic.SubagentStart({ ...START, agent_id: 'r' } as never)
+  expect((subagentEvents(sent)[0].subagents as { id: string }[]).map(a => a.id)).toEqual(['p1', 'r', 'w'])
+})
+
+test('session start re-sends the snapshot', OPTIONS, async ($, on) => {
+  world(on)
+  on('agent.list', () => ({ value: [{ id: 'a1', type: 'Explore', description: 'map code', status: 'running' }] as Listed[] }) as never)
+  const sent = argusd(on, () => ({}))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  expect(subagentEvents(sent).length).toBe(1)
+})
+
+test('every main turn end re-sends the snapshot', OPTIONS, async ($, on) => {
+  world(on)
+  on('agent.list', () => ({ value: [{ id: 'a1', type: 'Explore', description: 'map code', status: 'running' }] as Listed[] }) as never)
+  const sent = argusd(on, () => ({}))
+  on('turn.complete', ($, e) => ({ text: e.answer }) as never)
+  await $.turn.complete(TURN)
+  await $.turn.complete(TURN)
+  expect(subagentEvents(sent).length).toBe(2)
+})
+
 // A permission request with no settings decision, argusd holding its decision
 // for 25 s, then a tool call that Claude answers with a deny.
 function heldRequest(on: On, clock: ReturnType<typeof world>['clock']) {
@@ -570,6 +643,34 @@ test('a recovered poll reports the model and effort again', OPTIONS, async ($, o
     ['claude-opus-5-5', undefined],
     ['claude-opus-5-5', 'high'],
   ])
+})
+
+test('classic session start re-sends the subagents', OPTIONS, async ($, on) => {
+  world(on)
+  engineSteps(on)
+  on('agent.list', () => ({ value: [{ id: 'a1', type: 'Explore', description: 'map code', status: 'running' }] as Listed[] }) as never)
+  const sent = argusd(on, () => ({}))
+  on('classic.SessionStart', () => ({}))
+  await $.classic.SessionStart({ session_id: 's1', source: 'clear', transcript_path: '/t/s1.jsonl', cwd: '/w' } as never)
+  expect(subagentEvents(sent).map(e => e.subagents)).toEqual([[{ id: 'a1', type: 'Explore', desc: 'map code' }]])
+})
+
+test('a recovered poll re-sends the subagents', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  engineSteps(on)
+  on('agent.list', () => ({ value: [{ id: 'a1', type: 'Explore', description: 'map code', status: 'running' }] as Listed[] }) as never)
+  let polls = 0
+  const sent = argusd(on, s => {
+    if (s.path !== '/claude/poll') return {}
+    polls++
+    return polls === 1 ? new Error('connect ENOENT') : polls === 2 ? { commands: [] } : new Error('hold')
+  })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const before = subagentEvents(sent).length
+  await clock.advance(1000)
+  expect(subagentEvents(sent).length).toBe(before + 1)
 })
 
 test('a numeric effort reports no label', OPTIONS, async ($, on) => {
