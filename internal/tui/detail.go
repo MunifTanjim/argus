@@ -8,6 +8,7 @@ import (
 	lipgloss "charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 
+	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
@@ -199,6 +200,24 @@ func (m tview) drillTrace(e transcript.Entry, s transcript.Subagent) tea.Cmd {
 	f.subID = ref.subID
 	m.transcript.detailStack = append(m.transcript.detailStack, f)
 	return m.c.m.subscribeCmd(ref, len(m.c.m.transcriptCache[ref.key()].entries))
+}
+
+// drillRunning opens a running subagent's trace as the only frame: open frames
+// close as detailBack closes them, so back returns to the session's stream.
+func (m tview) drillRunning(r session.RunningSubagent) tea.Cmd {
+	var cmds []tea.Cmd
+	for f := m.topFrame(); f != nil; f = m.topFrame() {
+		if f.subID != "" {
+			cmds = append(cmds, m.c.m.unsubscribeCmd(f.subID))
+			m.activeSub = m.sessionSub
+			m.sessionSub = subRef{}
+		}
+		m.popDetail()
+	}
+	s := transcript.Subagent{ID: r.ID, Type: r.Type, Name: r.Name, Desc: r.Desc, Status: "running", HasTrace: true}
+	m.historyView = histDetail
+	cmds = append(cmds, m.drillTrace(transcript.Entry{Kind: transcript.EntrySubagent, Subagents: []transcript.Subagent{s}}, s))
+	return tea.Batch(cmds...)
 }
 
 // popDetail removes the deepest frame; returns true when the stack is now empty.

@@ -41,6 +41,9 @@ either end of an expanded run to fold it again. To show runs expanded by
 default, set `tui.verbose-transcript` to `true`, or run the
 `toggle verbose-transcript` command for the current session.
 
+In a live session, run `open subagent` to pick one of the subagents the
+session has running now and open its transcript.
+
 ### Select and copy
 
 In a transcript or an entry's detail, `y` copies the selected entry as the
@@ -251,6 +254,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `open live-screen` | session-dock, transcript |  | `<C-t>` |
 | `open palette` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace |  | `<C-k>` |
 | `open setup-log` | project-tree, workspace |  | `L` |
+| `open subagent` | session-dock, transcript |  |  |
 | `open tmux-pane` | home, workspace |  | `O` |
 | `prev` | changes, file-tree, history, home, project-tree, session-dock, sidebar-sessions, spawn, terminals, transcript, workspace | `<Up>` `k` |  |
 | `prev diff-file` | file |  | `[f` |

@@ -156,7 +156,7 @@ var sectionLists = map[string]sectionList{
 		focus: focusFor("logs"),
 	},
 	"transcript": {
-		own: bindingsOf(slices.Concat(transcriptViewKeys, []any{detailKeys, sessionKeys.FocusPrompt, sessionKeys.Raw,
+		own: bindingsOf(slices.Concat(transcriptViewKeys, []any{detailKeys, sessionKeys.FocusPrompt, sessionKeys.Raw, sessionKeys.Subagents,
 			redactListKeys, transcriptKeys.Redact, transcriptKeys.RedactList, transcriptKeys.RedactSave,
 			transcriptKeys.Export, transcriptKeys.Resume})...),
 		focus: focusFor("transcript"),
@@ -170,7 +170,7 @@ var sectionLists = map[string]sectionList{
 			listKeys.PageUp, listKeys.PageDown, listKeys.Open, listKeys.Back, spawnKeys.Filter),
 	},
 	"session-dock": {
-		own: bindingsOf(promptKeys, sessionKeys.FocusTranscript, sessionKeys.Raw),
+		own: bindingsOf(promptKeys, sessionKeys.FocusTranscript, sessionKeys.Raw, sessionKeys.Subagents),
 	},
 }
 

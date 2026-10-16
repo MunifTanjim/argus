@@ -162,6 +162,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sessions[s.ID] = s
 		}
 		m.dock.pruneReplyDrafts(m.sessions)
+		m.syncSubagents()
 		m.reorder()
 		return m, nil
 	case transcriptMsg:
@@ -488,6 +489,7 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 		delete(m.dock.drafts, ev.Session.ID)
 	}
 	m.syncPromptDraft() // reset a stale draft if the open session's prompt changed
+	m.syncSubagents()
 	m.reorder()
 	return cmd
 }
