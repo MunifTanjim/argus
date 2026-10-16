@@ -356,6 +356,47 @@ func TestSidebarSessionsWorkspaceOnly(t *testing.T) {
 	}
 }
 
+// Leaving the sidebar puts the cursor back on the open session, as the
+// project tree does.
+func TestSidebarSessionsCursorReturnsToOpenSession(t *testing.T) {
+	m := openLive(sidebarFilterModel(), "n1:b")
+	m = withFocus(m, leftSidebar)
+	m = typeKeys(m, "k")
+	if got := m.left.sessions.sel; got != "n1:a" {
+		t.Fatalf("k moved the cursor to %q, want alpha", got)
+	}
+	m, _ = upd(m, keyMsg("esc"))
+	if m.focused != mainPane {
+		t.Fatalf("esc focused %v, want the main pane", m.focused)
+	}
+	if got := sidebarListed(m)[m.left.sessions.index(sidebarListed(m))]; got != "n1:b" {
+		t.Errorf("cursor on %q after leaving, want the open session", got)
+	}
+}
+
+// Entering the sidebar also puts the cursor on the open session.
+func TestSidebarSessionsCursorFollowsOpenSessionOnEnter(t *testing.T) {
+	m := openLive(sidebarFilterModel(), "n1:b")
+	m.left.sessions.sel = "n1:a"
+	m.focusTree()
+	if got := m.left.sessions.sel; got != "n1:b" {
+		t.Errorf("cursor on %q after entering, want the open session", got)
+	}
+}
+
+// An open session the text filter hides leaves the cursor on the listed one.
+func TestSidebarSessionsCursorStaysWhenOpenSessionIsHidden(t *testing.T) {
+	m := openLive(sidebarFilterModel(), "n1:b")
+	m = withFocus(m, leftSidebar)
+	m = typeKeys(m, "/ga")
+	m, _ = upd(m, keyMsg("enter"))
+	m.focused = mainPane
+	m = m.leaveTree(leftSidebar)
+	if got := sidebarListed(m)[m.left.sessions.index(sidebarListed(m))]; got != "n1:c" {
+		t.Errorf("cursor on %q after leaving, want it kept on gamma", got)
+	}
+}
+
 // s in the Sessions tab opens an untargeted spawn; esc returns to the tab.
 func TestSidebarSessionsSpawn(t *testing.T) {
 	m := projectsTestModel()
