@@ -172,6 +172,14 @@ type Summary struct {
 	TaskSessionKeys string `json:"task_session_keys,omitempty"`
 }
 
+type RunningSubagent struct {
+	ID    string `json:"id"`
+	Type  string `json:"type,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Desc  string `json:"desc,omitempty"`
+	Since string `json:"since,omitempty"` // RFC 3339 UTC, first seen running
+}
+
 // Session is argus's record for a single AI coding tool session.
 type Session struct {
 	// ID is argus's internal identifier (stable for the session's lifetime).
@@ -225,6 +233,8 @@ type Session struct {
 
 	// Summary is the cached transcript digest for list views (nil until computed).
 	Summary *Summary `json:"summary,omitempty"`
+
+	Subagents []RunningSubagent `json:"subagents,omitempty"`
 
 	// Interaction is the pending user request (non-nil only while awaiting input).
 	Interaction *Interaction `json:"interaction,omitempty"`

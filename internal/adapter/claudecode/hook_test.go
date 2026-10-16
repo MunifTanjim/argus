@@ -460,3 +460,38 @@ func TestProcessHookModelInfoSetsLiveModel(t *testing.T) {
 		t.Fatalf("a model-only report should keep effort and status: %+v %q", got.Summary, got.Status)
 	}
 }
+
+func TestProcessHookSubagentsSetsRunning(t *testing.T) {
+	reg := registry.New()
+	mk := func(list []map[string]any) HookEvent {
+		payload, _ := json.Marshal(map[string]any{
+			"session_id": "sess-1", "hook_event_name": "Subagents", "subagents": list,
+		})
+		return HookEvent{Event: "Subagents", Payload: payload}
+	}
+	a1 := map[string]any{"id": "a1", "type": "Explore", "desc": "map code"}
+	a2 := map[string]any{"id": "a2", "type": "Plan", "desc": "plan it"}
+
+	before, _ := ProcessHook(reg, HookEvent{Event: "ModelInfo", Payload: []byte(`{"session_id":"sess-1","model":"claude-opus-5-5"}`)})
+	got, _ := ProcessHook(reg, mk([]map[string]any{a1}))
+	if len(got.Subagents) != 1 || got.Subagents[0].ID != "a1" || got.Subagents[0].Type != "Explore" ||
+		got.Subagents[0].Desc != "map code" || got.Subagents[0].Since == "" || got.Status != before.Status {
+		t.Fatalf("subagent not recorded: %+v status %q", got.Subagents, got.Status)
+	}
+	since := got.Subagents[0].Since
+
+	got, _ = ProcessHook(reg, mk([]map[string]any{a1, a2}))
+	if len(got.Subagents) != 2 || got.Subagents[0].Since != since || got.Subagents[1].ID != "a2" || got.Subagents[1].Since == "" {
+		t.Fatalf("a1 should keep its Since: %+v", got.Subagents)
+	}
+
+	got, _ = ProcessHook(reg, mk([]map[string]any{a2}))
+	if len(got.Subagents) != 1 || got.Subagents[0].ID != "a2" {
+		t.Fatalf("finished subagent not dropped: %+v", got.Subagents)
+	}
+
+	got, _ = ProcessHook(reg, mk([]map[string]any{}))
+	if len(got.Subagents) != 0 {
+		t.Fatalf("empty snapshot should clear: %+v", got.Subagents)
+	}
+}

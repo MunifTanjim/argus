@@ -34,6 +34,8 @@ type hookPayload struct {
 	// ModelInfo's model id and effort (nil: not reported; "": none).
 	Model  string  `json:"model"`
 	Effort *string `json:"effort"`
+	// Subagents is the Subagents event's snapshot of running subagents.
+	Subagents []session.RunningSubagent `json:"subagents"`
 }
 
 // statusFor maps a hook event to a session status. ok is false when the event
@@ -307,6 +309,11 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 		model = modelUpdate(p)
 	}
 
+	var subagents *[]session.RunningSubagent
+	if event == "Subagents" {
+		subagents = &p.Subagents
+	}
+
 	return reg.ApplyHook(registry.HookUpdate{
 		Agent:              Agent,
 		Name:               name,
@@ -322,5 +329,6 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 		Interaction:        ix,
 		ReplaceInteraction: replace,
 		Model:              model,
+		Subagents:          subagents,
 	})
 }
