@@ -166,6 +166,30 @@ class Interaction {
       );
 }
 
+class RunningSubagent {
+  final String id;
+  final String? type;
+  final String? name;
+  final String? desc;
+  final DateTime? since;
+
+  const RunningSubagent({
+    required this.id,
+    this.type,
+    this.name,
+    this.desc,
+    this.since,
+  });
+
+  factory RunningSubagent.fromJson(Map<String, dynamic> j) => RunningSubagent(
+        id: j['id'] as String? ?? '',
+        type: j['type'] as String?,
+        name: j['name'] as String?,
+        desc: j['desc'] as String?,
+        since: DateTime.tryParse(j['since'] as String? ?? ''),
+      );
+}
+
 class Session {
   final String id;
   final String agent;
@@ -187,6 +211,9 @@ class Session {
   final String? workspaceId;
   final Summary? summary;
   final Interaction? interaction;
+
+  /// Also empty from a node too old to report them.
+  final List<RunningSubagent> subagents;
   final String? nodeId;
   final String? nodeLabel;
   final bool offline;
@@ -214,6 +241,7 @@ class Session {
     this.workspaceId,
     this.summary,
     this.interaction,
+    this.subagents = const [],
     this.nodeId,
     this.nodeLabel,
     this.offline = false,
@@ -243,6 +271,10 @@ class Session {
         interaction: j['interaction'] == null
             ? null
             : Interaction.fromJson(j['interaction'] as Map<String, dynamic>),
+        subagents: (j['subagents'] as List?)
+                ?.map((e) => RunningSubagent.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            const [],
         nodeId: j['node_id'] as String?,
         nodeLabel: j['node_label'] as String?,
         offline: j['offline'] as bool? ?? false,

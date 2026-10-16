@@ -7,6 +7,7 @@ import 'package:argus/core/result.dart';
 import 'package:argus/data/session_repository.dart';
 import 'package:argus/models/enums.dart';
 import 'package:argus/models/session.dart';
+import 'package:argus/state/sessions.dart';
 import 'package:argus/ui/interaction_panel.dart';
 import 'package:argus/ui/session_composer.dart';
 import 'package:argus/ui/status_style.dart';
@@ -40,6 +41,7 @@ Session _s({
   Map<String, dynamic>? interaction,
   Map<String, dynamic>? summary,
   String? since,
+  List<Map<String, dynamic>>? subagents,
 }) =>
     Session.fromJson({
       'id': 'n:%1',
@@ -52,6 +54,7 @@ Session _s({
       'interaction': ?interaction,
       'summary': ?summary,
       'status_since': ?since,
+      'subagents': ?subagents,
     });
 
 Future<void> _pump(WidgetTester t, Session s, SessionRepository repo,
@@ -455,5 +458,58 @@ void main() {
     repo.done.complete();
     await t.pumpAndSettle();
     expect(find.text('second'), findsOneWidget);
+  });
+
+  group('running subagents', () {
+    final two = [
+      {'id': 'a1', 'type': 'Explore', 'desc': 'find it'},
+      {'id': 'a2', 'name': 'scout', 'desc': 'map it'},
+    ];
+    final summary = {'model_name': 'Opus 5.5', 'effort': 'high'};
+
+    testWidgets('the model line shows the count at its left', (t) async {
+      await _pump(t, _s(subagents: two, summary: summary), _Recording());
+      expect(find.byIcon(Icons.smart_toy_outlined), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
+      expect(find.text('Opus 5.5 · high'), findsOneWidget);
+      expect(t.getTopLeft(find.byIcon(Icons.smart_toy_outlined)).dx,
+          lessThan(t.getTopLeft(find.text('Opus 5.5 · high')).dx));
+    });
+
+    testWidgets('none shows no icon', (t) async {
+      await _pump(t, _s(summary: summary), _Recording());
+      expect(find.byIcon(Icons.smart_toy_outlined), findsNothing);
+    });
+
+    testWidgets('the count leaves the composer height alone', (t) async {
+      await _pump(t, _s(summary: summary), _Recording());
+      final without = t.getSize(find.byType(SessionComposer)).height;
+      await _pump(t, _s(subagents: two, summary: summary), _Recording());
+      expect(t.getSize(find.byType(SessionComposer)).height, without);
+    });
+
+    testWidgets('the count is a 48 px wide tap target', (t) async {
+      await _pump(t, _s(subagents: two, summary: summary), _Recording());
+      final size = t.getSize(find
+          .ancestor(
+              of: find.byIcon(Icons.smart_toy_outlined),
+              matching: find.byType(InkWell))
+          .first);
+      expect(size.width, greaterThanOrEqualTo(48));
+    });
+
+    testWidgets('tapping the count opens the sheet', (t) async {
+      final container = ProviderContainer(overrides: [
+        sessionRepositoryProvider.overrideWithValue(_Recording()),
+      ]);
+      addTearDown(container.dispose);
+      final s = _s(subagents: two, summary: summary);
+      container.read(sessionsProvider.notifier).put(s);
+      await _pump(t, s, _Recording(), container: container);
+      await t.tap(find.byIcon(Icons.smart_toy_outlined));
+      await t.pumpAndSettle();
+      expect(find.text('Explore'), findsOneWidget);
+      expect(find.text('scout'), findsOneWidget);
+    });
   });
 }
