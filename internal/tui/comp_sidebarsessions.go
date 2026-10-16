@@ -131,6 +131,14 @@ func (s sidebarSessionsComp) moveTo(ids []string, i int) sidebarSessionsComp {
 	return s
 }
 
+func (s sidebarSessionsComp) follow(c *ctx, id string) sidebarSessionsComp {
+	ids := s.ids(c)
+	if i := slices.Index(ids, id); i >= 0 {
+		return s.moveTo(ids, i)
+	}
+	return s
+}
+
 func (s sidebarSessionsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
 	k, m := projectsKeys, c.m
 	ids := s.ids(c)
