@@ -12,6 +12,7 @@ import '../models/session.dart';
 import '../state/prompt_drafts.dart';
 import '../state/respond_view_model.dart';
 import 'interaction_panel.dart';
+import 'status_style.dart';
 import 'theme.dart';
 import 'voice_input_field.dart';
 
@@ -101,12 +102,15 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   /// The panel's height cap set by dragging the status line; null until then.
   double? _panelHeight;
 
-  /// The height of the panel's fixed parts, as last laid out.
-  double _panelMin = 0;
   final _panelKey = GlobalKey();
 
   _RenderPanelBox? get _panelBox =>
       _panelKey.currentContext?.findRenderObject() as _RenderPanelBox?;
+
+  /// The height of the panel's fixed parts, as last laid out.
+  double get _panelMin => _panelBox?.minHeight ?? 0;
+
+  bool _collapses(double height) => height <= _panelMin / 2;
 
   String get _sid => widget.session.id;
 
@@ -195,18 +199,25 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   }
 
   void _dragUpdate(DragUpdateDetails d) {
-    var h = _panelHeight ?? 0;
     final box = _panelBox;
-    if (box != null) {
-      _panelMin = box.minHeight;
-      h = math.min(h, box.size.height);
-    }
+    // A new prompt mid-drag reset the height: go on from where it is.
+    var h = _panelHeight ?? box?.size.height ?? 0;
+    if (box != null) h = math.min(h, box.size.height);
     h = math.max(0.0, h - d.delta.dy);
-    setState(() {
-      _collapsed = h <= _panelMin / 2;
-      _panelHeight = h;
-    });
+    _panelHeight = h;
+    final collapsed = _collapses(h);
+    if (collapsed != _collapsed) {
+      setState(() => _collapsed = collapsed);
+    } else {
+      // Only the cap changed: lay the panel out again without rebuilding it.
+      box?.cap = h;
+    }
   }
+
+  void _toggle() => setState(() {
+        _collapsed = !_collapsed;
+        if (_collapses(_panelHeight ?? _panelMin)) _panelHeight = null;
+      });
 
   @override
   Widget build(BuildContext context) =>
@@ -221,32 +232,34 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     if (notice != null) {
       body = _notice(notice);
     } else if (pending) {
-      body = _collapsed
-          ? const SizedBox.shrink()
-          : Flexible(
-              child: _PanelBox(
-                key: _panelKey,
-                cap: _panelHeight ?? maxHeight * 0.6,
-                child: InteractionPanel(
-                    key: ValueKey(_promptKey(s.interaction)), session: s),
-              ),
-            );
+      // Hidden, not removed, when collapsed, so the answers so far are kept.
+      body = Flexible(
+        child: Visibility(
+          visible: !_collapsed,
+          maintainState: true,
+          child: _PanelBox(
+            key: _panelKey,
+            cap: _panelHeight ?? maxHeight * 0.6,
+            child: InteractionPanel(
+                key: ValueKey(_promptKey(s.interaction)), session: s),
+          ),
+        ),
+      );
     } else {
       body = _input(s);
     }
+    // A collapsed prompt still waits on the user, so its line stands out.
+    final alert = showPanel && _collapsed;
     final status = _rule(
       label: composerStatus(s, DateTime.now()),
+      alert: alert,
       trailing: showPanel
           ? IconButton(
               tooltip: _collapsed ? 'Expand' : 'Collapse',
               visualDensity: VisualDensity.compact,
+              color: alert ? statusColor(SessionStatus.awaitingInput) : null,
               icon: Icon(_collapsed ? Icons.expand_less : Icons.expand_more),
-              onPressed: () => setState(() {
-                _collapsed = !_collapsed;
-                if ((_panelHeight ?? _panelMin) <= _panelMin / 2) {
-                  _panelHeight = null;
-                }
-              }),
+              onPressed: _toggle,
             )
           : null,
     );
@@ -259,6 +272,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
           if (showPanel)
             GestureDetector(
               behavior: HitTestBehavior.opaque,
+              onTap: _collapsed ? _toggle : null,
               onVerticalDragStart: _dragStart,
               onVerticalDragUpdate: _dragUpdate,
               child: status,
@@ -328,8 +342,10 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
       );
 
   // A divider with a label set into its right end, like the TUI's rules.
-  Widget _rule({String? label, Widget? trailing}) {
-    const line = Divider(height: 1, color: AppColors.border);
+  Widget _rule({String? label, Widget? trailing, bool alert = false}) {
+    final bg = alert ? AppColors.awaitingSurface : AppColors.canvas;
+    final line = Divider(
+        height: 1, color: alert ? AppColors.awaitingBorder : AppColors.border);
     // The label sits on the line and truncates when it alone exceeds the width.
     Widget onLine(String t) => Stack(
           alignment: Alignment.center,
@@ -338,26 +354,30 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
             Align(
               alignment: Alignment.centerRight,
               child: ColoredBox(
-                color: AppColors.canvas,
+                color: bg,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 6),
                   child: Text(t,
                       maxLines: 1,
                       softWrap: false,
                       overflow: TextOverflow.ellipsis,
-                      style: mono.copyWith(color: AppColors.dim)),
+                      style: mono.copyWith(
+                          color: alert
+                              ? statusColor(SessionStatus.awaitingInput)
+                              : AppColors.dim)),
                 ),
               ),
             ),
           ],
         );
-    return SizedBox(
+    return Container(
       height: trailing == null ? 20 : 36,
+      color: bg,
       child: Row(children: [
-        const SizedBox(width: 12, child: line),
+        SizedBox(width: 12, child: line),
         Expanded(child: label != null ? onLine(label) : line),
         ?trailing,
-        const SizedBox(width: 12, child: line),
+        SizedBox(width: 12, child: line),
       ]),
     );
   }
