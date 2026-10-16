@@ -219,6 +219,7 @@ void main() {
         tofu: true,
       );
       await client.connect();
+      await client.channelsSettled;
       expect(client.connectedNodeIds.toSet(), {'A', 'B'},
           reason: 'initial chain authorizes both A and B');
 

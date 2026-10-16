@@ -29,6 +29,7 @@ void main() {
     final pinnedLink = MultiNodeLoopbackLink({'A': a, 'B': b}, trustChain: enfChain);
     final pinned = E2EClient(pinnedLink.incoming, pinnedLink.send, await keyPairFromSeed(base64.decode(v['enforcement_client_seed'] as String)), genesisHash: enfGenesis);
     await pinned.connect();
+    await pinned.channelsSettled;
     expect(pinned.connectedNodeIds.toSet(), equals({'A'}),
         reason: 'pinned: only authorized node A should be connected');
     await pinned.close();
@@ -38,6 +39,7 @@ void main() {
     final disabledLink = MultiNodeLoopbackLink({'A': a, 'B': b}, trustChain: disabledChain);
     final disabledClient = E2EClient(disabledLink.incoming, disabledLink.send, await generateKeyPair(), genesisHash: disabledGenesis);
     await disabledClient.connect();
+    await disabledClient.channelsSettled;
     expect(disabledClient.connectedNodeIds.toSet(), equals({'A', 'B'}),
         reason: 'disabled trust log: both nodes should connect');
     await disabledClient.close();
@@ -45,6 +47,7 @@ void main() {
     final openLink = MultiNodeLoopbackLink({'A': a, 'B': b});
     final openClient = E2EClient(openLink.incoming, openLink.send, await generateKeyPair());
     await openClient.connect();
+    await openClient.channelsSettled;
     expect(openClient.connectedNodeIds.toSet(), equals({'A', 'B'}),
         reason: 'open mode (no genesisHash): both nodes should connect');
     await openClient.close();
@@ -117,6 +120,7 @@ void main() {
         trustChain: Uint8List.fromList(base64.decode(v['enforcement_chain'] as String)));
     final client = E2EClient(link.incoming, link.send, await keyPairFromSeed(base64.decode(v['enforcement_client_seed'] as String)), tofu: true);
     await client.connect();
+    await client.channelsSettled;
     expect(client.connectedNodeIds.toSet(), {'A'});
     expect(client.trustTip, isNotNull);
     await client.close();
@@ -128,6 +132,7 @@ void main() {
     final link = MultiNodeLoopbackLink({'A': a, 'B': b});
     final client = E2EClient(link.incoming, link.send, await generateKeyPair(), tofu: true);
     await client.connect();
+    await client.channelsSettled;
     expect(client.connectedNodeIds.toSet(), {'A', 'B'});
     await client.close();
   });

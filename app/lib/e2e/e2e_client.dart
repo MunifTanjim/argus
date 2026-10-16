@@ -168,6 +168,9 @@ class E2EClient implements GatewayClient {
 
   final _byNodeId = <String, NodeChannel>{};
   final _opening = <String, Future<void>>{};
+  // Completes once a node's channel is registered, before the open's
+  // node.identify, so a call to an opening node waits no longer than needed.
+  final _registering = <String, Future<void>>{};
   // Completes once connect has loaded the trust log. Before that a TOFU store
   // holds no chain and reads as an open network, so adoption must wait.
   final _trustLoaded = Completer<void>();
@@ -194,6 +197,22 @@ class E2EClient implements GatewayClient {
 
   Set<String> get connectedNodeIds => _byNodeId.keys.toSet();
 
+  /// Their sessions are not yet loaded.
+  Set<String> get openingNodeIds => _registering.keys.toSet();
+
+  /// Lets a fan-out reach the nodes still opening too.
+  Future<void> _channelsSettled() => Future.wait(_registering.values.toList());
+
+  /// Completes once the channels [connect] started have opened or failed.
+  @visibleForTesting
+  Future<void> get channelsSettled => _channelsSettled();
+
+  /// Every node a fan-out reaches, the ones still opening included.
+  Future<List<String>> _settledNodeIds() async {
+    await _channelsSettled();
+    return _byNodeId.keys.toList();
+  }
+
   /// Fans out [method] (sessions.list / sessions.refresh) to every connected node,
   /// invoking [onNode] with each node's composited sessions AS THAT NODE RESPONDS
   /// — not gated on the slowest. A node that errors or times out is skipped (its
@@ -202,7 +221,7 @@ class E2EClient implements GatewayClient {
     String method,
     void Function(String nodeId, List<Map<String, dynamic>> sessions) onNode,
   ) async {
-    final entries = _byNodeId.keys.toList();
+    final entries = {..._byNodeId.keys, ..._registering.keys};
     await Future.wait(
       entries.map((nodeId) async {
         try {
@@ -271,6 +290,9 @@ class E2EClient implements GatewayClient {
   /// advertises an identity key. When a genesis hash is configured, pulls and
   /// ingests the trust log first, then skips any node whose identity key is not
   /// authorized (fail-closed: a failed pull leaves prior state in place).
+  ///
+  /// It returns once the trust log is loaded; the channels keep opening in the
+  /// background.
   Future<void> connect() async {
     final res = await _gateway.call('nodes.list');
     final nodes = (res is Map ? res['nodes'] : null) as List? ?? const [];
@@ -294,7 +316,7 @@ class E2EClient implements GatewayClient {
       }
     }
     if (!_trustLoaded.isCompleted) _trustLoaded.complete();
-    await _openEligible(nodes);
+    unawaited(_openEligible(nodes));
     final interval = trustResyncInterval;
     if (_trust != null && interval != null && !_closed) {
       _resyncTimer = Timer.periodic(interval, (_) => _kickResync());
@@ -333,19 +355,34 @@ class E2EClient implements GatewayClient {
   /// handshake finishes. Mirrors Go openIfEligible.
   Future<void> _openNode(NodeDescriptor desc) {
     if (_closed || _byNodeId.containsKey(desc.id)) return Future.value();
-    return _opening[desc.id] ??= _doOpenNode(desc).whenComplete(() {
-      _opening.remove(desc.id);
-    });
+    return _opening[desc.id] ??= () {
+      final registered = Completer<void>();
+      _registering[desc.id] = registered.future;
+      return _doOpenNode(desc, registered).whenComplete(() {
+        _opening.remove(desc.id);
+        _registering.remove(desc.id);
+        if (!registered.isCompleted) registered.complete();
+      });
+    }();
   }
 
   /// Opens a channel to [desc], records it in the roster, and reads its
   /// authenticated tip. A failed open is logged and swallowed so one unreachable
   /// node does not abort the caller (mirrors the Go client).
-  Future<void> _doOpenNode(NodeDescriptor desc) async {
+  Future<void> _doOpenNode(
+    NodeDescriptor desc,
+    Completer<void> registered,
+  ) async {
     try {
       final nc = await openChannel(desc);
       _byNodeId[desc.id] = nc;
       _roster[desc.id] = desc;
+      // A trust advance during the handshake may have revoked the node.
+      if (_closed || !_eligible(desc)) {
+        _loseNode(desc.id);
+        return;
+      }
+      registered.complete();
       // Record identity pub hex so checkTipConsistency can distinguish
       // "was connected, now offline" from "never connected", then read the
       // node's tip over its authenticated channel (node.identify).
@@ -665,7 +702,12 @@ class E2EClient implements GatewayClient {
     String method,
     Object? params,
   ) async {
-    final nc = _byNodeId[nodeId];
+    var nc = _byNodeId[nodeId];
+    final registering = _registering[nodeId];
+    if (nc == null && registering != null) {
+      await registering;
+      nc = _byNodeId[nodeId];
+    }
     if (nc == null) throw StateError('unknown node $nodeId');
     final result = await callNode(nc, method, utf8.encode(jsonEncode(params)));
     if (result.isEmpty) return null;
@@ -673,7 +715,7 @@ class E2EClient implements GatewayClient {
   }
 
   Future<List<dynamic>> _fanoutSessions(String method, Object? params) async {
-    final entries = _byNodeId.keys.toList();
+    final entries = await _settledNodeIds();
     final results = await Future.wait(
       entries.map((nodeId) async {
         try {
@@ -696,7 +738,7 @@ class E2EClient implements GatewayClient {
   }
 
   Future<List<dynamic>> _fanoutHistoryProjects(Object? params) async {
-    final entries = _byNodeId.keys.toList();
+    final entries = await _settledNodeIds();
     final results = await Future.wait(
       entries.map((nodeId) async {
         try {
@@ -731,7 +773,7 @@ class E2EClient implements GatewayClient {
   // can show an error instead of an empty tree. A partial failure lists the
   // failed nodes, so the caller can keep their last good projects.
   Future<Map<String, dynamic>> _fanoutProjects(Object? params) async {
-    final entries = _byNodeId.keys.toList();
+    final entries = await _settledNodeIds();
     final results = await Future.wait(
       entries.map((nodeId) async {
         try {
@@ -781,7 +823,7 @@ class E2EClient implements GatewayClient {
 
   // Ordered by node so the list does not reshuffle between loads.
   Future<Map<String, dynamic>> _fanoutTerminals(Object? params) async {
-    final entries = _byNodeId.keys.toList();
+    final entries = await _settledNodeIds();
     final results = await Future.wait(
       entries.map((nodeId) async {
         try {
@@ -852,7 +894,7 @@ class E2EClient implements GatewayClient {
   /// [pushGoneCode] only when every node reported gone. If no nodes are connected,
   /// falls back to the gateway so a plain-RPC connection still works.
   Future<Object?> _fanoutPush(String method, Object? params) async {
-    final nodeIds = _byNodeId.keys.toList();
+    final nodeIds = await _settledNodeIds();
     if (nodeIds.isEmpty) return _gateway.call(method, params);
     final results = await Future.wait(
       nodeIds.map((nodeId) async {
@@ -924,6 +966,7 @@ class E2EClient implements GatewayClient {
   Future<Object?> _routeByNode(String method, Object? params) async {
     var nodeId = stringField(params, 'node_id') ?? '';
     if (nodeId.isEmpty) {
+      await _channelsSettled();
       nodeId = _soleNode() ?? '';
       if (nodeId.isEmpty) throw RpcError(-32600, '$method requires node_id');
     }
