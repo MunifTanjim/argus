@@ -29,14 +29,25 @@ func TestDockRuleLabels(t *testing.T) {
 	}
 }
 
-func TestDockRuleTruncatesLeftBeforeDroppingRight(t *testing.T) {
+func TestDockRuleDropsLeftBeforeRight(t *testing.T) {
 	got := ansi.Strip(dockRule("Working on a very long label", "Opus 5.5", 24, ColorBorder))
-	if !strings.Contains(got, "Opus 5.5") || strings.Contains(got, "very long label") {
-		t.Fatalf("left should truncate first: %q", got)
+	if !strings.Contains(got, "Opus 5.5") || strings.Contains(got, "Working") {
+		t.Fatalf("left should drop first: %q", got)
 	}
 	got = ansi.Strip(dockRule("Working", "Opus 5.5 · high", 12, ColorBorder))
 	if strings.Contains(got, "Opus") {
 		t.Fatalf("a right label that cannot fit should be dropped: %q", got)
+	}
+}
+
+func TestDockRuleDropsLeftLabelThatCannotFit(t *testing.T) {
+	got, drawn := dockRuleFit("◆ 12", "Opus 5.5", 14, ColorBorder)
+	if drawn || strings.Contains(ansi.Strip(got), "◆") || strings.Contains(ansi.Strip(got), "…") {
+		t.Fatalf("a left label that cannot fit whole should be dropped: %q", ansi.Strip(got))
+	}
+	got, drawn = dockRuleFit("◆ 12", "Opus 5.5", 40, ColorBorder)
+	if !drawn || !strings.Contains(ansi.Strip(got), "◆ 12") {
+		t.Fatalf("a left label that fits should be drawn whole: %q", ansi.Strip(got))
 	}
 }
 

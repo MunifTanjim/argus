@@ -7,6 +7,8 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/MunifTanjim/argus/internal/session"
 )
@@ -65,6 +67,9 @@ func (d dockComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 		return d, nil, true
 	case c.m.matches(msg, sessionKeys.Raw):
 		return d, openLiveScreen(c), true
+	case c.m.matches(msg, sessionKeys.Subagents):
+		openSubagents(c)
+		return d, nil, true
 	}
 	if c.m.composing() {
 		d, cmd := d.handleIdleKey(c, msg)
@@ -124,7 +129,7 @@ func (d dockComp) view(c *ctx, w, h int) string {
 		ruleColor = ColorAccent
 	}
 	cw := containerWidthOf(w)
-	top, bottom := c.m.dockRules(cw, ruleColor)
+	top, bottom, countW := c.m.dockRules(cw, ruleColor)
 	bodyH := h - dockChrome
 	var body string
 	switch {
@@ -141,6 +146,10 @@ func (d dockComp) view(c *ctx, w, h int) string {
 	}
 	if !c.m.inputShown() {
 		body = indentBlock(body, strings.Repeat(" ", c.m.dockBodyIndent()))
+	}
+	// The count is the bottom rule's left label; a click on it lists them.
+	if countW > 0 {
+		c.hitZone(uv.Rect(centerGutter(cw, w)+dockRuleEdge+1, 2+lipgloss.Height(body), countW, 1), hitTarget{kind: hitSubagents})
 	}
 	return "\n" + centerBlock(top+"\n"+body+"\n"+bottom, cw, w)
 }
@@ -196,10 +205,16 @@ func (m model) composing() bool {
 	return ix == nil || ix.Kind == session.InteractionIdle
 }
 
-// dockRules are the region's rules: activity on top, model and effort below.
-func (m model) dockRules(w int, c color.Color) (top, bottom string) {
+// dockRules draws the dock's rules. countW is the width of the running count on
+// the bottom rule, 0 when it is not drawn.
+func (m model) dockRules(w int, c color.Color) (top, bottom string, countW int) {
 	s := m.sessions[m.liveSessionID()]
-	return dockRule("", m.dockStatusLabel(s), w, c), dockRule("", modelEffortLabel(s.Summary), w, c)
+	count := runningLabel(len(s.Subagents))
+	bottom, drawn := dockRuleFit(count, modelEffortLabel(s.Summary), w, c)
+	if drawn {
+		countW = lipgloss.Width(count)
+	}
+	return dockRule("", m.dockStatusLabel(s), w, c), bottom, countW
 }
 
 // spins while the session works: the top rule's spinner and timer advance.

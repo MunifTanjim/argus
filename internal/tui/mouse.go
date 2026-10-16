@@ -122,6 +122,13 @@ func (m model) mouseClick(ms tea.Mouse) (tea.Model, tea.Cmd) {
 	if ms.Button == tea.MouseRight && hit && t.kind != hitRow {
 		return m, nil
 	}
+	// The count opens the list without moving focus, as the command does.
+	if k == sessionDock && hit && t.kind == hitSubagents {
+		m = m.endVisualIn(mainPane)
+		c := &ctx{m: &m}
+		openSubagents(c)
+		return m, m.apply(c)
+	}
 	focused := m.focused == k
 	if !focused {
 		m.flash = ""

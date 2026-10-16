@@ -54,6 +54,7 @@ const (
 	hitFold
 	hitClose
 	hitBrand
+	hitSubagents
 )
 
 type hitTarget struct {

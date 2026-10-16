@@ -14,14 +14,21 @@ import (
 // dockRuleEdge is the run of dashes before the left label and after the right.
 const dockRuleEdge = 2
 
-// dockRule draws a w-wide "── left ─── right ──". The left label truncates
-// first; the right one is dropped only when it cannot fit.
+// dockRule draws a w-wide "── left ─── right ──". The right label is dropped
+// when it cannot fit; the left one is dropped, never truncated, when it cannot
+// fit whole.
 func dockRule(left, right string, w int, c color.Color) string {
+	rule, _ := dockRuleFit(left, right, w, c)
+	return rule
+}
+
+// dockRuleFit is dockRule that also reports whether the left label is drawn.
+func dockRuleFit(left, right string, w int, c color.Color) (string, bool) {
 	dash := func(n int) string {
 		return lipgloss.NewStyle().Foreground(c).Render(strings.Repeat("─", max(0, n)))
 	}
 	if w < 2*dockRuleEdge {
-		return dash(w)
+		return dash(w), false
 	}
 	pad := func(s string) string {
 		if s == "" {
@@ -37,12 +44,9 @@ func dockRule(left, right string, w int, c color.Color) string {
 	l := pad(left)
 	if lipgloss.Width(l) > room {
 		l = ""
-		if room > 3 {
-			l = " " + truncateLine(left, room-3) + "… "
-		}
 	}
 	fill := w - 2*dockRuleEdge - lipgloss.Width(l) - lipgloss.Width(r)
-	return dash(dockRuleEdge) + l + dash(fill) + r + dash(dockRuleEdge)
+	return dash(dockRuleEdge) + l + dash(fill) + r + dash(dockRuleEdge), l != ""
 }
 
 // formatElapsed: "12s", "3m 04s", "1h 02m".
