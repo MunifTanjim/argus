@@ -1681,8 +1681,15 @@ Session {
   workspace_id?:      string
   summary?:           Summary
   interaction?:       Interaction     // present only while the session waits for input
+  subagents?:         RunningSubagent[] // its subagents running now
   node_id?, node_label?: string       // added by the client
   offline?:           boolean         // added by the client
+}
+
+RunningSubagent {
+  id:                 string
+  type?, name?, desc?: string
+  since?:             string          // RFC 3339 UTC; when the node first saw it running
 }
 
 Summary {
@@ -1716,6 +1723,10 @@ Interaction {
   request_id?:        string   // the pending request this shows; echo it in RespondParams.request_id (Codex)
 }
 ```
+
+`subagents` is the session's top-level subagents that are running, as its agent
+last reported them: each report replaces the set, and the set ends with the
+session. A subagent keeps its `since` across reports.
 
 ### History
 
