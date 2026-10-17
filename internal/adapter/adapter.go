@@ -99,6 +99,13 @@ type StreamingTranscript interface {
 	Refresh() ([]transcript.Entry, error)
 }
 
+// QueueSource is a StreamingTranscript that also follows the agent's prompt
+// queue, as of its last Refresh.
+type QueueSource interface {
+	Queue() []transcript.QueuedPrompt
+	ClearQueue()
+}
+
 // TaskSource is an optional adapter capability for agents that persist a
 // structured task list (Claude Code's TaskCreate/TaskUpdate tools), so
 // change-detection and reads live server-side rather than in each client.
@@ -145,6 +152,19 @@ type Renamer interface {
 // that takes no prompt while a turn runs refuses it with api.ErrSessionBusy.
 type Prompter interface {
 	SendPrompt(ctx context.Context, sess session.Session, text string) error
+}
+
+// PromptQueuer is an adapter whose busy sessions take prompts, queued until the
+// agent reads them.
+type PromptQueuer interface {
+	QueuesPrompts(s session.Session) bool
+}
+
+// PaneFiller puts a prompt in a busy session's own input box, for the node to
+// submit with Enter in its pane. filled is false when the agent took the prompt
+// another way and needs no Enter.
+type PaneFiller interface {
+	FillPrompt(ctx context.Context, sess session.Session, text string) (filled bool, err error)
 }
 
 // ModBridged is an adapter whose sessions keep a mod connection to argusd (Claude

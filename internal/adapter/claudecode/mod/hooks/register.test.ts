@@ -680,3 +680,93 @@ test('a numeric effort reports no label', OPTIONS, async ($, on) => {
   await step($, { ...STEP, effort: 31999 })
   expect(modelInfos(sent).map(p => [p.model, p.effort])).toEqual([['claude-opus-5-5', '']])
 })
+
+function inputBox(on: On, draft: string, refusal?: 'dialog') {
+  const fills: string[] = []
+  on('prompt.read', () => ({ value: { text: draft, cursor: draft.length } }) as never)
+  on('prompt.fill', ($, e) => {
+    if (refusal) return { isFilled: false, refusal } as never
+    fills.push(e.text)
+    return { isFilled: true } as never
+  })
+  return fills
+}
+
+async function runFill(
+  $: EngineInterface,
+  on: On,
+  clock: ReturnType<typeof mock.clock>,
+  text: string,
+) {
+  const queue = [{ commands: [{ id: '1', kind: 'fill', text }] }]
+  const sent = argusd(on, s => (s.path === '/claude/poll' ? queue.shift() ?? new Error('hold') : {}))
+  on('prompt.submit', ($, e) => ({ text: e.text }) as never)
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  return sent.filter(s => s.path === '/claude/ack').map(s => s.body)
+}
+
+test('a fill replaces the draft and puts it back once submitted', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const fills = inputBox(on, 'my draft')
+  const acks = await runFill($, on, clock, 'steer')
+  expect(acks).toEqual([{ id: '1', ran: true }])
+  expect(fills).toEqual(['steer'])
+  await $.prompt.submit({ text: 'steer' } as never) // argus's Enter
+  expect(fills).toEqual(['steer', 'my draft'])
+})
+
+test('a submit with whitespace trimmed still puts the draft back', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const fills = inputBox(on, 'my draft')
+  await runFill($, on, clock, 'steer\n')
+  await $.prompt.submit({ text: 'steer' } as never)
+  expect(fills).toEqual(['steer\n', 'my draft'])
+})
+
+test('with no draft nothing is written back', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const fills = inputBox(on, '')
+  await runFill($, on, clock, 'steer')
+  await $.prompt.submit({ text: 'steer' } as never)
+  expect(fills).toEqual(['steer'])
+})
+
+test('a draft is not put back after its fill expired', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const fills = inputBox(on, 'my draft')
+  await runFill($, on, clock, 'steer')
+  await clock.advance(6000)
+  await $.prompt.submit({ text: 'steer' } as never)
+  expect(fills).toEqual(['steer'])
+})
+
+// The harness strips a refusal cause a test hook writes (only the engine's own
+// survives), so the 'dialog' cause and its 'busy' ack cannot be reached here.
+test('a refused fill fails without the busy ack', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  inputBox(on, 'my draft', 'dialog')
+  const acks = await runFill($, on, clock, 'steer')
+  expect(acks).toEqual([{ id: '1', error: 'the input box refused the text (unknown)' }])
+})
+
+test('a fill that lands after its accepted ack gives the draft back', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const fills: string[] = []
+  on('prompt.read', () => ({ value: { text: 'my draft', cursor: 8 } }) as never)
+  on('prompt.fill', async ($, e) => {
+    if (fills.length === 0) await clock.sleep(1500) // past the ack window
+    fills.push(e.text)
+    return { isFilled: true } as never
+  })
+  const queue = [{ commands: [{ id: '1', kind: 'fill', text: 'steer' }] }]
+  const sent = argusd(on, s => (s.path === '/claude/poll' ? queue.shift() ?? new Error('hold') : {}))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  await clock.advance(1500)
+  await clock.settle()
+  expect(sent.filter(s => s.path === '/claude/ack').map(s => s.body)).toEqual([{ id: '1' }])
+  expect(fills).toEqual(['steer', 'my draft'])
+})

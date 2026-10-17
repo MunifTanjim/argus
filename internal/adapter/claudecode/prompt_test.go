@@ -140,22 +140,99 @@ func TestClaudeAdapterIsPrompterAndModBridged(t *testing.T) {
 	}
 }
 
-func TestSendPromptRefusesABusySession(t *testing.T) {
+func TestSendPromptQueuesWhileWorking(t *testing.T) {
 	a, _ := newWiredAdapter(t)
 	got := modPoll(a, context.Background(), "s1")
 	waitUntil(t, func() bool { return a.ModBridge().Reachable("s1") })
-	for _, s := range []session.Session{
-		{ID: "x", AgentSessionID: "s1", Status: session.StatusWorking},
-		{ID: "x", AgentSessionID: "s1", Status: session.StatusAwaitingInput,
-			Interaction: &session.Interaction{Kind: session.InteractionPermission}},
-	} {
-		if err := a.SendPrompt(context.Background(), s, "hi"); !errors.Is(err, api.ErrSessionBusy) {
-			t.Fatalf("%s: err = %v, want ErrSessionBusy", s.Status, err)
-		}
+	s := session.Session{ID: "x", AgentSessionID: "s1", Status: session.StatusWorking}
+	if err := a.SendPrompt(context.Background(), s, "steer"); err != nil {
+		t.Fatal(err)
+	}
+	if cmds := <-got; len(cmds) != 1 || cmds[0].Kind != modbridge.KindPrompt || cmds[0].Text != "steer" {
+		t.Fatalf("poll got %v", cmds)
+	}
+}
+
+func TestSendPromptRefusesAPendingInteraction(t *testing.T) {
+	a, _ := newWiredAdapter(t)
+	got := modPoll(a, context.Background(), "s1")
+	waitUntil(t, func() bool { return a.ModBridge().Reachable("s1") })
+	s := session.Session{ID: "x", AgentSessionID: "s1", Status: session.StatusAwaitingInput,
+		Interaction: &session.Interaction{Kind: session.InteractionPermission}}
+	if err := a.SendPrompt(context.Background(), s, "hi"); !errors.Is(err, api.ErrSessionBusy) {
+		t.Fatalf("err = %v, want ErrSessionBusy", err)
+	}
+	if _, err := a.FillPrompt(context.Background(), s, "hi"); !errors.Is(err, api.ErrSessionBusy) {
+		t.Fatalf("fill err = %v, want ErrSessionBusy", err)
 	}
 	select {
 	case cmds := <-got:
-		t.Fatalf("a busy session was sent %v", cmds)
+		t.Fatalf("a session with a pending interaction was sent %v", cmds)
 	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestFillPromptSendsAFillCommand(t *testing.T) {
+	a, _ := newWiredAdapter(t)
+	got := modPoll(a, context.Background(), "s1")
+	waitUntil(t, func() bool { return a.ModBridge().Reachable("s1") })
+	s := session.Session{ID: "x", AgentSessionID: "s1", Status: session.StatusWorking}
+	if filled, err := a.FillPrompt(context.Background(), s, "steer"); err != nil || !filled {
+		t.Fatalf("filled = %v, err = %v", filled, err)
+	}
+	if cmds := <-got; len(cmds) != 1 || cmds[0].Kind != modbridge.KindFill || cmds[0].Text != "steer" {
+		t.Fatalf("poll got %v", cmds)
+	}
+}
+
+func TestFillPromptSendsASlashCommandAsAPrompt(t *testing.T) {
+	a, _ := newWiredAdapter(t)
+	got := modPoll(a, context.Background(), "s1")
+	waitUntil(t, func() bool { return a.ModBridge().Reachable("s1") })
+	s := session.Session{ID: "x", AgentSessionID: "s1", Status: session.StatusWorking}
+	if filled, err := a.FillPrompt(context.Background(), s, "/compact"); err != nil || filled {
+		t.Fatalf("filled = %v, err = %v; want sent, not filled", filled, err)
+	}
+	if cmds := <-got; len(cmds) != 1 || cmds[0].Kind != modbridge.KindPrompt || cmds[0].Text != "/compact" {
+		t.Fatalf("poll got %v", cmds)
+	}
+}
+
+func TestFillPromptRefusedByADialogIsBusy(t *testing.T) {
+	a, _ := newWiredAdapter(t)
+	go func() {
+		for _, c := range a.ModBridge().Wait(context.Background(), "s1", time.Minute) {
+			a.ModBridge().Ack(c.ID, modbridge.FailBusy, false)
+		}
+	}()
+	waitUntil(t, func() bool { return a.ModBridge().Reachable("s1") })
+	s := session.Session{ID: "x", AgentSessionID: "s1", Status: session.StatusWorking}
+	if _, err := a.FillPrompt(context.Background(), s, "steer"); !errors.Is(err, api.ErrSessionBusy) {
+		t.Fatalf("err = %v, want ErrSessionBusy", err)
+	}
+}
+
+func TestFillPromptOnlyAcceptedIsAnError(t *testing.T) {
+	a, _ := newWiredAdapter(t)
+	go func() {
+		for _, c := range a.ModBridge().Wait(context.Background(), "s1", time.Minute) {
+			a.ModBridge().Ack(c.ID, "", false)
+		}
+	}()
+	waitUntil(t, func() bool { return a.ModBridge().Reachable("s1") })
+	s := session.Session{ID: "x", AgentSessionID: "s1", Status: session.StatusWorking}
+	_, err := a.FillPrompt(context.Background(), s, "steer")
+	if err == nil || errors.Is(err, api.ErrSessionBusy) {
+		t.Fatalf("err = %v, want a not-filled error", err)
+	}
+}
+
+func TestQueuesPromptsFollowsTheModConnection(t *testing.T) {
+	a := New().(*ccAdapter)
+	if !a.QueuesPrompts(session.Session{Input: session.InputAPI}) {
+		t.Fatal("a mod-connected session should queue prompts")
+	}
+	if a.QueuesPrompts(session.Session{Input: session.InputPane}) {
+		t.Fatal("a keystrokes-only session must not queue prompts")
 	}
 }

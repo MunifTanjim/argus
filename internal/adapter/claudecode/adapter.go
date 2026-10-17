@@ -27,6 +27,8 @@ var _ adapter.Prompter = (*ccAdapter)(nil)
 var _ adapter.ModBridged = (*ccAdapter)(nil)
 var _ adapter.Dismisser = (*ccAdapter)(nil)
 var _ adapter.ModelLister = (*ccAdapter)(nil)
+var _ adapter.PromptQueuer = (*ccAdapter)(nil)
+var _ adapter.PaneFiller = (*ccAdapter)(nil)
 
 func (ccAdapter) Agent() string      { return Agent }
 func (ccAdapter) AgentName() string  { return "Claude" }

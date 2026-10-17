@@ -3,7 +3,9 @@ package claudecode
 import (
 	"os"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // StreamingTranscript incrementally folds a growing transcript file. A byte
@@ -18,7 +20,10 @@ type StreamingTranscript struct {
 	msgs       []parser.ClassifiedMsg
 	links      map[string]string // agentID -> toolUseID (cumulative)
 	metaCache  map[string]string // agentID -> toolUseID, from meta.json sidecars
+	queue      promptQueue
 }
+
+var _ adapter.QueueSource = (*StreamingTranscript)(nil)
 
 // NewStreamingTranscript returns a folder positioned at the file start. rootPath
 // resolves subagent files (pass path itself for a session root). isSubagent
@@ -37,11 +42,17 @@ func (s *StreamingTranscript) Refresh() ([]Entry, error) {
 		s.msgs = nil
 		s.links = map[string]string{}
 		s.metaCache = map[string]string{}
+		s.queue.clear()
 	}
 
-	newMsgs, newLinks, newOffset, err := parser.ReadSessionIncremental(s.path, s.offset, s.isSubagent)
+	newMsgs, newLinks, ops, newOffset, err := parser.ReadSessionIncrementalWithQueue(s.path, s.offset, s.isSubagent)
 	if err != nil {
 		return nil, err
+	}
+	if !s.isSubagent {
+		for _, op := range ops {
+			s.queue.apply(op)
+		}
 	}
 	s.msgs = append(s.msgs, newMsgs...)
 	for agentID, toolUseID := range newLinks {
@@ -60,3 +71,8 @@ func (s *StreamingTranscript) Refresh() ([]Entry, error) {
 	}
 	return foldEntries(pchunks, agentRefs, false), nil
 }
+
+func (s *StreamingTranscript) Queue() []transcript.QueuedPrompt { return s.queue.prompts() }
+
+// ClearQueue forgets the queue until new records arrive: Claude has drained it.
+func (s *StreamingTranscript) ClearQueue() { s.queue.clear() }

@@ -648,7 +648,9 @@ fail with `unknown session: <id>`.
 
 - `pane`: the node types the text into the tmux pane.
 - `api`: the node sends the text through the agent itself. This applies to
-  opencode, and to Claude Code while the Argus plugin is connected.
+  opencode, and to Claude Code while the Argus plugin is connected. A working
+  Claude Code session with a tmux pane can read text during the running turn,
+  except text that starts with `/`, which runs after the turn.
 - No `input_mode`: the call fails with `session has no terminal control`.
 
 `sessions.kill` kills the tmux pane. For a session without a pane, opencode
@@ -711,6 +713,13 @@ get empty answers.
 
 To apply a delta, the client cuts its entry list to `from_index`, then appends
 `entries`. Filter deltas by `sub_id`.
+
+For a Claude Code session transcript, the first result also carries `queue`:
+the prompts waiting in the agent's queue, oldest first. A later delta carries
+`queue` only when the queue changed, and then replaces it; a delta that changes
+only the queue has no `entries` and a `from_index` equal to the length of the
+client list. A prompt usually leaves the queue in the same delta that adds it to
+`entries`. Subagent transcripts never carry `queue`.
 
 - The first result starts at the first entry of the turn that holds the last
   cached entry, because entries of an unfinished turn can still change. If the
@@ -1261,11 +1270,15 @@ InputParams {
 
 For an `api` session, the node ignores `submit` and `prepare` and always
 submits the text. The call fails with `session has no terminal control` if
-`text` is empty. For opencode, Codex, and Claude Code, the call fails with
-`session is busy` if the session is not idle, including while a permission,
-question, or plan is pending. For Claude Code, text that starts with `/` runs
-as a slash command. Claude Code takes no prompt that starts with `/`, so other
-such text fails.
+`text` is empty. A session's `can_prompt` says whether it takes the text now.
+For opencode and Codex, the call fails with `session is busy` if the session
+is not idle. Claude Code takes the text while it works and queues it: it can
+read the text during the running turn when the session has a tmux pane, or
+after the turn otherwise. A slash command always runs after the turn. Every
+agent fails the call with `session is busy` while a permission, question, or
+plan is pending.
+For Claude Code, text that starts with `/` runs as a slash command. Claude Code
+takes no prompt that starts with `/`, so other such text fails.
 
 ```ts
 
@@ -1347,7 +1360,8 @@ TranscriptSubscribeParams {
   have_entries: number
 }
 
-TranscriptDelta { sub_id: string, from_index: number, entries: Entry[] }
+TranscriptDelta { sub_id: string, from_index: number, entries: Entry[], queue?: QueuedPrompt[] }
+QueuedPrompt    { text: string }
 
 ToolDetail { toolInput?: string, result?: string, resultIsError?: boolean }
 
@@ -1687,6 +1701,7 @@ Session {
   frontend?:          "tmux" | "vscode" | "external"
   input_mode?:        "pane" | "api"
   can_open_terminal?: boolean
+  can_prompt?:        boolean         // takes a prompt now; see sessions.input
   repo?:              string
   branch?:            string          // short sha for a detached HEAD
   workspace_id?:      string
