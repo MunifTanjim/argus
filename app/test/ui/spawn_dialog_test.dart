@@ -127,7 +127,11 @@ void main() {
   });
 
   testWidgets('name and command fields are gone', (tester) async {
-    await tester.pumpWidget(_app(const []));
+    await tester.pumpWidget(_app(const [
+      HistoryProject(
+          projectDir: '/a', cwd: '/home/u/argus', label: 'argus',
+          sessionCount: 1, lastActivity: '2026-06-29T10:00:00Z'),
+    ]));
     await tester.pumpAndSettle();
     // Use the labels that actually existed before this change.
     expect(find.widgetWithText(TextField, 'Name'), findsNothing);
@@ -223,10 +227,6 @@ void main() {
     final repo = _RecordingSpawnRepo();
     await tester.pumpWidget(_appWithRepo(repo));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose a directory'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Custom path…'));
-    await tester.pumpAndSettle();
     await tester.enterText(
         find.byKey(const Key('spawn-custom-path')), '/tmp/x');
     await tester.enterText(find.byKey(const Key('spawn-prompt')), 'go');
@@ -243,10 +243,6 @@ void main() {
       '/home/u/D': ['Dev', 'Docs'],
     }, homes: {'': '/home/u'}, latency: const Duration(milliseconds: 500));
     await tester.pumpWidget(_appWithRepo(repo));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose a directory'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Custom path…'));
     await tester.pumpAndSettle();
     await tester.pump(const Duration(milliseconds: 500)); // the reply
     await tester.pumpAndSettle();
@@ -280,23 +276,42 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('B'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose a directory'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Custom path…'));
-    await tester.pumpAndSettle();
     final field = find.byKey(const Key('spawn-custom-path'));
     expect(tester.widget<TextField>(field).controller!.text, '/home/b/');
-    expect(repo.completedOn, everyElement('b'));
+    expect(repo.completedOn.last, 'b');
+  });
+
+  testWidgets('a node with no directory history starts at a custom path',
+      (tester) async {
+    final repo = _CompletingRepo({}, homes: {'a': '/Users/me', 'b': '/home/b'})
+      ..nodeList = const [NodeRef('a', 'A'), NodeRef('b', 'B')];
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        historyProjectsProvider.overrideWith(() => _FakeProjects(const [
+              HistoryProject(
+                  projectDir: '/a', cwd: '/Users/me/argus', label: 'argus',
+                  sessionCount: 1, lastActivity: '2026-06-29T10:00:00Z',
+                  nodeId: 'a'),
+            ])),
+        sessionRepositoryProvider.overrideWithValue(repo),
+      ],
+      child: const MaterialApp(home: Scaffold(body: SpawnDialogBody())),
+    ));
+    await tester.pumpAndSettle();
+    final field = find.byKey(const Key('spawn-custom-path'));
+    expect(find.text('argus'), findsOneWidget);
+    expect(field, findsNothing);
+    await tester.tap(find.text('A'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('B'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(field).controller!.text, '/home/b/');
   });
 
   testWidgets('a custom path asks for completions once typing pauses',
       (tester) async {
     final repo = _CompletingRepo({}, homes: {'': '/home/u'});
     await tester.pumpWidget(_appWithRepo(repo));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose a directory'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Custom path…'));
     await tester.pumpAndSettle();
     final asked = repo.completedPaths.length;
     final field = find.byKey(const Key('spawn-custom-path'));
