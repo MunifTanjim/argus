@@ -494,9 +494,10 @@ func (m model) updateDelta(msg transcriptDeltaMsg) (tea.Model, tea.Cmd) {
 		m.transcriptCache[key] = cachedTranscript{entries: applyDelta(m.transcriptCache[key].entries, msg.delta)}
 		return m.updateTranscript(msg, streams(msg.ref.subID))
 	}
+	queue := nextQueue(m.transcriptCache[key].queue, msg.delta)
 	res, cmd := m.updateTranscript(msg, streams(msg.ref.subID))
 	m = res.(model)
-	m.transcriptCache[key] = cachedTranscript{entries: m.main[i].(transcriptComp).transcript.entries}
+	m.transcriptCache[key] = cachedTranscript{entries: m.main[i].(transcriptComp).transcript.entries, queue: queue}
 	return m, cmd
 }
 

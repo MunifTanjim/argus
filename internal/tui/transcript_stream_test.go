@@ -210,3 +210,14 @@ func TestSubscribeErrorKeepsEntries(t *testing.T) {
 		t.Error("a successful re-subscribe should clear the error")
 	}
 }
+
+func TestNextQueue(t *testing.T) {
+	prev := []transcript.QueuedPrompt{{Text: "a"}}
+	if got := nextQueue(prev, api.TranscriptDelta{}); len(got) != 1 {
+		t.Fatalf("absent queue: got %v, want kept", got)
+	}
+	empty := []transcript.QueuedPrompt{}
+	if got := nextQueue(prev, api.TranscriptDelta{Queue: &empty}); len(got) != 0 {
+		t.Fatalf("empty queue: got %v, want replaced", got)
+	}
+}

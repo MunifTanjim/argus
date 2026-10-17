@@ -157,7 +157,7 @@ func (d dockComp) view(c *ctx, w, h int) string {
 func (d dockComp) footer(c *ctx) []binding {
 	if c.m.composing() {
 		var binds []binding
-		if s := c.m.sessions[c.m.liveSessionID()]; s.AcceptsInput() && promptReady(s) {
+		if s := c.m.sessions[c.m.liveSessionID()]; s.CanPrompt {
 			binds = append(binds, promptKeys.Submit)
 		}
 		return append(binds, promptKeys.Read, sessionKeys.Raw)

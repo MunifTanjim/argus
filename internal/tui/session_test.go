@@ -118,7 +118,8 @@ func runCmd(cmd tea.Cmd) {
 func sessionModel(ix *session.Interaction) model {
 	m := testModel()
 	m.sessions = map[string]session.Session{
-		"s1": {ID: "s1", Status: session.StatusAwaitingInput, Interaction: ix, Input: session.InputPane, Tmux: session.TmuxLocation{PaneID: "%0"}},
+		"s1": {ID: "s1", Status: session.StatusAwaitingInput, Interaction: ix, Input: session.InputPane, Tmux: session.TmuxLocation{PaneID: "%0"},
+			CanPrompt: ix == nil || ix.Kind == session.InteractionIdle},
 	}
 	m = withLive(m, "s1")
 	m = withFocus(m, mainPane)
