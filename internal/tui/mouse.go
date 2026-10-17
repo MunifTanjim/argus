@@ -123,10 +123,10 @@ func (m model) mouseClick(ms tea.Mouse) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	// The count opens the list without moving focus, as the command does.
-	if k == sessionDock && hit && t.kind == hitSubagents {
+	if k == sessionDock && hit && t.kind == hitRunning {
 		m = m.endVisualIn(mainPane)
 		c := &ctx{m: &m}
-		openSubagents(c)
+		openRunning(c, runningKind(t.index))
 		return m, m.apply(c)
 	}
 	focused := m.focused == k
