@@ -70,6 +70,11 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
   List<AgentInfo>? _agents;
   String? _agent;
 
+  // null while loading; empty hides the picker.
+  List<ModelInfo>? _models;
+  bool _modelsFailed = false;
+  String? _model; // null = the agent's default
+
   // Directory state
   String? _selectedCwd; // resolved when projects load or the user picks
   bool _customCwd = false;
@@ -112,6 +117,32 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
         setState(() {
           _agents = const [];
           _agent = null;
+        });
+    }
+    _loadModels();
+  }
+
+  // Last call wins if the node or agent changes mid-load; the model resets to
+  // Default so one agent's alias is never sent to another.
+  Future<void> _loadModels() async {
+    final nodeId = _nodeId;
+    final agent = _agent;
+    setState(() {
+      _models = agent == null ? const [] : null;
+      _modelsFailed = false;
+      _model = null;
+    });
+    if (agent == null) return;
+    final result =
+        await ref.read(sessionRepositoryProvider).listModels(nodeId, agent);
+    if (!mounted || nodeId != _nodeId || agent != _agent) return;
+    switch (result) {
+      case Ok(:final value):
+        setState(() => _models = value);
+      case Error():
+        setState(() {
+          _models = const [];
+          _modelsFailed = true;
         });
     }
   }
@@ -173,6 +204,7 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
       nodeId: _nodeId,
       cwd: _effectiveCwd(),
       agent: _agent,
+      model: _model,
       prompt: _prompt.trim(),
     ));
     if (!mounted) return;
@@ -239,6 +271,8 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
     final agents = _agents;
     final agent = agents?.where((a) => a.id == _agent).firstOrNull;
     final project = projects.where((p) => p.cwd == _selectedCwd).firstOrNull;
+    final models = _models;
+    final model = models?.where((m) => m.id == _model).firstOrNull;
 
     final page = SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -258,6 +292,18 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
               value: agent?.name ?? 'Choose an agent',
               valueColor: agent == null ? null : _hexColor(agent.color),
               onTap: busy ? null : () => _pickAgent(agents),
+            ),
+          if (_agent != null &&
+              (models == null || models.isNotEmpty || _modelsFailed))
+            _PickerField(
+              label: 'Model',
+              value: model?.name ?? 'Default',
+              detail: models == null
+                  ? 'Loading models\u2026'
+                  : _modelsFailed
+                      ? "Couldn't load models"
+                      : null,
+              onTap: busy ? null : () => _pickModel(models ?? const []),
             ),
           if (target != null)
             _PickerField(
@@ -384,7 +430,26 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
           _Choice(value: a.id, title: a.name, color: _hexColor(a.color)),
       ],
     );
-    if (v != null) setState(() => _agent = v);
+    if (v == null || v == _agent) return;
+    setState(() => _agent = v);
+    _loadModels();
+  }
+
+  Future<void> _pickModel(List<ModelInfo> models) async {
+    final nodeId = _nodeId;
+    final agent = _agent;
+    final v = await _pick(
+      title: 'Model',
+      selected: _model ?? _defaultModel,
+      filterHint: 'Filter models',
+      choices: [
+        const _Choice(value: _defaultModel, title: 'Default'),
+        for (final m in models) _Choice(value: m.id, title: m.name),
+      ],
+    );
+    // The list was for this node and agent; drop a pick made after either changed.
+    if (v == null || !mounted || nodeId != _nodeId || agent != _agent) return;
+    setState(() => _model = v == _defaultModel ? null : v);
   }
 
   Future<void> _pickDirectory(List<HistoryProject> projects) async {
@@ -473,6 +538,7 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
 }
 
 const _customValue = '__custom__';
+const _defaultModel = '__default__';
 
 const _completeDebounce = Duration(milliseconds: 300);
 

@@ -20,8 +20,15 @@ class _FakeProjects extends HistoryProjectsViewModel {
 }
 
 class _RecordingSpawnRepo extends FakeSessionRepository {
-  _RecordingSpawnRepo({this.agents = const <AgentInfo>[]});
+  _RecordingSpawnRepo({
+    this.agents = const <AgentInfo>[],
+    this.models = const <String, List<ModelInfo>>{},
+    this.modelsError = false,
+  });
   final List<AgentInfo> agents;
+  final Map<String, List<ModelInfo>> models; // by agent id
+  final bool modelsError;
+  String? spawnedModel;
   String? spawnedPrompt;
   String? spawnedAgent;
   String? spawnedNode;
@@ -31,8 +38,10 @@ class _RecordingSpawnRepo extends FakeSessionRepository {
     String? nodeId,
     String? cwd,
     String? agent,
+    String? model,
     required String prompt,
   }) async {
+    spawnedModel = model;
     spawnedPrompt = prompt;
     spawnedAgent = agent;
     spawnedNode = nodeId;
@@ -43,6 +52,13 @@ class _RecordingSpawnRepo extends FakeSessionRepository {
   @override
   Future<Result<List<AgentInfo>>> listAgents(String? nodeId) async =>
       Result.ok(agents);
+
+  @override
+  Future<Result<List<ModelInfo>>> listModels(
+          String? nodeId, String agent) async =>
+      modelsError
+          ? const Result.error('boom')
+          : Result.ok(models[agent] ?? const <ModelInfo>[]);
 }
 
 class _CompletingRepo extends _RecordingSpawnRepo {
@@ -81,6 +97,7 @@ class _FailingSpawnRepo extends FakeSessionRepository {
     String? nodeId,
     String? cwd,
     String? agent,
+    String? model,
     required String prompt,
   }) async =>
       const Result.error('backend error');
@@ -93,6 +110,7 @@ class _PendingSpawnRepo extends FakeSessionRepository {
     String? nodeId,
     String? cwd,
     String? agent,
+    String? model,
     required String prompt,
   }) =>
       done.future;
@@ -112,6 +130,21 @@ Widget _appWithRepo(SessionRepository repo) => ProviderScope(
       ],
       child: const MaterialApp(home: Scaffold(body: SpawnDialogBody())),
     );
+
+class _LateNodesRepo extends _RecordingSpawnRepo {
+  _LateNodesRepo({super.agents, super.models});
+  final nodeList = Completer<Result<List<NodeRef>>>();
+  @override
+  Future<Result<List<NodeRef>>> nodes() => nodeList.future;
+}
+
+class _SlowModelsRepo extends _RecordingSpawnRepo {
+  _SlowModelsRepo({super.agents});
+  final pending = <String, Completer<Result<List<ModelInfo>>>>{};
+  @override
+  Future<Result<List<ModelInfo>>> listModels(String? nodeId, String agent) =>
+      (pending[agent] = Completer()).future;
+}
 
 void main() {
   testWidgets('Spawn is disabled until a prompt is entered', (tester) async {
@@ -382,6 +415,152 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repo.spawnedAgent, equals('codex'));
+  });
+
+  group('model picker', () {
+    const claude =
+        AgentInfo(id: 'claude', name: 'Claude', color: '#fe8019', spawnable: true);
+    const codex =
+        AgentInfo(id: 'codex', name: 'Codex', color: '#b8bb26', spawnable: true);
+    const claudeModels = [
+      ModelInfo(id: 'opus', name: 'Opus'),
+      ModelInfo(id: 'sonnet', name: 'Sonnet'),
+    ];
+
+    Future<void> open(WidgetTester tester, SessionRepository repo) async {
+      await tester.pumpWidget(_appWithRepo(repo));
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> pick(WidgetTester tester, String shown, String choice) async {
+      await tester.tap(find.text(shown));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(choice));
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> spawnWith(WidgetTester tester) async {
+      await tester.enterText(find.byKey(const Key('spawn-prompt')), 'go');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Spawn'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('sends the chosen model', (tester) async {
+      final repo = _RecordingSpawnRepo(
+          agents: const [claude], models: const {'claude': claudeModels});
+      await open(tester, repo);
+
+      expect(find.text('Model'), findsOneWidget);
+      expect(find.text('Default'), findsOneWidget);
+      await pick(tester, 'Default', 'Sonnet');
+      expect(find.text('Sonnet'), findsOneWidget);
+
+      await spawnWith(tester);
+      expect(repo.spawnedModel, 'sonnet');
+    });
+
+    testWidgets('default sends no model', (tester) async {
+      final repo = _RecordingSpawnRepo(
+          agents: const [claude], models: const {'claude': claudeModels});
+      await open(tester, repo);
+
+      await spawnWith(tester);
+      expect(repo.spawnedModel, isNull);
+    });
+
+    testWidgets('picking Default again clears the model', (tester) async {
+      final repo = _RecordingSpawnRepo(
+          agents: const [claude], models: const {'claude': claudeModels});
+      await open(tester, repo);
+
+      await pick(tester, 'Default', 'Sonnet');
+      await pick(tester, 'Sonnet', 'Default');
+
+      await spawnWith(tester);
+      expect(repo.spawnedModel, isNull);
+    });
+
+    testWidgets('no model list hides the picker', (tester) async {
+      final repo = _RecordingSpawnRepo(agents: const [claude]);
+      await open(tester, repo);
+
+      expect(find.text('Model'), findsNothing);
+      await spawnWith(tester);
+      expect(repo.spawnedModel, isNull);
+    });
+
+    testWidgets('changing agent resets the model', (tester) async {
+      final repo = _RecordingSpawnRepo(agents: const [
+        claude,
+        codex
+      ], models: const {
+        'claude': claudeModels,
+        'codex': [ModelInfo(id: 'gpt-b', name: 'GPT B')],
+      });
+      await open(tester, repo);
+
+      await pick(tester, 'Default', 'Sonnet');
+      await pick(tester, 'Claude', 'Codex');
+
+      expect(find.text('Sonnet'), findsNothing);
+      expect(find.text('Default'), findsOneWidget);
+      await spawnWith(tester);
+      expect(repo.spawnedAgent, 'codex');
+      expect(repo.spawnedModel, isNull);
+    });
+
+    testWidgets('a late reply for the old agent is dropped', (tester) async {
+      final repo = _SlowModelsRepo(agents: const [claude, codex]);
+      await open(tester, repo);
+
+      expect(find.text("Loading models\u2026"), findsOneWidget);
+      await pick(tester, 'Claude', 'Codex');
+      repo.pending['codex']!.complete(
+          const Result.ok([ModelInfo(id: 'gpt-b', name: 'GPT B')]));
+      await tester.pumpAndSettle();
+      repo.pending['claude']!.complete(const Result.ok(claudeModels));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Default'));
+      await tester.pumpAndSettle();
+      expect(find.text('GPT B'), findsOneWidget);
+      expect(find.text('Sonnet'), findsNothing);
+    });
+
+    testWidgets('a pick made while the node changed is dropped',
+        (tester) async {
+      final repo = _LateNodesRepo(
+          agents: const [claude], models: const {'claude': claudeModels});
+      await open(tester, repo);
+
+      await tester.tap(find.text('Default'));
+      await tester.pumpAndSettle();
+      repo.nodeList.complete(const Result.ok([
+        NodeRef('n1', 'one', spawnSupported: true),
+        NodeRef('n2', 'two', spawnSupported: true),
+      ]));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sonnet'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sonnet'), findsNothing);
+      await spawnWith(tester);
+      expect(repo.spawnedNode, 'n1');
+      expect(repo.spawnedModel, isNull);
+    });
+
+    testWidgets('a list error still allows Default', (tester) async {
+      final repo = _RecordingSpawnRepo(
+          agents: const [claude], modelsError: true);
+      await open(tester, repo);
+
+      expect(find.text('Model'), findsOneWidget);
+      expect(find.text('Default'), findsOneWidget);
+      expect(find.text("Couldn't load models"), findsOneWidget);
+      await spawnWith(tester);
+      expect(repo.spawnedModel, isNull);
+    });
   });
 
   testWidgets('node without tmux disables spawn and shows a hint',
