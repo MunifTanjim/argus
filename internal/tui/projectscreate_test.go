@@ -196,8 +196,7 @@ func TestIssueCreateOffersSpawn(t *testing.T) {
 	if !spawnOpen(m) || spawnOf(m).nodeID != "n1" || !spawnOf(m).fixedCwd || cmd == nil {
 		t.Fatalf("y should start the spawn flow on n1 with a fixed cwd: %+v", spawnOf(m))
 	}
-	res, _ = m.Update(spawnAgentsMsg{nodeID: "n1", agents: []api.AgentInfo{{ID: "claude"}}})
-	m = res.(model)
+	m = replyLoneAgent(m, "n1")
 	if spawnOf(m).step != spawnStepPrompt || spawnOf(m).cwd.Value() != "/repo/.worktrees/42-fix" || spawnOf(m).prompt.Value() != "Fix\n\nbody" {
 		t.Errorf("spawn should skip the dir step with the issue prompt: step=%v cwd=%q prompt=%q", spawnOf(m).step, spawnOf(m).cwd.Value(), spawnOf(m).prompt.Value())
 	}
@@ -237,7 +236,7 @@ func TestPresetSpawnShowsWhereItRuns(t *testing.T) {
 	m = closePicker(m)
 	cmd := m.beginPresetSpawn("n1", "/repo/.worktrees/42-fix", "Fix")
 	_ = cmd
-	m, _ = upd(m, spawnAgentsMsg{nodeID: "n1", agents: []api.AgentInfo{{ID: "claude"}}})
+	m = replyLoneAgent(m, "n1")
 	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "in /repo/.worktrees/42-fix") {
 		t.Errorf("the prompt step should show the directory it runs in:\n%s", out)
 	}

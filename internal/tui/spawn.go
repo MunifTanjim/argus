@@ -35,6 +35,7 @@ const (
 	spawnInactive spawnStep = iota
 	spawnStepNode
 	spawnStepAgent
+	spawnStepModel
 	spawnStepDir
 	spawnStepPrompt
 )
@@ -49,9 +50,12 @@ type spawnState struct {
 	nodeID       string                   // chosen node ("" = local/single)
 	agent        string                   // chosen agent id ("" = node default)
 	agents       []api.AgentInfo          // agents launchable on the node; nil while probing
-	cursor       int                      // list cursor (node, agent, and dir steps)
-	filter       filterPrompt             // dir step: editing dirQuery
-	dirQuery     string                   // dir step: shown dirs match this in label or cwd
+	models       []api.ModelInfo          // models the agent offers; nil while loading
+	modelsErr    string                   // why the list could not be loaded
+	model        string                   // chosen model id ("" = the agent's default)
+	cursor       int                      // list cursor (node, agent, model, and dir steps)
+	filter       filterPrompt             // model and dir steps: editing query
+	query        string                   // model and dir steps: shown rows match this
 	custom       bool                     // dir step: free-text path entry active
 	dirsSeq      int                      // custom path edits; only the latest one's completion request fires
 	cwd          textinput.Model          // resolved working directory
@@ -77,7 +81,7 @@ func newSpawnPromptArea() textarea.Model {
 }
 
 func (s spawnState) shownDirs() []session.HistoryProject {
-	q := strings.ToLower(s.dirQuery)
+	q := strings.ToLower(s.query)
 	if q == "" {
 		return s.dirs
 	}
@@ -90,6 +94,24 @@ func (s spawnState) shownDirs() []session.HistoryProject {
 	return out
 }
 
+func (s spawnState) shownModels() []api.ModelInfo {
+	q := strings.ToLower(s.query)
+	if q == "" {
+		return s.models
+	}
+	var out []api.ModelInfo
+	for _, mi := range s.models {
+		if strings.Contains(strings.ToLower(mi.Name), q) {
+			out = append(out, mi)
+		}
+	}
+	return out
+}
+
+// modelCursorMax is the model-step selectable row count: "Default" plus one
+// per shown model.
+func (s spawnState) modelCursorMax() int { return len(s.shownModels()) + 1 }
+
 // dirCursorMax is the dir-step selectable row count: one per shown project
 // plus the trailing "Custom path…" row.
 func (s spawnState) dirCursorMax() int { return len(s.shownDirs()) + 1 }
@@ -98,6 +120,6 @@ func (s spawnState) dirCursorMax() int { return len(s.shownDirs()) + 1 }
 func (s *spawnState) enterDirStep() {
 	s.step = spawnStepDir
 	s.dirs = projectsForNode(s.allProjects, s.nodeID)
-	s.dirQuery, s.filter = "", filterPrompt{}
+	s.query, s.filter = "", filterPrompt{}
 	s.cursor = 0
 }

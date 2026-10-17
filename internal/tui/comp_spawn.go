@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -87,13 +88,26 @@ func (s *spawnComp) startAgentStep(c *ctx) tea.Cmd {
 
 func (s *spawnComp) enterPrompt(c *ctx) tea.Cmd {
 	s.step = spawnStepPrompt
+	s.query, s.filter = "", filterPrompt{} // a filter opened on the step before stays behind
 	s.prompt = newSpawnPromptArea()
 	s.prompt.SetWidth(historyWidth(c.m.bodyWidth()))
 	s.prompt.SetHeight(max(1, c.m.bodyHeight()-6))
 	return s.prompt.Focus()
 }
 
+// An agent-less spawn has no models to ask about.
 func (s *spawnComp) afterAgentStep(c *ctx) tea.Cmd {
+	if s.agent == "" {
+		return s.afterModelStep(c)
+	}
+	s.step = spawnStepModel
+	s.models, s.modelsErr, s.model = nil, "", "" // loading
+	s.query, s.filter = "", filterPrompt{}
+	s.cursor = 0
+	return c.m.fetchSpawnModels(s.nodeID, s.agent)
+}
+
+func (s *spawnComp) afterModelStep(c *ctx) tea.Cmd {
 	if !s.fixedCwd {
 		s.enterDirStep()
 		if len(s.dirs) == 0 {
@@ -143,6 +157,19 @@ func (s spawnComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 			return s, cmd
 		}
 		s.agents = msg.agents // cursor stays 0 (set by startAgentStep; frozen while loading)
+	case spawnModelsMsg:
+		if s.step != spawnStepModel || msg.nodeID != s.nodeID || msg.agent != s.agent {
+			return s, nil // the flow moved on, or the reply is for another node or agent
+		}
+		switch {
+		case msg.err != nil:
+			s.modelsErr = msg.err.Error()
+		case len(msg.models) == 0:
+			cmd := s.afterModelStep(c)
+			return s, cmd
+		default:
+			s.models = msg.models
+		}
 	case spawnDirsDueMsg:
 		if s.step == spawnStepDir && s.custom && msg.seq == s.dirsSeq {
 			return s, c.m.fetchSpawnDirs(s.nodeID, s.cwd.Value())
@@ -205,9 +232,9 @@ func (s *spawnComp) listKey(c *ctx, msg tea.KeyPressMsg, n int) bool {
 func (s spawnComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
 	if s.filter.on {
 		var cmd tea.Cmd
-		s.filter, cmd, s.dirQuery = s.filter.handleKey(msg)
-		s.dirQuery = strings.TrimSpace(s.dirQuery)
-		s.cursor = min(s.cursor, cursorBottom(s.dirCursorMax()))
+		s.filter, cmd, s.query = s.filter.handleKey(msg)
+		s.query = strings.TrimSpace(s.query)
+		s.cursor = min(s.cursor, cursorBottom(s.choices()))
 		return s, cmd, true
 	}
 	// Typed keys stay literal, so only esc leaves while typing.
@@ -216,9 +243,9 @@ func (s spawnComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, b
 		back = c.m.matches(msg, listKeys.Back)
 	}
 	switch {
-	case back && s.step == spawnStepDir && !s.custom && s.dirQuery != "":
+	case back && s.query != "" && (s.step == spawnStepModel || s.step == spawnStepDir && !s.custom):
 		// A kept filter clears first, as in every other list.
-		s.dirQuery, s.cursor = "", 0
+		s.query, s.cursor = "", 0
 		return s, nil, true
 	case back:
 		s.end(c)
@@ -247,6 +274,18 @@ func (s spawnComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, b
 				cmd = s.afterAgentStep(c)
 			}
 		}
+	case spawnStepModel:
+		if c.m.matches(msg, spawnKeys.Filter) {
+			s.filter, cmd = s.filter.start(s.query)
+			break
+		}
+		if s.listKey(c, msg, s.modelCursorMax()) {
+			s.model = ""
+			if models := s.shownModels(); s.cursor > 0 && s.cursor-1 < len(models) {
+				s.model = models[s.cursor-1].ID
+			}
+			cmd = s.afterModelStep(c)
+		}
 	case spawnStepDir:
 		if s.custom {
 			if msg.String() == "enter" {
@@ -259,7 +298,7 @@ func (s spawnComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, b
 			break
 		}
 		if c.m.matches(msg, spawnKeys.Filter) {
-			s.filter, cmd = s.filter.start(s.dirQuery)
+			s.filter, cmd = s.filter.start(s.query)
 			break
 		}
 		if s.listKey(c, msg, s.dirCursorMax()) {
@@ -277,7 +316,9 @@ func (s spawnComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, b
 				break // mandatory: don't spawn without a prompt
 			}
 			s.end(c)
-			cmd = c.m.spawnCmd(strings.TrimSpace(s.cwd.Value()), s.nodeID, s.agent, s.prompt.Value())
+			cmd = c.m.spawnCmd(api.SpawnParams{
+				NodeID: s.nodeID, Cwd: strings.TrimSpace(s.cwd.Value()), Agent: s.agent, Model: s.model, Prompt: s.prompt.Value(),
+			})
 			break
 		}
 		s.prompt, cmd = s.prompt.Update(msg)
@@ -307,6 +348,8 @@ func (s spawnComp) choices() int {
 		return len(s.nodes)
 	case s.step == spawnStepAgent:
 		return len(s.agents)
+	case s.step == spawnStepModel:
+		return s.modelCursorMax()
 	case s.step == spawnStepDir && !s.custom:
 		return s.dirCursorMax()
 	}
@@ -343,6 +386,28 @@ func (s spawnComp) view(c *ctx, w, h int) string {
 		}
 		body = StyleSecondaryBold.Render("Which agent?") + "\n\n" +
 			renderCardList(c.below(4), "spawn", cards, s.cursor, max(1, avail-2))
+	case spawnStepModel:
+		cards := []string{spawnChoiceRow("Default", "", s.cursor == 0, cardW)}
+		for i, mi := range s.shownModels() {
+			cards = append(cards, spawnChoiceRow(mi.Name, "", i+1 == s.cursor, cardW))
+		}
+		head, rows := s.filterHead("Which model?")
+		var status string
+		switch {
+		case s.modelsErr != "":
+			first, _, _ := strings.Cut(s.modelsErr, "\n")
+			status = xansi.Truncate("couldn't load models: "+strings.TrimRight(first, "\r"), cardW, "…")
+		case s.models == nil:
+			status = "Loading models…"
+		}
+		listRows := avail - rows
+		if status != "" {
+			listRows-- // the status line under the list
+		}
+		body = head + "\n\n" + renderCardList(c.below(2+rows), "spawn", cards, s.cursor, max(1, listRows))
+		if status != "" {
+			body += "\n" + dimStyle.Render(status)
+		}
 	case spawnStepDir:
 		if s.custom {
 			ci := s.cwd
@@ -357,14 +422,7 @@ func (s spawnComp) view(c *ctx, w, h int) string {
 			cards = append(cards, spawnChoiceRow(p.Label, p.Cwd, i == s.cursor, cardW))
 		}
 		cards = append(cards, spawnChoiceRow("Custom path…", "", s.cursor == len(dirs), cardW))
-		head := StyleSecondaryBold.Render("Choose a directory")
-		switch {
-		case s.filter.on:
-			head += "\n" + s.filter.view()
-		case s.dirQuery != "":
-			head += dimStyle.Render("  /" + s.dirQuery)
-		}
-		rows := strings.Count(head, "\n") + 2 // head and the blank line
+		head, rows := s.filterHead("Choose a directory")
 		body = head + "\n\n" +
 			renderCardList(c.below(2+rows), "spawn", cards, s.cursor, max(1, avail-rows))
 	case spawnStepPrompt:
@@ -410,6 +468,19 @@ func (s spawnComp) dirSuggestionsView(w, rows int) string {
 	return b.String()
 }
 
+// filterHead is a filterable step's title with its filter prompt or kept query,
+// and the rows it takes with the blank line under it.
+func (s spawnComp) filterHead(title string) (string, int) {
+	head := StyleSecondaryBold.Render(title)
+	switch {
+	case s.filter.on:
+		head += "\n" + s.filter.view()
+	case s.query != "":
+		head += dimStyle.Render("  /" + s.query)
+	}
+	return head, strings.Count(head, "\n") + 2
+}
+
 func (s spawnComp) footerText(c *ctx) string {
 	switch {
 	case s.step == spawnStepAgent && s.agents == nil:
@@ -418,9 +489,9 @@ func (s spawnComp) footerText(c *ctx) string {
 		return dimStyle.Render("type a path · tab complete · ↑/↓ cycle · enter confirm · esc cancel")
 	case s.step == spawnStepPrompt:
 		return dimStyle.Render("enter launch · shift+enter/^j newline · esc cancel")
-	case s.step == spawnStepDir:
+	case s.step == spawnStepDir || s.step == spawnStepModel:
 		esc := "esc cancel"
-		if s.dirQuery != "" {
+		if s.query != "" {
 			esc = "esc clear filter"
 		}
 		return dimStyle.Render("↑/↓ move · " + c.m.keyTextOn(s.section(), spawnKeys.Filter) + " filter · enter select · " + esc)
