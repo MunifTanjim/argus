@@ -112,8 +112,8 @@ func (agAdapter) Install(opts adapter.InstallOptions) error {
 	return Install(opts.ArgusBin, DefaultHookEvents)
 }
 
-func (agAdapter) ReconcileIfInstalled(opts adapter.InstallOptions) ([]string, error) {
-	return ReconcileIfInstalled(opts.ArgusBin)
+func (agAdapter) Reconcile(opts adapter.InstallOptions) ([]string, error) {
+	return Reconcile(opts.ArgusBin)
 }
 
 func (agAdapter) Uninstall() error { return Uninstall() }

@@ -246,13 +246,3 @@ func TestWatchParentStopsOnEOF(t *testing.T) {
 		t.Fatal("did not stop after EOF")
 	}
 }
-
-func TestHookBin(t *testing.T) {
-	if got := hookBin(true); got != "" {
-		t.Errorf("managed hookBin = %q, want empty (keep the installed path)", got)
-	}
-	exe, _ := os.Executable()
-	if got := hookBin(false); got != exe {
-		t.Errorf("hookBin = %q, want %q", got, exe)
-	}
-}

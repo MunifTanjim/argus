@@ -175,7 +175,7 @@ func (a *cxAdapter) RenameSession(ctx context.Context, sess session.Session, nam
 // Codex needs no argus-managed config. Node start strips hooks older argus
 // versions installed; `argus hooks uninstall` still removes them too.
 func (cxAdapter) Install(adapter.InstallOptions) error { return nil }
-func (cxAdapter) ReconcileIfInstalled(adapter.InstallOptions) ([]string, error) {
+func (cxAdapter) Reconcile(adapter.InstallOptions) ([]string, error) {
 	return nil, Uninstall()
 }
 func (cxAdapter) Uninstall() error              { return Uninstall() }

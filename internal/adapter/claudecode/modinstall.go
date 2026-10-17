@@ -327,9 +327,8 @@ func configuredSocket() string {
 	return cfg[pluginID].Options.Socket
 }
 
-// reconcileMod migrates old hooks to the mod, updates a stale mod and moves it
-// to a new socket, but never installs for a user who opted into neither. Old
-// hooks that must stay are refreshed to opts.ArgusBin.
+// reconcileMod installs or updates the mod, migrating old hooks and moving it
+// to a new socket. Old hooks that must stay are refreshed to opts.ArgusBin.
 func reconcileMod(ctx context.Context, opts adapter.InstallOptions) ([]string, error) {
 	hooks, err := loadHooks()
 	if err != nil && !os.IsNotExist(err) {
@@ -342,14 +341,9 @@ func reconcileMod(ctx context.Context, opts adapter.InstallOptions) ([]string, e
 		// user's): leave the mod with it.
 		socket = ""
 	}
-	if !legacy {
-		if _, statErr := os.Stat(marketplaceDir()); errors.Is(statErr, fs.ErrNotExist) {
-			return nil, nil
-		}
-		// The current mod was written and the socket stayed: skip the claude calls.
-		if stampedVersion() == modVersion() && (socket == "" || configured == socket) {
-			return nil, nil
-		}
+	// The current mod was written and the socket stayed: skip the claude calls.
+	if !legacy && stampedVersion() == modVersion() && (socket == "" || configured == socket) {
+		return nil, nil
 	}
 	unlock, err := lockMod()
 	if err != nil {
@@ -360,6 +354,9 @@ func reconcileMod(ctx context.Context, opts adapter.InstallOptions) ([]string, e
 		if legacy {
 			return refreshLegacyHooks(opts.ArgusBin, errors.New("claude is not on argusd's PATH, so the old settings hooks cannot be replaced with the argus mod; run `argus hooks install`"))
 		}
+		if _, statErr := os.Stat(marketplaceDir()); errors.Is(statErr, fs.ErrNotExist) {
+			return nil, adapter.ErrAgentNotInstalled
+		}
 		return nil, errors.New("claude is not on argusd's PATH, so the argus plugin cannot be updated; run `argus hooks install`")
 	}
 	if err := checkClaude(ctx); err != nil {
@@ -369,16 +366,14 @@ func reconcileMod(ctx context.Context, opts adapter.InstallOptions) ([]string, e
 	if err != nil {
 		return nil, err
 	}
-	if !legacy {
-		if !installed {
-			return nil, nil
+	if !installed {
+		// A live socket left in settings by a removed mod does not own it.
+		socket = opts.Socket
+	} else if !legacy && version == modVersion() {
+		if moved, err := reapplySocket(ctx, socket); err != nil || !moved {
+			return nil, err
 		}
-		if version == modVersion() {
-			if moved, err := reapplySocket(ctx, socket); err != nil || !moved {
-				return nil, err
-			}
-			return []string{"argus mod socket " + socket}, nil
-		}
+		return []string{"argus mod socket " + socket}, nil
 	}
 	if err := applyMod(ctx, socket, version, installed); err != nil {
 		return nil, err

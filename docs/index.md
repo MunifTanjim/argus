@@ -69,14 +69,11 @@ features:
 
 ## Get started
 
-Install Argus on macOS or Linux, connect your agents, and open the TUI:
+Install Argus on macOS or Linux and open the TUI:
 
 ```sh
 # install the latest release
 curl -fsSL https://argus.muniftanjim.dev/install.sh | bash
-
-# connect Argus to your agents
-argus hooks install
 
 # open the TUI
 argus

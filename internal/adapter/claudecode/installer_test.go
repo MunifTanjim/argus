@@ -183,31 +183,19 @@ func TestInstallWithoutClaudeIsNotInstalled(t *testing.T) {
 	}
 }
 
-func TestReconcileDoesNothingWhenNeverInstalled(t *testing.T) {
+func TestReconcileInstallsWhenNeverInstalled(t *testing.T) {
 	seedSettings(t, `{}`)
 	f := &fakeClaude{version: "2.1.296", marketplaces: "[]", plugins: "[]"}
 	installFake(t, f)
-	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{})
-	if err != nil || len(changed) != 0 {
-		t.Fatalf("ReconcileIfInstalled = %v, %v; want nothing", changed, err)
+	changed, err := New().Reconcile(adapter.InstallOptions{Socket: "/run/argus/mod.sock"})
+	if err != nil || len(changed) == 0 {
+		t.Fatalf("Reconcile = %v, %v; want an install", changed, err)
 	}
-	for _, c := range f.calls {
-		if strings.HasPrefix(c, "plugin install") || strings.HasPrefix(c, "plugin marketplace add") {
-			t.Fatalf("reconcile installed without opt-in: %v", f.calls)
-		}
+	if !slices.Contains(f.calls, "plugin install argus@argus --config socket=/run/argus/mod.sock") {
+		t.Fatalf("calls = %v; want the mod installed", f.calls)
 	}
-}
-
-func TestReconcileSpawnsNothingWhenNeverInstalled(t *testing.T) {
-	seedSettings(t, `{}`)
-	f := &fakeClaude{version: "2.1.296", marketplaces: "[]", plugins: "[]"}
-	installFake(t, f)
-	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{})
-	if err != nil || len(changed) != 0 {
-		t.Fatalf("ReconcileIfInstalled = %v, %v; want nothing", changed, err)
-	}
-	if len(f.calls) != 0 {
-		t.Fatalf("claude called: %v", f.calls)
+	if stampedVersion() != modVersion() {
+		t.Fatal("a fresh install must be stamped")
 	}
 }
 
@@ -219,9 +207,9 @@ func TestReconcileIgnoresNonUserScopeRows(t *testing.T) {
 	if err := os.MkdirAll(marketplaceDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{})
+	changed, err := New().Reconcile(adapter.InstallOptions{})
 	if err != nil || len(changed) != 0 {
-		t.Fatalf("ReconcileIfInstalled = %v, %v; want nothing", changed, err)
+		t.Fatalf("Reconcile = %v, %v; want nothing", changed, err)
 	}
 }
 
@@ -229,9 +217,9 @@ func TestReconcileMigratesLegacyHooks(t *testing.T) {
 	path := seedSettings(t, legacyAndUserHooks)
 	f := &fakeClaude{version: "2.1.296", marketplaces: "[]", plugins: "[]"}
 	installFake(t, f)
-	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/run/argus/mod.sock"})
+	changed, err := New().Reconcile(adapter.InstallOptions{Socket: "/run/argus/mod.sock"})
 	if err != nil || len(changed) == 0 {
-		t.Fatalf("ReconcileIfInstalled = %v, %v; want a migration", changed, err)
+		t.Fatalf("Reconcile = %v, %v; want a migration", changed, err)
 	}
 	b, _ := os.ReadFile(path)
 	if strings.Contains(string(b), "argus hook") {
@@ -252,7 +240,7 @@ func TestReconcileReportsLegacyHooksWithoutClaude(t *testing.T) {
 	f := &fakeClaude{}
 	installFake(t, f)
 	claudeOnPath = func() bool { return false }
-	_, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/run/argus/mod.sock"})
+	_, err := New().Reconcile(adapter.InstallOptions{Socket: "/run/argus/mod.sock"})
 	if err == nil || !strings.Contains(err.Error(), "PATH") {
 		t.Fatalf("err = %v, want it to name the missing claude", err)
 	}
@@ -261,12 +249,16 @@ func TestReconcileReportsLegacyHooksWithoutClaude(t *testing.T) {
 	}
 }
 
-func TestReconcileWithoutClaudeOrLegacyHooksIsQuiet(t *testing.T) {
+func TestReconcileWithoutClaudeOrLegacyHooksIsNotInstalled(t *testing.T) {
 	seedSettings(t, `{}`)
-	installFake(t, &fakeClaude{})
+	f := &fakeClaude{}
+	installFake(t, f)
 	claudeOnPath = func() bool { return false }
-	if changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{}); err != nil || len(changed) != 0 {
-		t.Fatalf("ReconcileIfInstalled = %v, %v; want nothing", changed, err)
+	if changed, err := New().Reconcile(adapter.InstallOptions{Socket: "/run/argus/mod.sock"}); !errors.Is(err, adapter.ErrAgentNotInstalled) || len(changed) != 0 {
+		t.Fatalf("Reconcile = %v, %v; want ErrAgentNotInstalled", changed, err)
+	}
+	if len(f.calls) != 0 {
+		t.Fatalf("claude called: %v", f.calls)
 	}
 }
 
@@ -274,9 +266,9 @@ func TestReconcileWithoutSocketDoesNotInstall(t *testing.T) {
 	path := seedSettings(t, legacyAndUserHooks)
 	f := &fakeClaude{version: "2.1.296", marketplaces: "[]", plugins: "[]"}
 	installFake(t, f)
-	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{})
+	changed, err := New().Reconcile(adapter.InstallOptions{})
 	if err == nil {
-		t.Fatalf("ReconcileIfInstalled = %v, nil; want an error for a fresh install with no socket", changed)
+		t.Fatalf("Reconcile = %v, nil; want an error for a fresh install with no socket", changed)
 	}
 	for _, c := range f.calls {
 		if strings.HasPrefix(c, "plugin install") {
@@ -299,9 +291,9 @@ func TestReconcileSkipsClaudeWhenMarketplaceIsCurrent(t *testing.T) {
 	if err := stampInstalled(); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/run/argus/mod.sock"})
+	changed, err := New().Reconcile(adapter.InstallOptions{Socket: "/run/argus/mod.sock"})
 	if err != nil || len(changed) != 0 {
-		t.Fatalf("ReconcileIfInstalled = %v, %v; want nothing", changed, err)
+		t.Fatalf("Reconcile = %v, %v; want nothing", changed, err)
 	}
 	if len(f.calls) != 0 {
 		t.Fatalf("claude called: %v", f.calls)
@@ -330,9 +322,9 @@ const currentUserPlugin = `[{"id":"argus@argus","scope":"user","version":"%s"}]`
 func TestReconcileReappliesChangedSocket(t *testing.T) {
 	seedSettings(t, socketSettings("/tmp/argus-1/mod.sock"))
 	f := currentModFake(t, strings.Replace(currentUserPlugin, "%s", modVersion(), 1))
-	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/tmp/argus-2/mod.sock"})
+	changed, err := New().Reconcile(adapter.InstallOptions{Socket: "/tmp/argus-2/mod.sock"})
 	if err != nil || len(changed) == 0 {
-		t.Fatalf("ReconcileIfInstalled = %v, %v; want a change", changed, err)
+		t.Fatalf("Reconcile = %v, %v; want a change", changed, err)
 	}
 	want := []string{"--version", "plugin list --json", "plugin configure argus@argus --values-stdin"}
 	if strings.Join(f.calls, "|") != strings.Join(want, "|") {
@@ -346,30 +338,28 @@ func TestReconcileReappliesChangedSocket(t *testing.T) {
 func TestReconcileKeepsMatchingSocket(t *testing.T) {
 	seedSettings(t, socketSettings("/tmp/argus-1/mod.sock"))
 	f := currentModFake(t, strings.Replace(currentUserPlugin, "%s", modVersion(), 1))
-	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/tmp/argus-1/mod.sock"})
+	changed, err := New().Reconcile(adapter.InstallOptions{Socket: "/tmp/argus-1/mod.sock"})
 	if err != nil || len(changed) != 0 || len(f.calls) != 0 {
 		t.Fatalf("got %v, %v, calls %v; want nothing", changed, err, f.calls)
 	}
 }
 
-func TestReconcileChangedSocketSkipsWhenPluginNotInstalled(t *testing.T) {
+func TestReconcileReinstallsRemovedPlugin(t *testing.T) {
 	seedSettings(t, socketSettings("/tmp/argus-1/mod.sock"))
 	f := currentModFake(t, `[{"id":"argus@argus","scope":"project","version":"x"}]`)
-	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/tmp/argus-2/mod.sock"})
-	if err != nil || len(changed) != 0 {
-		t.Fatalf("got %v, %v; want nothing", changed, err)
+	changed, err := New().Reconcile(adapter.InstallOptions{Socket: "/tmp/argus-2/mod.sock"})
+	if err != nil || len(changed) == 0 {
+		t.Fatalf("got %v, %v; want an install", changed, err)
 	}
-	for _, c := range f.calls {
-		if strings.HasPrefix(c, "plugin configure") {
-			t.Fatalf("configured an absent plugin: %v", f.calls)
-		}
+	if !slices.Contains(f.calls, "plugin install argus@argus --config socket=/tmp/argus-2/mod.sock") {
+		t.Fatalf("calls = %v; want the mod installed on the new socket", f.calls)
 	}
 }
 
 func TestReconcileEmptySocketMakesNoCalls(t *testing.T) {
 	seedSettings(t, socketSettings("/tmp/argus-1/mod.sock"))
 	f := currentModFake(t, strings.Replace(currentUserPlugin, "%s", modVersion(), 1))
-	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{})
+	changed, err := New().Reconcile(adapter.InstallOptions{})
 	if err != nil || len(changed) != 0 || len(f.calls) != 0 {
 		t.Fatalf("got %v, %v, calls %v; want nothing", changed, err, f.calls)
 	}
@@ -382,9 +372,9 @@ func TestReconcileUpdatesStaleMod(t *testing.T) {
 	if err := os.MkdirAll(marketplaceDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{})
+	changed, err := New().Reconcile(adapter.InstallOptions{})
 	if err != nil || len(changed) == 0 {
-		t.Fatalf("ReconcileIfInstalled = %v, %v; want an update", changed, err)
+		t.Fatalf("Reconcile = %v, %v; want an update", changed, err)
 	}
 	if !strings.Contains(strings.Join(f.calls, "\n"), "plugin update argus@argus") {
 		t.Fatalf("calls = %v", f.calls)
@@ -398,9 +388,9 @@ func TestReconcileLeavesCurrentModAlone(t *testing.T) {
 	if err := os.MkdirAll(marketplaceDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{})
+	changed, err := New().Reconcile(adapter.InstallOptions{})
 	if err != nil || len(changed) != 0 {
-		t.Fatalf("ReconcileIfInstalled = %v, %v; want nothing", changed, err)
+		t.Fatalf("Reconcile = %v, %v; want nothing", changed, err)
 	}
 }
 
@@ -442,16 +432,16 @@ func TestFailedMigrationIsRetried(t *testing.T) {
 	path := seedSettings(t, legacyAndUserHooks)
 	f := &fakeClaude{version: "2.1.296", marketplaces: "[]", plugins: "[]", fail: "plugin install argus@argus --config socket=/run/argus/mod.sock"}
 	installFake(t, f)
-	if _, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/run/argus/mod.sock"}); err == nil {
+	if _, err := New().Reconcile(adapter.InstallOptions{Socket: "/run/argus/mod.sock"}); err == nil {
 		t.Fatal("reconcile must report the failed install")
 	}
 	if b, _ := os.ReadFile(path); !strings.Contains(string(b), "argus hook") {
 		t.Fatal("a failed install must keep the old hooks")
 	}
 	f.fail, f.calls = "", nil
-	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/run/argus/mod.sock"})
+	changed, err := New().Reconcile(adapter.InstallOptions{Socket: "/run/argus/mod.sock"})
 	if err != nil || len(changed) == 0 {
-		t.Fatalf("ReconcileIfInstalled = %v, %v; want the migration retried", changed, err)
+		t.Fatalf("Reconcile = %v, %v; want the migration retried", changed, err)
 	}
 	if b, _ := os.ReadFile(path); strings.Contains(string(b), "argus hook") {
 		t.Fatal("the retried migration must remove the old hooks")
@@ -466,11 +456,11 @@ func TestFailedUpdateIsRetried(t *testing.T) {
 	if err := os.MkdirAll(marketplaceDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/run/argus/mod.sock"}); err == nil {
+	if _, err := New().Reconcile(adapter.InstallOptions{Socket: "/run/argus/mod.sock"}); err == nil {
 		t.Fatal("reconcile must report the failed update")
 	}
 	f.fail, f.calls = "", nil
-	if _, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/run/argus/mod.sock"}); err != nil {
+	if _, err := New().Reconcile(adapter.InstallOptions{Socket: "/run/argus/mod.sock"}); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(f.calls, "plugin update argus@argus") {
@@ -510,7 +500,7 @@ func TestReconcileRefreshesHooksWithoutClaude(t *testing.T) {
 	path := seedSettings(t, legacyAndUserHooks)
 	installFake(t, &fakeClaude{})
 	claudeOnPath = func() bool { return false }
-	_, err := New().ReconcileIfInstalled(adapter.InstallOptions{ArgusBin: "/new/argus", Socket: "/run/argus/mod.sock"})
+	_, err := New().Reconcile(adapter.InstallOptions{ArgusBin: "/new/argus", Socket: "/run/argus/mod.sock"})
 	if err == nil || !strings.Contains(err.Error(), "PATH") {
 		t.Fatalf("err = %v, want it to name the missing claude", err)
 	}
@@ -526,7 +516,7 @@ func TestReconcileReportsStaleModWithoutClaude(t *testing.T) {
 	if err := os.MkdirAll(marketplaceDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := New().ReconcileIfInstalled(adapter.InstallOptions{}); err == nil || !strings.Contains(err.Error(), "PATH") {
+	if _, err := New().Reconcile(adapter.InstallOptions{}); err == nil || !strings.Contains(err.Error(), "PATH") {
 		t.Fatalf("err = %v, want it to name the missing claude", err)
 	}
 }
@@ -560,7 +550,7 @@ func TestReconcileLeavesSocketOfLiveNode(t *testing.T) {
 	t.Cleanup(func() { l.Close() })
 	seedSettings(t, socketSettings(live))
 	f := currentModFake(t, strings.Replace(currentUserPlugin, "%s", modVersion(), 1))
-	changed, err := New().ReconcileIfInstalled(adapter.InstallOptions{Socket: "/tmp/argus-dev/mod.sock"})
+	changed, err := New().Reconcile(adapter.InstallOptions{Socket: "/tmp/argus-dev/mod.sock"})
 	if err != nil || len(changed) != 0 || len(f.calls) != 0 {
 		t.Fatalf("got %v, %v, calls %v; want the live node's socket kept", changed, err, f.calls)
 	}

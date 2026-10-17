@@ -14,8 +14,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/shell"
 )
 
-// newHooksCmd builds `argus hooks install|uninstall`, the opt-in command that
-// writes/removes argus's Claude Code hooks in settings.json.
+// newHooksCmd: node start installs the integrations too; install is the
+// foreground retry that reports errors.
 func newHooksCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "hooks",
@@ -36,7 +36,6 @@ func newHooksCmd() *cobra.Command {
 }
 
 func newHooksInstallCmd() *cobra.Command {
-	var bin string
 	cmd := &cobra.Command{
 		Use:           "install",
 		Short:         "Install argus's agent integrations (hooks, Claude Code plugin)",
@@ -44,15 +43,11 @@ func newHooksInstallCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			argusBin := bin
-			if argusBin == "" {
-				argusBin = detectArgusBin()
-			}
 			cfg, err := resolveConfig(cmd)
 			if err != nil {
 				return fail(cmd, err)
 			}
-			opts := adapter.InstallOptions{ArgusBin: argusBin, Socket: node.ModSocketPath(cfg.Socket)}
+			opts := adapter.InstallOptions{ArgusBin: cfg.Bin, Socket: node.ModSocketPath(cfg.Socket)}
 			hooked, failed := false, false
 			for _, a := range adapters.All() {
 				path, err := a.SettingsPath()
@@ -88,7 +83,7 @@ func newHooksInstallCmd() *cobra.Command {
 				}
 			}
 			if hooked {
-				fmt.Printf("  command: %s hook <event>\n", argusBin)
+				fmt.Printf("  command: %s hook <event>\n", cfg.Bin)
 			}
 			if failed {
 				return errSilent // each failure was already printed
@@ -97,7 +92,7 @@ func newHooksInstallCmd() *cobra.Command {
 		},
 	}
 	addSocketFlag(cmd.Flags())
-	cmd.Flags().StringVar(&bin, "bin", "", "path to the argus binary the hooks invoke (default: auto-detect)")
+	cmd.Flags().String("bin", "", "argus binary the hooks invoke (default: argus) [$ARGUS_BIN]")
 	return cmd
 }
 
@@ -133,6 +128,7 @@ func newHooksUninstallCmd() *cobra.Command {
 			if failed {
 				return errSilent // each failure was already printed
 			}
+			fmt.Println("argus installs them again the next time it starts")
 			return nil
 		},
 	}
@@ -141,11 +137,4 @@ func newHooksUninstallCmd() *cobra.Command {
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
-}
-
-func detectArgusBin() string {
-	if exe, err := os.Executable(); err == nil {
-		return exe
-	}
-	return "argus"
 }

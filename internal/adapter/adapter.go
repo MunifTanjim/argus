@@ -212,7 +212,8 @@ type Adapter interface {
 	PrepareTextInput(ctx context.Context, pc PaneController, paneID string) error
 
 	Install(opts InstallOptions) error
-	ReconcileIfInstalled(opts InstallOptions) (added []string, err error)
+	// Reconcile installs or updates the integration; cheap when nothing changed.
+	Reconcile(opts InstallOptions) (added []string, err error)
 	Uninstall() error
 	SettingsPath() (string, error)
 	DefaultHookEvents() []string

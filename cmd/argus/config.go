@@ -37,6 +37,7 @@ func newConfigDirCmd() *cobra.Command {
 // the corresponding env var and config-file value.
 var flagKeys = map[string]string{
 	"socket":                 "socket",
+	"bin":                    "bin",
 	"gateway":                "gateway.url",
 	"token":                  "token",
 	"listen-addr":            "gateway.listen-addr",

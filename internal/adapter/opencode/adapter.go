@@ -147,7 +147,7 @@ func (a *ocAdapter) Respond(ctx context.Context, sess session.Session, p api.Res
 
 // OpenCode needs no argus-managed config.
 func (ocAdapter) Install(adapter.InstallOptions) error { return nil }
-func (ocAdapter) ReconcileIfInstalled(adapter.InstallOptions) ([]string, error) {
+func (ocAdapter) Reconcile(adapter.InstallOptions) ([]string, error) {
 	return nil, nil
 }
 func (ocAdapter) Uninstall() error              { return nil }
