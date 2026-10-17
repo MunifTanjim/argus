@@ -11,10 +11,13 @@ import (
 
 // -- Key handling -------------------------------------------------------------
 
-// promptReady reports whether a prompt can be sent to s now: the node takes
-// one only between turns, and a starting session is still at a startup gate.
-func promptReady(s session.Session) bool {
-	return s.Status != session.StatusStarting && s.ReadyForPrompt()
+// A session between turns with nothing pending is blocked only by a node too
+// old to send can_prompt.
+func sendBlockedReason(s session.Session) string {
+	if s.Status == session.StatusWorking || s.Status == session.StatusStarting || s.InteractionPending() {
+		return "wait for idle to send"
+	}
+	return "node too old to take prompts"
 }
 
 // handleIdleKey composes a free-text prompt, sent on submit once the session is
@@ -25,8 +28,8 @@ func (d dockComp) handleIdleKey(c *ctx, msg tea.KeyPressMsg) (dockComp, tea.Cmd)
 	}
 	if c.m.matches(msg, promptKeys.Submit) {
 		id := c.m.liveSessionID()
-		if !promptReady(c.m.sessions[id]) {
-			c.setFlash("wait for idle to send")
+		if s := c.m.sessions[id]; !s.CanPrompt {
+			c.setFlash(sendBlockedReason(s))
 			return d, nil
 		}
 		txt := strings.TrimSpace(d.reply.Value())

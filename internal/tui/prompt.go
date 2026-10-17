@@ -10,6 +10,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
+	xansi "github.com/charmbracelet/x/ansi"
+
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
@@ -449,7 +451,7 @@ func (d dockComp) promptLinesWidth(c *ctx, width int) ([]string, int, int) {
 		if s := c.m.sessions[c.m.liveSessionID()]; !s.AcceptsInput() {
 			return respondElsewhereLines(s), 0, 0
 		}
-		return d.idleLines()
+		return d.idleLines(c, width)
 	}
 	ix := c.m.interaction()
 
@@ -672,11 +674,31 @@ func (d dockComp) rejectInput(ix *session.Interaction, width int) string {
 	return userStyle.Render(promptMarker) + ti.View()
 }
 
-// idleLines renders the focused input. It is sized in the update path
+// idleLines renders the focused input, the anchor and the pinned control
+// block. It is sized in the update path
 // (sizeIdleReply): resizing here would mutate the shared viewport pointer and
 // scroll the next keypress.
-func (d dockComp) idleLines() ([]string, int, int) {
-	return markLines(strings.Split(d.reply.View(), "\n")), 0, 0
+func (d dockComp) idleLines(c *ctx, width int) ([]string, int, int) {
+	q := queueLines(c.m.liveQueue(), width)
+	lines := append(q, markLines(strings.Split(d.reply.View(), "\n"))...)
+	return lines, len(q), len(q)
+}
+
+const queuedMarker = "  ⧗ "
+
+const maxQueueLines = 3
+
+func queueLines(q []transcript.QueuedPrompt, width int) []string {
+	var lines []string
+	for i, p := range q {
+		if i == maxQueueLines {
+			lines = append(lines, dimStyle.Render(fmt.Sprintf("%s+%d more", strings.Repeat(" ", lipgloss.Width(queuedMarker)), len(q)-i)))
+			break
+		}
+		text := strings.Join(strings.Fields(p.Text), " ")
+		lines = append(lines, dimStyle.Render(xansi.Truncate(queuedMarker+text, width, "…")))
+	}
+	return lines
 }
 
 // markLines leads the first input line with the marker and indents the rest
@@ -699,13 +721,14 @@ func (d dockComp) composeLines(c *ctx) []string {
 		return respondElsewhereLines(s)
 	}
 	width := c.m.dockWidth()
+	q := queueLines(c.m.liveQueue(), width)
 	v := strings.TrimRight(d.reply.Value(), "\n")
 	if strings.TrimSpace(v) == "" {
-		return []string{spaceBetween(userStyle.Render(promptGlyph), dimStyle.Render("⇥ Tab to type"), width)}
+		return append(q, spaceBetween(userStyle.Render(promptGlyph), dimStyle.Render("⇥ Tab to type"), width))
 	}
 	// The text keeps the columns it has when focused.
 	wrapped := lipgloss.NewStyle().Width(max(1, width-lipgloss.Width(promptMarker))).Render(v)
-	return markLines(strings.Split(wrapped, "\n"))
+	return append(q, markLines(strings.Split(wrapped, "\n"))...)
 }
 
 // respondElsewhereLines stands in for the input when argus cannot send to the

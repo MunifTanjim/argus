@@ -27,6 +27,7 @@ func promptModel(ix *session.Interaction) model {
 			Frontend:    session.FrontendTmux,
 			Input:       session.InputPane,
 			Interaction: ix,
+			CanPrompt:   ix == nil || ix.Kind == session.InteractionIdle,
 		},
 	}
 	m = withLive(m, "s1")
@@ -1199,6 +1200,7 @@ func inputAPISession() session.Session {
 		Frontend:    session.FrontendExternal,
 		Input:       session.InputAPI,
 		Interaction: &session.Interaction{Kind: session.InteractionIdle},
+		CanPrompt:   true,
 	}
 }
 

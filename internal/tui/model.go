@@ -16,6 +16,7 @@ import (
 
 type cachedTranscript struct {
 	entries []transcript.Entry
+	queue   []transcript.QueuedPrompt
 }
 
 // toolBodyEntry caches one tool's on-demand-fetched body (see sessions.toolDetail).
@@ -196,6 +197,14 @@ func (m model) liveSessionID() string {
 
 // liveAgent is the agent of the live session (see liveSessionID).
 func (m model) liveAgent() string { return m.sessions[m.liveSessionID()].Agent }
+
+func (m model) liveQueue() []transcript.QueuedPrompt {
+	id := m.liveSessionID()
+	if id == "" {
+		return nil
+	}
+	return m.transcriptCache[m.cacheKeyFor(id)].queue
+}
 
 // interactionKey is a stable identity for a pending interaction: changes for a
 // different prompt, stays equal across re-publishes of the same one.

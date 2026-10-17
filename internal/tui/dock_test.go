@@ -12,6 +12,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // withInteraction delivers the open session's interaction as the registry
@@ -257,7 +258,7 @@ func TestInputHasNoLineHighlight(t *testing.T) {
 	if strings.Contains(ansi.Strip(m.dock.reply.View()), "❯") {
 		t.Fatalf("the marker should not be inside the textarea: %q", ansi.Strip(m.dock.reply.View()))
 	}
-	lines, _, _ := m.dock.idleLines()
+	lines, _, _ := m.dock.idleLines(&ctx{m: &m}, m.containerWidth())
 	if got := ansi.Strip(lines[0]); !strings.HasPrefix(got, promptMarker+"hi") {
 		t.Fatalf("first input line = %q, want it to start with %q", got, promptMarker+"hi")
 	}
@@ -324,7 +325,7 @@ func TestEnterWhileWorkingKeepsTheDraft(t *testing.T) {
 	rc := &recordingClient{}
 	m.client = rc
 	s := m.sessions["s1"]
-	s.Status = session.StatusWorking
+	s.Status, s.CanPrompt = session.StatusWorking, false
 	m.sessions["s1"] = s
 	m = pressKeys(m, keyMsg("tab"), keyMsg("h"), keyMsg("i"), keyMsg("enter"))
 	if m.dock.reply.Value() != "hi" || m.focused != sessionDock {
@@ -422,4 +423,75 @@ func TestTranscriptAndInputSpanAWideTerminal(t *testing.T) {
 		}
 	}
 	t.Fatal("no rule found")
+}
+
+func TestEnterWhileWorkingSendsWhenTheSessionQueues(t *testing.T) {
+	m := sessionModel(nil)
+	rc := &recordingClient{}
+	m.client = rc
+	s := m.sessions["s1"]
+	s.Status = session.StatusWorking
+	s.CanPrompt = true
+	m.sessions["s1"] = s
+	m = pressKeys(m, keyMsg("tab"), keyMsg("h"), keyMsg("i"))
+	m, cmd := upd(m, keyMsg("enter"))
+	if cmd != nil {
+		cmd()
+	}
+	if rc.count(api.MethodSessionInput) != 1 {
+		t.Fatal("a queueing session did not take the prompt while working")
+	}
+	if m.dock.reply.Value() != "" || m.flash == "wait for idle to send" {
+		t.Fatalf("draft %q flash %q, want the input cleared and no flash", m.dock.reply.Value(), m.flash)
+	}
+}
+
+func TestQueuedPromptsShowAboveTheInput(t *testing.T) {
+	m := sessionModel(nil)
+	m.transcriptCache = map[string]cachedTranscript{}
+	m.transcriptCache[m.cacheKeyFor("s1")] = cachedTranscript{queue: []transcript.QueuedPrompt{
+		{Text: "one"}, {Text: "two\n  lines"},
+	}}
+	lines := m.dock.composeLines(&ctx{m: &m})
+	if len(lines) != 3 {
+		t.Fatalf("got %d lines, want 2 queued + the input:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	if got := ansi.Strip(lines[0]); !strings.Contains(got, "one") {
+		t.Fatalf("line 0 = %q", got)
+	}
+	if got := ansi.Strip(lines[1]); !strings.Contains(got, "two lines") {
+		t.Fatalf("line 1 = %q, want the text on one line", got)
+	}
+	if got := ansi.Strip(lines[2]); !strings.Contains(got, "Tab to type") {
+		t.Fatalf("line 2 = %q, want the input", got)
+	}
+}
+
+func TestQueueListsAtMostThreePrompts(t *testing.T) {
+	q := []transcript.QueuedPrompt{{Text: "a"}, {Text: "b"}, {Text: "c"}, {Text: "d"}, {Text: "e"}}
+	lines := queueLines(q, 40)
+	if len(lines) != 4 || !strings.Contains(ansi.Strip(lines[3]), "+2 more") {
+		t.Fatalf("lines = %q", lines)
+	}
+	for _, l := range lines {
+		if lipgloss.Width(l) > 40 {
+			t.Fatalf("line wider than 40: %q", ansi.Strip(l))
+		}
+	}
+}
+
+func TestEnterOnAnOldNodeSaysWhy(t *testing.T) {
+	m := sessionModel(nil)
+	rc := &recordingClient{}
+	m.client = rc
+	s := m.sessions["s1"]
+	s.CanPrompt = false // a node older than can_prompt never sends it
+	m.sessions["s1"] = s
+	m = pressKeys(m, keyMsg("tab"), keyMsg("h"), keyMsg("i"), keyMsg("enter"))
+	if rc.count(api.MethodSessionInput) != 0 {
+		t.Fatal("a prompt was sent to a session that cannot take one")
+	}
+	if m.flash != "node too old to take prompts" {
+		t.Fatalf("flash = %q", m.flash)
+	}
 }
