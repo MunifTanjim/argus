@@ -12,11 +12,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/tmux"
+	"golang.org/x/sync/singleflight"
 )
 
 const sessionIdleTTL = time.Hour
@@ -60,6 +63,8 @@ type discoverer struct {
 
 	connMu sync.Mutex
 	cur    *rpcConn
+
+	starts singleflight.Group // shares one daemon start among concurrent callers
 
 	mu       sync.Mutex
 	threads  map[string]*threadEntry      // root thread id -> entry
@@ -646,6 +651,9 @@ func (d *discoverer) cachedModelNames() map[string]string {
 	return d.modelNames
 }
 
+// startTimeout bounds `codex app-server daemon start`.
+const startTimeout = 20 * time.Second
+
 // startDaemon runs `codex app-server daemon start`, which is a no-op when the
 // daemon is already running.
 var startDaemon = func(ctx context.Context) error {
@@ -662,8 +670,23 @@ func (d *discoverer) awaitConn(ctx context.Context) (*rpcConn, error) {
 	if c := d.conn(); c != nil {
 		return c, nil
 	}
-	if err := startDaemon(ctx); err != nil {
-		return nil, err
+	// Concurrent callers share one start. It runs on its own bounded context so a
+	// caller that gives up does not fail the others.
+	ch := d.starts.DoChan("start", func() (any, error) {
+		if d.conn() != nil {
+			return nil, nil
+		}
+		sctx, cancel := context.WithTimeout(context.Background(), startTimeout)
+		defer cancel()
+		return nil, startDaemon(sctx)
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, res.Err
+		}
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
@@ -699,9 +722,56 @@ func (d *discoverer) renameSession(ctx context.Context, id, name string) error {
 	return c.call(ctx, "thread/name/set", map[string]any{"threadId": id, "name": name}, nil)
 }
 
+// maxModelPages bounds model/list pagination so a misbehaving daemon cannot
+// loop forever.
+const maxModelPages = 100
+
+// listModels returns the daemon's visible models in server order, starting the
+// daemon when none is running. ID is the slug thread/start takes.
+func (d *discoverer) listModels(ctx context.Context) ([]api.ModelInfo, error) {
+	c, err := d.awaitConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []api.ModelInfo
+	cursor := ""
+	for page := 0; page < maxModelPages; page++ {
+		params := map[string]any{}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		var res struct {
+			Data []struct {
+				Model       string `json:"model"`
+				DisplayName string `json:"displayName"`
+				Hidden      bool   `json:"hidden"`
+			} `json:"data"`
+			NextCursor string `json:"nextCursor"`
+		}
+		if err := c.call(ctx, "model/list", params, &res); err != nil {
+			return nil, err
+		}
+		for _, m := range res.Data {
+			if m.Hidden {
+				continue
+			}
+			name := m.DisplayName
+			if name == "" {
+				name = m.Model
+			}
+			out = append(out, api.ModelInfo{ID: m.Model, Name: name})
+		}
+		if res.NextCursor == "" {
+			return out, nil
+		}
+		cursor = res.NextCursor
+	}
+	return out, nil
+}
+
 // spawnSession starts a thread in cwd with the user's config.toml approval and
 // sandbox defaults. The starting client is subscribed to the new thread.
-func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (string, error) {
+func (d *discoverer) spawnSession(ctx context.Context, cwd string, opts adapter.SpawnOptions) (string, error) {
 	c, err := d.awaitConn(ctx)
 	if err != nil {
 		return "", err
@@ -709,7 +779,11 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (stri
 	var res struct {
 		Thread cxThread `json:"thread"`
 	}
-	if err := c.call(ctx, "thread/start", map[string]any{"cwd": cwd}, &res); err != nil {
+	params := map[string]any{"cwd": cwd}
+	if opts.Model != "" {
+		params["model"] = opts.Model
+	}
+	if err := c.call(ctx, "thread/start", params, &res); err != nil {
 		return "", err
 	}
 	id := res.Thread.ID
@@ -720,11 +794,11 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (stri
 	d.subs[id] = true
 	d.mu.Unlock()
 	d.adopt(res.Thread)
-	if prompt == "" {
+	if opts.Prompt == "" {
 		return id, nil
 	}
 	d.upsert(id, session.StatusWorking, nil)
-	if err := startTurn(ctx, c, id, prompt); err != nil {
+	if err := startTurn(ctx, c, id, opts.Prompt); err != nil {
 		// The thread stays idle and sends no status, so restore its card here.
 		d.refreshCard(id)
 		return "", err
