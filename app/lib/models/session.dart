@@ -190,6 +190,30 @@ class RunningSubagent {
       );
 }
 
+class RunningShell {
+  final String id;
+  final String? toolUseId;
+  final String? command;
+  final String? desc;
+  final DateTime? since;
+
+  const RunningShell({
+    required this.id,
+    this.toolUseId,
+    this.command,
+    this.desc,
+    this.since,
+  });
+
+  factory RunningShell.fromJson(Map<String, dynamic> j) => RunningShell(
+        id: j['id'] as String? ?? '',
+        toolUseId: j['tool_use_id'] as String?,
+        command: j['command'] as String?,
+        desc: j['desc'] as String?,
+        since: DateTime.tryParse(j['since'] as String? ?? ''),
+      );
+}
+
 class Session {
   final String id;
   final String agent;
@@ -214,6 +238,7 @@ class Session {
 
   /// Also empty from a node too old to report them.
   final List<RunningSubagent> subagents;
+  final List<RunningShell> shells;
   final String? nodeId;
   final String? nodeLabel;
   final bool offline;
@@ -246,6 +271,7 @@ class Session {
     this.summary,
     this.interaction,
     this.subagents = const [],
+    this.shells = const [],
     this.nodeId,
     this.nodeLabel,
     this.offline = false,
@@ -278,6 +304,10 @@ class Session {
             : Interaction.fromJson(j['interaction'] as Map<String, dynamic>),
         subagents: (j['subagents'] as List?)
                 ?.map((e) => RunningSubagent.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            const [],
+        shells: (j['shells'] as List?)
+                ?.map((e) => RunningShell.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             const [],
         nodeId: j['node_id'] as String?,

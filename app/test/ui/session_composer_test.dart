@@ -43,6 +43,7 @@ Session _s({
   Map<String, dynamic>? summary,
   String? since,
   List<Map<String, dynamic>>? subagents,
+  List<Map<String, dynamic>>? shells,
   bool? canPrompt,
 }) =>
     Session.fromJson({
@@ -57,6 +58,7 @@ Session _s({
       'summary': ?summary,
       'status_since': ?since,
       'subagents': ?subagents,
+      'shells': ?shells,
       // Default: what the node sends.
       'can_prompt': canPrompt ??
           (status != 'working' &&
@@ -520,6 +522,54 @@ void main() {
       await t.pumpAndSettle();
       expect(find.text('Explore'), findsOneWidget);
       expect(find.text('scout'), findsOneWidget);
+    });
+  });
+
+  group('running shells', () {
+    final two = [
+      {'id': 'b1', 'tool_use_id': 't1', 'command': 'make test'},
+      {'id': 'b2', 'tool_use_id': 't2', 'command': 'npm run dev'},
+    ];
+    final summary = {'model_name': 'Opus 5.5', 'effort': 'high'};
+
+    testWidgets('the model line shows the count at its left', (t) async {
+      await _pump(t, _s(shells: two, summary: summary), _Recording());
+      expect(find.byIcon(Icons.terminal), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
+      expect(t.getTopLeft(find.byIcon(Icons.terminal)).dx,
+          lessThan(t.getTopLeft(find.text('Opus 5.5 · high')).dx));
+    });
+
+    testWidgets('both counts show, subagents first', (t) async {
+      await _pump(
+          t,
+          _s(subagents: [
+            {'id': 'a1', 'type': 'Explore'},
+          ], shells: two, summary: summary),
+          _Recording());
+      expect(find.text('1'), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
+      expect(t.getTopLeft(find.byIcon(Icons.smart_toy_outlined)).dx,
+          lessThan(t.getTopLeft(find.byIcon(Icons.terminal)).dx));
+    });
+
+    testWidgets('none shows no icon', (t) async {
+      await _pump(t, _s(summary: summary), _Recording());
+      expect(find.byIcon(Icons.terminal), findsNothing);
+    });
+
+    testWidgets('tapping the count opens the sheet', (t) async {
+      final container = ProviderContainer(overrides: [
+        sessionRepositoryProvider.overrideWithValue(_Recording()),
+      ]);
+      addTearDown(container.dispose);
+      final s = _s(shells: two, summary: summary);
+      container.read(sessionsProvider.notifier).put(s);
+      await _pump(t, s, _Recording(), container: container);
+      await t.tap(find.byIcon(Icons.terminal));
+      await t.pumpAndSettle();
+      expect(find.text('make test'), findsOneWidget);
+      expect(find.text('npm run dev'), findsOneWidget);
     });
   });
 
