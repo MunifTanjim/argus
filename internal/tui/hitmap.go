@@ -54,7 +54,8 @@ const (
 	hitFold
 	hitClose
 	hitBrand
-	hitSubagents
+	// hitRunning is a running count; index is its runningKind.
+	hitRunning
 )
 
 type hitTarget struct {

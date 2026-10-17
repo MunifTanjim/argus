@@ -68,7 +68,10 @@ func (d dockComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 	case c.m.matches(msg, sessionKeys.Raw):
 		return d, openLiveScreen(c), true
 	case c.m.matches(msg, sessionKeys.Subagents):
-		openSubagents(c)
+		openRunning(c, runningSubagents)
+		return d, nil, true
+	case c.m.matches(msg, sessionKeys.Shells):
+		openRunning(c, runningShells)
 		return d, nil, true
 	}
 	if c.m.composing() {
@@ -129,7 +132,7 @@ func (d dockComp) view(c *ctx, w, h int) string {
 		ruleColor = ColorAccent
 	}
 	cw := containerWidthOf(w)
-	top, bottom, countW := c.m.dockRules(cw, ruleColor)
+	top, bottom, zones := c.m.dockRules(cw, ruleColor)
 	bodyH := h - dockChrome
 	var body string
 	switch {
@@ -147,9 +150,9 @@ func (d dockComp) view(c *ctx, w, h int) string {
 	if !c.m.inputShown() {
 		body = indentBlock(body, strings.Repeat(" ", c.m.dockBodyIndent()))
 	}
-	// The count is the bottom rule's left label; a click on it lists them.
-	if countW > 0 {
-		c.hitZone(uv.Rect(centerGutter(cw, w)+dockRuleEdge+1, 2+lipgloss.Height(body), countW, 1), hitTarget{kind: hitSubagents})
+	// The counts are the bottom rule's left label; a click on one lists them.
+	for _, z := range zones {
+		c.hitZone(uv.Rect(centerGutter(cw, w)+dockRuleEdge+1+z.off, 2+lipgloss.Height(body), z.w, 1), hitTarget{kind: hitRunning, index: int(z.kind)})
 	}
 	return "\n" + centerBlock(top+"\n"+body+"\n"+bottom, cw, w)
 }
@@ -205,16 +208,36 @@ func (m model) composing() bool {
 	return ix == nil || ix.Kind == session.InteractionIdle
 }
 
-// dockRules draws the dock's rules. countW is the width of the running count on
-// the bottom rule, 0 when it is not drawn.
-func (m model) dockRules(w int, c color.Color) (top, bottom string, countW int) {
+// countZone is one running count within the bottom rule's left label, off
+// cells from the label's start.
+type countZone struct {
+	off, w int
+	kind   runningKind
+}
+
+// dockRules draws the dock's rules. zones are the running counts drawn on the
+// bottom rule: the counts that fit, dropped from the end.
+func (m model) dockRules(w int, c color.Color) (top, bottom string, zones []countZone) {
 	s := m.sessions[m.liveSessionID()]
-	count := runningLabel(len(s.Subagents))
-	bottom, drawn := dockRuleFit(count, modelEffortLabel(s.Summary), w, c)
-	if drawn {
-		countW = lipgloss.Width(count)
+	top = dockRule("", m.dockStatusLabel(s), w, c)
+	right := modelEffortLabel(s.Summary)
+	var labels []string
+	var all []countZone
+	off := 0
+	for _, k := range runningKinds {
+		if l := k.label(m.runningCount(k)); l != "" {
+			labels = append(labels, l)
+			all = append(all, countZone{off: off, w: lipgloss.Width(l), kind: k})
+			off += lipgloss.Width(l) + 1
+		}
 	}
-	return dockRule("", m.dockStatusLabel(s), w, c), bottom, countW
+	for n := len(labels); n > 0; n-- {
+		if b, ok := dockRuleFit(strings.Join(labels[:n], " "), right, w, c); ok {
+			return top, b, all[:n]
+		}
+	}
+	bottom, _ = dockRuleFit("", right, w, c)
+	return top, bottom, nil
 }
 
 // spins while the session works: the top rule's spinner and timer advance.

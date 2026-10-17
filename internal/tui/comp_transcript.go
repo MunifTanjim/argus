@@ -105,8 +105,13 @@ func (t transcriptComp) commands(c *ctx) []binding {
 	case t.live:
 		out = append(out, sessionKeys.Raw)
 	}
-	if t.live && len(c.m.sessions[t.sessionID].Subagents) > 0 && !v.redactActive() {
-		out = append(out, sessionKeys.Subagents)
+	if s := c.m.sessions[t.sessionID]; t.live && !v.redactActive() {
+		if len(s.Subagents) > 0 {
+			out = append(out, sessionKeys.Subagents)
+		}
+		if len(s.Shells) > 0 {
+			out = append(out, sessionKeys.Shells)
+		}
 	}
 	if t.historyView == histDetail {
 		return bindingsOf(append(out, detailKeys)...)
@@ -254,7 +259,10 @@ func (m tview) liveKey(msg tea.KeyPressMsg) tea.Cmd {
 	case m.c.m.matches(msg, sessionKeys.Raw):
 		return openLiveScreen(m.c)
 	case m.c.m.matches(msg, sessionKeys.Subagents):
-		openSubagents(m.c)
+		openRunning(m.c, runningSubagents)
+		return nil
+	case m.c.m.matches(msg, sessionKeys.Shells):
+		openRunning(m.c, runningShells)
 		return nil
 	}
 	if m.c.m.matches(msg, transcriptKeys.Back) {

@@ -202,9 +202,9 @@ func (m tview) drillTrace(e transcript.Entry, s transcript.Subagent) tea.Cmd {
 	return m.c.m.subscribeCmd(ref, len(m.c.m.transcriptCache[ref.key()].entries))
 }
 
-// drillRunning opens a running subagent's trace as the only frame: open frames
-// close as detailBack closes them, so back returns to the session's stream.
-func (m tview) drillRunning(r session.RunningSubagent) tea.Cmd {
+// closeFrames closes every open frame as detailBack closes them, so back
+// returns to the session's stream.
+func (m tview) closeFrames() []tea.Cmd {
 	var cmds []tea.Cmd
 	for f := m.topFrame(); f != nil; f = m.topFrame() {
 		if f.subID != "" {
@@ -214,9 +214,23 @@ func (m tview) drillRunning(r session.RunningSubagent) tea.Cmd {
 		}
 		m.popDetail()
 	}
+	return cmds
+}
+
+// drillRunning opens a running subagent's trace as the only frame.
+func (m tview) drillRunning(r session.RunningSubagent) tea.Cmd {
+	cmds := m.closeFrames()
 	s := transcript.Subagent{ID: r.ID, Type: r.Type, Name: r.Name, Desc: r.Desc, Status: "running", HasTrace: true}
 	m.historyView = histDetail
 	cmds = append(cmds, m.drillTrace(transcript.Entry{Kind: transcript.EntrySubagent, Subagents: []transcript.Subagent{s}}, s))
+	return tea.Batch(cmds...)
+}
+
+// drillShell opens a running shell's Bash call as the only frame.
+func (m tview) drillShell(r session.RunningShell) tea.Cmd {
+	cmds := m.closeFrames()
+	m.historyView = histDetail
+	cmds = append(cmds, m.drillEntry(transcript.Entry{Kind: transcript.EntryTool, ToolName: "Bash", ToolID: r.ToolUseID}, ""))
 	return tea.Batch(cmds...)
 }
 

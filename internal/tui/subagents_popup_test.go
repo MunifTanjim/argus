@@ -45,7 +45,7 @@ func openSubagentsPopup(t *testing.T, m model) model {
 	t.Helper()
 	m, cmd := upd(m, cmdMsg(sessionKeys.Subagents.name))
 	runCmd(cmd)
-	if _, ok := m.popups.front().(subagentsPopup); !ok {
+	if _, ok := runningFront(m, runningSubagents); !ok {
 		t.Fatalf("open subagent should open the popup; front = %T", m.popups.front())
 	}
 	return m
@@ -67,8 +67,8 @@ func TestDockRuleShowsRunningSubagents(t *testing.T) {
 	if _, bottom, _ := m.dockRules(80, ColorBorder); bottom != before {
 		t.Fatalf("no running subagents: the rule should be unchanged: %q", ansi.Strip(bottom))
 	}
-	if runningLabel(0) != "" {
-		t.Fatalf("runningLabel(0) = %q, want empty", runningLabel(0))
+	if runningSubagents.label(0) != "" {
+		t.Fatalf("runningSubagents.label(0) = %q, want empty", runningSubagents.label(0))
 	}
 }
 
@@ -162,7 +162,7 @@ func TestSubagentsPopupClosesWhenNoneRun(t *testing.T) {
 	m = openSubagentsPopup(t, m)
 	m = pressKeys(m, keyMsg("j"))
 	m = withRunning(m, twoRunning[:1])
-	if p, ok := m.popups.front().(subagentsPopup); !ok || p.cursor != 0 {
+	if p, ok := runningFront(m, runningSubagents); !ok || p.cursor != 0 {
 		t.Fatalf("a dropped row should clamp the cursor: %+v", m.popups.front())
 	}
 	m = withRunning(m, nil)
@@ -199,7 +199,7 @@ func TestSubagentsClickOpensPopup(t *testing.T) {
 	}
 	var zone hitZone
 	for _, z := range at.zones {
-		if z.target.kind == hitSubagents {
+		if z.target.kind == hitRunning && z.target.index == int(runningSubagents) {
 			zone = z
 		}
 	}
@@ -211,21 +211,9 @@ func TestSubagentsClickOpensPopup(t *testing.T) {
 		t.Fatalf("the zone should sit on the count's row: %q", l)
 	}
 	m, _ = click(m, x, y)
-	if _, ok := m.popups.front().(subagentsPopup); !ok || m.focused != mainPane {
+	if _, ok := runningFront(m, runningSubagents); !ok || m.focused != mainPane {
 		t.Fatalf("a click on the count should open the popup and keep focus: %T focus=%v", m.popups.front(), m.focused)
 	}
-}
-
-func countZone(m model) (x, y int, ok bool) {
-	m.View()
-	for _, a := range m.hits.areas {
-		for _, z := range a.zones {
-			if z.target.kind == hitSubagents {
-				return a.rect.Min.X + z.rect.Min.X, a.rect.Min.Y + z.rect.Min.Y, true
-			}
-		}
-	}
-	return 0, 0, false
 }
 
 func TestRunningCountZoneNeedsTheLabelDrawn(t *testing.T) {
@@ -234,7 +222,7 @@ func TestRunningCountZoneNeedsTheLabelDrawn(t *testing.T) {
 		s.Summary = &session.Summary{ModelName: "Opus 5.5", Effort: "high"}
 	}))
 	m.width, m.height = 120, 30
-	x, y, ok := countZone(m)
+	x, y, ok := zoneAt(m, runningSubagents)
 	if !ok {
 		t.Fatal("a wide dock should have a count zone")
 	}
@@ -242,7 +230,7 @@ func TestRunningCountZoneNeedsTheLabelDrawn(t *testing.T) {
 		t.Fatalf("the zone starts at %q, want the glyph", cell)
 	}
 	m.width = 24
-	if _, _, ok := countZone(m); ok {
+	if _, _, ok := zoneAt(m, runningSubagents); ok {
 		t.Fatal("a narrow dock draws no count, so it should have no zone")
 	}
 	if out := ansi.Strip(m.View().Content); strings.Contains(out, Icon.Subagent.Glyph) {
@@ -258,12 +246,12 @@ func TestClickingTheCountEndsVisualMode(t *testing.T) {
 	if !m.visualIn(mainPane) {
 		t.Fatal("setup: visual mode should be active")
 	}
-	x, y, ok := countZone(m)
+	x, y, ok := zoneAt(m, runningSubagents)
 	if !ok {
 		t.Fatal("no count zone")
 	}
 	m, _ = click(m, x, y)
-	if _, ok := m.popups.front().(subagentsPopup); !ok {
+	if _, ok := runningFront(m, runningSubagents); !ok {
 		t.Fatalf("the click should open the popup; front = %T", m.popups.front())
 	}
 	if m.visualIn(mainPane) {

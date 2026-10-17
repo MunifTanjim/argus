@@ -57,7 +57,8 @@ default, set `tui.verbose-transcript` to `true`, or run the
 `toggle verbose-transcript` command. The command applies until you quit the TUI.
 
 In a live Claude Code session, run `open subagent` to pick one of the subagents
-that the session runs now and open its transcript.
+that the session runs now and open its transcript. Run `open shell` to pick one
+of the session's background shells and open the call that started it.
 
 ### Select and copy
 
@@ -270,6 +271,7 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `open live-screen` | session-dock, transcript |  | `<C-t>` |
 | `open palette` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace |  | `<C-k>` |
 | `open setup-log` | project-tree, workspace |  | `L` |
+| `open shell` | session-dock, transcript |  |  |
 | `open subagent` | session-dock, transcript |  |  |
 | `open tmux-pane` | home, workspace |  | `O` |
 | `prev` | changes, file-tree, history, home, project-tree, session-dock, sidebar-sessions, spawn, terminals, transcript, workspace | `<Up>` `k` |  |
