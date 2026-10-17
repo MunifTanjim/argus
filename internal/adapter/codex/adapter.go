@@ -25,6 +25,7 @@ var _ adapter.InteractionOwner = (*cxAdapter)(nil)
 var _ adapter.Dismisser = (*cxAdapter)(nil)
 var _ adapter.Prompter = (*cxAdapter)(nil)
 var _ adapter.Spawner = (*cxAdapter)(nil)
+var _ adapter.ModelLister = (*cxAdapter)(nil)
 var _ adapter.Renamer = (*cxAdapter)(nil)
 
 func (cxAdapter) Agent() string      { return Agent }
@@ -145,7 +146,16 @@ func (a *cxAdapter) SpawnSession(ctx context.Context, cwd string, opts adapter.S
 	if err != nil {
 		return "", err
 	}
-	return d.spawnSession(ctx, cwd, opts.Prompt)
+	return d.spawnSession(ctx, cwd, opts)
+}
+
+// ListModels lists the models a thread can be spawned on.
+func (a *cxAdapter) ListModels(ctx context.Context) ([]api.ModelInfo, error) {
+	d, err := a.live()
+	if err != nil {
+		return nil, err
+	}
+	return d.listModels(ctx)
 }
 
 func (a *cxAdapter) Dismiss(ctx context.Context, sess session.Session) error {

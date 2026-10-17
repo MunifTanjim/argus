@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 )
@@ -275,7 +278,7 @@ func TestSpawnSessionStartsThreadAndTurn(t *testing.T) {
 	_ = d.ScanOnce(ctx)
 	f.waitConns(t, 1)
 
-	id, err := d.spawnSession(ctx, "/w/n1", "do it")
+	id, err := d.spawnSession(ctx, "/w/n1", adapter.SpawnOptions{Prompt: "do it"})
 	if err != nil || id != "n1" {
 		t.Fatalf("spawn = %q, %v", id, err)
 	}
@@ -317,7 +320,7 @@ func TestSpawnStartsDaemonWhenDown(t *testing.T) {
 		sock.Store(f.sock)
 		return nil
 	}
-	if _, err := d.spawnSession(ctx, "/w/n2", ""); err != nil {
+	if _, err := d.spawnSession(ctx, "/w/n2", adapter.SpawnOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if !started {
@@ -488,4 +491,109 @@ func TestThreadEffortFollowsSettings(t *testing.T) {
 	waitSession(t, reg, "t1", func(s session.Session) bool {
 		return s.Summary != nil && s.Summary.Effort == "low" && s.Summary.ModelName == "gpt-6-sol"
 	})
+}
+
+func modelListDaemon(t *testing.T) *fakeDaemon {
+	t.Helper()
+	return newFakeDaemon(t, func(method string, params json.RawMessage) (any, *rpcError) {
+		switch method {
+		case "model/list":
+			var p struct {
+				Cursor string `json:"cursor"`
+			}
+			_ = json.Unmarshal(params, &p)
+			if p.Cursor == "c2" {
+				return map[string]any{"data": []map[string]any{
+					{"id": "p3", "model": "gpt-b", "displayName": "GPT B", "hidden": false},
+					{"id": "p4", "model": "gpt-c", "displayName": "", "hidden": false},
+				}, "nextCursor": nil}, nil
+			}
+			return map[string]any{"data": []map[string]any{
+				{"id": "p1", "model": "gpt-a", "displayName": "GPT A", "hidden": false},
+				{"id": "p2", "model": "gpt-x", "displayName": "GPT X", "hidden": true},
+			}, "nextCursor": "c2"}, nil
+		case "thread/start":
+			return map[string]any{"thread": threadJSON("n1", "idle")}, nil
+		case "thread/loaded/list":
+			return map[string]any{"data": []string{}}, nil
+		}
+		return nil, nil
+	})
+}
+
+func TestListModelsPagesAndSkipsHidden(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	f := modelListDaemon(t)
+	d := newDiscoverer(registry.New(), nil)
+	d.sockPath = func() (string, error) { return f.sock, nil }
+	d.retry = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d.ctx = ctx
+	_ = d.ScanOnce(ctx)
+	f.waitConns(t, 1)
+
+	got, err := d.listModels(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []api.ModelInfo{{ID: "gpt-a", Name: "GPT A"}, {ID: "gpt-b", Name: "GPT B"}, {ID: "gpt-c", Name: "gpt-c"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("models = %v, want %v", got, want)
+	}
+	if m := f.expect(t, "model/list"); string(m.Params) != "{}" {
+		t.Fatalf("first page params = %s", m.Params)
+	}
+	if m := f.expect(t, "model/list"); string(m.Params) != `{"cursor":"c2"}` {
+		t.Fatalf("second page params = %s", m.Params)
+	}
+}
+
+func TestListModelsStartsDaemonWhenDown(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	d := newDiscoverer(registry.New(), nil)
+	var sock atomic.Value
+	sock.Store(filepath.Join(t.TempDir(), "missing.sock"))
+	d.sockPath = func() (string, error) { return sock.Load().(string), nil }
+	d.retry = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d.ctx = ctx
+	_ = d.ScanOnce(ctx)
+
+	started := false
+	old := startDaemon
+	t.Cleanup(func() { startDaemon = old })
+	startDaemon = func(context.Context) error {
+		started = true
+		sock.Store(modelListDaemon(t).sock)
+		return nil
+	}
+	got, err := d.listModels(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !started || len(got) != 3 {
+		t.Fatalf("started = %v, models = %v", started, got)
+	}
+}
+
+func TestSpawnSessionSendsModel(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	f := modelListDaemon(t)
+	d := newDiscoverer(registry.New(), nil)
+	d.sockPath = func() (string, error) { return f.sock, nil }
+	d.retry = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d.ctx = ctx
+	_ = d.ScanOnce(ctx)
+	f.waitConns(t, 1)
+
+	if _, err := d.spawnSession(ctx, "/w/n1", adapter.SpawnOptions{Model: "gpt-b"}); err != nil {
+		t.Fatal(err)
+	}
+	if m := f.expect(t, "thread/start"); string(m.Params) != `{"cwd":"/w/n1","model":"gpt-b"}` {
+		t.Fatalf("thread/start params = %s", m.Params)
+	}
 }
