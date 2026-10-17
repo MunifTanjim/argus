@@ -106,4 +106,34 @@ void main() {
 
     expect(find.textContaining('projects error'), findsOneWidget);
   });
+
+  testWidgets('filters projects by path', (tester) async {
+    final repo = _FakeHistoryRepository([
+      _project('Alpha'),
+      _project('Beta'),
+    ]);
+
+    await tester.pumpWidget(_app(repo));
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Filter projects'));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'USER/BETA');
+    await tester.pump();
+
+    expect(find.text('Alpha'), findsNothing);
+    expect(find.text('Beta'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'zzz');
+    await tester.pump();
+
+    expect(find.text('No projects match.'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Clear filter'));
+    await tester.pump();
+
+    expect(find.text('Alpha'), findsOneWidget);
+    expect(find.text('Beta'), findsOneWidget);
+  });
 }

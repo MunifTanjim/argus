@@ -5,17 +5,26 @@ import '../models/history.dart';
 import '../state/gateway.dart';
 import '../state/history_view_model.dart';
 import '../transport/connection.dart';
+import 'filter_title.dart';
 import 'history_sessions_screen.dart';
 import 'node_header.dart';
 import 'relative_time.dart';
 import 'responsive.dart';
 import 'shell_drawer.dart';
 
-class HistoryScreen extends ConsumerWidget {
+class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends ConsumerState<HistoryScreen> {
+  /// The project filter: null while the filter field is closed.
+  String? _query;
+
+  @override
+  Widget build(BuildContext context) {
     // Re-fetch when the connection comes back.
     ref.listen<ConnState>(connStateProvider, (prev, next) {
       if (next == ConnState.connected && prev != ConnState.connected) {
@@ -26,14 +35,31 @@ class HistoryScreen extends ConsumerWidget {
     final projects = ref.watch(historyProjectsProvider);
 
     return Scaffold(
-      appBar: AppBar(leading: shellMenuButton(context), title: const Text('History')),
+      appBar: AppBar(
+        leading: shellMenuButton(context),
+        title: FilterTitle(
+          query: _query,
+          hint: 'Filter projects',
+          onChanged: (q) => setState(() => _query = q),
+          onClose: () => setState(() => _query = null),
+          child: const Text('History'),
+        ),
+        actions: [
+          FilterButton(
+            query: _query,
+            tooltip: 'Filter projects',
+            onOpen: () => setState(() => _query = ''),
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: () => ref.read(historyProjectsProvider.notifier).reload(),
         child: switch (projects) {
           AsyncError(:final error) => ListView(
             children: [Center(child: Text(error.toString()))],
           ),
-          AsyncData(:final value) => _ProjectList(projects: value),
+          AsyncData(:final value) =>
+            _ProjectList(projects: value, query: _query ?? ''),
           _ => const Center(child: CircularProgressIndicator()),
         },
       ),
@@ -42,9 +68,10 @@ class HistoryScreen extends ConsumerWidget {
 }
 
 class _ProjectList extends StatelessWidget {
-  const _ProjectList({required this.projects});
+  const _ProjectList({required this.projects, required this.query});
 
   final List<HistoryProject> projects;
+  final String query;
 
   @override
   Widget build(BuildContext context) {
@@ -54,7 +81,15 @@ class _ProjectList extends StatelessWidget {
       );
     }
 
-    final rows = _groupByNode(projects);
+    final shown =
+        projects.where((p) => matchesHistoryProject(p, query)).toList();
+    if (shown.isEmpty) {
+      return ListView(
+        children: const [Center(child: Text('No projects match.'))],
+      );
+    }
+
+    final rows = _groupByNode(shown);
     return CenteredBody(
       child: ListView.builder(
         itemCount: rows.length,
