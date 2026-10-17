@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.1.3](https://github.com/MunifTanjim/argus/compare/0.1.2...0.1.3) (2026-10-17)
+
+
+### Features
+
+* carry a model choice into agent spawns ([8bdad99](https://github.com/MunifTanjim/argus/commit/8bdad9957843cfd6db414accd97ed2e1cc740ec9))
+* **claude:** add the argus claude code mod ([8a5c424](https://github.com/MunifTanjim/argus/commit/8a5c424f3d3064e73cfc4b41261b4b80a724c178))
+* **claude:** apply modelinfo events ([eb59825](https://github.com/MunifTanjim/argus/commit/eb59825b5a48e204bac7fc4036f8c3142155afbb))
+* **claude:** refuse prompts while busy ([2972ba1](https://github.com/MunifTanjim/argus/commit/2972ba1013ad64e638fbc7467c499dc91736550b))
+* **claude:** replace settings hooks with the claude code mod ([4ba8a47](https://github.com/MunifTanjim/argus/commit/4ba8a47e0c5b0babe8c7f4c52282b2fa2c8b914e))
+* **claude:** report model and effort ([7125de7](https://github.com/MunifTanjim/argus/commit/7125de7c97e5f98b5750615a4fe8ad8e7806023d))
+* **claude:** report whether a mod command ran ([0c62084](https://github.com/MunifTanjim/argus/commit/0c6208448afb478e41a91450a87e24f32d73a5f7))
+* **cli:** restart the running argus on upgrade ([59ac639](https://github.com/MunifTanjim/argus/commit/59ac63959285493a9712f704f3d9b1a22fb0bdb0))
+* **codex:** spawn on a chosen model ([6f5ab6f](https://github.com/MunifTanjim/argus/commit/6f5ab6fa6e2fa62c11551b1610b61c2c7c0139e3))
+* **codex:** track reasoning effort ([3d70231](https://github.com/MunifTanjim/argus/commit/3d7023185896a09094491bccb1497c03c27d0b1c))
+* complete spawn directories on the node ([695180f](https://github.com/MunifTanjim/argus/commit/695180faa111b47967532a0749a0808b5ef2afbe))
+* filter sidebar sessions by workspace ([12e3b02](https://github.com/MunifTanjim/argus/commit/12e3b0264be732b8caa60faec11c96cee5c4acef))
+* honor NO_COLOR and CLICOLOR_FORCE in pretty logs ([e4a3884](https://github.com/MunifTanjim/argus/commit/e4a3884d0fe1802648e8c2089246cfca70dde37e))
+* install agent integrations on start ([13882e1](https://github.com/MunifTanjim/argus/commit/13882e1c61c0f295a45d96861907ec1e23587446))
+* keep agent-reported model and effort per session ([f85da78](https://github.com/MunifTanjim/argus/commit/f85da78ea8701804b1b126913482734b34b81bd9))
+* kill from the sidebar and session lists ([70e89a2](https://github.com/MunifTanjim/argus/commit/70e89a296ecdf0a6de8b0cadbdc91f0c31642264))
+* **mod:** report running subagents ([afafce6](https://github.com/MunifTanjim/argus/commit/afafce6de4afee09046a8e3fbea54448b49d661c))
+* **node:** add per-agent input policy and the mod bridge ([5fe8bfa](https://github.com/MunifTanjim/argus/commit/5fe8bfa0257a9311f10452cc637dd084970c198d))
+* **node:** list an agent's models for spawn ([6f8833b](https://github.com/MunifTanjim/argus/commit/6f8833b602e2d33c7d74dd6f5bfde8f0c2e5248a))
+* **opencode:** populate live session summaries ([1e2450f](https://github.com/MunifTanjim/argus/commit/1e2450feeb54dbb2fd99a9e8d582154cf8eeee09))
+* **opencode:** spawn on a chosen model ([eae2c49](https://github.com/MunifTanjim/argus/commit/eae2c491cb3f25be6a4c93bee9984b63d3ab604f))
+* reject and hide missing directories ([aca99f3](https://github.com/MunifTanjim/argus/commit/aca99f3873d5ade48bfa15ae6cc586eb2b1e0c2c))
+* rename sessions through the agent ([acfb2f8](https://github.com/MunifTanjim/argus/commit/acfb2f8d6278eae8f25aa9cd11f4b85809f0e8e2))
+* route server methods by node_id ([7490f67](https://github.com/MunifTanjim/argus/commit/7490f674d7f2f05278e0847e0308a5114016754d))
+* run the node and the gateway as separate processes ([7192a8a](https://github.com/MunifTanjim/argus/commit/7192a8a61a46a773e792623af7085c16c48c047b))
+* run the TUI's server as a managed child process ([78ac225](https://github.com/MunifTanjim/argus/commit/78ac225801ef8a1d6b5793dd0a045cae14eee1a0))
+* spawn from the sidebar sessions tab ([54184a4](https://github.com/MunifTanjim/argus/commit/54184a4ed58e2f28e4ffc35fbac0e1f5c7fef178))
+* stamp status_since on status changes ([463c96f](https://github.com/MunifTanjim/argus/commit/463c96f4962545f3ff88e6c475dbc0f3a7d13543))
+* track a session's running subagents ([04922c6](https://github.com/MunifTanjim/argus/commit/04922c6222a6eb1fa0f0edff9ae30d8bb787aa4f))
+* **tui:** add upgrade commands ([d29a628](https://github.com/MunifTanjim/argus/commit/d29a6285aeacdbeab49d71e222a31b9b464f0e2f))
+* **tui:** add visual mode to the transcript ([47dd41d](https://github.com/MunifTanjim/argus/commit/47dd41dce616302def44d732889c90f45d014798))
+* **tui:** block sending until idle and guard prompt arrival ([a19aafe](https://github.com/MunifTanjim/argus/commit/a19aafe06060717d05330174c1c819954d166041))
+* **tui:** copy a transcript card's source ([060965f](https://github.com/MunifTanjim/argus/commit/060965f176079671faf1bb228030bed22d988c99))
+* **tui:** copy line selections as their source ([a897ca2](https://github.com/MunifTanjim/argus/commit/a897ca2df143dee44f938cfdf6df0373f967c42c))
+* **tui:** keep the session input always visible ([6800a4b](https://github.com/MunifTanjim/argus/commit/6800a4b555d586a221fe7abd8ab0f0c79e35732f))
+* **tui:** let the transcript span the full width ([4ebf015](https://github.com/MunifTanjim/argus/commit/4ebf015246351778ba82e67c25f70aebf81b103d))
+* **tui:** pick a model when spawning ([c6916d2](https://github.com/MunifTanjim/argus/commit/c6916d2bf079798dad1a2d4f3da4de37d6a29e99))
+* **tui:** refresh sessions from sidebar and workspace ([c572e75](https://github.com/MunifTanjim/argus/commit/c572e750c08173f88283a2b7b5819d4353fc32d3))
+* **tui:** select transcript text with the mouse ([223f019](https://github.com/MunifTanjim/argus/commit/223f01984c717a5cd7bcbf3b43c3186e002818fc))
+* **tui:** show activity and model on the input rules ([3ac9f46](https://github.com/MunifTanjim/argus/commit/3ac9f46f606f709f4767521ce36d7ec8da65c8a8))
+* **tui:** show running subagents on the input ([da87a52](https://github.com/MunifTanjim/argus/commit/da87a523a2756419f147e8d9bfa2a713adb2420b))
+* **tui:** spawn flow keys and directory filter ([1ced70c](https://github.com/MunifTanjim/argus/commit/1ced70c34110fb2bed69fb031af1b543cedca4fd))
+* upgrade and restart argus in place ([fbdc18d](https://github.com/MunifTanjim/argus/commit/fbdc18d2a0d9d1dc0439654a53923a1705b09872))
+
+
+### Bug Fixes
+
+* **claude:** show queued peer messages ([a74705b](https://github.com/MunifTanjim/argus/commit/a74705b39f0db10151ea7d5bd5066ecfd7fd717a))
+* **node:** follow a session to its new transcript file ([5a00c99](https://github.com/MunifTanjim/argus/commit/5a00c99613510e5e1806f41ed15a1c665a12738e))
+* **node:** rekey legacy plain projects ([1d765a8](https://github.com/MunifTanjim/argus/commit/1d765a8810a93c2b29d7bbf68d4b02dca03a520b))
+* **tui:** even out side margins ([8719a40](https://github.com/MunifTanjim/argus/commit/8719a40d4160a2e51a62a0159fc862ff238f9b22))
+* **tui:** gray out selection indicators in an unfocused main pane ([2c713f1](https://github.com/MunifTanjim/argus/commit/2c713f1e0c833f0d40f4b42c0b338c9700ffadaf))
+* **tui:** keep sidebar cursor on the open session ([d25605d](https://github.com/MunifTanjim/argus/commit/d25605d719f5cbfc0a687a6cb58e105ec61eea55))
+* **tui:** move by word with ctrl+arrows in prompt inputs ([2542e3e](https://github.com/MunifTanjim/argus/commit/2542e3eb36f3c0683665a284bd03b67b591b4af7))
+* **tui:** resubscribe transcript on node return ([18c2fd7](https://github.com/MunifTanjim/argus/commit/18c2fd7b02e09ec7a736cc54c157cc2fe4bd5553))
+
 ## [0.1.2](https://github.com/MunifTanjim/argus/compare/0.1.1...0.1.2) (2026-10-11)
 
 
