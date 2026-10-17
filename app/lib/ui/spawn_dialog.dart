@@ -138,6 +138,7 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
               (_nodeId == null || !value.any((n) => n.id == _nodeId))) {
             _nodeId = _defaultNodeId(value);
           }
+          if (_nodeId != prevNodeId) _clearCustomPath(); // another node's path
         });
         if (_nodeId != prevNodeId) _loadAgents(); // re-probe the new target node
       case Ok():
@@ -214,8 +215,8 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
     }
     final spawnable = selectedNode?.spawnSupported ?? true;
 
-    final allProjects = ref.watch(historyProjectsProvider).value ??
-        const <HistoryProject>[];
+    final history = ref.watch(historyProjectsProvider);
+    final allProjects = history.value ?? const <HistoryProject>[];
     // Dedupe by cwd: the same path can appear on multiple nodes or repeat in
     // history.
     final seenCwds = <String>{};
@@ -231,6 +232,10 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
     _selectedCwd ??= projects.isNotEmpty ? projects.first.cwd : null;
 
     final target = widget.target;
+    // With no directory to offer, go straight to a custom path.
+    if (target == null && history.hasValue && projects.isEmpty && !_customCwd) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _useCustomPath());
+    }
     final agents = _agents;
     final agent = agents?.where((a) => a.id == _agent).firstOrNull;
     final project = projects.where((p) => p.cwd == _selectedCwd).firstOrNull;
@@ -363,9 +368,7 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
     setState(() {
       _nodeId = v;
       _selectedCwd = null;
-      _customCwd = false;
-      _pathCtl.clear();
-      _seeded = null;
+      _clearCustomPath();
       _agents = null;
       _agent = null;
     });
@@ -401,12 +404,23 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
       footer: const _Choice(value: _customValue, title: 'Custom path…'),
     );
     if (v == null) return;
-    final wasCustom = _customCwd;
+    if (v == _customValue) return _useCustomPath();
     setState(() {
-      _customCwd = v == _customValue;
-      if (!_customCwd) _selectedCwd = v;
+      _customCwd = false;
+      _selectedCwd = v;
     });
-    if (_customCwd && !wasCustom) _seedHome();
+  }
+
+  void _clearCustomPath() {
+    _customCwd = false;
+    _pathCtl.clear();
+    _seeded = null;
+  }
+
+  void _useCustomPath() {
+    if (!mounted || _customCwd) return;
+    setState(() => _customCwd = true);
+    _seedHome();
   }
 
   Future<void> _seedHome() async {
