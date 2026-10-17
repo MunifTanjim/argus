@@ -113,6 +113,13 @@ type spawnAgentsMsg struct {
 	err    error
 }
 
+type spawnModelsMsg struct {
+	nodeID string
+	agent  string
+	models []api.ModelInfo
+	err    error
+}
+
 // spawnDirsDueMsg ends the debounce of the custom path edit numbered seq.
 type spawnDirsDueMsg struct{ seq int }
 

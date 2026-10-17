@@ -208,7 +208,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			nodes = nil
 		}
 		return m.beginSpawn(nodes, msg.projects)
-	case spawnAgentsMsg, spawnDirsDueMsg, spawnDirsMsg:
+	case spawnAgentsMsg, spawnModelsMsg, spawnDirsDueMsg, spawnDirsMsg:
 		return m.updateSpawn(m.spawnAt(), msg)
 	case spawnResultMsg:
 		if msg.err != nil {
@@ -336,12 +336,10 @@ func (m model) sendInputCmd(id, text string) tea.Cmd {
 	}
 }
 
-func (m model) spawnCmd(cwd, nodeID, agent, prompt string) tea.Cmd {
+func (m model) spawnCmd(p api.SpawnParams) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		err := client.Call(api.MethodSessionSpawn, api.SpawnParams{
-			NodeID: nodeID, Cwd: cwd, Agent: agent, Prompt: prompt,
-		}, nil)
+		err := client.Call(api.MethodSessionSpawn, p, nil)
 		return spawnResultMsg{err: err} // a successful spawn surfaces via registry events
 	}
 }
@@ -371,6 +369,20 @@ func (m model) fetchSpawnAgents(nodeID string) tea.Cmd {
 			}
 		}
 		return spawnAgentsMsg{nodeID: nodeID, agents: spawnable, err: err}
+	}
+}
+
+// fetchSpawnModels asks the node which models agent offers. A node too old to
+// know agents.models reads as an agent without a list.
+func (m model) fetchSpawnModels(nodeID, agent string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		var res api.AgentsModelsResult
+		err := client.Call(api.MethodAgentsModels, api.AgentsModelsParams{NodeID: nodeID, Agent: agent}, &res)
+		if api.IsMethodNotFound(err) {
+			err = nil
+		}
+		return spawnModelsMsg{nodeID: nodeID, agent: agent, models: res.Models, err: err}
 	}
 }
 
