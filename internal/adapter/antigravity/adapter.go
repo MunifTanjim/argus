@@ -29,11 +29,11 @@ func (agAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxS
 
 // SpawnCommand launches agy. --prompt-interactive keeps the session interactive
 // after the prompt runs (a bare positional arg is not a prompt).
-func (agAdapter) SpawnCommand(prompt string) (string, []string) {
-	if prompt == "" {
+func (agAdapter) SpawnCommand(opts adapter.SpawnOptions) (string, []string) {
+	if opts.Prompt == "" {
 		return "agy", nil
 	}
-	return "agy", []string{"--prompt-interactive", prompt}
+	return "agy", []string{"--prompt-interactive", opts.Prompt}
 }
 
 func (agAdapter) ResumeCommand(agentSessionID string) (string, []string, bool) {

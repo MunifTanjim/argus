@@ -1283,6 +1283,7 @@ SpawnParams {
   agent?:   string   // default agent if empty
   command?: string   // overrides agent
   prompt?:  string
+  model?:   string   // agent's default if empty
 }
 
 ResumeParams {

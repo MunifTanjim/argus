@@ -26,6 +26,7 @@ var _ adapter.TaskSource = (*ccAdapter)(nil)
 var _ adapter.Prompter = (*ccAdapter)(nil)
 var _ adapter.ModBridged = (*ccAdapter)(nil)
 var _ adapter.Dismisser = (*ccAdapter)(nil)
+var _ adapter.ModelLister = (*ccAdapter)(nil)
 
 func (ccAdapter) Agent() string      { return Agent }
 func (ccAdapter) AgentName() string  { return "Claude" }
@@ -40,11 +41,26 @@ func (a *ccAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.Tm
 	return NewDiscoverer(reg, clients)
 }
 
-func (ccAdapter) SpawnCommand(prompt string) (string, []string) {
-	if prompt == "" {
-		return "claude", nil
+func (ccAdapter) SpawnCommand(opts adapter.SpawnOptions) (string, []string) {
+	var args []string
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
 	}
-	return "claude", []string{prompt}
+	if opts.Prompt != "" {
+		args = append(args, opts.Prompt)
+	}
+	return "claude", args
+}
+
+// ListModels returns Claude's model aliases; the CLI resolves each to the current
+// model, so the list needs no upkeep per release.
+func (ccAdapter) ListModels(context.Context) ([]api.ModelInfo, error) {
+	return []api.ModelInfo{
+		{ID: "opus", Name: "Opus"}, {ID: "opus[1m]", Name: "Opus (1M)"},
+		{ID: "sonnet", Name: "Sonnet"}, {ID: "sonnet[1m]", Name: "Sonnet (1M)"},
+		{ID: "haiku", Name: "Haiku"}, {ID: "haiku[1m]", Name: "Haiku (1M)"},
+		{ID: "fable", Name: "Fable"}, {ID: "fable[1m]", Name: "Fable (1M)"},
+	}, nil
 }
 
 func (ccAdapter) ResumeCommand(agentSessionID string) (string, []string, bool) {
