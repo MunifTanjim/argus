@@ -157,7 +157,20 @@ type ModBridged interface {
 // agents whose sessions are not launched as a tmux pane process (opencode). It
 // returns the agent's own session id, which the registry keys the record by.
 type Spawner interface {
-	SpawnSession(ctx context.Context, cwd, prompt string) (agentSessionID string, err error)
+	SpawnSession(ctx context.Context, cwd string, opts SpawnOptions) (agentSessionID string, err error)
+}
+
+// SpawnOptions are the per-spawn choices an adapter turns into a launch. An empty
+// field means the agent's own default: the adapter adds nothing for it.
+type SpawnOptions struct {
+	Prompt string
+	Model  string // a ModelLister id
+}
+
+// ModelLister is an adapter that offers a model choice at spawn. The ids it
+// returns are what SpawnOptions.Model carries back.
+type ModelLister interface {
+	ListModels(ctx context.Context) ([]api.ModelInfo, error)
 }
 
 type Adapter interface {
@@ -175,7 +188,7 @@ type Adapter interface {
 
 	// SpawnCommand returns the CLI command to launch a session.
 	// An empty name means the agent cannot be spawned.
-	SpawnCommand(prompt string) (name string, args []string)
+	SpawnCommand(opts SpawnOptions) (name string, args []string)
 
 	// ResumeCommand returns the CLI invocation to resume a past session by its
 	// agent session id. ok=false means this agent cannot resume by id; probe with

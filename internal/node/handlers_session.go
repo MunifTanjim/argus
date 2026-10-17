@@ -310,7 +310,7 @@ func (d *Node) resolveSpawnCommand(p api.SpawnParams) (command string, args []st
 		}
 		return p.Command, args
 	}
-	return d.adapterFor(p.Agent).SpawnCommand(p.Prompt)
+	return d.adapterFor(p.Agent).SpawnCommand(adapter.SpawnOptions{Prompt: p.Prompt, Model: p.Model})
 }
 
 // handleAgentsList reports agents with spawnable flags. Probed live per call so an
@@ -321,7 +321,7 @@ func (d *Node) handleAgentsList(_ context.Context, params json.RawMessage) (any,
 	}
 	agents := make([]api.AgentInfo, 0, len(d.adapterList))
 	for _, a := range d.adapterList {
-		name, _ := a.SpawnCommand("")
+		name, _ := a.SpawnCommand(adapter.SpawnOptions{})
 		// A Spawner (headless) agent creates sessions over its service API, so it
 		// spawns without tmux; every other agent's spawn opens a tmux pane.
 		_, isSpawner := a.(adapter.Spawner)
@@ -357,7 +357,7 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 	// id. This path needs no tmux, so it runs ahead of the pane-spawn tmux guard.
 	a := d.adapterFor(p.Agent)
 	if sp, ok := a.(adapter.Spawner); ok {
-		id, err := sp.SpawnSession(ctx, p.Cwd, p.Prompt)
+		id, err := sp.SpawnSession(ctx, p.Cwd, adapter.SpawnOptions{Prompt: p.Prompt, Model: p.Model})
 		if err != nil {
 			return nil, &api.RPCError{
 				Code:    api.CodeInvalidRequest,

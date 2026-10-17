@@ -39,7 +39,7 @@ func (a *cxAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.Tm
 
 // SpawnCommand names the binary only: spawn goes through the daemon
 // (SpawnSession). The name backs the installed-agent PATH probe.
-func (cxAdapter) SpawnCommand(string) (string, []string) { return "codex", nil }
+func (cxAdapter) SpawnCommand(adapter.SpawnOptions) (string, []string) { return "codex", nil }
 
 // ResumeCommand is the viewer pane: another client on the same daemon thread.
 // It is unavailable until the thread can be resumed (see discoverer.resumable).
@@ -140,12 +140,12 @@ func (a *cxAdapter) SendPrompt(ctx context.Context, sess session.Session, text s
 	return d.sendPrompt(ctx, sess.AgentSessionID, text)
 }
 
-func (a *cxAdapter) SpawnSession(ctx context.Context, cwd, prompt string) (string, error) {
+func (a *cxAdapter) SpawnSession(ctx context.Context, cwd string, opts adapter.SpawnOptions) (string, error) {
 	d, err := a.live()
 	if err != nil {
 		return "", err
 	}
-	return d.spawnSession(ctx, cwd, prompt)
+	return d.spawnSession(ctx, cwd, opts.Prompt)
 }
 
 func (a *cxAdapter) Dismiss(ctx context.Context, sess session.Session) error {
