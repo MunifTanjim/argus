@@ -343,12 +343,21 @@ func (m tview) updateMsg(msg tea.Msg) tea.Cmd {
 	defer m.dropStaleVisual() // new rows can fold a selection's row away
 	switch msg := msg.(type) {
 	case transcriptMsg:
+		if msg.err != nil {
+			// A failed (re)subscribe keeps what was shown: the cache still holds
+			// it, and the next re-subscribe catches up from the cache's length.
+			m.transcript.err = msg.err
+			break
+		}
 		prevID, wasLast := m.currentRowID()
 		atBottom := m.streamFollows()
 		m.setEntries(msg.entries)
 		m.transcript.err = msg.err
 		m.restoreEntryCursor(prevID, atBottom, wasLast)
 	case transcriptDeltaMsg:
+		if msg.initial {
+			m.transcript.err = nil // a re-subscribe recovered from a failed one
+		}
 		if msg.ref.agentID != "" {
 			// Match by subID, not topFrame(): the user may have drilled into a leaf above it.
 			for i := range m.transcript.detailStack {

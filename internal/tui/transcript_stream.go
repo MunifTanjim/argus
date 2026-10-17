@@ -38,6 +38,17 @@ func (m *model) resubscribeOnClear(prev session.Session, existed bool, cur sessi
 	return tea.Batch(m.unsubscribeCmd(old), bind)
 }
 
+// resubscribeLive re-opens the open live stream after its subscription was
+// lost, catching up from the cached entries. sessionID limits it to that
+// session's stream ("" = any).
+func (m model) resubscribeLive(sessionID string) tea.Cmd {
+	t, ok := m.baseComp().(transcriptComp)
+	if !ok || !t.live || t.activeSub.subID == "" || (sessionID != "" && t.sessionID != sessionID) {
+		return nil
+	}
+	return m.subscribeCmd(t.activeSub, len(m.transcriptCache[t.activeSub.key()].entries))
+}
+
 // bindStream shows ref's cached entries at once (empty for a fresh key) and pins
 // the view to the bottom so the catch-up delta keeps tailing (see
 // restoreEntryCursor).
