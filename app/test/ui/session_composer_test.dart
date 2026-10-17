@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/core/result.dart';
 import 'package:argus/data/session_repository.dart';
+import 'package:argus/models/entry.dart';
 import 'package:argus/models/enums.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/state/sessions.dart';
@@ -42,6 +43,7 @@ Session _s({
   Map<String, dynamic>? summary,
   String? since,
   List<Map<String, dynamic>>? subagents,
+  bool? canPrompt,
 }) =>
     Session.fromJson({
       'id': 'n:%1',
@@ -55,10 +57,17 @@ Session _s({
       'summary': ?summary,
       'status_since': ?since,
       'subagents': ?subagents,
+      // Default: what the node sends.
+      'can_prompt': canPrompt ??
+          (status != 'working' &&
+              status != 'starting' &&
+              (interaction == null || interaction['kind'] == 'idle')),
     });
 
 Future<void> _pump(WidgetTester t, Session s, SessionRepository repo,
-        {ProviderContainer? container, String? notice}) =>
+        {ProviderContainer? container,
+        String? notice,
+        List<QueuedPrompt> queue = const []}) =>
     t.pumpWidget(UncontrolledProviderScope(
       container: container ??
           ProviderContainer(
@@ -67,7 +76,8 @@ Future<void> _pump(WidgetTester t, Session s, SessionRepository repo,
         home: Scaffold(
           body: Align(
             alignment: Alignment.bottomCenter,
-            child: SessionComposer(session: s, inputNotice: notice),
+            child: SessionComposer(
+                session: s, inputNotice: notice, queue: queue),
           ),
         ),
       ),
@@ -511,5 +521,27 @@ void main() {
       expect(find.text('Explore'), findsOneWidget);
       expect(find.text('scout'), findsOneWidget);
     });
+  });
+
+  testWidgets('a queueing session sends while working', (t) async {
+    final repo = _Recording();
+    await _pump(t, _s(status: 'working', canPrompt: true), repo);
+    await t.enterText(find.byType(TextField), 'steer');
+    await t.pump();
+    await t.tap(find.byIcon(Icons.send));
+    await t.pump();
+    expect(repo.inputs, [
+      ['n:%1', 'steer']
+    ]);
+  });
+
+  testWidgets('queued prompts list above the input, at most three', (t) async {
+    final q = ['a', 'b', 'c', 'd', 'e'].map((s) => QueuedPrompt(text: s)).toList();
+    await _pump(t, _s(status: 'working', canPrompt: true), _Recording(),
+        queue: q);
+    expect(find.text('a'), findsOneWidget);
+    expect(find.text('c'), findsOneWidget);
+    expect(find.text('d'), findsNothing);
+    expect(find.text('+2 more'), findsOneWidget);
   });
 }

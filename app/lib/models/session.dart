@@ -222,6 +222,10 @@ class Session {
   /// agent can spawn a viewer here.
   final bool canOpenTerminal;
 
+  /// Node-computed on emit: argus can send the session a prompt now. The single
+  /// signal for allowing a send.
+  final bool canPrompt;
+
   const Session({
     required this.id,
     required this.agent,
@@ -246,6 +250,7 @@ class Session {
     this.nodeLabel,
     this.offline = false,
     this.canOpenTerminal = false,
+    this.canPrompt = false,
   });
 
   factory Session.fromJson(Map<String, dynamic> j) => Session(
@@ -279,6 +284,7 @@ class Session {
         nodeLabel: j['node_label'] as String?,
         offline: j['offline'] as bool? ?? false,
         canOpenTerminal: j['can_open_terminal'] as bool? ?? false,
+        canPrompt: j['can_prompt'] as bool? ?? false,
       );
 
   /// The label shown wherever a session needs a title: repo, else name, else id.
@@ -302,12 +308,6 @@ class Session {
   /// Mirrors the backend session.AcceptsInput(): true for tmux (pane) and for
   /// API agents like opencode, false for decision-only sessions.
   bool get acceptsInput => inputMode != InputMode.none;
-
-  /// Mirrors session.ReadyForPrompt(), and is false while starting.
-  bool get promptReady =>
-      status != SessionStatus.starting &&
-      status != SessionStatus.working &&
-      (interaction == null || interaction!.kind == InteractionKind.idle);
 
   /// Whether a paneless API session can be torn down (dismissed). Kill is
   /// unconditional, so status and interaction do not gate it.
