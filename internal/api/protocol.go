@@ -1000,11 +1000,14 @@ type TranscriptUnsubscribeParams struct {
 }
 
 // TranscriptDelta is both the subscribe result (initial catch-up) and the push
-// payload. The client truncates its cached entries to FromIndex, then appends Entries.
+// payload. The client truncates its cached entries to FromIndex, then appends
+// Entries. Queue, when present, replaces the client's queued prompts; absent,
+// they are unchanged.
 type TranscriptDelta struct {
-	SubID     string             `json:"sub_id"`
-	FromIndex int                `json:"from_index"`
-	Entries   []transcript.Entry `json:"entries"`
+	SubID     string                     `json:"sub_id"`
+	FromIndex int                        `json:"from_index"`
+	Entries   []transcript.Entry         `json:"entries"`
+	Queue     *[]transcript.QueuedPrompt `json:"queue,omitempty"`
 }
 
 // TerminalOpenParams opens a terminal session with the given dimensions.

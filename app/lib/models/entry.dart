@@ -250,15 +250,28 @@ class ToolDetail {
       );
 }
 
+class QueuedPrompt {
+  final String text;
+
+  const QueuedPrompt({required this.text});
+
+  factory QueuedPrompt.fromJson(Map<String, dynamic> j) =>
+      QueuedPrompt(text: j['text'] as String? ?? '');
+}
+
 class TranscriptDelta {
   final String subId;
   final int fromIndex;
   final List<Entry> entries;
 
+  /// Replaces the queued prompts when present; null leaves them unchanged.
+  final List<QueuedPrompt>? queue;
+
   const TranscriptDelta({
     required this.subId,
     required this.fromIndex,
     required this.entries,
+    this.queue,
   });
 
   factory TranscriptDelta.fromJson(Map<String, dynamic> j) => TranscriptDelta(
@@ -268,5 +281,8 @@ class TranscriptDelta {
                 ?.map((e) => Entry.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             const [],
+        queue: (j['queue'] as List?)
+            ?.map((e) => QueuedPrompt.fromJson(e as Map<String, dynamic>))
+            .toList(),
       );
 }

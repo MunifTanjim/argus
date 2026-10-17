@@ -47,6 +47,8 @@ func (d *Node) snapshotWithCaps() []session.Session {
 // emitted to a client, so they reflect this node's tmux and installed agents.
 func (d *Node) withCaps(s session.Session) session.Session {
 	s.CanOpenTerminal = d.canOpenTerminal(s)
+	q, ok := d.adapterFor(s.Agent).(adapter.PromptQueuer)
+	s.CanPrompt = s.TakesPrompt(ok && q.QueuesPrompts(s))
 	return s
 }
 
@@ -198,8 +200,8 @@ func (d *Node) handleSessionCapture(ctx context.Context, params json.RawMessage)
 }
 
 // handleSessionInput delivers input to a session over its input channel: the
-// agent's own prompt API for an InputAPI session (opencode), or tmux keystrokes
-// for an InputPane session.
+// agent's own prompt API for an InputAPI session (opencode, Claude over its
+// mod), or tmux keystrokes for an InputPane session.
 func (d *Node) handleSessionInput(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.InputParams](params)
 	if err != nil {
@@ -261,16 +263,51 @@ func (d *Node) sendPaneInput(ctx context.Context, s session.Session, p api.Input
 }
 
 // sendPromptInput delivers a prompt to an InputAPI session over its agent's API.
-// The agent decides whether a busy session takes it; each refuses with "session is busy".
+// A working session whose agent fills its own input box gets the text filled
+// and submitted with Enter in its pane, so the agent queues it as typed there.
 func (d *Node) sendPromptInput(ctx context.Context, s session.Session, p api.InputParams) (any, error) {
-	pr, ok := d.adapterFor(s.Agent).(adapter.Prompter)
-	if !ok || p.Text == "" {
+	a := d.adapterFor(s.Agent)
+	if p.Text == "" {
+		return nil, fmt.Errorf("%s: %w", s.ID, api.ErrNoTerminalControl)
+	}
+	if f, ok := a.(adapter.PaneFiller); ok && s.Status == session.StatusWorking && s.Controllable() {
+		return nil, d.fillAndSubmit(ctx, s, f, p.Text)
+	}
+	pr, ok := a.(adapter.Prompter)
+	if !ok {
 		return nil, fmt.Errorf("%s: %w", s.ID, api.ErrNoTerminalControl)
 	}
 	if err := pr.SendPrompt(ctx, s, p.Text); err != nil {
 		return nil, err
 	}
 	return nil, nil
+}
+
+// fillAndSubmit leaves copy mode before pressing Enter so the key reaches the
+// agent. A permission, question or plan that opened during the fill gets no
+// Enter: the key would answer it.
+func (d *Node) fillAndSubmit(ctx context.Context, s session.Session, f adapter.PaneFiller, text string) error {
+	_, c, err := d.resolve(s.ID)
+	if err != nil {
+		return err
+	}
+	filled, err := f.FillPrompt(ctx, s, text)
+	if err != nil || !filled {
+		return err
+	}
+	if cur, ok := d.reg.Get(s.ID); !ok || cur.InteractionPending() {
+		return fmt.Errorf("%s: %w", s.ID, api.ErrSessionBusy)
+	}
+	inMode, err := c.PaneInMode(ctx, s.Tmux.PaneID)
+	if err != nil {
+		return err
+	}
+	if inMode {
+		if err := c.CancelMode(ctx, s.Tmux.PaneID); err != nil {
+			return err
+		}
+	}
+	return c.SendKeys(ctx, s.Tmux.PaneID, "Enter")
 }
 
 // sleepCtx waits for d, returning early if ctx is cancelled.

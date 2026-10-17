@@ -414,7 +414,9 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                       ConstrainedBox(
                         constraints: BoxConstraints(maxHeight: box.maxHeight),
                         child: SessionComposer(
-                            session: live, inputNotice: inputNotice),
+                            session: live,
+                            inputNotice: inputNotice,
+                            queue: st.queue),
                       ),
                   ],
                 ),

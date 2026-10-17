@@ -14,6 +14,7 @@ String newSubId() => newHexId();
 class TranscriptState {
   final String? subId;
   final List<Entry> entries;
+  final List<QueuedPrompt> queue;
   final Object? error;
 
   /// Whether the initial snapshot has arrived. Distinguishes "still loading"
@@ -22,11 +23,16 @@ class TranscriptState {
   final bool loaded;
 
   const TranscriptState(
-      {this.subId, this.entries = const [], this.error, this.loaded = false});
+      {this.subId,
+      this.entries = const [],
+      this.queue = const [],
+      this.error,
+      this.loaded = false});
 
   TranscriptState copyWith({
     String? subId,
     List<Entry>? entries,
+    List<QueuedPrompt>? queue,
     Object? error,
     bool clearError = false,
     bool? loaded,
@@ -34,6 +40,7 @@ class TranscriptState {
       TranscriptState(
         subId: subId ?? this.subId,
         entries: entries ?? this.entries,
+        queue: queue ?? this.queue,
         error: clearError ? null : (error ?? this.error),
         loaded: loaded ?? this.loaded,
       );
@@ -54,7 +61,10 @@ class TranscriptNotifier extends Notifier<TranscriptState> {
   void applyDelta(TranscriptDelta d) {
     if (d.subId != state.subId) return;
     state = state.copyWith(
-        entries: applyDelta_(state.entries, d), clearError: true, loaded: true);
+        entries: applyDelta_(state.entries, d),
+        queue: d.queue,
+        clearError: true,
+        loaded: true);
   }
 
   void setError(Object? e) => state = state.copyWith(error: e);

@@ -307,3 +307,40 @@ func TestStreaming_DepthCapSuppressesLink(t *testing.T) {
 		t.Fatalf("capped item ID=%q HasTrace=%v, want empty/false", sa.ID, sa.HasTrace)
 	}
 }
+
+func TestStreamingTranscriptFollowsTheQueue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	write := func(s string) {
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if _, err := f.WriteString(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`{"type":"user","uuid":"u1","timestamp":"2026-10-16T14:45:00Z","message":{"role":"user","content":[{"type":"text","text":"go"}]}}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-16T14:45:14.858Z","sessionId":"s","content":"P1 say ONE"}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-16T14:45:15.877Z","sessionId":"s","content":"P2 say TWO"}
+`)
+	st := NewStreamingTranscript(path, path, false)
+	if _, err := st.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if got := texts(st.Queue()); !reflect.DeepEqual(got, []string{"P1 say ONE", "P2 say TWO"}) {
+		t.Fatalf("queue = %q", got)
+	}
+	write(`{"type":"queue-operation","operation":"remove","timestamp":"2026-10-16T14:45:23.876Z","sessionId":"s","content":"P1 say ONE","reason":"absorbed_mid_turn"}
+`)
+	if _, err := st.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if got := texts(st.Queue()); !reflect.DeepEqual(got, []string{"P2 say TWO"}) {
+		t.Fatalf("queue after delivery = %q", got)
+	}
+	st.ClearQueue()
+	if got := st.Queue(); len(got) != 0 {
+		t.Fatalf("queue after clear = %v", got)
+	}
+}

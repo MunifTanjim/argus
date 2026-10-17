@@ -289,3 +289,20 @@ func equal(a, b []bool) bool {
 	}
 	return true
 }
+
+func TestAckBusyFailsTheSendWithErrBusy(t *testing.T) {
+	b := New(time.Second, time.Second, nil)
+	ctx := context.Background()
+	go func() {
+		for _, c := range b.Wait(ctx, "s1", time.Minute) {
+			b.Ack(c.ID, FailBusy, false)
+		}
+	}()
+	for !b.Reachable("s1") {
+		time.Sleep(time.Millisecond)
+	}
+	_, err := b.Send(ctx, "s1", Command{Kind: KindFill, Text: "steer"})
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("err = %v, want ErrBusy", err)
+	}
+}

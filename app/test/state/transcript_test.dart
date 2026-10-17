@@ -83,4 +83,28 @@ void main() {
     n.setSubId('s2'); // reconnect picks a new sub id
     expect(c.read(_provider).loaded, isTrue);
   });
+
+  test('a delta replaces the queue only when it carries one', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final n = container.read(transcriptProvider('k').notifier);
+    n.setSubId('x');
+    n.applyDelta(TranscriptDelta.fromJson({
+      'sub_id': 'x',
+      'from_index': 0,
+      'entries': [],
+      'queue': [
+        {'text': 'steer'}
+      ],
+    }));
+    expect(container.read(transcriptProvider('k')).queue.map((p) => p.text),
+        ['steer']);
+    n.applyDelta(TranscriptDelta.fromJson(
+        {'sub_id': 'x', 'from_index': 0, 'entries': []}));
+    expect(container.read(transcriptProvider('k')).queue.map((p) => p.text),
+        ['steer']);
+    n.applyDelta(TranscriptDelta.fromJson(
+        {'sub_id': 'x', 'from_index': 0, 'entries': [], 'queue': []}));
+    expect(container.read(transcriptProvider('k')).queue, isEmpty);
+  });
 }

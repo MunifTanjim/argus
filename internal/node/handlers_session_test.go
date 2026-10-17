@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
@@ -346,6 +348,25 @@ func TestHandleAgentsList(t *testing.T) {
 		if sp && id != "codex" {
 			t.Fatalf("no-tmux: %s must not be spawnable", id)
 		}
+	}
+}
+
+func TestWithCapsStampsCanPrompt(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	working := func(agent string, in session.InputMode) session.Session {
+		return session.Session{Agent: agent, Input: in, Status: session.StatusWorking}
+	}
+	if !d.withCaps(working("claude", session.InputAPI)).CanPrompt {
+		t.Fatal("working claude over the mod: can_prompt should be set")
+	}
+	if d.withCaps(working("claude", session.InputPane)).CanPrompt {
+		t.Fatal("working claude over keystrokes: can_prompt must be unset")
+	}
+	if d.withCaps(working("opencode", session.InputAPI)).CanPrompt {
+		t.Fatal("working opencode: can_prompt must be unset")
+	}
+	if !d.withCaps(session.Session{Agent: "opencode", Input: session.InputAPI, Status: session.StatusIdle}).CanPrompt {
+		t.Fatal("idle opencode: can_prompt should be set")
 	}
 }
 
@@ -724,5 +745,123 @@ func TestHandleSessionSpawnRejectsUnusableModel(t *testing.T) {
 	}
 	if fs.gotModel != "m1" {
 		t.Fatalf("gotModel = %q, want m1", fs.gotModel)
+	}
+}
+
+type fakeFiller struct {
+	fakePrompter
+	filled    string
+	fillErr   error
+	notFilled bool // took the prompt another way: no Enter
+	onFill    func()
+}
+
+func (f *fakeFiller) FillPrompt(_ context.Context, _ session.Session, text string) (bool, error) {
+	f.filled = text
+	if f.onFill != nil {
+		f.onFill()
+	}
+	return f.fillErr == nil && !f.notFilled, f.fillErr
+}
+
+func TestBusyPaneSessionIsFilledThenSubmitted(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	ctx := context.Background()
+	tc := tmux.New("argus-fill-test")
+	t.Cleanup(func() { _ = tc.KillServer(context.Background()) })
+	paneID, err := tc.NewSession(ctx, tmux.NewSessionOpts{Name: "sh", Command: "/bin/sh -c 'read x; echo GOT-ENTER; sleep 30'"})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	d := newNode(map[session.TmuxServer]*tmux.Client{session.TmuxServerArgus: tc})
+	ff := &fakeFiller{}
+	d.adapters["opencode"] = ff
+	s, _ := d.reg.ApplyHook(registry.HookUpdate{Agent: "opencode", Server: session.TmuxServerArgus, PaneID: paneID,
+		AgentSessionID: "ses_1", Status: session.StatusWorking, Input: session.InputAPI})
+	input := func(text string) error {
+		params, _ := json.Marshal(api.InputParams{SessionID: s.ID, Text: text, Submit: true})
+		_, err := d.handleSessionInput(ctx, params)
+		return err
+	}
+	entered := func() bool {
+		out, _ := tc.CapturePane(ctx, paneID, tmux.CaptureOpts{})
+		return strings.Contains(out, "GOT-ENTER")
+	}
+
+	ff.fillErr = api.ErrSessionBusy
+	if err := input("steer"); !errors.Is(err, api.ErrSessionBusy) {
+		t.Fatalf("refused fill: err = %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if entered() || ff.called {
+		t.Fatal("a refused fill pressed Enter or fell back to SendPrompt")
+	}
+
+	ff.fillErr, ff.notFilled = nil, true
+	if err := input("/compact"); err != nil {
+		t.Fatalf("unfilled prompt: err = %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if entered() {
+		t.Fatal("an unfilled prompt pressed Enter")
+	}
+
+	ff.notFilled = false
+	ff.onFill = func() {
+		d.reg.ApplyHook(registry.HookUpdate{Agent: "opencode", AgentSessionID: "ses_1", Status: session.StatusAwaitingInput,
+			Interaction: &session.Interaction{Kind: session.InteractionPermission}})
+	}
+	if err := input("steer"); !errors.Is(err, api.ErrSessionBusy) {
+		t.Fatalf("fill under a new permission: err = %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if entered() {
+		t.Fatal("Enter was sent while a permission was pending")
+	}
+	ff.onFill = nil
+	d.reg.ApplyHook(registry.HookUpdate{Agent: "opencode", AgentSessionID: "ses_1", Status: session.StatusWorking,
+		ReplaceInteraction: true})
+
+	if err := input("steer"); err != nil {
+		t.Fatal(err)
+	}
+	if ff.filled != "steer" || ff.called {
+		t.Fatalf("filled %q, SendPrompt called %v; want a fill only", ff.filled, ff.called)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !entered() {
+		if time.Now().After(deadline) {
+			t.Fatal("Enter never reached the pane")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestSendPromptIsUsedWhenNoFillApplies(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		hook registry.HookUpdate
+		text string
+	}{
+		{"working but paneless", registry.HookUpdate{AgentSessionID: "ses_2", Status: session.StatusWorking}, "hi"},
+		{"idle with a pane", registry.HookUpdate{AgentSessionID: "ses_3", Status: session.StatusIdle,
+			Server: session.TmuxServerArgus, PaneID: "%1"}, "hi"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newNode(map[session.TmuxServer]*tmux.Client{})
+			ff := &fakeFiller{}
+			d.adapters["opencode"] = ff
+			tc.hook.Agent, tc.hook.Input = "opencode", session.InputAPI
+			s, _ := d.reg.ApplyHook(tc.hook)
+			params, _ := json.Marshal(api.InputParams{SessionID: s.ID, Text: tc.text, Submit: true})
+			if _, err := d.handleSessionInput(context.Background(), params); err != nil {
+				t.Fatal(err)
+			}
+			if !ff.called || ff.gotText != tc.text || ff.filled != "" {
+				t.Fatalf("called=%v text=%q filled=%q; want SendPrompt(%q) and no fill", ff.called, ff.gotText, ff.filled, tc.text)
+			}
+		})
 	}
 }

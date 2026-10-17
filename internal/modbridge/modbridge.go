@@ -15,7 +15,12 @@ import (
 const (
 	KindPrompt = "prompt" // a prompt, or a slash command when it starts with "/"
 	KindExit   = "exit"   // end the session
+	KindFill   = "fill"   // put text in Claude's input box in place of the draft
 )
+
+// FailBusy is the failure the mod acks for a fill Claude's input box refused
+// because a dialog holds the keys.
+const FailBusy = "busy"
 
 // Command is one instruction for the mod. The mod acks it by ID once run, or
 // once accepted when it is still waiting (e.g. on a running turn).
@@ -31,6 +36,9 @@ var ErrUnreachable = errors.New("session has no mod connection")
 // ErrNoAck reports a command handed to a poll that the mod never acked: the
 // poll's client went away before the command reached Claude.
 var ErrNoAck = errors.New("claude did not confirm the command")
+
+// ErrBusy reports a command the mod refused with FailBusy.
+var ErrBusy = errors.New("claude's input is held by a dialog")
 
 // conn is one session's mod connection: an open poll, or the grace after one
 // closed, during which the mod is expected to re-poll.
@@ -195,6 +203,10 @@ func (b *Bridge) Ack(id, failure string, ran bool) {
 	delete(b.acks, id)
 	b.mu.Unlock()
 	if ch == nil {
+		return
+	}
+	if failure == FailBusy {
+		ch <- ack{err: ErrBusy}
 		return
 	}
 	if failure != "" {

@@ -11,6 +11,13 @@ import (
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
+func nextQueue(prev []transcript.QueuedPrompt, d api.TranscriptDelta) []transcript.QueuedPrompt {
+	if d.Queue == nil {
+		return prev
+	}
+	return *d.Queue
+}
+
 // resubscribeOnClear re-subscribes when a /clear changes the open session's
 // AgentSessionID, so pre-clear entries don't survive into the new transcript.
 func (m *model) resubscribeOnClear(prev session.Session, existed bool, cur session.Session) tea.Cmd {
@@ -54,7 +61,13 @@ func (m model) resubscribeLive(sessionID string) tea.Cmd {
 // restoreEntryCursor).
 func (m tview) bindStream(ref subRef) tea.Cmd {
 	m.activeSub = ref
-	m.setEntries(m.c.m.transcriptCache[ref.key()].entries)
+	cached := m.c.m.transcriptCache[ref.key()]
+	if cached.queue != nil {
+		// Not followed while unsubscribed: the catch-up delta brings it anew.
+		cached.queue = nil
+		m.c.m.transcriptCache[ref.key()] = cached
+	}
+	m.setEntries(cached.entries)
 	m.transcript.cursor = max(0, len(m.displayRows())-1)
 	m.transcript.scroll = m.maxScroll()
 	return m.c.m.subscribeCmd(ref, len(m.transcript.entries))
