@@ -5,8 +5,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
@@ -246,5 +248,57 @@ func TestClientRespondPermission(t *testing.T) {
 	}
 	if gotBody != `{"decision":"reject","message":"no"}` {
 		t.Fatalf("body = %s", gotBody)
+	}
+}
+
+func TestListModelsLabelsByProvider(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/model":
+			_, _ = w.Write([]byte(`{"data":[
+				{"id":"claude-haiku-5-5","modelID":"claude-haiku-5-5","providerID":"opencode","name":"Claude Haiku 5.5","enabled":true},
+				{"id":"claude-haiku-5-5","modelID":"claude-haiku-5-5","providerID":"opencode-go","name":"Claude Haiku 5.5","enabled":true},
+				{"id":"old","modelID":"old","providerID":"opencode","name":"Old","enabled":false},
+				{"id":"x","modelID":"x","providerID":"mystery","name":"X","enabled":true}]}`))
+		case "/api/provider":
+			_, _ = w.Write([]byte(`{"data":[{"id":"opencode","name":"Default / OpenCode"},{"id":"opencode-go","name":"OpenCode Go"}]}`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := newClient(serviceInfo{URL: srv.URL}).listModels(context.Background())
+	if err != nil {
+		t.Fatalf("listModels: %v", err)
+	}
+	want := []api.ModelInfo{
+		{ID: "opencode/claude-haiku-5-5", Name: "Claude Haiku 5.5 · Default / OpenCode"},
+		{ID: "opencode-go/claude-haiku-5-5", Name: "Claude Haiku 5.5 · OpenCode Go"},
+		{ID: "mystery/x", Name: "X · mystery"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("models = %+v, want %+v", got, want)
+	}
+}
+
+func TestListModelsFallsBackToProviderIDs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/model":
+			_, _ = w.Write([]byte(`{"data":[{"id":"m","modelID":"m","providerID":"opencode","name":"M","enabled":true}]}`))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := newClient(serviceInfo{URL: srv.URL}).listModels(context.Background())
+	if err != nil {
+		t.Fatalf("listModels: %v", err)
+	}
+	want := []api.ModelInfo{{ID: "opencode/m", Name: "M · opencode"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("models = %+v, want %+v", got, want)
 	}
 }

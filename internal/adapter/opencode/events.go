@@ -93,7 +93,7 @@ func (d *discoverer) runEventPump(ctx context.Context) {
 		}
 		c, ok := d.dial()
 		if !ok {
-			if sleep(ctx, 3*time.Second) {
+			if d.awaitRetry(ctx) {
 				return
 			}
 			continue
@@ -111,6 +111,21 @@ func (d *discoverer) runEventPump(ctx context.Context) {
 		if sleep(ctx, time.Second) {
 			return
 		}
+	}
+}
+
+// awaitRetry waits before the pump dials again: 3s, or until an auto-start
+// reports the service is up.
+func (d *discoverer) awaitRetry(ctx context.Context) (canceled bool) {
+	t := time.NewTimer(3 * time.Second)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return true
+	case <-d.wake:
+		return false
+	case <-t.C:
+		return false
 	}
 }
 
