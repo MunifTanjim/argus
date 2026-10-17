@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/MunifTanjim/argus/internal/fakeagent"
@@ -19,7 +20,22 @@ func env(key, fallback string) string {
 	return fallback
 }
 
+// cli answers the claude CLI calls argus makes to install its plugin, without
+// planting a session.
+func cli(args []string) {
+	switch strings.Join(args, " ") {
+	case "--version":
+		fmt.Println("99.0.0 (Claude Code)")
+	case "plugin list --json", "plugin marketplace list --json":
+		fmt.Println("[]")
+	}
+}
+
 func main() {
+	if len(os.Args) > 1 {
+		cli(os.Args[1:])
+		return
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fakeclaude: getwd:", err)

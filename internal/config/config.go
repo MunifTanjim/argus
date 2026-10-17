@@ -12,6 +12,7 @@ import (
 // Config is the resolved argus configuration. Precedence: flags > env > file > defaults.
 type Config struct {
 	Socket string
+	Bin    string // argus binary that agent hooks invoke
 	Token  string // shared gateway token: presented by clients/nodes, required by the gateway
 	// Mode selects the run topology: "node", "gateway", or empty to infer from URL/token.
 	Mode      string
@@ -146,6 +147,7 @@ func DefaultSocket() string { return GetRuntimePath("argus.sock") }
 // defaults are the built-in fallback values for unset keys.
 var defaults = map[string]any{
 	"socket":                          DefaultSocket(),
+	"bin":                             "argus",
 	"token":                           "",
 	"gateway.url":                     "",
 	"gateway.listen-addr":             ":8443",
@@ -249,6 +251,7 @@ func (c Config) Validate() error {
 func FromViper(v *viper.Viper) Config {
 	return Config{
 		Socket: v.GetString("socket"),
+		Bin:    v.GetString("bin"),
 		Token:  v.GetString("token"),
 		Mode:   v.GetString("mode"),
 		Gateway: GatewayConfig{

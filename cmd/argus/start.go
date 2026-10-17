@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -157,7 +158,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 	}
 
 	if local {
-		go reconcileHooks(logger.Scoped("hooks").L, adapter.InstallOptions{ArgusBin: hookBin(managed), Socket: node.ModSocketPath(cfg.Socket)})
+		go reconcileHooks(logger.Scoped("hooks").L, adapter.InstallOptions{ArgusBin: cfg.Bin, Socket: node.ModSocketPath(cfg.Socket)})
 		if err := connectGateway(ctx, cfg, d); err != nil {
 			return fail(cmd, err)
 		}
@@ -387,14 +388,24 @@ func applyLogLevel(cfg *config.Config) error {
 	return nil
 }
 
-// reconcileHooks syncs installed agent integrations with this binary so changes
-// take effect without a manual reinstall. Best-effort, and slow when it runs
-// the claude CLI, so callers run it in the background.
+// reconcileHooks skips agents that were never run. Best-effort, and slow when
+// it runs the claude CLI, so callers run it in the background.
 func reconcileHooks(log *slog.Logger, opts adapter.InstallOptions) {
 	for _, a := range adapters.All() {
-		if added, err := a.ReconcileIfInstalled(opts); err != nil {
+		path, err := a.SettingsPath()
+		if err != nil {
 			log.Warn("reconcile hooks failed", "agent", a.Agent(), "err", err)
-		} else if len(added) > 0 {
+			continue
+		}
+		if path != "" && !dirExists(filepath.Dir(path)) {
+			continue
+		}
+		added, err := a.Reconcile(opts)
+		switch {
+		case errors.Is(err, adapter.ErrAgentNotInstalled):
+		case err != nil:
+			log.Warn("reconcile hooks failed", "agent", a.Agent(), "err", err)
+		case len(added) > 0:
 			log.Info("reconciled argus hooks", "agent", a.Agent(), "added", added)
 		}
 	}
@@ -405,15 +416,6 @@ func reconcileHooks(log *slog.Logger, opts adapter.InstallOptions) {
 func watchParent(r io.Reader, stop context.CancelFunc) {
 	_, _ = io.Copy(io.Discard, r)
 	stop()
-}
-
-// hookBin keeps the installed hook binary for a managed server: the TUI that
-// starts it can run from any path, for example a dev build.
-func hookBin(managed bool) string {
-	if managed {
-		return ""
-	}
-	return detectArgusBin()
 }
 
 // connectGateway dials an upstream gateway in the background to enroll the node as a

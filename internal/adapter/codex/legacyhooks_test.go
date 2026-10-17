@@ -94,12 +94,12 @@ func TestRemoveLegacyHooksDeletesManagedEntries(t *testing.T) {
 	}
 }
 
-func TestReconcileIfInstalledRemovesLegacyHooks(t *testing.T) {
+func TestReconcileRemovesLegacyHooks(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
 	seedLegacyHooks(t, "/bin/argus")
-	if added, err := New().ReconcileIfInstalled(adapter.InstallOptions{ArgusBin: "/bin/argus"}); err != nil || len(added) != 0 {
-		t.Fatalf("ReconcileIfInstalled = %v, %v", added, err)
+	if added, err := New().Reconcile(adapter.InstallOptions{ArgusBin: "/bin/argus"}); err != nil || len(added) != 0 {
+		t.Fatalf("Reconcile = %v, %v", added, err)
 	}
 	if _, err := os.Stat(filepath.Join(home, "hooks.json")); !os.IsNotExist(err) {
 		t.Fatal("node start must strip argus-managed codex hooks")

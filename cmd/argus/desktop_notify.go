@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+
 	"github.com/MunifTanjim/argus/internal/config"
 )
 
@@ -12,4 +14,11 @@ func desktopClickCmd(cfg *config.Config) func(string) []string {
 	return func(sessionID string) []string {
 		return []string{bin, "_focus", "--socket", socket, sessionID}
 	}
+}
+
+func detectArgusBin() string {
+	if exe, err := os.Executable(); err == nil {
+		return exe
+	}
+	return "argus"
 }

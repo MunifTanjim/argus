@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/MunifTanjim/argus/internal/adapter/hookset"
@@ -91,9 +92,9 @@ func Install(argusBin string, events []string) error {
 	return nil
 }
 
-// ReconcileIfInstalled aligns managed hooks with DefaultHookEvents when already
-// opted in. A store missing the argus set is healed by installing.
-func ReconcileIfInstalled(argusBin string) ([]string, error) {
+// Reconcile aligns managed hooks with DefaultHookEvents, installing them into
+// any store that lacks them.
+func Reconcile(argusBin string) ([]string, error) {
 	all, err := stores()
 	if err != nil {
 		return nil, err
@@ -123,7 +124,10 @@ func ReconcileIfInstalled(argusBin string) ([]string, error) {
 	}
 
 	if !anyOptedIn {
-		return nil, nil
+		if err := Install(argusBin, DefaultHookEvents); err != nil {
+			return nil, err
+		}
+		return slices.Clone(DefaultHookEvents), nil
 	}
 
 	addedSet := map[string]bool{}

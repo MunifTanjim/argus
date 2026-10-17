@@ -152,7 +152,7 @@ func (ccAdapter) Install(opts adapter.InstallOptions) error {
 	return installMod(ctx, opts)
 }
 
-func (ccAdapter) ReconcileIfInstalled(opts adapter.InstallOptions) ([]string, error) {
+func (ccAdapter) Reconcile(opts adapter.InstallOptions) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), claudeTimeout)
 	defer cancel()
 	return reconcileMod(ctx, opts)

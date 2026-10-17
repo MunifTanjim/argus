@@ -38,6 +38,12 @@ log:
   format: pretty        # pretty | json
 ```
 
+## Agent hooks
+
+`bin` (default `argus`) is the binary the agent hooks run. Set it to a full path
+when `argus` is not on the agent's `PATH`, for example when the agent starts
+from a desktop launcher. Argus updates the hooks the next time it starts.
+
 ## Projects & Workspaces
 
 For the project and workspace settings, see

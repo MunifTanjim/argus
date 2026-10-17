@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -214,14 +215,14 @@ func TestReconcileSelfHeals(t *testing.T) {
 		t.Fatal("secondary file should not exist before reconcile")
 	}
 
-	if _, err := ReconcileIfInstalled("/usr/bin/argus"); err != nil {
+	if _, err := Reconcile("/usr/bin/argus"); err != nil {
 		t.Fatal(err)
 	}
 
 	assertArgusSet(t, primary)
 	assertArgusSet(t, secondary)
 
-	added, err := ReconcileIfInstalled("/usr/bin/argus")
+	added, err := Reconcile("/usr/bin/argus")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,13 +231,17 @@ func TestReconcileSelfHeals(t *testing.T) {
 	}
 }
 
-func TestReconcileNoOpWhenNotInstalled(t *testing.T) {
+func TestReconcileInstallsWhenAbsent(t *testing.T) {
 	setupHome(t)
-	added, err := ReconcileIfInstalled("/usr/bin/argus")
+	added, err := Reconcile("argus")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(added) != 0 {
-		t.Errorf("reconcile with no hooks: added=%v; want none", added)
+	if !slices.Equal(added, DefaultHookEvents) {
+		t.Errorf("reconcile with no hooks: added=%v; want %v", added, DefaultHookEvents)
 	}
+	primary, _ := hooksJSONPath()
+	secondary, _ := configHooksJSONPath()
+	assertArgusSet(t, primary)
+	assertArgusSet(t, secondary)
 }

@@ -74,14 +74,17 @@ machine through the gateway.
 
 ## Connect Your Agents
 
-Connect Argus to your agents so it can track each session's status in real time:
+Argus connects to your agents when it starts, so it can track each session's
+status in real time. It sets up every supported agent you have installed and
+skips the others.
+
+If an agent is not connected, run this to retry and see what went wrong:
 
 ```sh
 argus hooks install
 ```
 
-This sets up every supported agent you have installed and skips the others. It
-is safe to re-run.
+`argus hooks uninstall` removes the integrations until Argus starts again.
 
 For Claude Code it installs the Argus plugin. Without it, Argus still lists your
 Claude sessions but cannot show their live status or answer their permission
@@ -90,7 +93,10 @@ requests. It can send prompts only to sessions in tmux.
 Claude Code loads the plugin when a session starts. After you install or
 upgrade Argus, restart the Claude sessions that are running.
 
-For Antigravity it installs hooks and changes only its own entries.
+For Antigravity it installs hooks and changes only its own entries. The hooks
+run `argus`, so it must be on Antigravity's `PATH`. If it is not, set
+[`bin`](/getting-started/configuration#agent-hooks) to the full path of the
+binary.
 
 OpenCode needs no hooks.
 
