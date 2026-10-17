@@ -13,6 +13,7 @@ import '../models/session.dart';
 import '../state/prompt_drafts.dart';
 import '../state/respond_view_model.dart';
 import 'interaction_panel.dart';
+import 'running_shells_sheet.dart';
 import 'running_subagents_sheet.dart';
 import 'status_style.dart';
 import 'theme.dart';
@@ -303,7 +304,12 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
           body,
           _rule(
             label: modelLine(s.summary),
-            leading: s.subagents.isEmpty ? null : _subagentCount(s),
+            leading: s.subagents.isEmpty && s.shells.isEmpty
+                ? null
+                : Row(mainAxisSize: MainAxisSize.min, children: [
+                    if (s.subagents.isNotEmpty) _subagentCount(s),
+                    if (s.shells.isNotEmpty) _shellCount(s),
+                  ]),
           ),
         ],
       ),
@@ -385,11 +391,18 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
         ),
       );
 
+  Widget _subagentCount(Session s) => _count(
+      Icons.smart_toy_outlined,
+      s.subagents.length,
+      () => showRunningSubagents(context, sessionId: s.id, agent: s.agent));
+
+  Widget _shellCount(Session s) => _count(Icons.terminal, s.shells.length,
+      () => showRunningShells(context, sessionId: s.id, agent: s.agent));
+
   // The tap target is only as tall as the model line, so the composer never
   // shifts when the count shows.
-  Widget _subagentCount(Session s) => InkWell(
-        onTap: () =>
-            showRunningSubagents(context, sessionId: s.id, agent: s.agent),
+  Widget _count(IconData icon, int n, VoidCallback onTap) => InkWell(
+        onTap: onTap,
         child: ConstrainedBox(
           constraints: const BoxConstraints(minWidth: _countTapWidth),
           child: Center(
@@ -398,10 +411,9 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.smart_toy_outlined,
-                      size: 14, color: AppColors.dim),
+                  Icon(icon, size: 14, color: AppColors.dim),
                   const SizedBox(width: 4),
-                  Text('${s.subagents.length}',
+                  Text('$n',
                       style: mono.copyWith(color: AppColors.dim)),
                 ]),
               ),
