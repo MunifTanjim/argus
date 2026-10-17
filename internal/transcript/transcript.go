@@ -101,6 +101,10 @@ func (e Entry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(a)
 }
 
+type QueuedPrompt struct {
+	Text string `json:"text"`
+}
+
 // IsTeammate reports whether this entry is a teammate message rather than a spawn.
 func (e Entry) IsTeammate() bool {
 	return e.Kind == EntrySubagent && len(e.Subagents) == 1 && e.Subagents[0].IsTeammate

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -33,18 +34,46 @@ func (a *ccAdapter) inputMode(s session.Session) session.InputMode {
 	return session.InputNone
 }
 
+// QueuesPrompts reports that a busy session takes prompts while its mod is
+// connected: Claude queues them until it reads them.
+func (a *ccAdapter) QueuesPrompts(s session.Session) bool { return s.Input == session.InputAPI }
+
 // ModBridge is the bridge the node's mod socket serves.
 func (a *ccAdapter) ModBridge() *modbridge.Bridge { return a.bridge }
 
-// SendPrompt hands text to the session's mod while the session is ready for a
-// prompt: a leading "/" runs it as a slash command, anything else is submitted
-// as a prompt.
+// SendPrompt hands text to the session's mod: a leading "/" runs it as a slash
+// command, anything else is submitted as a prompt. While a turn runs, Claude
+// takes it once the turn ends.
 func (a *ccAdapter) SendPrompt(ctx context.Context, sess session.Session, text string) error {
-	if !sess.ReadyForPrompt() {
+	if sess.InteractionPending() {
 		return fmt.Errorf("%s: %w", sess.ID, api.ErrSessionBusy)
 	}
 	_, err := a.sendMod(ctx, sess, modbridge.Command{Kind: modbridge.KindPrompt, Text: text})
 	return err
+}
+
+// FillPrompt puts text in Claude's input box in place of the user's draft, which
+// the mod puts back once the text is submitted; the caller sends the Enter. A
+// slash command is not filled but sent as a prompt, so Claude runs it after the
+// turn.
+func (a *ccAdapter) FillPrompt(ctx context.Context, sess session.Session, text string) (bool, error) {
+	if strings.HasPrefix(text, "/") {
+		return false, a.SendPrompt(ctx, sess, text)
+	}
+	if sess.InteractionPending() {
+		return false, fmt.Errorf("%s: %w", sess.ID, api.ErrSessionBusy)
+	}
+	ran, err := a.sendMod(ctx, sess, modbridge.Command{Kind: modbridge.KindFill, Text: text})
+	if errors.Is(err, modbridge.ErrBusy) {
+		return false, fmt.Errorf("%s: %w", sess.ID, api.ErrSessionBusy)
+	}
+	if err != nil {
+		return false, err
+	}
+	if !ran {
+		return false, fmt.Errorf("%s: claude did not fill the input in time", sess.ID)
+	}
+	return true, nil
 }
 
 // Dismiss ends a paneless Claude session through its mod, cutting short any

@@ -2,6 +2,7 @@ package parser
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"time"
@@ -64,50 +65,58 @@ func ReadSubagentSession(path string) ([]Chunk, error) {
 	return BuildChunks(msgs), nil
 }
 
-// ReadSessionIncremental reads complete lines appended after offset and returns
-// the new msgs, subagent links (agentID -> toolUseID), and the advanced offset.
+// ReadSessionIncrementalWithQueue reads complete lines appended after offset and returns
+// the new msgs, subagent links (agentID -> toolUseID), queue-operation records, and the advanced offset.
 // A trailing partial line (no \n yet) is left for the next call. The building
 // block for live tailing.
 //
 // clearSidechain forces isSidechain off before classifying, needed when tailing
 // a subagent file (see ReadSubagentSession) or Classify drops every entry.
-func ReadSessionIncremental(path string, offset int64, clearSidechain bool) ([]ClassifiedMsg, map[string]string, int64, error) {
+func ReadSessionIncrementalWithQueue(path string, offset int64, clearSidechain bool) ([]ClassifiedMsg, map[string]string, []QueueOp, int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// A not-yet-created transcript (freshly launched session, subscribed
 			// before Claude writes its first line) reads as empty, not an error, so
 			// the subscription's poller can pick up content once the file appears.
-			return nil, nil, offset, nil
+			return nil, nil, nil, offset, nil
 		}
-		return nil, nil, offset, err
+		return nil, nil, nil, offset, err
 	}
 	defer f.Close()
 
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return nil, nil, offset, err
+		return nil, nil, nil, offset, err
 	}
 	data, err := io.ReadAll(f)
 	if err != nil {
-		return nil, nil, offset, err
+		return nil, nil, nil, offset, err
 	}
 
 	// Process only through the last newline; defer any partial final line so a
 	// half-written entry is re-read once complete.
 	lastNL := bytes.LastIndexByte(data, '\n')
 	if lastNL < 0 {
-		return nil, nil, offset, nil // no complete line appended
+		return nil, nil, nil, offset, nil // no complete line appended
 	}
 	newOffset := offset + int64(lastNL) + 1
 
 	var msgs []ClassifiedMsg
+	var ops []QueueOp
 	links := map[string]string{}
 	for _, line := range bytes.Split(data[:lastNL+1], []byte{'\n'}) {
 		if len(line) == 0 || len(line) > maxLineSize {
 			continue
 		}
-		entry, ok := ParseEntry(line)
-		if !ok {
+		var entry Entry
+		if json.Unmarshal(line, &entry) != nil {
+			continue
+		}
+		if op, ok := QueueOpFrom(entry); ok {
+			ops = append(ops, op)
+			continue
+		}
+		if !entry.hasID() {
 			continue
 		}
 		if clearSidechain {
@@ -120,5 +129,12 @@ func ReadSessionIncremental(path string, offset int64, clearSidechain bool) ([]C
 			links[agentID] = toolUseID
 		}
 	}
-	return msgs, links, newOffset, nil
+	return msgs, links, ops, newOffset, nil
+}
+
+// ReadSessionIncremental reads classified messages from offset; see
+// ReadSessionIncrementalWithQueue.
+func ReadSessionIncremental(path string, offset int64, clearSidechain bool) ([]ClassifiedMsg, map[string]string, int64, error) {
+	msgs, links, _, off, err := ReadSessionIncrementalWithQueue(path, offset, clearSidechain)
+	return msgs, links, off, err
 }

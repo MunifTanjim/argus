@@ -6,8 +6,12 @@ const RETRY_MIN_MS = 1000
 const RETRY_MAX_MS = 15000
 // How long a command from argus may take to fail before it is acked as accepted.
 const ACK_WINDOW_MS = 1000
+// How long a fill's saved draft waits for argus's Enter to submit the text.
+const DRAFT_TTL_MS = 5000
+// The failure a fill acks when a dialog holds the keys (modbridge.FailBusy).
+const FAIL_BUSY = 'busy'
 
-export type Command = { id: string; kind: 'prompt' | 'exit'; text: string }
+export type Command = { id: string; kind: 'prompt' | 'exit' | 'fill'; text: string }
 
 type Env = { tmuxPane: string; tmux: string; autoMode: boolean }
 
@@ -40,12 +44,19 @@ let turnId = ''
 // The model and effort last reported to argusd, so steps report only a change.
 let lastModel = ''
 let lastEffort: string | undefined
+// The text a fill put in Claude's input box and the draft it replaced, until
+// argus's Enter submits the text.
+let filled: { text: string; draft: string; at: number } | undefined
+// Fills acked as accepted, not filled: argus sends no Enter for them.
+const abandoned = new Set<string>()
 
 export const register: Register = (on, options) => {
   socketPath = String(options.socket ?? '')
   env = undefined
   lastModel = ''
   lastEffort = undefined
+  filled = undefined
+  abandoned.clear()
 
   // The session may move to a new id (/clear, /resume): repoll under it at once.
   on('classic.SessionStart', async ($, e, next) => {
@@ -56,6 +67,15 @@ export const register: Register = (on, options) => {
   })
     .catch(($, e, next) => next(e))
   on('classic.UserPromptSubmit', async ($, e, next) => (await forward($, 'UserPromptSubmit', e), next(e)))
+    .catch(($, e, next) => next(e))
+  // argus's Enter submits a fill: put back the draft it replaced. Matched before
+  // the settings hooks beneath run, so a slow hook cannot expire it.
+  on('prompt.submit', async ($, e, next) => {
+    const draft = await takeDraft($, e.text)
+    const result = await next(e)
+    if (draft !== undefined) await $.prompt.fill({ text: draft, mode: 'replace' }).catch(() => undefined)
+    return result
+  })
     .catch(($, e, next) => next(e))
   // argusd never reads the tool's output, which can be large.
   on('classic.PostToolUse', async ($, e, next) => (await forward($, 'PostToolUse', withoutResponse(e)), next(e)))
@@ -367,6 +387,7 @@ export async function run($: EngineInterface, c: Command): Promise<void> {
   if (c.kind === 'exit') return exit($, c)
   const failure = await Promise.race([execute($, c), $.clock.sleep(ACK_WINDOW_MS).then(() => PENDING)])
   if (failure === PENDING) {
+    if (c.kind === 'fill') abandoned.add(c.id)
     await post($, '/claude/ack', { id: c.id }).catch(() => '')
     return
   }
@@ -391,7 +412,9 @@ async function execute($: EngineInterface, c: Command): Promise<string> {
   let failure = ''
   try {
     const slash = /^\/(\S+)\s*([\s\S]*)$/.exec(c.text)
-    if (slash?.[1].includes('/')) {
+    if (c.kind === 'fill') {
+      failure = await fill($, c)
+    } else if (slash?.[1].includes('/')) {
       failure = `/${slash[1]} is not a slash command, and Claude takes no prompt starting with /`
     } else if (slash) {
       await $.command.run({ command: slash[1], args: slash[2] })
@@ -405,6 +428,32 @@ async function execute($: EngineInterface, c: Command): Promise<string> {
   }
   if (failure !== '') $.ui.log(`argus: ${c.kind} failed: ${failure}`, { to: 'debug' })
   return failure
+}
+
+// Resolves with the failure, or '' once filled.
+async function fill($: EngineInterface, c: Command): Promise<string> {
+  const box = await $.prompt.read()
+  const r = await $.prompt.fill({ text: c.text, mode: 'replace' })
+  if (!r.isFilled) return r.refusal === 'dialog' ? FAIL_BUSY : `the input box refused the text (${r.refusal ?? 'unknown'})`
+  // Acked as accepted while this ran: no Enter follows, so give the draft back.
+  if (abandoned.delete(c.id)) {
+    await $.prompt.fill({ text: box.text, mode: 'replace' })
+    return ''
+  }
+  filled = { text: c.text, draft: box.text, at: await $.clock.now() }
+  return ''
+}
+
+async function takeDraft($: EngineInterface, text: string): Promise<string | undefined> {
+  try {
+    const f = filled
+    if (!f || f.text.trim() !== text.trim()) return undefined
+    filled = undefined
+    if (f.draft === '' || (await $.clock.now()) - f.at > DRAFT_TTL_MS) return undefined
+    return f.draft
+  } catch {
+    return undefined
+  }
 }
 
 export function parseDecision(output: string): Decision | undefined {

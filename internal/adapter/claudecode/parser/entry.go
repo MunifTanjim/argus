@@ -12,9 +12,12 @@ type Entry struct {
 	IsSidechain bool   `json:"isSidechain"`
 	IsMeta      bool   `json:"isMeta"`
 	// Content is the top-level payload on system entries (the recap text on
-	// away_summary); distinct from Message.Content on user/assistant entries.
+	// away_summary) and queue-operation entries (the queued text); distinct from
+	// Message.Content on user/assistant entries.
 	Content json.RawMessage `json:"content"`
-	Message struct {
+	// Operation is a queue-operation entry's change to Claude's prompt queue.
+	Operation string `json:"operation"`
+	Message   struct {
 		ID         string          `json:"id"` // API message id; repeated on each line of a split message
 		Role       string          `json:"role"`
 		Content    json.RawMessage `json:"content"`
@@ -96,12 +99,11 @@ func (e Entry) ToolUseResultMap() map[string]json.RawMessage {
 // Returns false if the JSON is invalid or the entry has no UUID.
 func ParseEntry(line []byte) (Entry, bool) {
 	var e Entry
-	if err := json.Unmarshal(line, &e); err != nil {
-		return Entry{}, false
-	}
-	// Summary entries use leafUuid instead of uuid.
-	if e.UUID == "" && e.LeafUUID == "" {
+	if err := json.Unmarshal(line, &e); err != nil || !e.hasID() {
 		return Entry{}, false
 	}
 	return e, true
 }
+
+// Summary entries use leafUuid instead of uuid.
+func (e Entry) hasID() bool { return e.UUID != "" || e.LeafUUID != "" }

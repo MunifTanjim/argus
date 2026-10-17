@@ -50,6 +50,24 @@ func (s *sharedTranscript) Refresh() ([]transcript.Entry, error) {
 	return entries, nil
 }
 
+func (s *sharedTranscript) Queue() (q []transcript.QueuedPrompt, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	qs, ok := s.st.(adapter.QueueSource)
+	if !ok {
+		return nil, false
+	}
+	return qs.Queue(), true
+}
+
+func (s *sharedTranscript) ClearQueue() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if qs, ok := s.st.(adapter.QueueSource); ok {
+		qs.ClearQueue()
+	}
+}
+
 // transcriptCache keeps folded transcripts after their last subscriber leaves,
 // so reopening a session reads only the lines appended since. An item without
 // subscribers is evicted after idleTTL, or sooner when more than maxIdle such

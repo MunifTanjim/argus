@@ -217,6 +217,11 @@ type Session struct {
 	// and installed agents. It is the single signal clients use to offer a terminal.
 	CanOpenTerminal bool `json:"can_open_terminal,omitempty"`
 
+	// CanPrompt reports that argus can send the session a prompt now.
+	// Node-computed on emit (see TakesPrompt): the single signal clients use to
+	// allow sending.
+	CanPrompt bool `json:"can_prompt,omitempty"`
+
 	// Repo is the basename of the session directory's git repository, when known
 	// (path-derived, not from the transcript).
 	Repo string `json:"repo,omitempty"`
@@ -264,7 +269,19 @@ const (
 // channel. It is the single check clients and the node use for "can prompt".
 func (s Session) AcceptsInput() bool { return s.Input != InputNone }
 
+// InteractionPending reports a permission, question or plan awaiting the user.
+func (s Session) InteractionPending() bool {
+	return s.Interaction != nil && s.Interaction.Kind != InteractionIdle
+}
+
 // ReadyForPrompt reports whether the session is idle enough to take a new prompt.
 func (s Session) ReadyForPrompt() bool {
-	return s.Status != StatusWorking && (s.Interaction == nil || s.Interaction.Kind == InteractionIdle)
+	return s.Status != StatusWorking && !s.InteractionPending()
+}
+
+// TakesPrompt computes CanPrompt; queues reports whether the agent takes
+// prompts while a turn runs.
+func (s Session) TakesPrompt(queues bool) bool {
+	return s.AcceptsInput() && s.Status != StatusStarting && !s.InteractionPending() &&
+		(s.Status != StatusWorking || queues)
 }

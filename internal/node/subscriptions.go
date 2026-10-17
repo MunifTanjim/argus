@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"sync"
 	"time"
 
@@ -16,6 +17,11 @@ import (
 
 // transcriptPollInterval is how often a subscription re-reads its file locally.
 const transcriptPollInterval = time.Second
+
+// queueStaleAfter is how long a session may sit idle with prompts still listed
+// as queued before the list is dropped: Claude drains its queue as soon as it
+// idles, so what is left is a record argus misread. A var so tests can shorten it.
+var queueStaleAfter = 2 * time.Second
 
 // connSubs holds one connection's active transcript subscriptions.
 type connSubs struct {
@@ -220,9 +226,15 @@ func (d *Node) handleTranscriptSubscribe(ctx context.Context, params json.RawMes
 	// Start the poller bound to the connection ctx.
 	pollCtx, cancel := context.WithCancel(ctx)
 	cs.add(p.SubID, cancel)
-	go d.pollTranscript(pollCtx, n, p.SubID, p.SessionID, a, path, st, taskSignals, entries, driveStatus)
+	var queue *[]transcript.QueuedPrompt
+	if p.AgentID == "" {
+		if q, ok := st.Queue(); ok {
+			queue = &q
+		}
+	}
+	go d.pollTranscript(pollCtx, n, p.SubID, p.SessionID, a, path, st, taskSignals, entries, driveStatus, queue)
 
-	return api.TranscriptDelta{SubID: p.SubID, FromIndex: from, Entries: entries[from:]}, nil
+	return api.TranscriptDelta{SubID: p.SubID, FromIndex: from, Entries: entries[from:], Queue: queue}, nil
 }
 
 func (d *Node) openTranscript(a adapter.Adapter, path, root string, isSub bool) (*sharedTranscript, []transcript.Entry, error) {
@@ -287,7 +299,7 @@ func (d *Node) nextTranscript(sessionID string, a adapter.Adapter, path string) 
 // prefix plus resent tail), not entries[from:]: diffEntries compares against the
 // full fold to compute the from_index. Passing a tail slice would report
 // from_index=0 every tick and resend the whole transcript.
-func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessionID string, a adapter.Adapter, path string, st *sharedTranscript, taskSignals func([]transcript.Entry) (int, bool), sent []transcript.Entry, driveStatus bool) {
+func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessionID string, a adapter.Adapter, path string, st *sharedTranscript, taskSignals func([]transcript.Entry) (int, bool), sent []transcript.Entry, driveStatus bool, sentQueue *[]transcript.QueuedPrompt) {
 	defer func() { d.transcripts.release(st) }()
 	defer func() {
 		if cs := d.connSubsFor(n); cs != nil {
@@ -299,6 +311,7 @@ func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessio
 		lastSignals, _ = taskSignals(sent) // seed from catch-up; don't fire on open
 	}
 	var idleSurfaced bool
+	var idleSince time.Time
 	t := time.NewTicker(transcriptPollInterval)
 	defer t.Stop()
 	for {
@@ -313,10 +326,16 @@ func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessio
 					d.transcripts.release(st)
 					d.log.Info("transcript.switch", "sub_id", subID, "from", path, "to", next)
 					st, path = nextSt, next
-					if err := n.Notify(api.MethodTranscriptDelta, api.TranscriptDelta{SubID: subID, FromIndex: 0, Entries: entries}); err != nil {
+					if sentQueue != nil {
+						if q, ok := nextSt.Queue(); ok {
+							sentQueue = &q
+						}
+					}
+					if err := n.Notify(api.MethodTranscriptDelta, api.TranscriptDelta{SubID: subID, FromIndex: 0, Entries: entries, Queue: sentQueue}); err != nil {
 						return // connection gone
 					}
 					sent = entries
+					idleSince = time.Time{}
 					if taskSignals != nil {
 						lastSignals, _ = taskSignals(entries)
 					}
@@ -352,18 +371,51 @@ func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessio
 				}
 			}
 			from, changed := diffEntries(sent, cur)
-			if !changed {
+			var queue *[]transcript.QueuedPrompt
+			if sentQueue != nil {
+				if q := d.liveQueue(st, sessionID, &idleSince); !slices.Equal(q, *sentQueue) {
+					queue = &q
+				}
+			}
+			if !changed && queue == nil {
 				continue
 			}
-			d.log.Info("transcript.delta", "sub_id", subID, "from", from, "entries", len(cur)-from, "total", len(cur))
+			if !changed {
+				from = len(sent) // a queue-only change resends no entries
+			}
+			d.log.Info("transcript.delta", "sub_id", subID, "from", from, "entries", len(cur)-from, "total", len(cur), "queue", queue != nil)
 			if err := n.Notify(api.MethodTranscriptDelta, api.TranscriptDelta{
-				SubID: subID, FromIndex: from, Entries: cur[from:],
+				SubID: subID, FromIndex: from, Entries: cur[from:], Queue: queue,
 			}); err != nil {
 				return // connection gone
 			}
 			sent = cur
+			if queue != nil {
+				sentQueue = queue
+			}
 		}
 	}
+}
+
+// liveQueue drops the queue once the session has sat idle past
+// queueStaleAfter; idleSince tracks when that idle stretch began.
+func (d *Node) liveQueue(st *sharedTranscript, sessionID string, idleSince *time.Time) []transcript.QueuedPrompt {
+	q, _ := st.Queue()
+	if len(q) == 0 {
+		*idleSince = time.Time{}
+		return q
+	}
+	if s, ok := d.reg.Get(sessionID); !ok || !s.ReadyForPrompt() {
+		*idleSince = time.Time{}
+		return q
+	}
+	if idleSince.IsZero() {
+		*idleSince = time.Now()
+	} else if time.Since(*idleSince) >= queueStaleAfter {
+		st.ClearQueue()
+		return []transcript.QueuedPrompt{}
+	}
+	return q
 }
 
 func lastTurnInterrupted(entries []transcript.Entry) bool {

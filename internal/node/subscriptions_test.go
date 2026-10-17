@@ -437,3 +437,101 @@ func TestTranscriptFollowsSessionToNewFile(t *testing.T) {
 		}
 	}
 }
+
+const queueLine = `{"type":"queue-operation","operation":"enqueue","timestamp":"2026-06-12T10:00:05Z","sessionId":"s","content":"steer"}` + "\n"
+
+func appendRaw(t *testing.T, path, s string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(s); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func nextDelta(t *testing.T, fn *fakeNotifier) (api.TranscriptDelta, map[string]json.RawMessage) {
+	t.Helper()
+	select {
+	case n := <-fn.ch:
+		var d api.TranscriptDelta
+		var raw map[string]json.RawMessage
+		_ = json.Unmarshal(n.Params, &d)
+		_ = json.Unmarshal(n.Params, &raw)
+		return d, raw
+	case <-time.After(5 * time.Second):
+		t.Fatal("no delta")
+	}
+	return api.TranscriptDelta{}, nil
+}
+
+func TestQueueRidesTheTranscriptSubscription(t *testing.T) {
+	d := newNode(nil)
+	tmp := writeTempTranscript(t)
+	s, _ := d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "c1", TranscriptPath: tmp, Status: session.StatusWorking})
+	fn := &fakeNotifier{ch: make(chan api.Notification, 8)}
+	d.registerConn(fn)
+	ctx := api.WithNotifier(context.Background(), fn)
+	res, err := d.handleTranscriptSubscribe(ctx, mustJSON(api.TranscriptSubscribeParams{SubID: "x", SessionID: s.ID}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := res.(api.TranscriptDelta)
+	if first.Queue == nil || len(*first.Queue) != 0 {
+		t.Fatalf("catch-up queue = %v, want present and empty", first.Queue)
+	}
+	total := first.FromIndex + len(first.Entries)
+
+	appendRaw(t, tmp, queueLine)
+	got, _ := nextDelta(t, fn)
+	if got.Queue == nil || len(*got.Queue) != 1 || (*got.Queue)[0].Text != "steer" {
+		t.Fatalf("queue = %v", got.Queue)
+	}
+	if got.FromIndex != total || len(got.Entries) != 0 {
+		t.Fatalf("queue-only delta: from %d entries %d, want from %d and none", got.FromIndex, len(got.Entries), total)
+	}
+
+	appendTranscriptLine(t, tmp)
+	_, raw := nextDelta(t, fn)
+	if _, ok := raw["queue"]; ok {
+		t.Fatalf("an unchanged queue was sent: %s", raw["queue"])
+	}
+	d.dropConn(fn)
+}
+
+func TestIdleSessionDropsAStaleQueue(t *testing.T) {
+	old := queueStaleAfter
+	queueStaleAfter = 300 * time.Millisecond
+	t.Cleanup(func() { queueStaleAfter = old })
+	d := newNode(nil)
+	tmp := writeTempTranscript(t)
+	appendRaw(t, tmp, queueLine)
+	s, _ := d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "c1", TranscriptPath: tmp, Status: session.StatusWorking})
+	fn := &fakeNotifier{ch: make(chan api.Notification, 8)}
+	d.registerConn(fn)
+	ctx := api.WithNotifier(context.Background(), fn)
+	res, err := d.handleTranscriptSubscribe(ctx, mustJSON(api.TranscriptSubscribeParams{SubID: "x", SessionID: s.ID}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q := res.(api.TranscriptDelta).Queue; q == nil || len(*q) != 1 {
+		t.Fatalf("catch-up queue = %v", q)
+	}
+	// Briefly idle (a turn-end batch starting the next turn): kept.
+	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "c1", Status: session.StatusIdle})
+	time.Sleep(100 * time.Millisecond)
+	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "c1", Status: session.StatusWorking})
+	select {
+	case n := <-fn.ch:
+		t.Fatalf("queue changed during a brief idle: %s", n.Params)
+	case <-time.After(1500 * time.Millisecond):
+	}
+	d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", AgentSessionID: "c1", Status: session.StatusIdle})
+	got, _ := nextDelta(t, fn)
+	if got.Queue == nil || len(*got.Queue) != 0 {
+		t.Fatalf("stale queue = %v, want present and empty", got.Queue)
+	}
+	d.dropConn(fn)
+}
