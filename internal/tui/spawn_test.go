@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -18,14 +19,17 @@ import (
 type spawnPickClient struct {
 	nodes       []api.NodeInfo
 	projects    []session.HistoryProject
-	agents      []api.AgentInfo     // agents.list reply (no spawnable agent → step skipped)
-	homes       map[string]string   // host.completeDir home by node_id
-	subdirs     map[string][]string // host.completeDir names by path
-	completed   []string            // host.completeDir node_ids, in call order
+	agents      []api.AgentInfo            // agents.list reply (no spawnable agent → step skipped)
+	models      map[string][]api.ModelInfo // agent.model.list reply by agent
+	modelsErr   error                      // agent.model.list failure
+	homes       map[string]string          // host.completeDir home by node_id
+	subdirs     map[string][]string        // host.completeDir names by path
+	completed   []string                   // host.completeDir node_ids, in call order
 	spawnCalled bool
 	spawnNodeID string
 	spawnCwd    string
 	spawnAgent  string
+	spawnModel  string
 	spawnPrompt string
 }
 
@@ -43,6 +47,12 @@ func (c *spawnPickClient) Call(method string, params, out any) error {
 		if p, ok := out.(*api.AgentsListResult); ok {
 			*p = api.AgentsListResult{Agents: c.agents}
 		}
+	case api.MethodAgentModelList:
+		if c.modelsErr != nil {
+			return c.modelsErr
+		}
+		p := params.(api.AgentModelListParams)
+		*out.(*api.AgentModelListResult) = api.AgentModelListResult{Models: c.models[p.Agent]}
 	case api.MethodHostCompleteDir:
 		p := params.(api.HostCompleteDirParams)
 		c.completed = append(c.completed, p.NodeID)
@@ -61,6 +71,7 @@ func (c *spawnPickClient) Call(method string, params, out any) error {
 			c.spawnNodeID = sp.NodeID
 			c.spawnCwd = sp.Cwd
 			c.spawnAgent = sp.Agent
+			c.spawnModel = sp.Model
 			c.spawnPrompt = sp.Prompt
 		}
 	}
@@ -72,6 +83,14 @@ func (c *spawnPickClient) States() <-chan bool             { return make(chan bo
 func (c *spawnPickClient) Reconnect()                      {}
 func (c *spawnPickClient) Close() error                    { return nil }
 func (c *spawnPickClient) Quarantined() bool               { return false }
+
+// replyLoneAgent answers the agents probe on nodeID with a lone claude that
+// offers no models, so the flow skips both steps.
+func replyLoneAgent(m model, nodeID string) model {
+	m, _ = upd(m, spawnAgentsMsg{nodeID: nodeID, agents: []api.AgentInfo{{ID: "claude"}}})
+	m, _ = upd(m, spawnModelsMsg{nodeID: nodeID, agent: "claude"})
+	return m
+}
 
 func pumpAgents(t *testing.T, m model, cmd tea.Cmd) model {
 	t.Helper()
@@ -261,8 +280,8 @@ func TestSpawnAgentStepSelects(t *testing.T) {
 	}
 	mm, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyDown}) // cursor → codex
 	m = mm.(model)
-	mm, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // choose codex → dir
-	m = mm.(model)
+	mm, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // choose codex → models (none) → dir
+	m = runSpawnReplies(mm.(model), cmd)
 	if spawnOf(m).step != spawnStepDir || spawnOf(m).agent != "codex" {
 		t.Fatalf("agent not chosen: step=%v agent=%q", spawnOf(m).step, spawnOf(m).agent)
 	}
@@ -272,7 +291,7 @@ func TestSpawnAgentStepSelects(t *testing.T) {
 		mm, _ = m.handleKey(tea.KeyPressMsg{Code: r, Text: string(r)})
 		m = mm.(model)
 	}
-	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	_, cmd = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	runCmd(cmd)
 	if !c.spawnCalled || c.spawnAgent != "codex" {
 		t.Fatalf("spawn agent=%q, want codex", c.spawnAgent)
@@ -608,13 +627,13 @@ func TestSpawnDirFilter(t *testing.T) {
 		t.Fatalf("filtered view should hide argus and keep Custom path:\n%s", out)
 	}
 	m = pressKeys(m, keyMsg("esc"))
-	if !spawnOpen(m) || spawnOf(m).dirQuery != "" || len(spawnOf(m).shownDirs()) != 3 {
-		t.Fatalf("esc should clear the filter and stay open: open=%v query=%q", spawnOpen(m), spawnOf(m).dirQuery)
+	if !spawnOpen(m) || spawnOf(m).query != "" || len(spawnOf(m).shownDirs()) != 3 {
+		t.Fatalf("esc should clear the filter and stay open: open=%v query=%q", spawnOpen(m), spawnOf(m).query)
 	}
 	m = typeKeys(m, "/cmp")
 	m = pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // keep the filter
-	if spawnOf(m).filter.on || spawnOf(m).dirQuery != "cmp" {
-		t.Fatalf("enter should keep the filter: on=%v query=%q", spawnOf(m).filter.on, spawnOf(m).dirQuery)
+	if spawnOf(m).filter.on || spawnOf(m).query != "cmp" {
+		t.Fatalf("enter should keep the filter: on=%v query=%q", spawnOf(m).filter.on, spawnOf(m).query)
 	}
 	m = pressKeys(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // pick
 	if spawnOf(m).step != spawnStepPrompt || spawnOf(m).cwd.Value() != "/home/u/cmp" {
@@ -635,8 +654,8 @@ func TestSpawnDirFilterEscClearsFirst(t *testing.T) {
 		t.Fatalf("footer with a kept filter should offer clearing it: %q", f)
 	}
 	m = pressKeys(m, keyMsg("esc"))
-	if !spawnOpen(m) || spawnOf(m).dirQuery != "" || len(spawnOf(m).shownDirs()) != 2 {
-		t.Fatalf("esc should clear the kept filter and stay open: open=%v query=%q", spawnOpen(m), spawnOf(m).dirQuery)
+	if !spawnOpen(m) || spawnOf(m).query != "" || len(spawnOf(m).shownDirs()) != 2 {
+		t.Fatalf("esc should clear the kept filter and stay open: open=%v query=%q", spawnOpen(m), spawnOf(m).query)
 	}
 	m = pressKeys(m, keyMsg("esc"))
 	if spawnOpen(m) {
@@ -740,4 +759,245 @@ func TestSpawnCustomPathDebouncesCompletion(t *testing.T) {
 	if len(msgs) != 1 || msgs[0].(spawnDirsMsg).path != "/home/u/De" {
 		t.Fatalf("the latest edit's debounce: %v, want one request for /home/u/De", msgs)
 	}
+}
+
+func modelSpawnClient() *spawnPickClient {
+	return &spawnPickClient{
+		nodes:    []api.NodeInfo{{ID: "only", Capabilities: api.NodeCapabilities{SpawnSession: true}}},
+		projects: []session.HistoryProject{{Label: "p1", Cwd: "/p/1", NodeID: "only"}},
+		agents: []api.AgentInfo{
+			{ID: "claude", Name: "Claude", Spawnable: true},
+			{ID: "codex", Name: "Codex", Spawnable: true},
+		},
+		models: map[string][]api.ModelInfo{"claude": {{ID: "opus", Name: "Opus"}, {ID: "sonnet", Name: "Sonnet"}, {ID: "haiku", Name: "Haiku"}}},
+	}
+}
+
+// pickClaude opens the flow and picks the first agent, landing on its model step.
+func pickClaude(t *testing.T, c *spawnPickClient) model {
+	t.Helper()
+	m := openSpawn(t, c)
+	m.width, m.height = 80, 24
+	mm, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	return runSpawnReplies(mm.(model), cmd)
+}
+
+func spawnWithPrompt(t *testing.T, m model, c *spawnPickClient) {
+	t.Helper()
+	mm, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // dir → prompt
+	m = typeKeys(mm.(model), "go")
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	runCmd(cmd)
+	if !c.spawnCalled {
+		t.Fatal("no spawn")
+	}
+}
+
+func TestSpawnModelStepSendsChoice(t *testing.T) {
+	c := modelSpawnClient()
+	m := pickClaude(t, c)
+	if spawnStepOf(m) != spawnStepModel {
+		t.Fatalf("step=%v want model", spawnStepOf(m))
+	}
+	v := spawnView(m)
+	for _, want := range []string{"Which model?", "Default", "Sonnet"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("view missing %q:\n%s", want, v)
+		}
+	}
+	m = pressKeys(m, tea.KeyPressMsg{Code: tea.KeyDown}, tea.KeyPressMsg{Code: tea.KeyDown})
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if spawnStepOf(m) != spawnStepDir {
+		t.Fatalf("step=%v want dir", spawnStepOf(m))
+	}
+	spawnWithPrompt(t, m, c)
+	if c.spawnModel != "sonnet" || c.spawnAgent != "claude" {
+		t.Fatalf("spawn model=%q agent=%q", c.spawnModel, c.spawnAgent)
+	}
+}
+
+func TestSpawnModelDefaultSendsNone(t *testing.T) {
+	c := modelSpawnClient()
+	m := pickClaude(t, c)
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	spawnWithPrompt(t, m, c)
+	if c.spawnModel != "" {
+		t.Fatalf("spawn model=%q, want none", c.spawnModel)
+	}
+}
+
+func TestSpawnModelStepSkippedWithoutList(t *testing.T) {
+	c := modelSpawnClient()
+	c.models = map[string][]api.ModelInfo{"claude": nil}
+	if m := pickClaude(t, c); spawnStepOf(m) != spawnStepDir {
+		t.Fatalf("empty list: step=%v want dir", spawnStepOf(m))
+	}
+	c = modelSpawnClient()
+	c.modelsErr = &api.RPCError{Code: api.CodeMethodNotFound}
+	m := pickClaude(t, c)
+	if spawnStepOf(m) != spawnStepDir {
+		t.Fatalf("old node: step=%v want dir", spawnStepOf(m))
+	}
+	spawnWithPrompt(t, m, c)
+	if c.spawnModel != "" {
+		t.Fatalf("spawn model=%q, want none", c.spawnModel)
+	}
+}
+
+func TestSpawnModelListErrorOffersDefault(t *testing.T) {
+	c := modelSpawnClient()
+	c.modelsErr = errors.New("codex: daemon unavailable")
+	m := pickClaude(t, c)
+	if spawnStepOf(m) != spawnStepModel || spawnOf(m).choices() != 1 {
+		t.Fatalf("step=%v choices=%d, want model with only Default", spawnStepOf(m), spawnOf(m).choices())
+	}
+	m.width = 160 // a card wide enough for the whole error
+	if v := spawnView(m); !strings.Contains(v, "couldn't load models: codex: daemon unavailable") {
+		t.Fatalf("view missing the error:\n%s", v)
+	}
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if spawnStepOf(m) != spawnStepDir || spawnOf(m).model != "" {
+		t.Fatalf("step=%v model=%q, want dir with Default", spawnStepOf(m), spawnOf(m).model)
+	}
+}
+
+func TestSpawnModelLoadingKeepsDefaultSelectable(t *testing.T) {
+	c := modelSpawnClient()
+	m := openSpawn(t, c)
+	m.width, m.height = 80, 24
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // reply not delivered
+	if spawnStepOf(m) != spawnStepModel || !strings.Contains(spawnView(m), "Loading models") {
+		t.Fatalf("step=%v view:\n%s", spawnStepOf(m), spawnView(m))
+	}
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if spawnStepOf(m) != spawnStepDir {
+		t.Fatalf("step=%v want dir", spawnStepOf(m))
+	}
+}
+
+func TestSpawnModelStaleReplyIgnored(t *testing.T) {
+	c := modelSpawnClient()
+	m := openSpawn(t, c)
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // claude's model step, loading
+	m, _ = upd(m, spawnModelsMsg{nodeID: "only", agent: "codex", models: []api.ModelInfo{{ID: "x", Name: "X"}}})
+	if spawnOf(m).models != nil {
+		t.Fatalf("stale reply populated the step: %+v", spawnOf(m).models)
+	}
+}
+
+func TestSpawnModelFilter(t *testing.T) {
+	c := modelSpawnClient()
+	m := pickClaude(t, c)
+	m = typeKeys(m, "/son")
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // keep the filter
+	if got := spawnOf(m).shownModels(); len(got) != 1 || got[0].ID != "sonnet" || spawnOf(m).choices() != 2 {
+		t.Fatalf("shown=%+v", got)
+	}
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEscape}) // clears the kept filter
+	if !spawnOpen(m) || spawnOf(m).query != "" || spawnOf(m).choices() != 4 {
+		t.Fatalf("first esc: open=%v query=%q", spawnOpen(m), spawnOf(m).query)
+	}
+	m = typeKeys(m, "/son")
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = pressKeys(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	spawnWithPrompt(t, m, c)
+	if c.spawnModel != "sonnet" {
+		t.Fatalf("spawn model=%q", c.spawnModel)
+	}
+
+	m = pickClaude(t, modelSpawnClient())
+	m = typeKeys(m, "/son")
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if spawnOpen(m) {
+		t.Fatal("second esc should cancel the flow")
+	}
+}
+
+func TestSpawnPresetGoesThroughModelStep(t *testing.T) {
+	c := modelSpawnClient()
+	c.agents = c.agents[:1]
+	m := newModel(c, false, nil)
+	m.width, m.height = 80, 24
+	cmd := m.beginPresetSpawn("only", "/p/1", "do it")
+	m = runSpawnReplies(m, cmd)
+	if spawnStepOf(m) != spawnStepModel {
+		t.Fatalf("step=%v want model", spawnStepOf(m))
+	}
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if spawnStepOf(m) != spawnStepPrompt || spawnOf(m).prompt.Value() != "do it" {
+		t.Fatalf("step=%v prompt=%q", spawnStepOf(m), spawnOf(m).prompt.Value())
+	}
+}
+
+func TestSpawnPresetModelFilterClosedOnSkip(t *testing.T) {
+	c := modelSpawnClient()
+	c.agents = c.agents[:1]
+	m := newModel(c, false, nil)
+	m.width, m.height = 80, 24
+	cmd := m.beginPresetSpawn("only", "/p/1", "")
+	for _, msg := range execCmd(cmd) {
+		if _, ok := msg.(spawnAgentsMsg); ok {
+			m, _ = upd(m, msg)
+		}
+	}
+	m = typeKeys(m, "/") // while the models load
+	m, _ = upd(m, spawnModelsMsg{nodeID: "only", agent: "claude"})
+	m = typeKeys(m, "go")
+	if spawnStepOf(m) != spawnStepPrompt || spawnOf(m).prompt.Value() != "go" {
+		t.Fatalf("step=%v prompt=%q, want the typed text in the prompt", spawnStepOf(m), spawnOf(m).prompt.Value())
+	}
+}
+
+func TestSpawnModelListHeightMatchesDirList(t *testing.T) {
+	c := modelSpawnClient()
+	var models []api.ModelInfo
+	var projects []session.HistoryProject
+	for i := range 40 {
+		models = append(models, api.ModelInfo{ID: fmt.Sprintf("m%d", i), Name: fmt.Sprintf("Model%d", i)})
+		projects = append(projects, session.HistoryProject{Label: fmt.Sprintf("p%d", i), Cwd: fmt.Sprintf("/p/%d", i), NodeID: "only"})
+	}
+	c.models = map[string][]api.ModelInfo{"claude": models}
+	c.projects = projects
+	m := pickClaude(t, c)
+	if spawnStepOf(m) != spawnStepModel {
+		t.Fatalf("step=%v want model", spawnStepOf(m))
+	}
+	modelH := lipgloss.Height(spawnView(m))
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if spawnStepOf(m) != spawnStepDir {
+		t.Fatalf("step=%v want dir", spawnStepOf(m))
+	}
+	if dirH := lipgloss.Height(spawnView(m)); modelH != dirH {
+		t.Fatalf("model step is %d rows, dir step %d", modelH, dirH)
+	}
+}
+
+func TestSpawnModelLongErrorStaysOneLine(t *testing.T) {
+	c := modelSpawnClient()
+	c.modelsErr = errors.New("opencode: start service")
+	short := lipgloss.Height(spawnView(pickClaude(t, c)))
+
+	c = modelSpawnClient()
+	c.modelsErr = errors.New("opencode: start service: exit status 1: " + strings.Repeat("stderr ", 40) + "\nsecond line\nthird line")
+	m := pickClaude(t, c)
+	v := spawnView(m)
+	if h := lipgloss.Height(v); h != short {
+		t.Fatalf("view is %d rows with a long error, %d with a short one:\n%s", h, short, v)
+	}
+	if strings.Contains(v, "second line") {
+		t.Fatalf("view shows the error's later lines:\n%s", v)
+	}
+	cardW := historyWidth(m.bodyWidth())
+	for _, ln := range strings.Split(v, "\n") {
+		if strings.Contains(ln, "couldn't load models") {
+			if w := lipgloss.Width(ln); w > cardW {
+				t.Fatalf("status line is %d wide, card %d: %q", w, cardW, ansi.Strip(ln))
+			}
+			return
+		}
+	}
+	t.Fatalf("view missing the error:\n%s", v)
 }

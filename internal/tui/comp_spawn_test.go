@@ -14,7 +14,7 @@ import (
 func runSpawnReplies(m model, cmd tea.Cmd) model {
 	for _, msg := range execCmd(cmd) {
 		switch msg.(type) {
-		case spawnNodesMsg, spawnAgentsMsg, spawnDirsMsg:
+		case spawnNodesMsg, spawnAgentsMsg, spawnModelsMsg, spawnDirsMsg:
 			var next tea.Cmd
 			m, next = upd(m, msg)
 			m = runSpawnReplies(m, next)
@@ -141,9 +141,9 @@ func TestSpawnFromIssueOfferReturnsFocusToTheTree(t *testing.T) {
 	}
 	m, _ = upd(m, keyMsg("y"))
 	assertSpawnOpen(t, "y on the offer", m, n)
-	m, _ = upd(m, spawnAgentsMsg{nodeID: "n1", agents: []api.AgentInfo{{ID: "claude"}}})
+	m = replyLoneAgent(m, "n1")
 	if spawnStepOf(m) != spawnStepPrompt {
-		t.Fatalf("the agents reply: step = %v, want the prompt", spawnStepOf(m))
+		t.Fatalf("the models reply: step = %v, want the prompt", spawnStepOf(m))
 	}
 	m, _ = upd(m, keyMsg("enter"))
 	assertSpawnClosed(t, "launch", m, n, leftSidebar)

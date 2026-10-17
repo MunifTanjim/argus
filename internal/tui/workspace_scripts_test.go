@@ -167,7 +167,7 @@ func TestSpawnNotesRunningSetup(t *testing.T) {
 	m := withSetup(projectsTestModel(), 1, &api.ScriptRun{State: "running", Command: "pnpm install"})
 	m.width, m.height = 120, 30
 	m.beginPresetSpawn("n1", "/repo-feat", "")
-	m, _ = upd(m, spawnAgentsMsg{nodeID: "n1", agents: []api.AgentInfo{{ID: "claude"}}})
+	m = replyLoneAgent(m, "n1")
 	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "setup is still running") {
 		t.Errorf("the spawn prompt should note the running setup:\n%s", out)
 	}
