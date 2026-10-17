@@ -143,12 +143,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.connected {
 			// Reconnected: resync authoritatively; live events resume on their own.
 			m.reconnecting = false
-			cmd := tea.Batch(m.resyncCmd(), m.loadProjects(), m.loadTerminalsCmd())
-			if t, ok := m.baseComp().(transcriptComp); ok && t.live && t.activeSub.subID != "" {
-				ref := t.activeSub
-				have := len(m.transcriptCache[ref.key()].entries)
-				cmd = tea.Batch(cmd, m.subscribeCmd(ref, have))
-			}
+			cmd := tea.Batch(m.resyncCmd(), m.loadProjects(), m.loadTerminalsCmd(), m.resubscribeLive(""))
 			return m, cmd
 		}
 		m.reconnecting = true // keep the last-known list visible meanwhile
@@ -483,6 +478,11 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 		// stale (pre-clear) stream is dropped and the new file streams from the start.
 		if c := m.resubscribeOnClear(prev, existed, ev.Session); c != nil {
 			cmd = tea.Batch(cmd, c)
+		} else if (!existed || prev.Offline) && !ev.Session.Offline {
+			// A restarted node drops its subscriptions while this client's link
+			// stays up; its sessions come back online, or re-listed when a
+			// gateway restart outran the node's return.
+			cmd = tea.Batch(cmd, m.resubscribeLive(ev.Session.ID))
 		}
 	case registry.EventRemoved:
 		delete(m.sessions, ev.Session.ID)

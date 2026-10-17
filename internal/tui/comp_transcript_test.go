@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -579,5 +580,53 @@ func TestDoneToolBodyWithResultNotRefetched(t *testing.T) {
 	runCmd(cmd)
 	if got := countCalls(rc, api.MethodSessionToolDetail); got != before {
 		t.Errorf("a tool with a cached result was re-fetched")
+	}
+}
+
+// A drilled-in subagent frame holds the only live subscription, so its node's
+// restart (session back online) or this client's reconnect re-subscribes it,
+// and the catch-up keeps filling the frame.
+func TestSubagentFrameResubscribesWhenItsStreamIsLost(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		lose func(m model) (model, tea.Cmd)
+	}{
+		{"session back online", func(m model) (model, tea.Cmd) {
+			s := m.sessions["n1:s1"]
+			s.Offline = true
+			m.sessions["n1:s1"] = s
+			s.Offline = false
+			return upd(m, notificationMsg(sessionEventNote(registry.EventUpdated, s)))
+		}},
+		{"reconnect", func(m model) (model, tea.Cmd) {
+			return upd(m, connStateMsg{connected: true})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rc := &recordingClient{}
+			m := resumeInto(streamModel(rc), "n1:s1", subagentEntry())
+			m, cmd := upd(m, keyMsg("enter"))
+			m = liveDeltas(m, cmd, []transcript.Entry{{ID: "x", Kind: transcript.EntryText, Text: "before restart"}})
+			frame := trOf(m).activeSub
+
+			m, cmd = tc.lose(m)
+			runCmd(cmd)
+			subs := subscribeCalls(rc)
+			last := subs[len(subs)-1]
+			if last.SubID != frame.subID || last.AgentID != frame.agentID || last.HaveEntries != 1 {
+				t.Fatalf("want a re-subscribe of the subagent stream %+v with have_entries 1, got %+v", frame, last)
+			}
+			m, _ = upd(m, transcriptMsg{id: "n1:s1", err: errors.New("node not back yet")})
+			m, _ = upd(m, transcriptDeltaMsg{ref: frame, initial: true, delta: api.TranscriptDelta{
+				SubID: frame.subID, FromIndex: 1,
+				Entries: []transcript.Entry{{ID: "y", Kind: transcript.EntryText, Text: "after restart"}},
+			}})
+			if out := viewText(m); !strings.Contains(out, "before restart") || !strings.Contains(out, "after restart") {
+				t.Fatalf("the catch-up should extend the frame:\n%s", out)
+			}
+			if trOf(m).transcript.err != nil {
+				t.Error("a successful re-subscribe should clear the failed one's error")
+			}
+		})
 	}
 }

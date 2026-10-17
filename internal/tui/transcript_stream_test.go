@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
@@ -126,5 +129,84 @@ func TestResubscribeOnClearNoop(t *testing.T) {
 	m.sessions["s1"] = cur
 	if cmd := m.resubscribeOnClear(s, true, cur); cmd != nil {
 		t.Error("must not re-subscribe while drilled into a subagent")
+	}
+}
+
+func subscribeCalls(rc *recordingClient) []api.TranscriptSubscribeParams {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	var out []api.TranscriptSubscribeParams
+	for i, m := range rc.calls {
+		if m == api.MethodTranscriptSubscribe {
+			out = append(out, rc.params[i].(api.TranscriptSubscribeParams))
+		}
+	}
+	return out
+}
+
+func sessionEventNote(typ registry.EventType, s session.Session) api.Notification {
+	params, _ := json.Marshal(registry.Event{Type: typ, Session: s})
+	return api.Notification{Method: api.MethodSessionEvent, Params: params}
+}
+
+// A restarted node drops its subscriptions while the gateway link stays up, so
+// the open session coming back (online again, or re-listed after a gateway
+// restart) must re-subscribe its live stream.
+func TestSessionReturnResubscribesLiveStream(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		prev    *session.Session
+		typ     registry.EventType
+		resubOK bool
+	}{
+		{"back online", &session.Session{ID: "s1", Offline: true}, registry.EventUpdated, true},
+		{"re-listed", nil, registry.EventAdded, true},
+		{"already online", &session.Session{ID: "s1"}, registry.EventUpdated, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := testModel()
+			rc := &recordingClient{}
+			m.client = rc
+			m = withLive(m, "s1")
+			m.sessions = map[string]session.Session{}
+			if tc.prev != nil {
+				m.sessions["s1"] = *tc.prev
+			}
+			m = withTr(m, func(t *transcriptComp) { t.activeSub = subRef{subID: "x", sessionID: "s1", cacheKey: "s1"} })
+			m.transcriptCache = map[string]cachedTranscript{"s1": {entries: userEntries(3)}}
+			m = withTr(m, func(t *transcriptComp) { t.transcript.entries = userEntries(3) })
+
+			runCmd(m.applyEvent(sessionEventNote(tc.typ, session.Session{ID: "s1"})))
+			subs := subscribeCalls(rc)
+			if !tc.resubOK {
+				if len(subs) != 0 {
+					t.Fatalf("must not re-subscribe: %+v", subs)
+				}
+				return
+			}
+			if len(subs) != 1 || subs[0].SubID != "x" || subs[0].HaveEntries != 3 {
+				t.Fatalf("want one re-subscribe of x with have_entries 3, got %+v", subs)
+			}
+		})
+	}
+}
+
+// A failed re-subscribe (node not back yet) keeps the shown entries, so the next
+// re-subscribe's have_entries matches what the view holds.
+func TestSubscribeErrorKeepsEntries(t *testing.T) {
+	m := testModel()
+	m = withLive(m, "s1")
+	m = withTr(m, func(t *transcriptComp) {
+		t.activeSub = subRef{subID: "x", sessionID: "s1", cacheKey: "s1"}
+		t.transcript.entries = userEntries(3)
+	})
+	m.transcriptCache = map[string]cachedTranscript{"s1": {entries: userEntries(3)}}
+	m, _ = upd(m, transcriptMsg{id: "s1", err: errors.New("node offline")})
+	if got := len(trOf(m).transcript.entries); got != 3 {
+		t.Fatalf("entries after subscribe error = %d, want 3", got)
+	}
+	m, _ = upd(m, transcriptDeltaMsg{ref: trOf(m).activeSub, delta: api.TranscriptDelta{FromIndex: 3}, initial: true})
+	if trOf(m).transcript.err != nil {
+		t.Error("a successful re-subscribe should clear the error")
 	}
 }
