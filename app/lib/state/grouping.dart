@@ -51,6 +51,13 @@ class AgentInfo {
   });
 }
 
+/// A model an agent offers at spawn; [id] is what the node expects back.
+class ModelInfo {
+  final String id;
+  final String name;
+  const ModelInfo({required this.id, required this.name});
+}
+
 /// A node's completion of a directory path: its user's [home], and the [paths]
 /// of the subdirectories in the path's parent that start with its last segment.
 class DirCompletion {

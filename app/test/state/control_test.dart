@@ -146,6 +146,53 @@ void main() {
     expect(frames.single, contains('"cwd":"/p"'));
   });
 
+  test('spawn sends model only when set', () async {
+    Future<String> frameFor({String? model}) async {
+      final frames = <String>[];
+      final client = RpcClient(
+          incoming: StreamController<RpcMessage>().stream,
+          sendFrame: frames.add);
+      // ignore: unawaited_futures
+      SessionService(() => client).spawn(model: model, prompt: 'p');
+      await Future<void>.delayed(Duration.zero);
+      return frames.single;
+    }
+
+    expect(await frameFor(), isNot(contains('"model"')));
+    expect(await frameFor(model: ''), isNot(contains('"model"')));
+    expect(await frameFor(model: 'sonnet'), contains('"model":"sonnet"'));
+  });
+
+  test('listModels sends agent and node and parses the models', () async {
+    final frames = <String>[];
+    final incoming = StreamController<RpcMessage>();
+    final client = RpcClient(incoming: incoming.stream, sendFrame: frames.add);
+    final fut = SessionService(() => client).listModels('n', 'claude');
+    await Future<void>.delayed(Duration.zero);
+    expect(frames.single, contains('"method":"agents.models"'));
+    expect(frames.single, contains('"agent":"claude"'));
+    expect(frames.single, contains('"node_id":"n"'));
+    final id = (jsonDecode(frames.single.trim()) as Map)['id'];
+    incoming.add(RpcMessage.fromJson(jsonDecode(
+        '{"jsonrpc":"2.0","id":"$id","result":{"models":[{"id":"opus","name":"Opus"}]}}')));
+    final models = (await fut as Ok<List<ModelInfo>>).value;
+    expect(models.single.id, 'opus');
+    expect(models.single.name, 'Opus');
+  });
+
+  test('listModels maps method-not-found to an empty list', () async {
+    final frames = <String>[];
+    final incoming = StreamController<RpcMessage>();
+    final client = RpcClient(incoming: incoming.stream, sendFrame: frames.add);
+    final fut = SessionService(() => client).listModels(null, 'claude');
+    await Future<void>.delayed(Duration.zero);
+    expect(frames.single, isNot(contains('"node_id"')));
+    final id = (jsonDecode(frames.single.trim()) as Map)['id'];
+    incoming.add(RpcMessage.fromJson(jsonDecode(
+        '{"jsonrpc":"2.0","id":"$id","error":{"code":-32601,"message":"nope"}}')));
+    expect((await fut as Ok<List<ModelInfo>>).value, isEmpty);
+  });
+
   test('nodes derives from server.info and parses id/label', () async {
     final frames = <String>[];
     final incoming = StreamController<RpcMessage>();

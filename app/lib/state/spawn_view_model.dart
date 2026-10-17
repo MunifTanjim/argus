@@ -7,12 +7,14 @@ class SpawnRequest {
     this.nodeId,
     this.cwd,
     this.agent,
+    this.model,
     required this.prompt,
   });
 
   final String? nodeId;
   final String? cwd;
   final String? agent;
+  final String? model;
   final String prompt;
 }
 
@@ -27,6 +29,7 @@ class SpawnViewModel {
       nodeId: r.nodeId,
       cwd: r.cwd,
       agent: r.agent,
+      model: r.model,
       prompt: r.prompt,
     ),
   );
