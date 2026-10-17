@@ -4,21 +4,28 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/tmux"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 )
 
 const sessionIdleTTL = time.Hour
 
 // Keep small: the service is a local single-process server.
 const scanConcurrency = 4
+
+// startTimeout bounds `opencode service start`.
+const startTimeout = 20 * time.Second
 
 type presenceEntry struct {
 	lastActivity       time.Time
@@ -31,6 +38,9 @@ type discoverer struct {
 	reg *registry.Registry
 
 	dial func() (*client, bool)
+
+	starts singleflight.Group // shares one `opencode service start` among concurrent callers
+	wake   chan struct{}      // signals the event pump to dial now instead of after its retry delay
 
 	pumpOnce    sync.Once
 	pumpStarted atomic.Bool // set when the event pump goroutine has been launched
@@ -71,6 +81,7 @@ func newDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.
 		panes:     map[string]string{},
 		pendPerm:  map[string]string{},
 		pendForm:  map[string]*pendingForm{},
+		wake:      make(chan struct{}, 1),
 	}
 	d.dial = func() (*client, bool) {
 		info, ok := readServiceInfo()
@@ -315,22 +326,87 @@ func (d *discoverer) sendPrompt(ctx context.Context, sessionID, text string) err
 	return c.sendPrompt(ctx, sessionID, text)
 }
 
-// spawnSession creates a new OpenCode session over the service API and returns its id.
-func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (string, error) {
-	c, ok := d.dial()
-	if !ok {
-		return "", fmt.Errorf("opencode: service unavailable")
+// startService runs `opencode service start`, which returns once the background
+// server is up and is a no-op when it already runs.
+var startService = func(ctx context.Context) error {
+	cmd := shell.NewCommandContext(ctx, "opencode", "service", "start")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("opencode: start service: %w: %s", err, cmd.StdErr().String())
 	}
-	id, err := c.createSession(ctx, cwd)
+	return nil
+}
+
+func (d *discoverer) awaitClient(ctx context.Context) (*client, error) {
+	if c, ok := d.dial(); ok {
+		return c, nil
+	}
+	// Concurrent callers share one start. It runs on its own bounded context so a
+	// caller that gives up does not fail the others.
+	ch := d.starts.DoChan("start", func() (any, error) {
+		if _, ok := d.dial(); ok {
+			return nil, nil
+		}
+		sctx, cancel := context.WithTimeout(context.Background(), startTimeout)
+		defer cancel()
+		if err := startService(sctx); err != nil {
+			return nil, err
+		}
+		select {
+		case d.wake <- struct{}{}:
+		default:
+		}
+		return nil, nil
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, res.Err
+		}
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if c, ok := d.dial(); ok {
+			return c, nil
+		}
+		if sleep(ctx, 50*time.Millisecond) {
+			return nil, ctx.Err()
+		}
+	}
+	return nil, fmt.Errorf("opencode: service unavailable")
+}
+
+func (d *discoverer) spawnSession(ctx context.Context, cwd string, opts adapter.SpawnOptions) (string, error) {
+	var model ocModelRef
+	if opts.Model != "" {
+		provider, id, ok := strings.Cut(opts.Model, "/")
+		if !ok || provider == "" || id == "" {
+			return "", fmt.Errorf("opencode: invalid model %q", opts.Model)
+		}
+		model = ocModelRef{ID: id, ProviderID: provider}
+	}
+	c, err := d.awaitClient(ctx)
 	if err != nil {
 		return "", err
+	}
+	created, err := c.createSession(ctx, cwd, model)
+	if err != nil {
+		return "", err
+	}
+	id := created.ID
+	if model.ID != "" && (created.Model.ID != model.ID || created.Model.ProviderID != model.ProviderID) {
+		if err := c.switchModel(ctx, id, model); err != nil {
+			_ = c.deleteSession(ctx, id) // best effort: don't leave a session on the wrong model
+			return "", err
+		}
 	}
 	// Register before prompting: the session already exists on the server, and an
 	// idle (unprompted) session is not in /api/session/active, so a later scan would
 	// not find it. Registering first keeps it tracked even if the prompt fails.
 	d.upsert(id, session.StatusWorking, nil)
-	if prompt != "" {
-		if err := c.sendPrompt(ctx, id, prompt); err != nil {
+	if opts.Prompt != "" {
+		if err := c.sendPrompt(ctx, id, opts.Prompt); err != nil {
 			return "", err
 		}
 	}

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -28,6 +29,7 @@ func newTestDiscoverer(reg *registry.Registry, c *client) *discoverer {
 		panes:    map[string]string{},
 		pendPerm: map[string]string{},
 		pendForm: map[string]*pendingForm{},
+		wake:     make(chan struct{}, 1),
 	}
 	d.dial = func() (*client, bool) {
 		if c == nil {
@@ -87,7 +89,7 @@ func TestSpawnSessionCreatesPromptsAndRegisters(t *testing.T) {
 	reg := registry.New()
 	d := newTestDiscoverer(reg, newClient(serviceInfo{URL: srv.URL}))
 
-	id, err := d.spawnSession(context.Background(), "/repo", "do the thing")
+	id, err := d.spawnSession(context.Background(), "/repo", adapter.SpawnOptions{Prompt: "do the thing"})
 	if err != nil {
 		t.Fatalf("spawnSession: %v", err)
 	}
@@ -96,6 +98,9 @@ func TestSpawnSessionCreatesPromptsAndRegisters(t *testing.T) {
 	}
 	if !strings.Contains(createBody, `"directory":"/repo"`) {
 		t.Fatalf("create body missing cwd: %q", createBody)
+	}
+	if strings.Contains(createBody, `"model"`) {
+		t.Fatalf("create body carries a model without one chosen: %q", createBody)
 	}
 	if !strings.Contains(promptBody, "do the thing") {
 		t.Fatalf("prompt body missing text: %q", promptBody)
@@ -109,10 +114,75 @@ func TestSpawnSessionCreatesPromptsAndRegisters(t *testing.T) {
 	}
 }
 
+func stubStartService(t *testing.T, start func(context.Context) error) {
+	t.Helper()
+	old := startService
+	t.Cleanup(func() { startService = old })
+	startService = start
+}
+
 func TestSpawnSessionServiceUnavailable(t *testing.T) {
+	started := false
+	stubStartService(t, func(context.Context) error {
+		started = true
+		return errors.New("opencode: start service: exit status 1")
+	})
 	d := newTestDiscoverer(registry.New(), nil)
-	if _, err := d.spawnSession(context.Background(), "/repo", "hi"); err == nil {
-		t.Fatal("expected error when service is unavailable")
+	if _, err := d.spawnSession(context.Background(), "/repo", adapter.SpawnOptions{Prompt: "hi"}); err == nil {
+		t.Fatal("expected error when the service cannot be started")
+	}
+	if !started {
+		t.Fatal("spawn must try to start the service when it is not running")
+	}
+}
+
+func TestSpawnSessionStartsServiceWhenDown(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session":
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_up","location":{"directory":"/repo"}}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/session/ses_up":
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_up","location":{"directory":"/repo"}}}`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	d := newTestDiscoverer(registry.New(), nil)
+	var live *client
+	d.dial = func() (*client, bool) { return live, live != nil }
+	stubStartService(t, func(context.Context) error {
+		live = newClient(serviceInfo{URL: srv.URL})
+		return nil
+	})
+	id, err := d.spawnSession(context.Background(), "/repo", adapter.SpawnOptions{})
+	if err != nil || id != "ses_up" {
+		t.Fatalf("spawn = %q, %v; want ses_up once the service is started", id, err)
+	}
+}
+
+func TestListModelsStartsServiceWhenDown(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/model":
+			_, _ = w.Write([]byte(`{"data":[{"id":"m","modelID":"m","providerID":"p","name":"M","enabled":true}]}`))
+		case "/api/provider":
+			_, _ = w.Write([]byte(`{"data":[{"id":"p","name":"P"}]}`))
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	d := newTestDiscoverer(registry.New(), nil)
+	var live *client
+	d.dial = func() (*client, bool) { return live, live != nil }
+	stubStartService(t, func(context.Context) error {
+		live = newClient(serviceInfo{URL: srv.URL})
+		return nil
+	})
+	got, err := (&ocAdapter{disc: d}).ListModels(context.Background())
+	if err != nil || len(got) != 1 || got[0].ID != "p/m" {
+		t.Fatalf("ListModels = %v, %v; want [p/m] once the service is started", got, err)
 	}
 }
 
@@ -135,7 +205,7 @@ func TestSpawnSessionWithoutPromptSkipsPrompt(t *testing.T) {
 	reg := registry.New()
 	d := newTestDiscoverer(reg, newClient(serviceInfo{URL: srv.URL}))
 
-	if _, err := d.spawnSession(context.Background(), "", ""); err != nil {
+	if _, err := d.spawnSession(context.Background(), "", adapter.SpawnOptions{}); err != nil {
 		t.Fatalf("spawnSession: %v", err)
 	}
 	if prompted {
@@ -629,5 +699,257 @@ func TestAdapterSendPromptRefusesBusySession(t *testing.T) {
 	busy := session.Session{Agent: Agent, AgentSessionID: "ses_1", Status: session.StatusWorking}
 	if err := a.SendPrompt(context.Background(), busy, "hello"); !errors.Is(err, api.ErrSessionBusy) {
 		t.Fatalf("err = %v, want ErrSessionBusy", err)
+	}
+}
+
+// modelSpawnServer serves session create (responding with createModel),
+// switchModel, and prompt, recording each request body.
+type modelSpawnServer struct {
+	createBody, switchBody, promptBody    string
+	switchCalls, promptCalls, deleteCalls int
+	switchStatus                          int
+	order                                 []string
+}
+
+func (m *modelSpawnServer) handler(createModel string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session":
+			m.createBody = string(b)
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_m","model":` + createModel + `}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/ses_m/model":
+			m.switchCalls++
+			m.switchBody = string(b)
+			m.order = append(m.order, "switch")
+			w.WriteHeader(m.switchStatus)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/session/ses_m/prompt":
+			m.promptCalls++
+			m.promptBody = string(b)
+			m.order = append(m.order, "prompt")
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/session/ses_m":
+			m.deleteCalls++
+			w.WriteHeader(204)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/session/ses_m":
+			_, _ = w.Write([]byte(`{"data":{"id":"ses_m"}}`))
+		default:
+			w.WriteHeader(404)
+		}
+	})
+}
+
+func TestSpawnSessionSendsModel(t *testing.T) {
+	m := &modelSpawnServer{switchStatus: 204}
+	srv := httptest.NewServer(m.handler(`{"id":"claude-haiku-5-5","providerID":"opencode-go"}`))
+	defer srv.Close()
+	d := newTestDiscoverer(registry.New(), newClient(serviceInfo{URL: srv.URL}))
+
+	opts := adapter.SpawnOptions{Prompt: "go", Model: "opencode-go/claude-haiku-5-5"}
+	if _, err := d.spawnSession(context.Background(), "/repo", opts); err != nil {
+		t.Fatalf("spawnSession: %v", err)
+	}
+	if !strings.Contains(m.createBody, `"model":{"id":"claude-haiku-5-5","providerID":"opencode-go"}`) {
+		t.Fatalf("create body missing model: %q", m.createBody)
+	}
+	if m.switchCalls != 0 {
+		t.Fatalf("switch called %d times though create applied the model", m.switchCalls)
+	}
+	if m.promptCalls != 1 {
+		t.Fatalf("prompt calls = %d, want 1", m.promptCalls)
+	}
+}
+
+func TestSpawnSessionSplitsModelAtFirstSlash(t *testing.T) {
+	m := &modelSpawnServer{switchStatus: 204}
+	srv := httptest.NewServer(m.handler(`{"id":"org/model","providerID":"p"}`))
+	defer srv.Close()
+	d := newTestDiscoverer(registry.New(), newClient(serviceInfo{URL: srv.URL}))
+
+	if _, err := d.spawnSession(context.Background(), "/repo", adapter.SpawnOptions{Model: "p/org/model"}); err != nil {
+		t.Fatalf("spawnSession: %v", err)
+	}
+	if !strings.Contains(m.createBody, `"model":{"id":"org/model","providerID":"p"}`) {
+		t.Fatalf("create body: %q", m.createBody)
+	}
+}
+
+func TestSpawnSessionSwitchesModelWhenCreateIgnoresIt(t *testing.T) {
+	m := &modelSpawnServer{switchStatus: 204}
+	srv := httptest.NewServer(m.handler(`{"id":"default-x","providerID":"opencode"}`))
+	defer srv.Close()
+	d := newTestDiscoverer(registry.New(), newClient(serviceInfo{URL: srv.URL}))
+
+	opts := adapter.SpawnOptions{Prompt: "go", Model: "opencode-go/claude-haiku-5-5"}
+	if _, err := d.spawnSession(context.Background(), "/repo", opts); err != nil {
+		t.Fatalf("spawnSession: %v", err)
+	}
+	if !strings.Contains(m.switchBody, `"model":{"id":"claude-haiku-5-5","providerID":"opencode-go"}`) {
+		t.Fatalf("switch body: %q", m.switchBody)
+	}
+	if strings.Join(m.order, ",") != "switch,prompt" {
+		t.Fatalf("call order = %v, want switch before prompt", m.order)
+	}
+}
+
+func TestSpawnSessionFailsWhenSwitchModelFails(t *testing.T) {
+	m := &modelSpawnServer{switchStatus: 400}
+	srv := httptest.NewServer(m.handler(`{"id":"default-x","providerID":"opencode"}`))
+	defer srv.Close()
+	d := newTestDiscoverer(registry.New(), newClient(serviceInfo{URL: srv.URL}))
+
+	opts := adapter.SpawnOptions{Prompt: "go", Model: "opencode-go/claude-haiku-5-5"}
+	if _, err := d.spawnSession(context.Background(), "/repo", opts); err == nil {
+		t.Fatal("expected error when the model cannot be applied")
+	}
+	if m.promptCalls != 0 {
+		t.Fatalf("prompt called %d times after a failed switch", m.promptCalls)
+	}
+	if m.deleteCalls != 1 {
+		t.Fatalf("delete called %d times, want the created session removed once", m.deleteCalls)
+	}
+}
+
+func TestSpawnSessionRejectsMalformedModel(t *testing.T) {
+	m := &modelSpawnServer{switchStatus: 204}
+	srv := httptest.NewServer(m.handler(`{}`))
+	defer srv.Close()
+	d := newTestDiscoverer(registry.New(), newClient(serviceInfo{URL: srv.URL}))
+
+	if _, err := d.spawnSession(context.Background(), "/repo", adapter.SpawnOptions{Model: "no-slash"}); err == nil {
+		t.Fatal("expected error for a model id without a provider")
+	}
+	if m.createBody != "" {
+		t.Fatalf("session created for a malformed model: %q", m.createBody)
+	}
+}
+
+func TestAwaitClientSharesOneStart(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+	d := newTestDiscoverer(registry.New(), nil)
+	var live atomic.Pointer[client]
+	var dials atomic.Int32
+	d.dial = func() (*client, bool) {
+		dials.Add(1)
+		c := live.Load()
+		return c, c != nil
+	}
+	var starts atomic.Int32
+	stubStartService(t, func(ctx context.Context) error {
+		starts.Add(1)
+		if dl, ok := ctx.Deadline(); !ok || time.Until(dl) > startTimeout {
+			t.Errorf("start deadline = %v, %v; want within %v", dl, ok, startTimeout)
+		}
+		// Hold the start until both callers have found the service down: the
+		// first dials twice (before and inside the shared start), the second once.
+		for i := 0; i < 200 && dials.Load() < 3; i++ {
+			time.Sleep(5 * time.Millisecond)
+		}
+		live.Store(newClient(serviceInfo{URL: srv.URL}))
+		return nil
+	})
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			c, err := d.awaitClient(context.Background())
+			if err == nil && c == nil {
+				err = errors.New("nil client")
+			}
+			errs <- err
+		}()
+	}
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("awaitClient: %v", err)
+		}
+	}
+	if n := starts.Load(); n != 1 {
+		t.Fatalf("service started %d times, want 1", n)
+	}
+}
+
+func TestAwaitClientStartSurvivesCallerCancel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+	d := newTestDiscoverer(registry.New(), nil)
+	var live atomic.Pointer[client]
+	d.dial = func() (*client, bool) {
+		c := live.Load()
+		return c, c != nil
+	}
+	release := make(chan struct{})
+	stubStartService(t, func(ctx context.Context) error {
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		live.Store(newClient(serviceInfo{URL: srv.URL}))
+		return nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	first := make(chan error, 1)
+	go func() {
+		_, err := d.awaitClient(ctx)
+		first <- err
+	}()
+	second := make(chan error, 1)
+	go func() {
+		_, err := d.awaitClient(context.Background())
+		second <- err
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	if err := <-first; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled caller err = %v, want context.Canceled", err)
+	}
+	close(release)
+	if err := <-second; err != nil {
+		t.Fatalf("other caller failed after the first cancelled: %v", err)
+	}
+}
+
+func TestAutoStartWakesEventPump(t *testing.T) {
+	events := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/event" {
+			select {
+			case events <- struct{}{}:
+			default:
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer srv.Close()
+	d := newTestDiscoverer(registry.New(), nil)
+	var live atomic.Pointer[client]
+	dialed := make(chan struct{}, 1)
+	d.dial = func() (*client, bool) {
+		select {
+		case dialed <- struct{}{}:
+		default:
+		}
+		c := live.Load()
+		return c, c != nil
+	}
+	stubStartService(t, func(context.Context) error {
+		live.Store(newClient(serviceInfo{URL: srv.URL}))
+		return nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.runEventPump(ctx)
+	<-dialed // the pump's first dial failed; it now waits to retry
+	time.Sleep(20 * time.Millisecond)
+	if _, err := d.awaitClient(ctx); err != nil {
+		t.Fatalf("awaitClient: %v", err)
+	}
+	select {
+	case <-events:
+	case <-time.After(time.Second):
+		t.Fatal("event pump did not reconnect promptly after the service was started")
 	}
 }
