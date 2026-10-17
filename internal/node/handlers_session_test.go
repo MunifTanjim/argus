@@ -39,7 +39,19 @@ type fakeSpawner struct {
 	gotModel          string
 	id                string
 	err               error
+	models            []api.ModelInfo
+	modelsErr         error
 }
+
+func (f *fakeSpawner) ListModels(context.Context) ([]api.ModelInfo, error) {
+	return f.models, f.modelsErr
+}
+
+// fakePlain is an adapter without a model choice (not a ModelLister).
+type fakePlain struct{ adapter.Adapter }
+
+func (fakePlain) Agent() string     { return "plain" }
+func (fakePlain) AgentName() string { return "Plain" }
 
 func (fakeSpawner) IsHeadless() bool                                     { return true }
 func (fakeSpawner) Agent() string                                        { return "fake" }
@@ -639,5 +651,78 @@ func TestCwdError(t *testing.T) {
 		case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
 			t.Errorf("cwdError(%q) = %v, want %q", tc.cwd, err, tc.want)
 		}
+	}
+}
+
+func TestHandleAgentModelList(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.adapters["fake"] = &fakeSpawner{models: []api.ModelInfo{{ID: "m1", Name: "M1"}}}
+	d.adapters["plain"] = fakePlain{}
+	d.adapters["broken"] = &fakeSpawner{modelsErr: errors.New("boom")}
+
+	models := func(agent string) (any, error) {
+		return d.handleAgentModelList(context.Background(), mustSpawnJSON(t, api.AgentModelListParams{Agent: agent}))
+	}
+
+	res, err := models("fake")
+	if err != nil {
+		t.Fatalf("fake: %v", err)
+	}
+	if got := res.(api.AgentModelListResult).Models; len(got) != 1 || got[0] != (api.ModelInfo{ID: "m1", Name: "M1"}) {
+		t.Fatalf("fake models = %+v", got)
+	}
+
+	res, err = models("plain")
+	if err != nil {
+		t.Fatalf("plain: %v", err)
+	}
+	got := res.(api.AgentModelListResult).Models
+	if got == nil || len(got) != 0 {
+		t.Fatalf("plain models = %#v, want empty non-nil", got)
+	}
+
+	_, err = models("nope")
+	var rpcErr *api.RPCError
+	if !errors.As(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest {
+		t.Fatalf("unknown agent err = %v, want CodeInvalidRequest", err)
+	}
+
+	_, err = models("broken")
+	if !errors.As(err, &rpcErr) || !strings.Contains(rpcErr.Message, "boom") {
+		t.Fatalf("list error = %v, want message containing boom", err)
+	}
+}
+
+func TestHandleSessionSpawnRejectsUnusableModel(t *testing.T) {
+	fs := &fakeSpawner{id: "ses_x"}
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.adapters["fake"] = fs
+	d.adapters["plain"] = fakePlain{}
+	repo := t.TempDir()
+
+	spawn := func(p api.SpawnParams) error {
+		p.Cwd = repo
+		_, err := d.handleSessionSpawn(context.Background(), mustSpawnJSON(t, p))
+		return err
+	}
+	wantInvalid := func(name string, err error, msg string) {
+		t.Helper()
+		var rpcErr *api.RPCError
+		if !errors.As(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest || !strings.Contains(rpcErr.Message, msg) {
+			t.Fatalf("%s: err = %v, want CodeInvalidRequest containing %q", name, err, msg)
+		}
+	}
+
+	wantInvalid("no model choice", spawn(api.SpawnParams{Agent: "plain", Model: "m1"}), "no model choice")
+	wantInvalid("explicit command", spawn(api.SpawnParams{Agent: "fake", Command: "zsh", Model: "m1"}), "explicit command")
+	if fs.gotCwd != "" {
+		t.Fatalf("SpawnSession called for a rejected model")
+	}
+
+	if err := spawn(api.SpawnParams{Agent: "fake", Model: "m1", Prompt: "hi"}); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	if fs.gotModel != "m1" {
+		t.Fatalf("gotModel = %q, want m1", fs.gotModel)
 	}
 }

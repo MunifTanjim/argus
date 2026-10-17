@@ -313,6 +313,32 @@ func (d *Node) resolveSpawnCommand(p api.SpawnParams) (command string, args []st
 	return d.adapterFor(p.Agent).SpawnCommand(adapter.SpawnOptions{Prompt: p.Prompt, Model: p.Model})
 }
 
+func (d *Node) handleAgentModelList(ctx context.Context, params json.RawMessage) (any, error) {
+	p, err := api.Decode[api.AgentModelListParams](params)
+	if err != nil {
+		return nil, err
+	}
+	a, ok := d.adapters[p.Agent]
+	if !ok {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown agent " + p.Agent}
+	}
+	ml, ok := a.(adapter.ModelLister)
+	if !ok {
+		return api.AgentModelListResult{Models: []api.ModelInfo{}}, nil
+	}
+	models, err := ml.ListModels(ctx)
+	if err != nil {
+		return nil, &api.RPCError{
+			Code:    api.CodeInvalidRequest,
+			Message: "cannot list " + a.AgentName() + " models: " + err.Error(),
+		}
+	}
+	if models == nil {
+		models = []api.ModelInfo{}
+	}
+	return api.AgentModelListResult{Models: models}, nil
+}
+
 // handleAgentsList reports agents with spawnable flags. Probed live per call so an
 // agent installed after startup is offered.
 func (d *Node) handleAgentsList(_ context.Context, params json.RawMessage) (any, error) {
@@ -352,10 +378,19 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 	if err := d.cwdError("cannot spawn", p.Cwd); err != nil {
 		return nil, err
 	}
+	a := d.adapterFor(p.Agent)
+	// Never drop a model choice silently: reject what cannot apply it.
+	if p.Model != "" {
+		if p.Command != "" {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "cannot choose a model with an explicit command"}
+		}
+		if _, ok := a.(adapter.ModelLister); !ok {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: a.AgentName() + " has no model choice"}
+		}
+	}
 	// A Spawner agent (headless, e.g. opencode) has no pane process: create the
 	// session over its service API and register it under the canonical agent-keyed
 	// id. This path needs no tmux, so it runs ahead of the pane-spawn tmux guard.
-	a := d.adapterFor(p.Agent)
 	if sp, ok := a.(adapter.Spawner); ok {
 		id, err := sp.SpawnSession(ctx, p.Cwd, adapter.SpawnOptions{Prompt: p.Prompt, Model: p.Model})
 		if err != nil {
