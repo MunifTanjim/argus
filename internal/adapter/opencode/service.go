@@ -15,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/MunifTanjim/argus/internal/api"
 )
 
 const Agent = "opencode"
@@ -82,6 +84,19 @@ type ocModelRef struct {
 	ID         string `json:"id"`
 	ProviderID string `json:"providerID"`
 	Variant    string `json:"variant"`
+}
+
+// ocModelEntry is one /api/model entry: a model as offered by one provider.
+type ocModelEntry struct {
+	ModelID    string `json:"modelID"`
+	ProviderID string `json:"providerID"`
+	Name       string `json:"name"`
+	Enabled    bool   `json:"enabled"`
+}
+
+type ocProviderEntry struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // ocTokens is a session's cumulative token usage. Cache tokens are excluded from
@@ -307,35 +322,102 @@ func (c *client) listSessions(ctx context.Context) ([]ocSession, error) {
 	return listEnvelope[ocSession](ctx, c, "/api/session", "", "list sessions")
 }
 
-// createSession creates a new session and returns its id. A non-empty dir sets
-// the session's working directory, so discovery hydrates the right cwd and repo.
-func (c *client) createSession(ctx context.Context, dir string) (string, error) {
+// createSession creates a new session and returns it. A non-empty dir sets the
+// session's working directory, so discovery hydrates the right cwd and repo. A
+// model with an ID is requested for the session; the server may ignore it, so the
+// caller checks the returned session's Model.
+func (c *client) createSession(ctx context.Context, dir string, model ocModelRef) (ocSession, error) {
 	body := map[string]any{}
 	if dir != "" {
 		body["location"] = map[string]string{"directory": dir}
 	}
+	if model.ID != "" {
+		body["model"] = map[string]string{"id": model.ID, "providerID": model.ProviderID}
+	}
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return "", err
+		return ocSession{}, err
 	}
 	resp, err := c.do(ctx, http.MethodPost, "/api/session", strings.NewReader(string(payload)))
 	if err != nil {
-		return "", err
+		return ocSession{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("create session: %s", resp.Status)
+		return ocSession{}, fmt.Errorf("create session: %s", resp.Status)
 	}
 	var env struct {
 		Data ocSession `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		return "", err
+		return ocSession{}, err
 	}
 	if env.Data.ID == "" {
-		return "", fmt.Errorf("create session: empty id in response")
+		return ocSession{}, fmt.Errorf("create session: empty id in response")
 	}
-	return env.Data.ID, nil
+	return env.Data, nil
+}
+
+// deleteSession removes a session and its child sessions.
+func (c *client) deleteSession(ctx context.Context, sessionID string) error {
+	resp, err := c.do(ctx, http.MethodDelete, "/api/session/"+sessionID, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("delete session: %s", resp.Status)
+	}
+	return nil
+}
+
+// switchModel sets the model used by the session's subsequent turns.
+func (c *client) switchModel(ctx context.Context, sessionID string, model ocModelRef) error {
+	payload, err := json.Marshal(map[string]any{
+		"model": map[string]string{"id": model.ID, "providerID": model.ProviderID},
+	})
+	if err != nil {
+		return err
+	}
+	resp, err := c.do(ctx, http.MethodPost, "/api/session/"+sessionID+"/model", strings.NewReader(string(payload)))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("switch model: %s", resp.Status)
+	}
+	return nil
+}
+
+// listModels returns the enabled models in server order. A model id is
+// providerID + "/" + modelID, because the same model can be offered by several
+// providers; the label names the provider to tell those apart.
+func (c *client) listModels(ctx context.Context) ([]api.ModelInfo, error) {
+	models, err := listEnvelope[ocModelEntry](ctx, c, "/api/model", "", "list models")
+	if err != nil {
+		return nil, err
+	}
+	providers, err := listEnvelope[ocProviderEntry](ctx, c, "/api/provider", "", "list providers")
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[string]string, len(providers))
+	for _, p := range providers {
+		names[p.ID] = p.Name
+	}
+	var out []api.ModelInfo
+	for _, m := range models {
+		if !m.Enabled {
+			continue
+		}
+		provider := names[m.ProviderID]
+		if provider == "" {
+			provider = m.ProviderID
+		}
+		out = append(out, api.ModelInfo{ID: m.ProviderID + "/" + m.ModelID, Name: m.Name + " · " + provider})
+	}
+	return out, nil
 }
 
 func (c *client) readMessages(ctx context.Context, sessionID string) ([]ocMessage, error) {
