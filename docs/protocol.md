@@ -1664,6 +1664,7 @@ Session {
   summary?:           Summary
   interaction?:       Interaction     // present only while the session waits for input
   subagents?:         RunningSubagent[] // its subagents running now
+  shells?:            RunningShell[]  // its background shells running now
   node_id?, node_label?: string       // added by the client
   offline?:           boolean         // added by the client
 }
@@ -1671,6 +1672,13 @@ Session {
 RunningSubagent {
   id:                 string
   type?, name?, desc?: string
+  since?:             string          // RFC 3339 UTC; when the node first saw it running
+}
+
+RunningShell {
+  id:                 string          // the agent's background task id
+  tool_use_id?:       string          // the call that started it; see sessions.toolDetail
+  command?, desc?:    string
   since?:             string          // RFC 3339 UTC; when the node first saw it running
 }
 
@@ -1708,6 +1716,9 @@ Interaction {
 `subagents` is the session's top-level subagents that are running, as its agent
 last reported them: each report replaces the set, and the set ends with the
 session. A subagent keeps its `since` across reports.
+
+`shells` is the same for the background shells that the session's main loop
+started. A subagent's shells are not listed.
 
 ### History
 
