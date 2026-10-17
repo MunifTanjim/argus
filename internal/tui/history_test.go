@@ -139,3 +139,72 @@ func TestHistoryTranscriptRoundTripKeepsTheSessions(t *testing.T) {
 		t.Errorf("esc should return to the sessions on s2: view=%v cursor=%d sessions=%d", viewOf(m), h.sessCursor, len(h.sessions))
 	}
 }
+
+func TestHistoryProjectFilterMatchesPath(t *testing.T) {
+	m := typeKeys(testModel(), "gt")
+	m, _ = upd(m, histProjectsMsg{projects: []session.HistoryProject{
+		{NodeID: "n1", ProjectDir: "/a", Label: "argus", Cwd: "/src/argus"},
+		{NodeID: "n1", ProjectDir: "/b", Label: "argus", Cwd: "/src/argus/.worktrees/feat-x"},
+		{NodeID: "n1", ProjectDir: "/c", Label: "other", Cwd: "/src/other"},
+	}})
+	m = typeKeys(m, "/FEAT")
+	m, _ = upd(m, keyMsg("enter"))
+	h := historyOf(m)
+	if shown := h.shownProjects(); len(shown) != 1 || shown[0].ProjectDir != "/b" {
+		t.Fatalf("the filter should keep the worktree only: %v", shown)
+	}
+	m, _ = upd(m, keyMsg("enter"))
+	if h := historyOf(m); !h.inProject || h.project.ProjectDir != "/b" {
+		t.Fatalf("enter should open the filtered row: project=%q", h.project.ProjectDir)
+	}
+	m, _ = upd(m, keyMsg("esc"))
+	m, _ = upd(m, keyMsg("esc"))
+	if h := historyOf(m); h.projQuery != "" || len(h.shownProjects()) != 3 || viewOf(m) != viewHistoryProjects {
+		t.Errorf("esc should clear the filter before it leaves: query=%q view=%v", h.projQuery, viewOf(m))
+	}
+}
+
+func TestHistorySessionFilterAndLoadMore(t *testing.T) {
+	m := typeKeys(testModel(), "gt")
+	m, _ = upd(m, histProjectsMsg{projects: historyProjectsAB()})
+	m, _ = upd(m, keyMsg("enter"))
+	page := session.HistorySessionPage{HasMore: true, Items: []session.HistorySession{
+		{SessionID: "s1", Title: "fix the login bug", TranscriptPath: "/t/s1"},
+		{SessionID: "s2", Title: "add history filter", TranscriptPath: "/t/s2"},
+		{SessionID: "s3", FirstMessage: "Filter the logs", TranscriptPath: "/t/s3"},
+	}}
+	m, _ = upd(m, histSessionsMsg{projectDir: "/a", page: page})
+	m = typeKeys(m, "/filter")
+	m, _ = upd(m, keyMsg("enter"))
+	m = typeKeys(m, "j")
+	h := historyOf(m)
+	if shown := h.shownSessions(); len(shown) != 2 || shown[h.sessCursor].SessionID != "s3" {
+		t.Fatalf("the cursor should move over the filtered rows: shown=%v cursor=%d", shown, h.sessCursor)
+	}
+	rc := &recordingClient{}
+	m.client = rc
+	m, cmd := upd(m, keyMsg("m"))
+	if cmd == nil {
+		t.Fatal("m should load more sessions")
+	}
+	if sm, ok := cmd().(histSessionsMsg); !ok || sm.offset != 3 {
+		t.Errorf("load more should start after all loaded sessions: %#v", sm)
+	}
+	m, _ = upd(m, histSessionsMsg{projectDir: "/a", offset: 3, page: session.HistorySessionPage{Items: []session.HistorySession{
+		{SessionID: "s4", Title: "filter again", TranscriptPath: "/t/s4"},
+	}}})
+	if shown := historyOf(m).shownSessions(); len(shown) != 3 {
+		t.Errorf("the filter should apply to the new page: %v", shown)
+	}
+}
+
+func TestHistoryFilterShowsNoMatchHint(t *testing.T) {
+	m := typeKeys(testModel(), "gt")
+	m, _ = upd(m, histProjectsMsg{projects: historyProjectsAB()})
+	m = typeKeys(m, "/zzz")
+	m, _ = upd(m, keyMsg("enter"))
+	out := ansi.Strip(m.View().Content)
+	if !strings.Contains(out, "no projects match /zzz") {
+		t.Errorf("the empty filter result should say so:\n%s", out)
+	}
+}

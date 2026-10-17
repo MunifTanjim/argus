@@ -143,7 +143,8 @@ var sectionLists = map[string]sectionList{
 		focus: focusFor("home"),
 	},
 	"history": {
-		own:   bindingsOf(historyProjectsKeys, historySessionsKeys, listKeys.TabPrev, listKeys.TabNext, transcriptKeys.Export),
+		own: bindingsOf(historyProjectsKeys, historySessionsKeys, listKeys.TabPrev, listKeys.TabNext, transcriptKeys.Export,
+			projectsKeys.Filter, listKeys.Filter),
 		focus: focusFor("history"),
 	},
 	"terminals": {

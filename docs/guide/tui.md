@@ -230,8 +230,8 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `cursor word-prev` | visual | `b` |  |
 | `cycle group-by` | home |  | `zg` |
 | `filter-directories` | spawn | `/` |  |
-| `filter-projects` | node, project, project-tree | `/` |  |
-| `filter-sessions` | home, sidebar-sessions, workspace | `/` |  |
+| `filter-projects` | history, node, project, project-tree | `/` |  |
+| `filter-sessions` | history, home, sidebar-sessions, workspace | `/` |  |
 | `focus down` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><C-j>` `<C-w><Down>` `<C-w>j` |  |
 | `focus left` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><C-h>` `<C-w><Left>` `<C-w>h` |  |
 | `focus next` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><C-w>` `<C-w>w` |  |
