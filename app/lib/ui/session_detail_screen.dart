@@ -59,6 +59,7 @@ class SessionDetailScreen extends ConsumerStatefulWidget {
 class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     with RouteAware, WidgetsBindingObserver {
   TranscriptSubscription? _sub;
+  String? _openKey; // the store the stream feeds
   StreamSubscription<RpcMessage>? _tasksSub;
   RouteObserver<PageRoute<dynamic>>? _observer;
 
@@ -135,9 +136,10 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
   void _open() {
     _sub?.dispose();
     final live = ref.read(sessionsProvider)[_sid] ?? widget.session;
+    _openKey = _cacheKey(live);
     _sub = ref.read(transcriptRepositoryProvider).open(
           sessionId: _sid,
-          store: ref.read(transcriptProvider(_cacheKey(live)).notifier),
+          store: ref.read(transcriptProvider(_openKey!).notifier),
         );
   }
 
@@ -183,15 +185,22 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
         _bindTasks();
       }
     });
-    // Re-open when the cache key changes (/clear or first hook set).
-    ref.listen<String?>(
-      sessionsProvider.select((m) => m[_sid]?.agentSessionId),
+    // Re-open when the cache key changes (/clear or first hook set), or when
+    // the session comes back online: a restarted node drops its subscriptions
+    // while this connection stays up, and after a gateway restart the session
+    // is re-listed only once its node returns. A missing session keeps the
+    // stream's key.
+    ref.listen<Session?>(
+      sessionsProvider.select((m) => m[_sid]),
       (prev, next) {
-        final prevKey = _keyFor(prev);
-        final nextKey = _keyFor(next);
-        if (prevKey == nextKey) return;
+        if (next == null) return;
+        final back = !next.offline && (prev == null || prev.offline);
+        final prevKey = _openKey;
+        if (_cacheKey(next) == prevKey && !back) return;
         _open();
-        ref.invalidate(transcriptProvider(prevKey));
+        if (prevKey != null && prevKey != _openKey) {
+          ref.invalidate(transcriptProvider(prevKey));
+        }
       },
     );
 
@@ -212,7 +221,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     } else {
       inputNotice = null;
     }
-    final st = ref.watch(transcriptProvider(_cacheKey(live)));
+    final st = ref.watch(transcriptProvider(_openKey ?? _cacheKey(live)));
     final conn = ref.watch(connStateProvider);
     final connError = ref.watch(connErrorProvider);
     final title = live.displayTitle;

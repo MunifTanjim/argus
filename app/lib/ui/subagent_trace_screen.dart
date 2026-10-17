@@ -6,6 +6,7 @@ import '../data/history_repository.dart';
 import '../data/transcript_repository.dart';
 import '../models/entry.dart';
 import '../state/gateway.dart';
+import '../state/sessions.dart';
 import '../state/tool_detail.dart';
 import '../state/transcript_controller.dart';
 import '../transport/connection.dart';
@@ -120,6 +121,15 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
         _open();
       }
     });
+    // Re-open when the session comes back online: a restarted node drops its
+    // subscriptions while this connection stays up, and after a gateway restart
+    // the session is re-listed only once its node returns.
+    ref.listen<bool?>(
+      sessionsProvider.select((m) => m[_sessionId]?.offline),
+      (prev, next) {
+        if (next == false && prev != false) _open();
+      },
+    );
 
     final st = ref.watch(transcriptProvider(_key));
     final conn = ref.watch(connStateProvider);

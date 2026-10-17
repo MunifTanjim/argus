@@ -51,6 +51,7 @@ Session _s({
   String? branch,
   String? workspaceId,
   String? nodeId,
+  bool offline = false,
 }) =>
     Session.fromJson({
       'id': 'mac:%1',
@@ -72,6 +73,7 @@ Session _s({
       'node_id': ?nodeId,
       'agent_session_id': ?agentSessionId,
       'name': ?name,
+      'offline': offline,
     });
 
 class _SeededTranscript extends TranscriptNotifier {
@@ -501,6 +503,60 @@ void main() {
     expect(find.textContaining('post-clear line'), findsOneWidget);
     expect(find.textContaining('pre-clear line'), findsNothing);
     expect(repo.stores, hasLength(2)); // re-opened onto the fresh store
+  });
+
+  // A restarted node drops its subscriptions while this connection stays up.
+  testWidgets('re-opens when the session comes back online', (tester) async {
+    final repo = _RecordingRepo();
+    await tester.pumpWidget(_app([
+      gatewayProvider.overrideWithValue(null),
+      transcriptRepositoryProvider.overrideWithValue(repo),
+      transcriptProvider('c9')
+          .overrideWith(() => _SeededTranscript(const [])),
+    ], session: _s(agentSessionId: 'c9')));
+    final container =
+        ProviderScope.containerOf(tester.element(find.byType(SessionDetailScreen)));
+    container.read(sessionsProvider.notifier).replaceAll([_s(agentSessionId: 'c9')]);
+    await tester.pump();
+    final opened = repo.stores.length;
+
+    container
+        .read(sessionsProvider.notifier)
+        .replaceAll([_s(agentSessionId: 'c9', offline: true)]);
+    await tester.pump();
+    expect(repo.stores, hasLength(opened)); // offline: nothing to re-open yet
+
+    container.read(sessionsProvider.notifier).replaceAll([_s(agentSessionId: 'c9')]);
+    await tester.pump();
+    expect(repo.stores, hasLength(opened + 1));
+  });
+
+  // A gateway restart can re-list the session only once its node returns; the
+  // stream keeps its key while the session is missing.
+  testWidgets('re-opens onto the same store when the session is re-listed',
+      (tester) async {
+    final repo = _RecordingRepo();
+    await tester.pumpWidget(_app([
+      gatewayProvider.overrideWithValue(null),
+      transcriptRepositoryProvider.overrideWithValue(repo),
+      transcriptProvider('c9')
+          .overrideWith(() => _SeededTranscript(const [])),
+    ], session: _s(agentSessionId: 'c9')));
+    final container =
+        ProviderScope.containerOf(tester.element(find.byType(SessionDetailScreen)));
+    container.read(sessionsProvider.notifier).replaceAll([_s(agentSessionId: 'c9')]);
+    await tester.pump();
+    final opened = repo.stores.length;
+    final store = repo.stores.last;
+
+    container.read(sessionsProvider.notifier).replaceAll([]);
+    await tester.pump();
+    expect(repo.stores, hasLength(opened)); // missing: keep the stream's key
+
+    container.read(sessionsProvider.notifier).replaceAll([_s(agentSessionId: 'c9')]);
+    await tester.pump();
+    expect(repo.stores, hasLength(opened + 1));
+    expect(repo.stores.last, same(store));
   });
 
   // opencode: paneless, input_mode api, so it accepts prompts and can be torn
