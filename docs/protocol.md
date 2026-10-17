@@ -594,7 +594,7 @@ The client picks the node for each call:
 | Node from composite `terminal_id` | `terminal.kill`, `terminal.rename`, `terminal.open` with `terminal_id` |
 | Node from composite `workspace_id` | `workspace.changedFiles`, `workspace.diff`, `workspace.listDir`, `workspace.readFile`, `workspace.commits`, `workspace.commitFiles`, `workspace.remove`, `workspace.setTarget`, `workspace.runSetup`, `workspace.setupLog` |
 | Node from composite `project_id` | `workspace.create`, `project.rename`, `project.setHidden`, `project.setPinned`, `project.forget`, `project.branches`, `project.prs`, `project.issues` |
-| Node from `node_id` param | `sessions.spawn`, `sessions.resume`, `agents.list`, `sessions.exportBundle`, `sessions.historySessions`, `sessions.historyTranscript`, `sessions.historyToolDetail`, `terminal.create`, `host.completeDir` |
+| Node from `node_id` param | `sessions.spawn`, `sessions.resume`, `agents.list`, `agent.model.list`, `sessions.exportBundle`, `sessions.historySessions`, `sessions.historyTranscript`, `sessions.historyToolDetail`, `terminal.create`, `host.completeDir` |
 | Node that owns the `sub_id` or `term_id` | `transcript.unsubscribe`, `terminal.input`, `terminal.resize`, `terminal.close` |
 | Node from `node_id` param, or the gateway when `node_id` is empty | `server.checkUpgrade`, `server.upgrade`, `server.restart` |
 | The gateway | `ping`, `server.info`, `nodes.list`, `relay.open`, `relay.close`, `trustlog.sync`, `push.vapidKey`, `clients.*`, `pushport.setToken` |
@@ -1221,6 +1221,7 @@ unix socket and on relay channels.
 | `sessions.focus`        | request      | `SessionRef`                     | `null`                       |
 | `session.rename`        | request      | `{ session_id, name }`           | `{ name, applied }`          |
 | `agents.list`           | request      | `{ node_id? }`                   | `{ agents: AgentInfo[] }`    |
+| `agent.model.list`      | request      | `{ node_id?, agent }`            | `{ models: ModelInfo[] }`    |
 | `host.completeDir`      | request      | `{ node_id?, path }`             | `{ home, paths: string[] }`  |
 | `sessions.tasks`        | request      | `SessionRef`                     | `{ tasks: Task[] }`          |
 | `tasks.changed`         | notification | `{ sub_id, session_id }`         | —                            |
@@ -1232,6 +1233,13 @@ the node user's home directory. `sessions.spawn` and `sessions.resume`
 reject (`-32600`) a `cwd` that is relative, does not exist, is not a directory, or
 cannot be entered on the node; `terminal.open` with a `session_id` rejects a
 session whose directory is any of these.
+
+`agent.model.list` lists the models `agent` can be spawned on, in the agent's
+order. An agent without a model choice returns no models. An unknown `agent` or a
+failed listing is rejected (`-32600`). A `ModelInfo.id` is opaque: a client shows
+`name` and passes `id` back unchanged as `model` in `sessions.spawn`.
+`sessions.spawn` rejects (`-32600`) a `model` given with a `command`, or for an
+agent without a model choice.
 
 `host.completeDir` returns the node user's home directory as `home`. `paths` holds
 the subdirectories of `path`'s parent whose names start with `path`'s last
@@ -1294,6 +1302,8 @@ ResumeParams {
 }
 
 AgentInfo { id, name, color: string, spawnable: boolean }
+
+ModelInfo { id, name: string }
 
 Task {
   id, subject:  string
