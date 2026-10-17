@@ -307,7 +307,7 @@ test('the poll backs off while argusd is down', OPTIONS, async ($, on) => {
   // argusd is back: the retry due in 4 s succeeds and the next poll goes out at once.
   up = true
   await clock.advance(4000)
-  expect(sent.length).toBe(5)
+  expect(sent.filter(s => s.path === '/claude/poll').length).toBe(5)
 })
 
 test('each poll reads the session id afresh', OPTIONS, async ($, on) => {
@@ -393,10 +393,10 @@ test('a main-loop turn end is reported as a Stop', OPTIONS, async ($, on) => {
   const sent = argusd(on, () => ({}))
   on('turn.complete', ($, e) => ({ text: e.answer }) as never)
   await $.turn.complete(TURN)
-  expect(sent.length).toBe(1)
-  expect(sent[0].path).toBe('/claude/event')
-  expect(sent[0].body.event).toBe('Stop')
-  expect(sent[0].body.payload).toEqual(expect.objectContaining({
+  const stops = sent.filter(s => s.body.event === 'Stop')
+  expect(stops.length).toBe(1)
+  expect(stops[0].path).toBe('/claude/event')
+  expect(stops[0].body.payload).toEqual(expect.objectContaining({
     hook_event_name: 'Stop', session_id: 's1', cwd: '/w', stop_hook_active: false,
   }))
 })
@@ -769,4 +769,197 @@ test('a fill that lands after its accepted ack gives the draft back', OPTIONS, a
   await clock.settle()
   expect(sent.filter(s => s.path === '/claude/ack').map(s => s.body)).toEqual([{ id: '1' }])
   expect(fills).toEqual(['steer', 'my draft'])
+})
+
+function shellEvents(sent: Sent[]) {
+  return sent.filter(s => s.body.event === 'Shells').map(s => (s.body.payload as Record<string, unknown>).shells as { id: string }[])
+}
+
+const lastShellIds = (sent: Sent[]) => shellEvents(sent).at(-1)?.map(s => s.id)
+
+const BG = {
+  session_id: 's1', transcript_path: '/t/s1.jsonl', cwd: '/w', tool_name: 'Bash', tool_use_id: 't1',
+  tool_input: { command: 'make test', description: 'run tests' }, tool_response: { backgroundTaskId: 'b1' },
+}
+
+// The classic hooks beneath the mod, registered before the test first calls $.
+function classicBottom(on: On) {
+  on('classic.PostToolUse', () => ({}))
+  on('classic.Stop', () => ({}))
+  on('classic.SessionStart', () => ({}))
+  on('session.append', ($, e, next) => next(e))
+}
+
+async function startShells($: EngineInterface, ...ids: string[]) {
+  for (const id of ids) {
+    await $.classic.PostToolUse({ ...BG, tool_use_id: `t-${id}`, tool_response: { backgroundTaskId: id } } as never)
+  }
+}
+
+const notification = (id: string) =>
+  `<task-notification>\n<task-id>${id}</task-id>\n<status>completed</status>\n</task-notification>`
+
+function appendRow(text: string, agentId?: string) {
+  return {
+    message: { type: 'user', role: 'user', content: [{ type: 'text', text }] },
+    door: 'delivery',
+    origin: { kind: 'task-notification' },
+    uuid: 'u1',
+    ...(agentId ? { agentId } : {}),
+  }
+}
+
+test('a backgrounded Bash call is reported', OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  on('classic.PostToolUse', () => ({}))
+  await $.classic.PostToolUse(BG as never)
+  expect(shellEvents(sent)).toEqual([[{ id: 'b1', tool_use_id: 't1', command: 'make test', desc: 'run tests' }]])
+  expect(shellEvents(sent).length).toBe(1)
+})
+
+test('a foreground Bash call is not reported', OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  on('classic.PostToolUse', () => ({}))
+  await $.classic.PostToolUse({ ...BG, tool_response: { stdout: 'ok' } } as never)
+  expect(shellEvents(sent).length).toBe(0)
+})
+
+test("a subagent's backgrounded Bash call is not reported", OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  on('classic.PostToolUse', () => ({}))
+  await $.classic.PostToolUse({ ...BG, agent_id: 'a1' } as never)
+  expect(shellEvents(sent).length).toBe(0)
+})
+
+test('a task notification ends its shell', OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  classicBottom(on)
+  await startShells($, 'b1')
+  await $.session.append(appendRow(notification('b1'), 'a1') as never)
+  expect(lastShellIds(sent)).toEqual(['b1'])
+  await $.session.append(appendRow(notification('b1')) as never)
+  expect(lastShellIds(sent)).toEqual([])
+})
+
+test('KillShell and TaskStop end their shell', OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  classicBottom(on)
+  await startShells($, 'b1', 'b2')
+  await $.classic.PostToolUse({ ...BG, tool_name: 'KillShell', tool_input: { shell_id: 'b1' }, tool_response: {} } as never)
+  expect(lastShellIds(sent)).toEqual(['b2'])
+  await $.classic.PostToolUse({ ...BG, tool_name: 'TaskStop', tool_input: { task_id: 'b2' }, tool_response: {} } as never)
+  expect(lastShellIds(sent)).toEqual([])
+})
+
+test('Stop drops shells it no longer lists and never adds', OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  classicBottom(on)
+  await startShells($, 'b1', 'b2')
+  await $.classic.Stop({
+    session_id: 's1', transcript_path: '/t/s1.jsonl', cwd: '/w', stop_hook_active: false,
+    background_tasks: [
+      { id: 'b2', type: 'shell', status: 'running', description: '' },
+      { id: 'x9', type: 'shell', status: 'running', description: '' },
+    ],
+  } as never)
+  expect(lastShellIds(sent)).toEqual(['b2'])
+})
+
+for (const source of ['clear', 'resume']) {
+  test(`${source} empties the shells, compact does not`, OPTIONS, async ($, on) => {
+    world(on)
+    engineSteps(on)
+    on('agent.list', () => ({ value: [] as Listed[] }) as never)
+    const sent = argusd(on, () => ({}))
+    classicBottom(on)
+    await startShells($, 'b1')
+    await $.classic.SessionStart({ session_id: 's1', source: 'compact', transcript_path: '/t/s1.jsonl', cwd: '/w' } as never)
+    expect(lastShellIds(sent)).toEqual(['b1'])
+    await $.classic.SessionStart({ session_id: 's2', source, transcript_path: '/t/s2.jsonl', cwd: '/w' } as never)
+    expect(lastShellIds(sent)).toEqual([])
+  })
+}
+
+test('classic session start re-sends the shells', OPTIONS, async ($, on) => {
+  world(on)
+  engineSteps(on)
+  on('agent.list', () => ({ value: [] as Listed[] }) as never)
+  const sent = argusd(on, () => ({}))
+  classicBottom(on)
+  await startShells($, 'b1')
+  await $.classic.SessionStart({ session_id: 's1', source: 'startup', transcript_path: '/t/s1.jsonl', cwd: '/w' } as never)
+  expect(shellEvents(sent).map(e => e.map(s => s.id))).toEqual([['b1'], ['b1']])
+})
+
+test('TaskStop by its deprecated shell_id ends the shell', OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  classicBottom(on)
+  await startShells($, 'b1')
+  await $.classic.PostToolUse({ ...BG, tool_name: 'TaskStop', tool_input: { shell_id: 'b1' }, tool_response: {} } as never)
+  expect(lastShellIds(sent)).toEqual([])
+})
+
+test('one row with several notifications ends each shell', OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  classicBottom(on)
+  await startShells($, 'b1', 'b2', 'b3')
+  await $.session.append(appendRow(`${notification('b1')}\n${notification('b3')}`) as never)
+  expect(lastShellIds(sent)).toEqual(['b2'])
+})
+
+test("a model's or tool's text quoting a notification ends nothing", OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  classicBottom(on)
+  await startShells($, 'b1')
+  await $.session.append({ ...appendRow(notification('b1')), origin: { kind: 'model', model: 'm' } } as never)
+  await $.session.append({ ...appendRow(notification('b1')), origin: { kind: 'tool', tool: 'Read' } } as never)
+  expect(lastShellIds(sent)).toEqual(['b1'])
+})
+
+test("a shell's command is reported as its first line, cut to 200 characters", OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  classicBottom(on)
+  await $.classic.PostToolUse({ ...BG, tool_input: { command: "cat <<'EOF' > a.txt\nbody\nEOF" } } as never)
+  await $.classic.PostToolUse({ ...BG, tool_use_id: 't2', tool_input: { command: 'x'.repeat(300) }, tool_response: { backgroundTaskId: 'b2' } } as never)
+  const last = shellEvents(sent).at(-1) as unknown as { command: string }[]
+  expect(last.map(s => s.command)).toEqual(["cat <<'EOF' > a.txt", 'x'.repeat(200)])
+})
+
+test('Stop drops a shell it lists as finished', OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  classicBottom(on)
+  await startShells($, 'b1', 'b2', 'b3')
+  await $.classic.Stop({
+    session_id: 's1', transcript_path: '/t/s1.jsonl', cwd: '/w', stop_hook_active: false,
+    background_tasks: [
+      { id: 'b1', type: 'shell', status: 'completed', description: '' },
+      { id: 'b2', type: 'shell', status: 'running', description: '' },
+      { id: 'b3', type: 'shell', status: 'killed', description: '' },
+    ],
+  } as never)
+  expect(lastShellIds(sent)).toEqual(['b2'])
+})
+
+test('every main turn end re-sends the shells', OPTIONS, async ($, on) => {
+  world(on)
+  on('agent.list', () => ({ value: [] as Listed[] }) as never)
+  const sent = argusd(on, () => ({}))
+  classicBottom(on)
+  on('turn.complete', ($, e) => ({ text: e.answer }) as never)
+  await startShells($, 'b1')
+  await $.turn.complete(TURN)
+  await $.turn.complete({ ...TURN, agentId: 'a1' })
+  await $.turn.complete(TURN)
+  expect(shellEvents(sent).map(e => e.map(s => s.id))).toEqual([['b1'], ['b1'], ['b1']])
 })

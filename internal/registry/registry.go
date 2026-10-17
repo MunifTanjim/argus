@@ -6,6 +6,7 @@ package registry
 
 import (
 	"reflect"
+	"slices"
 	"sync"
 	"time"
 
@@ -72,6 +73,7 @@ type Registry struct {
 
 	// subagents are keyed by session id.
 	subagents map[string][]session.RunningSubagent
+	shells    map[string][]session.RunningShell
 }
 
 // New returns an empty Registry.
@@ -85,6 +87,7 @@ func New() *Registry {
 		inputPolicies: make(map[string]InputPolicy),
 		models:        make(map[string]liveModel),
 		subagents:     make(map[string][]session.RunningSubagent),
+		shells:        make(map[string][]session.RunningShell),
 	}
 }
 
@@ -271,7 +274,7 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 			s.Summary = f.Summary
 		}
 		r.overlayModel(s)
-		r.overlaySubagents(s)
+		r.overlayRunning(s)
 		r.refreshInput(s)
 		applyStatusHint(s, f.StatusHint)
 
@@ -489,6 +492,7 @@ func (r *Registry) remove(id, paneK string, finalStatus session.Status) {
 	delete(r.sessions, id)
 	delete(r.models, id)
 	delete(r.subagents, id)
+	delete(r.shells, id)
 	r.index.clear(paneK, s.AgentSessionID)
 	r.publish(Event{Type: EventRemoved, Session: removed})
 }
@@ -629,31 +633,46 @@ func (r *Registry) overlayModel(s *session.Session) {
 
 // setSubagents keeps the Since of subagents already held. Caller holds r.mu.
 func (r *Registry) setSubagents(id string, list []session.RunningSubagent, now time.Time) {
-	held := make(map[string]string, len(r.subagents[id]))
-	for _, sa := range r.subagents[id] {
-		held[sa.ID] = sa.Since
-	}
-	stamp := now.UTC().Format(time.RFC3339)
-	next := make([]session.RunningSubagent, len(list))
-	for i, sa := range list {
-		sa.Since = stamp
-		if since, ok := held[sa.ID]; ok {
-			sa.Since = since
-		}
-		next[i] = sa
-	}
-	r.subagents[id] = next
+	r.subagents[id] = keepSince(r.subagents[id], list, func(sa *session.RunningSubagent) (string, *string) { return sa.ID, &sa.Since }, now)
 }
 
-// overlaySubagents copies so a published session never shares the stored
-// slice. Caller holds r.mu.
-func (r *Registry) overlaySubagents(s *session.Session) {
-	list := r.subagents[s.ID]
-	if len(list) == 0 {
-		s.Subagents = nil
-		return
+// setShells keeps the Since of shells already held. Caller holds r.mu.
+func (r *Registry) setShells(id string, list []session.RunningShell, now time.Time) {
+	r.shells[id] = keepSince(r.shells[id], list, func(sh *session.RunningShell) (string, *string) { return sh.ID, &sh.Since }, now)
+}
+
+// keepSince returns list with each item's Since carried over from held by key,
+// or stamped now when it is new.
+func keepSince[T any](held, list []T, key func(*T) (string, *string), now time.Time) []T {
+	was := make(map[string]string, len(held))
+	for i := range held {
+		id, since := key(&held[i])
+		was[id] = *since
 	}
-	s.Subagents = append([]session.RunningSubagent(nil), list...)
+	stamp := now.UTC().Format(time.RFC3339)
+	next := slices.Clone(list)
+	for i := range next {
+		id, since := key(&next[i])
+		*since = stamp
+		if s, ok := was[id]; ok {
+			*since = s
+		}
+	}
+	return next
+}
+
+// overlayRunning copies so a published session never shares the stored
+// slices. Caller holds r.mu.
+func (r *Registry) overlayRunning(s *session.Session) {
+	s.Subagents = cloneOrNil(r.subagents[s.ID])
+	s.Shells = cloneOrNil(r.shells[s.ID])
+}
+
+func cloneOrNil[T any](list []T) []T {
+	if len(list) == 0 {
+		return nil
+	}
+	return slices.Clone(list)
 }
 
 // HookUpdate carries the correlation keys and fields from an agent hook event. Empty
@@ -686,9 +705,10 @@ type HookUpdate struct {
 	// stale pending interaction.
 	ReplaceInteraction bool
 	Model              *ModelUpdate
-	// Subagents is nil to leave the running set unchanged; non-nil replaces it
-	// (empty clears).
+	// Subagents and Shells are nil to leave the running set unchanged; non-nil
+	// replaces it (empty clears).
 	Subagents *[]session.RunningSubagent
+	Shells    *[]session.RunningShell
 }
 
 // ApplyHook correlates a hook event to a session (by pane, else agent session id),
@@ -747,10 +767,10 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 		r.index.setPane(pKey, s.ID)
 	}
 
-	// A Subagents snapshot repeats on every turn end: publish it only when it
+	// A running-set snapshot repeats on every turn end: publish it only when it
 	// changed the session.
 	var before *session.Session
-	if !created && u.Subagents != nil {
+	if !created && (u.Subagents != nil || u.Shells != nil) {
 		b := *s
 		before = &b
 	}
@@ -789,7 +809,10 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	if u.Subagents != nil {
 		r.setSubagents(s.ID, *u.Subagents, time.Now())
 	}
-	r.overlaySubagents(s)
+	if u.Shells != nil {
+		r.setShells(s.ID, *u.Shells, time.Now())
+	}
+	r.overlayRunning(s)
 
 	if u.Status == session.StatusDead {
 		r.markEnded(pKey)

@@ -8,6 +8,10 @@ const RETRY_MAX_MS = 15000
 const ACK_WINDOW_MS = 1000
 // How long a fill's saved draft waits for argus's Enter to submit the text.
 const DRAFT_TTL_MS = 5000
+// The statuses a task notification reports for a task that ended.
+const FINISHED = new Set(['completed', 'failed', 'killed'])
+// How much of a shell's command argusd keeps: clients show one short line.
+const COMMAND_MAX = 200
 // The failure a fill acks when a dialog holds the keys (modbridge.FailBusy).
 const FAIL_BUSY = 'busy'
 
@@ -49,6 +53,10 @@ let lastEffort: string | undefined
 let filled: { text: string; draft: string; at: number } | undefined
 // Fills acked as accepted, not filled: argus sends no Enter for them.
 const abandoned = new Set<string>()
+// The main loop's running background shells, by task id, in start order.
+const shells = new Map<string, Shell>()
+
+type Shell = { id: string; tool_use_id: string; command: string; desc: string }
 
 export const register: Register = (on, options) => {
   socketPath = String(options.socket ?? '')
@@ -57,9 +65,13 @@ export const register: Register = (on, options) => {
   lastEffort = undefined
   filled = undefined
   abandoned.clear()
+  shells.clear()
 
   // The session may move to a new id (/clear, /resume): repoll under it at once.
   on('classic.SessionStart', async ($, e, next) => {
+    // A shell belongs to the session that started it.
+    const { source } = e as Record<string, unknown>
+    if (source === 'clear' || source === 'resume') shells.clear()
     await forward($, 'SessionStart', e)
     startPolling($)
     await resendState($)
@@ -78,13 +90,37 @@ export const register: Register = (on, options) => {
   })
     .catch(($, e, next) => next(e))
   // argusd never reads the tool's output, which can be large.
-  on('classic.PostToolUse', async ($, e, next) => (await forward($, 'PostToolUse', withoutResponse(e)), next(e)))
+  on('classic.PostToolUse', async ($, e, next) => {
+    const changed = trackShell(e as Record<string, unknown>)
+    await Promise.all([forward($, 'PostToolUse', withoutResponse(e)), changed && reportShells($)])
+    return next(e)
+  })
     .catch(($, e, next) => next(e))
   on('classic.PostToolUseFailure', async ($, e, next) => (await forward($, 'PostToolUseFailure', e), next(e)))
     .catch(($, e, next) => next(e))
   on('classic.Notification', async ($, e, next) => (await forward($, 'Notification', e), next(e)))
     .catch(($, e, next) => next(e))
-  on('classic.Stop', async ($, e, next) => (await forward($, 'Stop', e), next(e)))
+  // background_tasks only drops shells, so a subagent's shell never joins.
+  on('classic.Stop', async ($, e, next) => {
+    const tasks = (e as Record<string, unknown>).background_tasks
+    let changed = false
+    if (Array.isArray(tasks) && shells.size > 0) {
+      const listed = new Set(tasks
+        .map(t => t as Record<string, unknown>)
+        .filter(t => !FINISHED.has(String(t.status)))
+        .map(t => String(t.id)))
+      changed = dropShells([...shells.keys()].filter(id => !listed.has(id)))
+    }
+    await Promise.all([forward($, 'Stop', e), changed && reportShells($)])
+    return next(e)
+  })
+    .catch(($, e, next) => next(e))
+  // A model's or a tool's row can quote a notification without being one.
+  on('session.append', async ($, e, next) => {
+    if (shells.size > 0 && !e.agentId && e.origin.kind !== 'model' && e.origin.kind !== 'tool' &&
+      dropShells(notifiedTasks(e.message.content))) await reportShells($)
+    return next(e)
+  })
     .catch(($, e, next) => next(e))
   on('classic.SessionEnd', async ($, e, next) => (await forward($, 'SessionEnd', e), next(e)))
     .catch(($, e, next) => next(e))
@@ -195,7 +231,9 @@ export const register: Register = (on, options) => {
         ...(await sessionFields($)),
         stop_hook_active: false,
       })
-      await reportSubagents($)
+      // Every turn end re-sends both sets, so one that reached argusd out of
+      // order is corrected.
+      await Promise.all([reportSubagents($), reportShells($)])
     }
     return done
   }).catch(($, e, next) => next(e))
@@ -343,6 +381,60 @@ async function reportSubagents(
   }
 }
 
+// Applies a main-loop tool call to the shell set; true when the set changed.
+function trackShell(e: Record<string, unknown>): boolean {
+  if (e.agent_id) return false
+  const input = (e.tool_input ?? {}) as Record<string, unknown>
+  const response = (e.tool_response ?? {}) as Record<string, unknown>
+  switch (e.tool_name) {
+    case 'Bash': {
+      const id = response.backgroundTaskId
+      if (typeof id !== 'string' || id === '') return false
+      shells.set(id, {
+        id,
+        tool_use_id: String(e.tool_use_id ?? ''),
+        command: String(input.command ?? '').split('\n', 1)[0].slice(0, COMMAND_MAX),
+        desc: String(input.description ?? ''),
+      })
+      return true
+    }
+    case 'KillShell':
+      return shells.delete(String(input.shell_id ?? ''))
+    case 'TaskStop':
+      return shells.delete(String(response.task_id ?? input.task_id ?? input.shell_id ?? ''))
+  }
+  return false
+}
+
+// Deletes ids from the shell set; true when any was held.
+function dropShells(ids: Iterable<string>): boolean {
+  let changed = false
+  for (const id of ids) changed = shells.delete(id) || changed
+  return changed
+}
+
+// The task ids of the <task-notification>s in a row.
+function notifiedTasks(content: unknown): string[] {
+  const parts = typeof content === 'string' ? [content]
+    : Array.isArray(content) ? content.flatMap(b => {
+      const { type, text } = b as { type?: string; text?: unknown }
+      return type === 'text' ? [String(text ?? '')] : []
+    })
+    : []
+  return parts.flatMap(t => t.includes('<task-notification>')
+    ? [...t.matchAll(/<task-notification>[\s\S]*?<task-id>([^<]+)<\/task-id>/g)].map(m => m[1])
+    : [])
+}
+
+// argusd replaces its set with this one. Never throws.
+async function reportShells($: EngineInterface): Promise<void> {
+  try {
+    await forward($, 'Shells', { hook_event_name: 'Shells', ...(await sessionFields($)), shells: [...shells.values()] })
+  } catch {
+    // argusd hears of it on the next change or reconnect
+  }
+}
+
 // Send argusd the live model and subagents it keeps in memory again, unchanged
 // or not. Never throws.
 async function resendState($: EngineInterface): Promise<void> {
@@ -351,6 +443,7 @@ async function resendState($: EngineInterface): Promise<void> {
   await Promise.all([
     $.session.model().catch(() => '').then(model => reportModel($, model)),
     reportSubagents($),
+    reportShells($),
   ])
 }
 

@@ -180,6 +180,14 @@ type RunningSubagent struct {
 	Since string `json:"since,omitempty"` // RFC 3339 UTC, first seen running
 }
 
+type RunningShell struct {
+	ID        string `json:"id"`
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	Command   string `json:"command,omitempty"`
+	Desc      string `json:"desc,omitempty"`
+	Since     string `json:"since,omitempty"` // RFC 3339 UTC, first seen running
+}
+
 // Session is argus's record for a single AI coding tool session.
 type Session struct {
 	// ID is argus's internal identifier (stable for the session's lifetime).
@@ -240,6 +248,7 @@ type Session struct {
 	Summary *Summary `json:"summary,omitempty"`
 
 	Subagents []RunningSubagent `json:"subagents,omitempty"`
+	Shells    []RunningShell    `json:"shells,omitempty"`
 
 	// Interaction is the pending user request (non-nil only while awaiting input).
 	Interaction *Interaction `json:"interaction,omitempty"`

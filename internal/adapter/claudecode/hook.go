@@ -36,6 +36,8 @@ type hookPayload struct {
 	Effort *string `json:"effort"`
 	// Subagents is the Subagents event's snapshot of running subagents.
 	Subagents []session.RunningSubagent `json:"subagents"`
+	// Shells is the Shells event's snapshot of running background shells.
+	Shells []session.RunningShell `json:"shells"`
 }
 
 // statusFor maps a hook event to a session status. ok is false when the event
@@ -313,6 +315,10 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 	if event == "Subagents" {
 		subagents = &p.Subagents
 	}
+	var shells *[]session.RunningShell
+	if event == "Shells" {
+		shells = &p.Shells
+	}
 
 	return reg.ApplyHook(registry.HookUpdate{
 		Agent:              Agent,
@@ -330,5 +336,6 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 		ReplaceInteraction: replace,
 		Model:              model,
 		Subagents:          subagents,
+		Shells:             shells,
 	})
 }

@@ -495,3 +495,39 @@ func TestProcessHookSubagentsSetsRunning(t *testing.T) {
 		t.Fatalf("empty snapshot should clear: %+v", got.Subagents)
 	}
 }
+
+func TestProcessHookShellsSetsRunning(t *testing.T) {
+	reg := registry.New()
+	mk := func(list []map[string]any) HookEvent {
+		payload, _ := json.Marshal(map[string]any{
+			"session_id": "sess-1", "hook_event_name": "Shells", "shells": list,
+		})
+		return HookEvent{Event: "Shells", Payload: payload}
+	}
+	b1 := map[string]any{"id": "b1", "tool_use_id": "t1", "command": "make test", "desc": "run tests"}
+	b2 := map[string]any{"id": "b2", "tool_use_id": "t2", "command": "npm run dev"}
+
+	before, _ := ProcessHook(reg, HookEvent{Event: "ModelInfo", Payload: []byte(`{"session_id":"sess-1","model":"claude-opus-5-5"}`)})
+	got, _ := ProcessHook(reg, mk([]map[string]any{b1}))
+	if len(got.Shells) != 1 || got.Shells[0].ID != "b1" || got.Shells[0].ToolUseID != "t1" ||
+		got.Shells[0].Command != "make test" || got.Shells[0].Desc != "run tests" ||
+		got.Shells[0].Since == "" || got.Status != before.Status {
+		t.Fatalf("shell not recorded: %+v status %q", got.Shells, got.Status)
+	}
+	since := got.Shells[0].Since
+
+	got, _ = ProcessHook(reg, mk([]map[string]any{b1, b2}))
+	if len(got.Shells) != 2 || got.Shells[0].Since != since || got.Shells[1].ID != "b2" || got.Shells[1].Since == "" {
+		t.Fatalf("b1 should keep its Since: %+v", got.Shells)
+	}
+
+	got, _ = ProcessHook(reg, mk([]map[string]any{b2}))
+	if len(got.Shells) != 1 || got.Shells[0].ID != "b2" {
+		t.Fatalf("finished shell not dropped: %+v", got.Shells)
+	}
+
+	got, _ = ProcessHook(reg, mk([]map[string]any{}))
+	if len(got.Shells) != 0 {
+		t.Fatalf("empty snapshot should clear: %+v", got.Shells)
+	}
+}
