@@ -5,6 +5,7 @@ import '../core/result.dart';
 import '../data/history_repository.dart';
 import '../models/history.dart';
 import 'agent_badge.dart';
+import 'filter_title.dart';
 import 'history_transcript_screen.dart';
 import 'relative_time.dart';
 import 'responsive.dart';
@@ -24,6 +25,9 @@ class _HistorySessionsScreenState extends ConsumerState<HistorySessionsScreen> {
   bool _hasMore = false;
   bool _loading = false;
   Object? _error;
+
+  /// The session filter: null while the filter field is closed.
+  String? _query;
 
   @override
   void initState() {
@@ -64,7 +68,22 @@ class _HistorySessionsScreenState extends ConsumerState<HistorySessionsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.project.label)),
+      appBar: AppBar(
+        title: FilterTitle(
+          query: _query,
+          hint: 'Filter sessions',
+          onChanged: (q) => setState(() => _query = q),
+          onClose: () => setState(() => _query = null),
+          child: Text(widget.project.label),
+        ),
+        actions: [
+          FilterButton(
+            query: _query,
+            tooltip: 'Filter sessions',
+            onOpen: () => setState(() => _query = ''),
+          ),
+        ],
+      ),
       // top: false — AppBar covers the top; bottom-only clears the nav bar.
       body: SafeArea(top: false, child: _buildBody()),
     );
@@ -84,15 +103,22 @@ class _HistorySessionsScreenState extends ConsumerState<HistorySessionsScreen> {
       return const Center(child: Text('No sessions in this project.'));
     }
 
+    final query = _query ?? '';
+    final shown =
+        _items.where((s) => matchesHistorySession(s, query)).toList();
+    if (shown.isEmpty && !_hasMore) {
+      return const Center(child: Text('No sessions match.'));
+    }
+
     final distinctAgents =
         _items.map((s) => s.agent).where((a) => a.isNotEmpty).toSet();
     final showAgent = distinctAgents.length > 1;
 
     return CenteredBody(
       child: ListView.builder(
-        itemCount: _items.length + (_hasMore ? 1 : 0),
+        itemCount: shown.length + (_hasMore ? 1 : 0),
         itemBuilder: (context, index) {
-          if (index == _items.length) {
+          if (index == shown.length) {
             return Padding(
               padding: const EdgeInsets.all(16),
               child: Center(
@@ -103,7 +129,7 @@ class _HistorySessionsScreenState extends ConsumerState<HistorySessionsScreen> {
               ),
             );
           }
-          final s = _items[index];
+          final s = shown[index];
           return _SessionCard(
             session: s,
             label: s.displayTitle,

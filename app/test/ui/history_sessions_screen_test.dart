@@ -179,4 +179,66 @@ void main() {
 
     expect(find.text('5 turns'), findsOneWidget);
   });
+
+  testWidgets('filters loaded sessions and applies the filter to new pages',
+      (tester) async {
+    final page1 = HistorySessionPage(
+      items: [
+        _session('sess-1', title: 'Fix the login bug'),
+        _session('sess-2', title: 'Add history filter'),
+      ],
+      hasMore: true,
+    );
+    final page2 = HistorySessionPage(
+      items: [_session('sess-3', title: 'Filter the logs')],
+      hasMore: false,
+    );
+    final repo = _FakeHistoryRepository([page1, page2]);
+
+    await tester.pumpWidget(_app(repo));
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Filter sessions'));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'FILTER');
+    await tester.pump();
+
+    expect(find.text('Fix the login bug'), findsNothing);
+    expect(find.text('Add history filter'), findsOneWidget);
+
+    await tester.tap(find.text('Load more'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Filter the logs'), findsOneWidget);
+    expect(find.text('Fix the login bug'), findsNothing);
+
+    await tester.tap(find.byTooltip('Clear filter'));
+    await tester.pump();
+
+    expect(find.text('Fix the login bug'), findsOneWidget);
+    expect(find.text('My Project'), findsOneWidget);
+  });
+
+  testWidgets('shows a no-match state when the filter hides every session',
+      (tester) async {
+    final repo = _FakeHistoryRepository([
+      HistorySessionPage(
+        items: [_session('sess-1', title: 'A Session')],
+        hasMore: false,
+      ),
+    ]);
+
+    await tester.pumpWidget(_app(repo));
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Filter sessions'));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'zzz');
+    await tester.pump();
+
+    expect(find.text('No sessions match.'), findsOneWidget);
+  });
 }

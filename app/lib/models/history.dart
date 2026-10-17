@@ -1,3 +1,5 @@
+import 'agent.dart';
+
 class HistoryProject {
   final String projectDir;
   final String cwd;
@@ -93,6 +95,22 @@ class HistorySession {
       : (firstMessage?.isNotEmpty ?? false)
           ? firstMessage!
           : sessionId;
+}
+
+/// Whether [query], case-insensitively, is in the project's label, path, or
+/// node.
+bool matchesHistoryProject(HistoryProject p, String query) =>
+    _containsQuery(query, [p.label, p.cwd, p.nodeLabel, p.nodeId]);
+
+/// Whether [query], case-insensitively, is in the session's title, first
+/// message, agent, or model.
+bool matchesHistorySession(HistorySession s, String query) => _containsQuery(
+    query, [s.title, s.firstMessage, agentLabel(s.agent), s.modelName]);
+
+bool _containsQuery(String query, List<String?> fields) {
+  if (query.isEmpty) return true;
+  final q = query.toLowerCase();
+  return fields.any((f) => f != null && f.toLowerCase().contains(q));
 }
 
 class HistorySessionPage {
