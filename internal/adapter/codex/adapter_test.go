@@ -31,7 +31,7 @@ func TestAdapterIsHeadlessWithCapabilities(t *testing.T) {
 			t.Errorf("codex adapter must implement %s", name)
 		}
 	}
-	if name, _ := a.SpawnCommand("x"); name != "codex" {
+	if name, _ := a.SpawnCommand(adapter.SpawnOptions{Prompt: "x"}); name != "codex" {
 		t.Errorf("SpawnCommand binary = %q; want codex (PATH probe)", name)
 	}
 	if name, args, ok := a.ResumeCommand("t1"); !ok || name != "codex" || len(args) != 2 || args[0] != "resume" || args[1] != "t1" {

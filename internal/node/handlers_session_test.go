@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -35,17 +36,18 @@ type fakeNonPrompter struct{ adapter.Adapter }
 type fakeSpawner struct {
 	adapter.Adapter
 	gotCwd, gotPrompt string
+	gotModel          string
 	id                string
 	err               error
 }
 
-func (fakeSpawner) IsHeadless() bool                       { return true }
-func (fakeSpawner) Agent() string                          { return "fake" }
-func (fakeSpawner) AgentName() string                      { return "Fake" }
-func (fakeSpawner) AgentColor() string                     { return "#000000" }
-func (fakeSpawner) SpawnCommand(string) (string, []string) { return "sh", nil } // sh exists in PATH
-func (f *fakeSpawner) SpawnSession(_ context.Context, cwd, prompt string) (string, error) {
-	f.gotCwd, f.gotPrompt = cwd, prompt
+func (fakeSpawner) IsHeadless() bool                                     { return true }
+func (fakeSpawner) Agent() string                                        { return "fake" }
+func (fakeSpawner) AgentName() string                                    { return "Fake" }
+func (fakeSpawner) AgentColor() string                                   { return "#000000" }
+func (fakeSpawner) SpawnCommand(adapter.SpawnOptions) (string, []string) { return "sh", nil } // sh exists in PATH
+func (f *fakeSpawner) SpawnSession(_ context.Context, cwd string, opts adapter.SpawnOptions) (string, error) {
+	f.gotCwd, f.gotPrompt, f.gotModel = cwd, opts.Prompt, opts.Model
 	return f.id, f.err
 }
 
@@ -337,11 +339,11 @@ func TestHandleAgentsList(t *testing.T) {
 
 func TestResolveSpawnCommand(t *testing.T) {
 	d := New()
-	// Default agent (empty) resolves to the first adapter, claude, with the prompt
-	// as its argument.
-	cmd, args := d.resolveSpawnCommand(api.SpawnParams{Prompt: "fix the bug"})
-	if cmd != "claude" || len(args) != 1 || args[0] != "fix the bug" {
-		t.Fatalf("default: cmd=%q args=%#v, want claude [\"fix the bug\"]", cmd, args)
+	// Default agent (empty) resolves to the first adapter, claude, with the model
+	// flag and the prompt.
+	cmd, args := d.resolveSpawnCommand(api.SpawnParams{Prompt: "fix the bug", Model: "sonnet"})
+	if cmd != "claude" || !slices.Equal(args, []string{"--model", "sonnet", "fix the bug"}) {
+		t.Fatalf("default: cmd=%q args=%#v, want claude [--model sonnet \"fix the bug\"]", cmd, args)
 	}
 	// A named agent resolves to its own binary.
 	if cmd, _ := d.resolveSpawnCommand(api.SpawnParams{Agent: "codex"}); cmd != "codex" {

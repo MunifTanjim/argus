@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/spawn"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -38,7 +39,7 @@ func newSpawnCmd() *cobra.Command {
 			if ad == nil {
 				return fail(cmd, fmt.Errorf("unknown agent %q (valid: %s)", agentID, knownAgents()))
 			}
-			command, _ := ad.SpawnCommand("")
+			command, _ := ad.SpawnCommand(adapter.SpawnOptions{})
 			if command == "" {
 				return fail(cmd, fmt.Errorf("agent %q cannot be spawned", agentID))
 			}
@@ -124,7 +125,7 @@ func completeSpawnAgent(_ *cobra.Command, args []string, _ string) ([]string, co
 	}
 	var comps []string
 	for _, a := range adapters.All() {
-		if name, _ := a.SpawnCommand(""); name != "" {
+		if name, _ := a.SpawnCommand(adapter.SpawnOptions{}); name != "" {
 			if _, err := exec.LookPath(name); err == nil {
 				comps = append(comps, a.Agent()+"\t"+a.AgentName())
 			}

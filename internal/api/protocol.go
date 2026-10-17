@@ -38,6 +38,7 @@ const (
 	MethodSessionResume         = "sessions.resume"         // request: ResumeParams; result: ResumeResult (reuses/adopts/launches a pane, waits until openable)
 	// Probed live per call.
 	MethodAgentsList    = "agents.list"    // request: AgentsListParams; result: AgentsListResult
+	MethodAgentsModels  = "agents.models"  // request: AgentsModelsParams; result: AgentsModelsResult
 	MethodSessionKill   = "sessions.kill"  // request: SessionRef; result: nil (kills the tmux pane, or dismisses a paneless presence card)
 	MethodSessionFocus  = "sessions.focus" // request: SessionRef; result: nil (focus the session's tmux pane on its owning node)
 	MethodSessionRename = "session.rename" // request: SessionRenameParams; result: SessionRenameResult
@@ -734,6 +735,7 @@ type SpawnParams struct {
 	Agent   string `json:"agent,omitempty"`   // node resolves to a command; blank = default
 	Command string `json:"command,omitempty"` // explicit launch command; overrides Agent when set
 	Prompt  string `json:"prompt,omitempty"`  // initial prompt; how it reaches the CLI is agent-specific (an argument, or a flag like --prompt-interactive)
+	Model   string `json:"model,omitempty"`   // a ModelInfo.ID from agents.models; blank = the agent's default
 }
 
 // SpawnResult identifies the newly created session.
@@ -772,6 +774,24 @@ type AgentInfo struct {
 // default spawn target among the spawnable ones).
 type AgentsListResult struct {
 	Agents []AgentInfo `json:"agents"`
+}
+
+type AgentsModelsParams struct {
+	NodeID string `json:"node_id,omitempty"` // gateway routing key; empty = sole node
+	Agent  string `json:"agent"`
+}
+
+// ModelInfo is one model an agent can spawn with. ID is opaque to clients: they
+// show Name and send ID back unchanged in SpawnParams.Model.
+type ModelInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// AgentsModelsResult lists the models the agent offers. Empty means the agent
+// offers no model choice.
+type AgentsModelsResult struct {
+	Models []ModelInfo `json:"models"`
 }
 
 // HistorySessionsParams: Limit <= 0 returns all from Offset.

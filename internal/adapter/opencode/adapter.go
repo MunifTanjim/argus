@@ -39,7 +39,7 @@ func (a *ocAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.Tm
 // SpawnCommand names the binary only: OpenCode is headless, so spawn goes through
 // the service API (SpawnSession), not a launched pane. The name still backs the
 // installed-agent PATH probe in handleAgentsList.
-func (ocAdapter) SpawnCommand(string) (string, []string) {
+func (ocAdapter) SpawnCommand(adapter.SpawnOptions) (string, []string) {
 	return "opencode", nil
 }
 
@@ -117,11 +117,11 @@ func (a *ocAdapter) SendPrompt(ctx context.Context, sess session.Session, text s
 	return a.disc.sendPrompt(ctx, sess.AgentSessionID, text)
 }
 
-func (a *ocAdapter) SpawnSession(ctx context.Context, cwd, prompt string) (string, error) {
+func (a *ocAdapter) SpawnSession(ctx context.Context, cwd string, opts adapter.SpawnOptions) (string, error) {
 	if a.disc == nil {
 		return "", fmt.Errorf("opencode: no active discoverer")
 	}
-	return a.disc.spawnSession(ctx, cwd, prompt)
+	return a.disc.spawnSession(ctx, cwd, opts.Prompt)
 }
 
 // RenameSession renames the session through the OpenCode service.
