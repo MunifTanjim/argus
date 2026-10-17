@@ -26,11 +26,8 @@ void main() {
     expect(s.summary!.effort, isNull);
   });
 
-  test('promptReady mirrors the node and blocks a starting session', () {
-    expect(_s({}).promptReady, isTrue);
-    expect(_s({'interaction': {'kind': 'idle'}, 'status': 'awaiting_input'}).promptReady, isTrue);
-    expect(_s({'status': 'working'}).promptReady, isFalse);
-    expect(_s({'status': 'starting'}).promptReady, isFalse);
-    expect(_s({'status': 'awaiting_input', 'interaction': {'kind': 'permission'}}).promptReady, isFalse);
+  test('canPrompt is read from the node', () {
+    expect(_s({'can_prompt': true}).canPrompt, isTrue);
+    expect(_s({}).canPrompt, isFalse);
   });
 }

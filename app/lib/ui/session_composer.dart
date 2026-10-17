@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/result.dart';
 import '../data/session_repository.dart';
+import '../models/entry.dart';
 import '../models/enums.dart';
 import '../models/session.dart';
 import '../state/prompt_drafts.dart';
@@ -82,13 +83,22 @@ String? modelLine(Summary? s) {
 
 /// The least tap target width a touch control gets.
 const _countTapWidth = 48.0;
+const _maxQueued = 3;
+
+final _whitespace = RegExp(r'\s+');
 
 /// The prompt input, or the pending prompt in its place, between a status line
 /// and a model line.
 class SessionComposer extends ConsumerStatefulWidget {
-  const SessionComposer({super.key, required this.session, this.inputNotice});
+  const SessionComposer(
+      {super.key,
+      required this.session,
+      this.inputNotice,
+      this.queue = const []});
 
   final Session session;
+
+  final List<QueuedPrompt> queue;
 
   /// Shown in place of the input when argus cannot send to the session.
   final String? inputNotice;
@@ -167,7 +177,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   }
 
   bool get _canSend =>
-      widget.session.promptReady &&
+      widget.session.canPrompt &&
       !_vm.running &&
       _text.text.trim().isNotEmpty;
 
@@ -250,7 +260,14 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
         ),
       );
     } else {
-      body = _input(s);
+      body = Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (widget.queue.isNotEmpty) _queueList(widget.queue),
+          _input(s),
+        ],
+      );
     }
     // A collapsed prompt still waits on the user, so its line stands out.
     final alert = showPanel && _collapsed;
@@ -293,6 +310,26 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     );
   }
 
+  Widget _queueList(List<QueuedPrompt> q) {
+    final style = Theme.of(context)
+        .textTheme
+        .bodySmall
+        ?.copyWith(color: AppColors.dim);
+    Widget line(String text) =>
+        Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final p in q.take(_maxQueued))
+            line(p.text.replaceAll(_whitespace, ' ').trim()),
+          if (q.length > _maxQueued) line('+${q.length - _maxQueued} more'),
+        ],
+      ),
+    );
+  }
+
   Widget _input(Session s) => Padding(
         padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
         child: Row(
@@ -319,8 +356,8 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
             ),
             // While sending is blocked, a tap on the disabled button says why.
             Tooltip(
-              message: s.promptReady ? 'Send' : 'Wait for idle to send',
-              triggerMode: s.promptReady
+              message: s.canPrompt ? 'Send' : 'Wait for idle to send',
+              triggerMode: s.canPrompt
                   ? TooltipTriggerMode.longPress
                   : TooltipTriggerMode.tap,
               child: IconButton(

@@ -6,7 +6,7 @@ const minServerVersion = '0.1.2';
 
 /// Oldest argus node this app works with. Older nodes stay visible but are
 /// flagged outdated and lose their actions.
-const minNodeVersion = '0.1.2';
+const minNodeVersion = '0.1.3';
 
 /// A leading "v", or the `git describe --dirty` suffix: "-7-g17d66765" on a
 /// build made after a release tag, "-dirty" on one with local changes.
