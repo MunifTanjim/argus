@@ -6,8 +6,9 @@ an untrusted or internet-facing host. E2EE is off by default.
 
 ## Enable
 
-Set `e2ee.enabled: true` on the gateway, every node, and every client. All three
-must agree, or the link stays unencrypted.
+Set `e2ee.enabled: true` on every node and on each machine where you run the TUI
+or the CLI. In the mobile app, turn on **End-to-end encryption** for the
+connection. A gateway needs no setting, because it only relays the traffic.
 
 ```yaml
 # ~/.config/argus/config.yaml
@@ -45,8 +46,13 @@ read or change.
 # runs a preview until you pass --confirm:
 argus lock init --confirm sigpub:<this-node> [sigpub:<other-node>...]
 
-# authorize a device (node label, or a devpub: key):
+# authorize or revoke a device (node label, or a devpub: key):
 argus lock sign <device>
+argus lock revoke-device <device>
+
+# add or remove a signer:
+argus lock add-signer sigpub:<key>
+argus lock remove-signer sigpub:<key>
 
 # inspect state and history:
 argus lock status
@@ -55,7 +61,9 @@ argus lock log
 
 `lock init` needs your own signer key in the list and refuses without it. Run it
 without `--confirm` first to preview the signer set and the devices it would
-authorize.
+authorize. It reads the list of nodes from the gateway, so set `gateway.url`, or
+pass `--gateway <url> --token <TOKEN>`. `--gen-disablements N` creates `N`
+break-glass secrets. The default is 1.
 
 A device that is not authorized yet stays connected to the gateway but opens no
 node channels. It opens them as soon as `lock sign` authorizes it, with no restart.
@@ -117,11 +125,12 @@ log or show different nodes different versions of it.
 - **No quarantine does not mean the network is safe.** A gateway can withhold the
   chain so a device never learns the network is locked. Only a pin you placed
   yourself is reliable. Pin every device.
-- **Split view.** A gateway may show different nodes different branches of the chain.
-  Argus reads each node's tip over the authenticated channel and flags a mismatch as
-  `⚠ equivocation detected` in `lock status`. You can also compare the `tip:`
-  fingerprint by reading `lock status` directly on each node; matching words mean
-  they share one chain.
+- **Split view.** A gateway can show different nodes different branches of the
+  chain. Argus reads the tip of each node over the authenticated channel. On a
+  mismatch, Argus writes `equivocation detected` to its log, and the app shows
+  a warning. To check
+  by hand, run `lock status` on each node and compare the `tip:` fingerprints.
+  Matching words mean that the nodes share one chain.
 
 ### Revoke a Signer
 

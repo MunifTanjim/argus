@@ -7,7 +7,8 @@ script below, or build from source.
 
 You need these to *run* Argus, however you install it:
 
-- [tmux](https://github.com/tmux/tmux): Argus discovers agent sessions running in tmux
+- [tmux](https://github.com/tmux/tmux): Argus uses it to spawn and resume sessions
+  and to show the live screen of a session
 - At least one supported AI coding agent for Argus to supervise:
   - [Claude Code](https://www.claude.com/product/claude-code) 2.1.293 or later: run as `claude`
   - [Codex](https://developers.openai.com/codex/cli): the OpenAI Codex CLI, run as `codex`
@@ -49,7 +50,7 @@ Or clone and install with `make`:
 git clone https://github.com/MunifTanjim/argus
 cd argus
 
-make install                          
+make install
 ```
 
 ## Upgrade
@@ -59,9 +60,10 @@ argus upgrade
 ```
 
 This downloads the latest release, checks its SHA-256 checksum, and replaces the
-binary. If `argus start` is running, the running argus replaces its own binary
-and then restarts in place. The PID does not change, so a `systemd` or `launchd`
-service keeps tracking it.
+binary. If Argus is running on this machine, the node and the gateway restart in
+place, one after the other. The PID of `argus start` does not change, so a
+`systemd` or `launchd` service keeps tracking it. If you installed shell
+completion, the upgrade updates it too.
 
 - `--no-restart` replaces the binary, but does not restart the running argus.
 - `--no-download` restarts the running argus with the binary that is already on
@@ -69,14 +71,14 @@ service keeps tracking it.
 
 Argus must be able to write to the directory that holds its binary.
 
-In the TUI, the `upgrade node` and `upgrade gateway` commands upgrade another
-machine through the gateway.
+In the TUI, `upgrade node` upgrades the selected node, or this machine, and
+`upgrade gateway` upgrades the gateway.
 
 ## Connect Your Agents
 
 Argus connects to your agents when it starts, so it can track each session's
-status in real time. It sets up every supported agent you have installed and
-skips the others.
+status in real time. It sets up each supported agent that you ran at least once
+and skips the others.
 
 If an agent is not connected, run this to retry and see what went wrong:
 
@@ -87,8 +89,13 @@ argus hooks install
 `argus hooks uninstall` removes the integrations until Argus starts again.
 
 For Claude Code it installs the Argus plugin. Without it, Argus still lists your
-Claude sessions but cannot show their live status or answer their permission
-requests. It can send prompts only to sessions in tmux.
+Claude sessions with a status that it reads from the transcript, but the status
+can lag. Argus also cannot answer permission requests, and it can send prompts
+only to sessions in tmux.
+
+To install the plugin, Argus runs the `claude` command, so `claude` must be on
+the `PATH` of Argus. If Argus runs as a `systemd` or `launchd` service, set
+`PATH` in the service, or run `argus hooks install` from a shell.
 
 Claude Code loads the plugin when a session starts. After you install or
 upgrade Argus, restart the Claude sessions that are running.

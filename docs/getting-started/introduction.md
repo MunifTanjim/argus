@@ -11,8 +11,7 @@ interrupt, or kill sessions without leaving the TUI.
 You can use Argus in a terminal on one machine, across several machines, or
 from your phone, which gets a push notification when a session needs you.
 
-Argus supports **Claude Code**, **Codex**, **Antigravity**, and **OpenCode**. It
-lists their sessions together. Support for more agents can come later.
+Argus supports **Claude Code**, **Codex**, **Antigravity**, and **OpenCode**.
 
 ## Highlights
 
@@ -22,19 +21,18 @@ lists their sessions together. Support for more agents can come later.
 - **Live status:** working, waiting, idle, or dead.
 - **Transcripts:** The full conversation, with foldable sections and tool-call details.
 - **Live screen:** Watch a session's terminal and type into it.
-- **Lifecycle control:** Spawn, interrupt, or kill sessions and answer prompts directly.
+- **Lifecycle control:** Spawn a session on the model you pick, rename, interrupt,
+  or kill it, and answer its prompts.
 - **Multi-machine:** Collect sessions from several machines and watch them in one TUI.
 - **Mobile app:** An Android and iOS app with **push notifications**.
 
 ## How it fits together
 
 Argus runs as a **node** on each machine. The node discovers your agent
-sessions in tmux, tracks their status, and serves a local API. The TUI uses
-that API. The agents send their events to the node through hooks or the Argus
-plugin.
+sessions, tracks their status, and serves a local API. The TUI uses that API.
 
 - On a **single machine**, run the [TUI](/guide/tui). It connects to the local
   node automatically.
-- Across **several machines**, one node acts as a
-  [gateway](/guide/multi-machine) and the other nodes connect to it. The TUI and
-  the [mobile app](/guide/mobile-app) connect to the gateway.
+- Across **several machines**, one machine runs a
+  [gateway](/guide/multi-machine), and the node of each machine connects to it.
+  The TUI and the [mobile app](/guide/mobile-app) connect to the gateway.

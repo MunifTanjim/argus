@@ -42,7 +42,7 @@ features:
       width: "24"
       height: "24"
     title: Watch & Control
-    details: Live status, transcripts, and the session terminal, which you can type into. Spawn, interrupt, or kill sessions and answer prompts directly.
+    details: Live status, transcripts, and the session terminal, which you can type into. Spawn, rename, interrupt, or kill sessions and answer their prompts.
     link: /guide/tui
   - icon:
       src: "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23F5B301%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%2216%22%20y%3D%2216%22%20width%3D%226%22%20height%3D%226%22%20rx%3D%221%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%2216%22%20width%3D%226%22%20height%3D%226%22%20rx%3D%221%22%2F%3E%3Crect%20x%3D%229%22%20y%3D%222%22%20width%3D%226%22%20height%3D%226%22%20rx%3D%221%22%2F%3E%3Cpath%20d%3D%22M5%2016v-3a1%201%200%200%201%201-1h12a1%201%200%200%201%201%201v3%22%2F%3E%3Cpath%20d%3D%22M12%2012V8%22%2F%3E%3C%2Fsvg%3E"
@@ -62,7 +62,7 @@ features:
       src: "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23F5B301%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20width%3D%2214%22%20height%3D%2220%22%20x%3D%225%22%20y%3D%222%22%20rx%3D%222%22%20ry%3D%222%22%2F%3E%3Cpath%20d%3D%22M12%2018h.01%22%2F%3E%3C%2Fsvg%3E"
       width: "24"
       height: "24"
-    title: Mobile App + Notification
+    title: Mobile App
     details: Watch and control your sessions from Android or iOS, with push notifications when a session needs you.
     link: /guide/mobile-app
 ---
@@ -87,7 +87,7 @@ Prefer Go? `go install github.com/MunifTanjim/argus/cmd/argus@latest`, or follow
 <a class="scale" href="/guide/single-machine">
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
 <h3>Local</h3>
-<p>Run <code>argus</code> in a terminal. It finds your tmux agent sessions automatically.</p>
+<p>Run <code>argus</code> in a terminal. It finds your agent sessions automatically.</p>
 </a>
 <div class="scale-arrow" aria-hidden="true">→</div>
 <a class="scale" href="/guide/multi-machine">

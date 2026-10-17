@@ -17,7 +17,9 @@ the list. Its files stay.
 
 ```sh
 argus project list
-argus project pin <project>
+argus project rename <project> <name>
+argus project hide <project>      # unhide to undo
+argus project pin <project>       # unpin to undo
 argus project forget <project>
 ```
 
@@ -48,7 +50,8 @@ recorded stay. Remove one with `argus project forget <project>`.
 
 ## Workspaces
 
-A new workspace is a new git worktree. You can create it from one of these:
+A new workspace is a new git worktree, so only a git project can have more
+than one workspace. You can create it from one of these:
 
 - a new branch
 - a branch that exists
@@ -59,6 +62,10 @@ A new workspace is a new git worktree. You can create it from one of these:
 argus workspace create <project> <name> --source new|branch|pr|issue
 ```
 
+For `pr` and `issue`, `<name>` is the number. If the branch of `new` already
+exists, Argus checks it out and shows a warning. Add `--wait` to wait until
+[setup](#setup-and-teardown) ends.
+
 List the workspaces of every project, or of one project:
 
 ```sh
@@ -66,7 +73,10 @@ argus workspace list [project]
 ```
 
 Each workspace has a target branch. The default is the default branch of the
-repository. The changes view compares the workspace with its target branch.
+repository. A workspace from a PR targets the base branch of the PR. To set a
+different target, add `--target <branch>` to `workspace create`, or run
+`workspace target` later. The changes view compares the workspace with its
+target branch.
 
 ```sh
 argus workspace target <workspace> <branch>
@@ -102,8 +112,8 @@ A relative worktree path starts at the main worktree. If the branch name
 contains `/`, `.Branch.Name` makes nested directories, and `.Branch.Slug` makes
 one directory.
 
-The node checks both templates when it starts. A template with an unknown
-variable stops the start and the error names the key.
+The node checks both templates when it starts. A template that does not parse
+or that has an unknown variable stops the start, and the error names the key.
 
 ```yaml
 workspace:
@@ -215,6 +225,7 @@ Remove deletes the worktree. The branch stays.
 argus workspace remove <workspace>
 ```
 
+- The main worktree cannot be removed.
 - A workspace with live sessions cannot be removed. Kill its sessions first.
 - If the workspace has uncommitted changes, the remove stops before teardown
   runs. To discard the changes, use `--force`.

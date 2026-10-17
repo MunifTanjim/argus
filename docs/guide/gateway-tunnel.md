@@ -10,7 +10,7 @@ gateway over [SSH](/guide/multi-machine#ssh-access).
 Provider: **Cloudflare Tunnel** (requires
 [`cloudflared`](https://github.com/cloudflare/cloudflared) on `PATH`). Pick a mode
 with `--tunnel`. Plain `--tunnel cloudflare` infers the mode from the
-`--cloudflare-*` flags. The tunnel edge terminates TLS. If the tunnel dies, Argus
+`--cloudflare-*` flags. Without those flags, it starts a quick tunnel. The tunnel edge terminates TLS. If the tunnel dies, Argus
 retries with backoff and keeps serving on your LAN.
 
 With any provider, if a tunnel comes up but reports no public URL within a minute,
@@ -41,9 +41,8 @@ argus start --tunnel cloudflare:remote --cloudflare-token <CLOUDFLARE_TOKEN> --t
   that pairing can reach.
 - In the Cloudflare dashboard, point the tunnel's public hostname at the gateway's
   listen address (`http://localhost:8443` by default).
-- Reading the ingress requires `cloudflared --loglevel info`, so this mode runs
-  `cloudflared` with more verbose logging than the other modes. Argus classifies the
-  extra lines as debug, so they appear only with `--log-level debug`.
+- In this mode, `cloudflared` writes more log lines than in the other modes.
+  They appear only with `--log-level debug`.
 
 ### Local
 
@@ -71,7 +70,7 @@ argus start --token <TOKEN> --tunnel ngrok
 ```
 
 - `--ngrok-domain <domain>` binds a **reserved/custom domain** instead. Reserve the
-  domain in the ngrok dashboard first. The agent doesn't provision it.
+  domain in the ngrok dashboard first. Argus does not create it.
 
   ```sh
   argus start --token <TOKEN> --tunnel ngrok --ngrok-domain argus.example.com
@@ -99,8 +98,7 @@ argus start --token <TOKEN> --tunnel zrok --zrok-name argus
   terminal, Argus prompts for your zrok account token and enables it. Otherwise run
   `zrok2 enable <token>` yourself first.
 - For a **self-hosted** instance, point the CLI at it with `ZROK2_API_ENDPOINT` (or
-  `zrok2 config set apiEndpoint …`). Argus's child `zrok2` process inherits the
-  environment.
+  `zrok2 config set apiEndpoint …`). Argus passes its environment to `zrok2`.
 
 ## External
 

@@ -1,8 +1,7 @@
 # Protocol
 
-The Go types in `internal/api/protocol.go` are the source of truth for field
-names. Argus has two reference clients: the Go client (`internal/client`, used
-by the TUI and the CLI) and the Flutter app (`app/`).
+Argus has two reference clients: the Go client, which the TUI and the CLI use,
+and the mobile app.
 
 Timeouts and intervals marked **client default** are the Go client's values.
 A new client can use different ones. The node or the gateway fixes all other
@@ -26,8 +25,8 @@ local:    client ──unix socket──▶ node
 gateway:  client ──WebSocket /client──▶ gateway ◀──WebSocket /node── node
 ```
 
-On the gateway path, the node dials out to the gateway. The gateway never
-dials a node.
+On the gateway path, the node dials out to the gateway. This connection is
+the node uplink. The gateway never dials a node.
 
 The gateway does not read session data, and it does not merge results from
 several nodes. The client opens one relay channel per node and
@@ -51,19 +50,24 @@ A client that uses the gateway path must implement these parts:
 
 ### Versions
 
-The protocol has no version number and no compatibility check. The `version`
-field in `server.info` and `node.identify` is the Argus build version. It is
-for display only.
+The protocol has no version number and no version negotiation. The `version`
+field in `server.info` and `node.identify` is the Argus build version.
+
+A client can compare it with a minimum version that the client supports.
 
 ## Wire format
 
 ### Transports
 
 **Unix socket.** Each node listens on a unix socket. The default path is
-`argus.sock` in the runtime directory (configuration key `socket`). The CLI,
-the TUI on the same machine, and the `argus hook` command use this socket. The
-socket has no token authentication. It is the only transport that serves the
-`lock.*` methods.
+`argus.sock` in the runtime directory (configuration key `socket`). The CLI
+and the TUI on the same machine use this socket. Only the owner of the socket
+file can connect. The socket has no token authentication. It is the only
+transport that serves the `lock.*` methods.
+
+A gateway also listens on `argus-gateway.sock`, in the same directory as the
+node socket. This socket serves only `server.info` (with no `nodes`),
+`server.checkUpgrade`, `server.upgrade`, and `server.restart`.
 
 **WebSocket.** The gateway serves plain HTTP on `:8443` by default
 (`--listen-addr`). It has two WebSocket routes and no other HTTP routes:
@@ -97,10 +101,9 @@ length is 16 MiB. A receiver skips empty lines. If a line is longer than
 16 MiB, the receiver closes the connection.
 
 On a WebSocket, treat the text messages as one byte stream. A WebSocket
-message does not always hold exactly one frame. The Go peer writes through a
-4 KiB buffer. As a result, a large frame arrives as one message, and its `\n`
-arrives in the next message. A client must buffer the input and split it on
-`\n`.
+message does not always hold exactly one frame. For example, a large frame can
+arrive as one message, and its `\n` can arrive in the next message. A client
+must buffer the input and split it on `\n`.
 
 If a line is not valid JSON, the receiver sends back an error response with
 code `-32700`, message `"parse error"`, and no `id`. Then it continues with
@@ -135,18 +138,14 @@ A frame belongs to one of these classes:
 A relay frame never reaches the normal dispatch path. It carries its payload
 in `body`, not in `params` or `result`. See [Relay channels](#relay-channels).
 
-Both sides of a connection can send requests. For example, on the node uplink
-the gateway sends `node.identify` to the node, and the node sends
-`trustlog.push` to the gateway.
+Both sides of a connection can send requests and notifications.
 
 ### Request ids
 
 Each side picks its own request ids. Use integers. A server echoes the `id`
 exactly as it received it, but the Go peer matches responses only as integers.
-
-- On direct frames, the Go peer starts at `0` and counts up.
-- On relay frames, the Go client and the app use one counter for all channels
-  of a connection. The counter starts at `1`.
+On relay frames, use one counter for all channels of a connection, so that
+each id is unique on the connection.
 
 ### Errors
 
@@ -159,10 +158,12 @@ exactly as it received it, but the Go peer matches responses only as integers.
 | `410`    | push target gone | `push.test` hit a dead push subscription.                  |
 
 A handler error that is not a JSON-RPC error becomes `-32603` with the error
-text as `message`. Most handlers return plain errors. As a result, bad params,
-a missing field, and `unknown session: <id>` usually arrive as `-32603`. A
-client must not depend on the code to tell these errors apart. The `message`
-text is the only detail.
+text as `message`. Many handlers return plain errors, so bad params and a
+missing field often arrive as `-32603`. The code and the text also differ
+between handlers. For example, `sessions.capture` returns
+`-32603 unknown session: <id>`, but `sessions.kill` returns
+`-32600 unknown session <id>`. A client must not depend on the code to tell
+these errors apart. The `message` text is the only detail.
 
 ### Keepalive
 
@@ -170,24 +171,17 @@ text is the only detail.
 directly, before any dispatch rule. As a result, a `ping` always works, even
 on a connection that serves no other method.
 
-Only two links send pings:
+The gateway does not ping clients. A client that must detect a dead
+connection must send its own pings. The client default is a ping every 15
+seconds with a 5-second timeout, and a close after two failed pings in a row.
+Any reply counts as a success, including an error reply. The app uses a
+20-second interval and a 10-second timeout, and closes after one failure.
 
-- The gateway pings each node every 15 seconds and waits 5 seconds for the
-  reply. After two failed pings in a row, it closes the uplink. Any reply
-  counts as a success, including an error reply.
-- The client pings the gateway. The client default is the same as above. The
-  app uses a 20-second interval and a 10-second timeout, and closes after one
-  failure.
+### Slow readers
 
-The gateway does not ping clients, and nodes do not ping the gateway. A client
-that must detect a dead connection must send its own pings.
-
-### Write deadline
-
-Every frame write in the Go peer has a 10-second deadline. If a write does not
-complete in time, the peer closes the whole connection, because a partial
-frame corrupts the stream. On the gateway, this means that one slow relay
-channel can close a client connection or a node uplink.
+If the gateway cannot write a frame to a client in time, it closes the whole
+connection, because a partial frame corrupts the stream. A client must read
+its connection continuously.
 
 ## Connecting a client
 
@@ -300,9 +294,9 @@ pairing flow is:
 second await on the same token, and after the timeout. It does not return an
 error in these cases.
 
-The gateway stores each token as `client-tokens/<sha256(token)>.json` in the
-state directory. `clients.list` returns the SHA-256 id in the field `token`,
-not the raw token. `clients.remove` takes that id.
+The gateway identifies each stored token by its SHA-256 hash. `clients.list`
+returns this id in the field `token`, not the raw token. `clients.remove`
+takes that id.
 
 ## Relay channels
 
@@ -390,16 +384,17 @@ client sends `node.identify` as its first frame.
 
 ### Order and delivery
 
-- The node serves each request in its own goroutine. Responses can arrive in
-  a different order than the requests.
+- The node serves requests concurrently. Responses can arrive in a different
+  order than the requests.
 - Notifications on one channel arrive in the order that the node sent them.
 - The node acts only on requests. It ignores notifications and responses from
   the client on a channel.
 - If the node cannot open the `body` of a request, it drops the frame without
   a reply. The client sees only its own timeout.
 
-The client default timeout for a call on a relay channel is 30 seconds. Calls
-to the gateway itself have no client timeout.
+The client default timeout for a call on a relay channel is 30 seconds.
+`server.upgrade` is the exception: its client default is 6 minutes. Calls to
+the gateway itself have no client timeout.
 
 ### Mode mismatch
 
@@ -442,14 +437,13 @@ read them. Set `e2ee.enabled: true` on nodes and clients to use this mode. See
 
 ### Keys
 
-| Key             | Type       | Where                                                                   |
-| --------------- | ---------- | ----------------------------------------------------------------------- |
-| node identity   | Curve25519 | `node-identity.json` in the state directory                             |
-| client identity | Curve25519 | Go: `client-identity.json` in locked mode, else one key per process. App: always stored. |
-| node signer     | Ed25519    | `signer-key.json` in the state directory (locked mode)                  |
+| Key             | Type       | Lifetime                                                               |
+| --------------- | ---------- | ---------------------------------------------------------------------- |
+| node identity   | Curve25519 | stored by the node                                                     |
+| client identity | Curve25519 | Go client: stored in locked mode, else one key per process. App: stored. |
+| node signer     | Ed25519    | stored by the node (locked mode)                                       |
 
-Key files are JSON with standard base64 values:
-`{"private":"<base64>","public":"<base64>"}`. Curve25519 keys are 32 bytes.
+Curve25519 keys are 32 bytes.
 
 The node reports its identity public key in `node.identify` as
 `identity_pubkey` (base64). The gateway copies it to the roster (`nodes.list`,
@@ -478,8 +472,7 @@ gateway assigned. For example, node `home` and channel `c12` give the
 prologue `argus-e2e/v1|home|c12`. Both sides must build it from the same
 values.
 
-The Go side uses `github.com/flynn/noise`. The app has its own
-implementation. Both follow the Noise specification:
+Both sides follow the Noise specification:
 
 - The ChaCha20-Poly1305 nonce is 4 zero bytes, then the 64-bit message counter
   in little-endian order.
@@ -575,8 +568,8 @@ The client makes these ids composite:
 - `session_id` in the results of `sessions.spawn` and `sessions.resume`
 - `workspace_id` in the result of `workspace.create`
 - `session_id` in `tasks.changed`
-- `id` of each terminal in `terminal.list` and in the result of
-  `terminal.create`
+- `id` and `workspace_id` of each terminal in `terminal.list` and in the
+  result of `terminal.create`
 
 The client adds `node_id` and `node_label` to sessions, projects, terminals,
 and history items. History items are not composite. A node accepts a composite
@@ -594,7 +587,7 @@ The client picks the node for each call:
 | Node from composite `terminal_id` | `terminal.kill`, `terminal.rename`, `terminal.open` with `terminal_id` |
 | Node from composite `workspace_id` | `workspace.changedFiles`, `workspace.diff`, `workspace.listDir`, `workspace.readFile`, `workspace.commits`, `workspace.commitFiles`, `workspace.remove`, `workspace.setTarget`, `workspace.runSetup`, `workspace.setupLog` |
 | Node from composite `project_id` | `workspace.create`, `project.rename`, `project.setHidden`, `project.setPinned`, `project.forget`, `project.branches`, `project.prs`, `project.issues` |
-| Node from `node_id` param | `sessions.spawn`, `sessions.resume`, `agents.list`, `agent.model.list`, `sessions.exportBundle`, `sessions.historySessions`, `sessions.historyTranscript`, `sessions.historyToolDetail`, `terminal.create`, `host.completeDir` |
+| Node from `node_id` param | `sessions.spawn`, `sessions.resume`, `agents.list`, `agent.model.list`, `sessions.exportBundle`, `sessions.historySessions`, `sessions.historyTranscript`, `sessions.historyToolDetail`, `terminal.create`, `host.info`, `host.setWakelock`, `host.completeDir` |
 | Node that owns the `sub_id` or `term_id` | `transcript.unsubscribe`, `terminal.input`, `terminal.resize`, `terminal.close` |
 | Node from `node_id` param, or the gateway when `node_id` is empty | `server.checkUpgrade`, `server.upgrade`, `server.restart` |
 | The gateway | `ping`, `server.info`, `nodes.list`, `relay.open`, `relay.close`, `trustlog.sync`, `push.vapidKey`, `clients.*`, `pushport.setToken` |
@@ -648,19 +641,27 @@ fail with `unknown session: <id>`.
 
 - `pane`: the node types the text into the tmux pane.
 - `api`: the node sends the text through the agent itself. This applies to
-  opencode, and to Claude Code while the Argus plugin is connected. A working
-  Claude Code session with a tmux pane can read text during the running turn,
-  except text that starts with `/`, which runs after the turn.
+  opencode, codex, and Claude Code while the Argus plugin is connected. A
+  working Claude Code session with a tmux pane can read text during the
+  running turn, except text that starts with `/`, which runs after the turn.
 - No `input_mode`: the call fails with `session has no terminal control`.
 
-`sessions.kill` kills the tmux pane. For a session without a pane, opencode
-removes the session card, and Claude Code stops its running turn and exits.
+`sessions.kill` kills the tmux pane of the session. For a headless agent
+(opencode, codex), it also removes the session, with or without a viewer
+pane. For Claude Code without a pane, Claude Code stops its running turn and
+exits.
 
 `session.rename` renames a session through the agent's own rename feature
 (opencode's session title, codex's thread name, Claude's rename), so the new
 name shows in the agent's own UI as well as in argus. It needs no tmux pane.
-Agents without a rename feature fail with
-`rename unsupported for <agent> sessions`.
+The node trims the name and returns the trimmed name. These errors are
+`-32600`:
+
+- `session_id and name are required`, also for a blank name.
+- `name must not contain control characters`.
+- `unknown session <id>`.
+- `rename unsupported for <agent> sessions`, for an agent without a rename
+  feature.
 
 The result's `applied` is true once the agent has taken the name, and the
 session update follows. While a Claude Code turn is running, Claude Code takes
@@ -668,17 +669,16 @@ the name only after the turn, so `applied` is false and the session update
 arrives once it has. Claude Code renames only while the Argus plugin is
 connected; otherwise the call fails with
 `rename needs the Argus plugin connection`. While the plugin is connected, a
-rename typed in Claude Code reaches argus too. Names with control characters
-are rejected.
+rename typed in Claude Code reaches argus too.
 
 **Answering an interaction.** When a session waits for input, its
 `interaction` field describes the request. Answer it with `sessions.respond`:
 
-- If a `PermissionRequest` hook is held, the node turns the structured fields
-  (`behavior`, `reason`, `answers`, `question_action`, `set_mode`,
-  `option_value`) into the hook decision.
-- If no hook is held and the agent is headless, the node passes the answer to
-  the agent's service (opencode, the codex app-server daemon).
+- If the agent waits on the node for the decision, for example Claude Code
+  with the Argus plugin, the node turns the structured fields (`behavior`, `reason`, `answers`,
+  `question_action`, `set_mode`, `option_value`) into the decision.
+- Otherwise, if the agent is headless, the node passes the answer to the
+  agent's service (opencode, the codex app-server daemon).
 - In all other cases, the node drops the answer and returns success.
 
 For `option_value`, the node maps `deny` to a deny, `allow` to an allow, and
@@ -722,8 +722,9 @@ client list. A prompt usually leaves the queue in the same delta that adds it to
 `entries`. Subagent transcripts never carry `queue`.
 
 - The first result starts at the first entry of the turn that holds the last
-  cached entry, because entries of an unfinished turn can still change. If the
-  last cached entry ends a turn, the first result starts at that entry
+  cached entry, because entries of an unfinished turn can still change. A
+  `turn_end`, `system`, `compact`, or `shell` entry ends a turn. If the last
+  cached entry ends a turn, the first result starts at that entry
   (`have_entries - 1`).
 - The node does not verify the cached entries of the client. The cache must
   come from the same session and the same `agent_id`.
@@ -734,6 +735,10 @@ client list. A prompt usually leaves the queue in the same delta that adds it to
 - A second subscribe with the same `sub_id` replaces the first. All
   subscriptions end when the connection closes.
 - Set `agent_id` to follow a subagent transcript.
+- If the agent moves the session to a new transcript file, for example after
+  `/resume` or `/clear` in Claude Code, the node follows it. The node sends a
+  delta with `from_index: 0` and every entry of the new file. This applies
+  only to subscriptions without `agent_id`.
 
 Errors: `sub_id required`, `unknown session: <id>`,
 `session has no transcript: <id>`, and `unknown subagent: <id>`.
@@ -758,9 +763,8 @@ support (today, Claude Code), and never at subscribe time.
 4. The client sends `terminal.resize` when its size changes.
 5. The client calls `terminal.close` to stop.
 
-The node runs `tmux attach` to a mirror session that shows only the pane of
-the session. The first output is the screen that tmux draws on attach. There
-is no separate snapshot.
+The terminal shows only the pane of the session. The first output is a full
+redraw of the screen. There is no separate snapshot.
 
 - `data` is standard base64 in both directions. One output chunk holds at
   most 32 KiB. A chunk can end inside a UTF-8 sequence.
@@ -789,12 +793,14 @@ Errors: `term_id required`, `unknown term_id: <id>`, `bad base64`, and
 
 #### Persistent terminals
 
-A node with `capabilities.terminal` runs persistent shells. Each shell is one
-window of the tmux session `terminal` on the private `-L argus` server. The
-terminal id is the tmux window id.
+A node with `capabilities.terminal` runs persistent shells. A terminal id is
+opaque.
 
 - `terminal.create` starts the default shell in the node user's home
-  directory.
+  directory. With a node-local `workspace_id`, it starts the shell in the
+  directory of that workspace, and the terminal carries that `workspace_id`.
+  If the workspace directory no longer exists, the call fails with
+  `workspace directory is gone: <dir>`.
 - `terminal.list` returns the terminals in creation order. `cwd` shows the
   node user's home as `~`. `name` is empty until a rename. A node without
   `capabilities.terminal` returns an empty list.
@@ -820,8 +826,8 @@ Errors: `terminals not supported on this node`, `unknown terminal: <id>`,
 `project.changed` is a notification with empty params. It tells the client to
 call `project.list` again.
 
-- `project.forget` deletes the registry rows and keeps the files. It fails if
-  the project has live sessions.
+- `project.forget` forgets the project and keeps its files. It fails if the
+  project has live sessions.
 - `workspace.remove` fails for the main worktree and for a workspace with live
   sessions. Without `force`, it fails for uncommitted changes and for a
   teardown script failure. With `force`, it removes the workspace and returns
@@ -829,8 +835,8 @@ call `project.list` again.
 - `against: "target"` has an effect only on `workspace.changedFiles`.
 - `workspace.commits` always lists commits since the merge base with the
   target branch. It returns an empty list if the workspace has no target.
-- `path: ""` is the root only for `workspace.listDir`. `workspace.diff`
-  fails with `path is required`.
+- `path: ""` is the root only for `workspace.listDir`. `workspace.diff` and
+  `workspace.readFile` fail with `path is required`.
 
 ### Push notifications
 
@@ -858,6 +864,9 @@ The cleartext payload is:
 `id` is random for each delivery. The device uses it to drop duplicates.
 `session_id` is the local id. Join it with `node_id` to get the composite id.
 A `push.test` payload has `data: {"test": "1"}` and no `session_id`.
+
+If the push service reports that a subscription is gone, the node deletes the
+device record. `push.test` then returns error `410`.
 
 ## Locked mode
 
@@ -1008,9 +1017,14 @@ to nodes whose identity key the log authorizes, unless the log is disabled.
 When the log changes, it closes channels to nodes that are no longer
 authorized.
 
-The `signer_pubkey` in the roster comes from the gateway. Use it for discovery
-only. For a trust decision, read the key from `node.identify` on an
-authenticated channel.
+A node that runs `lock.localDisable` accepts channels from any device. It
+reports `lock_disabled: true` in `node.identify`, and the gateway copies the
+flag to the roster. The Go client opens a channel to such a node even when the
+log does not authorize its own device.
+
+The `signer_pubkey` and `lock_disabled` fields in the roster come from the
+gateway. Use them as hints only. For a trust decision, read the values from
+`node.identify` on an authenticated channel.
 
 ### Equivocation
 
@@ -1029,12 +1043,9 @@ channels.
 
 ### Pinning and quarantine
 
-A node and a client can pin the genesis hash. The pin comes from the
-configuration key `lock.genesis` (form `gen:<hex>`) or from a pin file in the
-state directory. The pin files are `trustlog-genesis` (node) and
-`client-trustlog-genesis` (client). Each holds the 32 raw bytes of the hash.
-If both sources exist and disagree, the node does not start. A node that runs
-`lock.init` pins its new genesis.
+A node and a client can pin the genesis hash. See
+[Pin Devices](/guide/e2ee#pin-devices). A node that runs `lock.init` pins its
+new genesis.
 
 If a node without a log sees a valid chain on the gateway, or if its disabled
 chain is superseded by another root, it becomes quarantined. A quarantined
@@ -1047,103 +1058,6 @@ a log.
 
 Keys in text form use a prefix and 64 hex characters: `sigpub:`, `devpub:`,
 `gen:`, `dis:`, and `tip:`.
-
-## Node and gateway internals
-
-A client does not use the protocol in this section.
-
-### Node uplink
-
-A node connects to `<gateway>/node` with the master token. Then:
-
-1. The gateway sends `node.identify` to the node. The node must answer in 30
-   seconds with a non-empty `id`, or the gateway closes the connection.
-2. The gateway adds the node to its roster and notifies all clients with a
-   `node.event`.
-3. The link stays open. On this link, the node answers only `node.identify` and
-   `ping`. All client traffic arrives in relay frames.
-
-The node calls these methods on the gateway through the uplink: `nodes.list`,
-`trustlog.sync`, `trustlog.push`, and `push.deliver`. The gateway returns
-`-32601 method not found: <method>` for other methods.
-
-If the link drops, the node dials again. The wait starts at 500 ms and doubles
-up to 15 seconds. After a successful connection, the wait goes back to 500 ms.
-
-**Trust log.** A node pushes its full chain with `trustlog.push` after each
-local change. It syncs on connect and every 5 minutes. When a push adds
-entries, the gateway sends these notifications:
-
-- `trustlog.changed` with all head hashes, to every node except the sender.
-  The node pulls, at most once per second, if it does not hold all heads.
-- `node.event` of type `trust-changed`, to every client.
-
-### Push delivery
-
-1. The node builds the payload and encrypts it for the device (RFC 8291,
-   `aes128gcm`).
-2. The node sends `push.deliver` to the gateway with the ciphertext.
-3. The gateway posts the ciphertext to the endpoint.
-
-The encrypted body is one `aes128gcm` record. The plaintext ends with the
-delimiter `0x02` and has no padding.
-
-```
-salt(16) || rs = 4096 (uint32_be) || idlen = 65 || sender_public_key(65) || ciphertext
-```
-
-The gateway posts with these headers:
-
-```http
-Content-Type: application/octet-stream
-Content-Encoding: aes128gcm
-TTL: 1800
-Urgency: high
-Authorization: vapid t=<ES256 JWT>, k=<base64url public key>
-```
-
-If a PushPort token is set and the endpoint host is the PushPort host, the
-header is `Authorization: Bearer <pit_ token>`. If the gateway has no VAPID
-key, it sends no `Authorization` header.
-
-The subscription is gone in these cases:
-
-- The push service answers `404` or `410`.
-- On the VAPID path, the service answers `403` with a body that contains
-  `do not correspond`.
-
-`push.deliver` then returns `{"gone": true}`, and the node deletes the device
-record. `push.test` returns error `410` in this case.
-
-### Hooks
-
-Claude Code sends its events through the Argus plugin.
-
-The `argus hook` command serves the hook-based agents. It sends the hook
-events to the local node over the unix socket. The method is `hook.event`:
-
-```ts
-HookEvent {
-  agent:       string   // for example "antigravity"
-  event:       string   // for example "Stop"
-  tmux_pane:   string
-  tmux_socket: string   // base name of the $TMUX socket
-  payload:     any      // the raw hook JSON from stdin (at most 8 MiB)
-  auto_mode:   boolean  // CLAUDE_CODE_ENABLE_AUTO_MODE is "1"
-  env?:        { [name: string]: string }
-}
-```
-
-For an event that waits for an answer, such as a permission request, the
-call blocks if the session is live. The node holds it until a client answers with
-`sessions.respond`. The node then returns the decision as
-`hookSpecificOutput` JSON in `output`, and the command prints it. The agent
-prompt stays open at the same time, and the first answer wins. If the hook
-connection closes, or after 1490 seconds, the node returns an empty output.
-
-For all other events, the command waits at most 2 seconds for the node. It
-prints its own output, not the result of the node, and
-always exits with status 0.
 
 ## Method reference
 
@@ -1173,10 +1087,17 @@ IdentifyResult {
   id:               string   // stable node id; composite-id prefix
   label:            string
   version:          string
-  capabilities:     { spawn_session: boolean, terminal: boolean }
+  capabilities:     Capabilities
   identity_pubkey?: string   // base64 Curve25519
   signer_pubkey?:   string   // base64 Ed25519 (locked mode)
   tip?:             bytes    // trust-log tip (locked mode)
+  lock_disabled?:   boolean  // the node accepts any device
+}
+
+Capabilities {
+  spawn_session: boolean   // the node can spawn sessions (tmux present)
+  terminal:      boolean   // the node can run persistent terminals
+  host_wakelock: boolean   // the node serves host.setWakelock
 }
 
 ServerInfo {
@@ -1188,9 +1109,10 @@ ServerInfo {
 
 NodeDescriptor {
   id, label, version: string
-  capabilities:     { spawn_session: boolean, terminal: boolean }
+  capabilities:     Capabilities
   identity_pubkey?: string
   signer_pubkey?:   string   // from the gateway; discovery only
+  lock_disabled?:   boolean  // from the gateway; a hint only
   online:           boolean
 }
 
@@ -1199,6 +1121,12 @@ NodeEvent {
   node: NodeDescriptor       // empty for trust-changed
 }
 ```
+
+A gateway relays capability keys that it does not know unchanged, so a client
+can read the capabilities of a node that is newer than the gateway.
+
+On a node's unix socket, `server.info` returns one entry in `nodes`, with an
+empty `id`.
 
 `server.upgrade` downloads the latest release, checks its SHA-256 against the
 `.sha256` release asset, and replaces the binary. It does not restart. If the
@@ -1209,6 +1137,41 @@ arguments and the same PID. The shutdown can close the connection before the
 reply arrives, so only an error reply means that the restart failed. The new
 process reports a new `started_at`. A target that does not support these
 methods replies `-32601`.
+
+`server.upgrade` and `server.restart` fail with
+`an upgrade or restart is already in progress` while another one runs.
+`server.upgrade` fails with `upgrade can only be run with the argus binary`
+if the target runs from a binary with a different name.
+
+### Host
+
+Both methods are served by the node.
+
+| Method             | Params                       | Result         |
+| ------------------ | ---------------------------- | -------------- |
+| `host.info`        | `{ node_id? }`               | `HostInfo`     |
+| `host.setWakelock` | `{ node_id?, until? }`       | `HostWakelock` |
+
+```ts
+HostInfo {
+  os?:            string   // for example "macOS 26.0.1 (arm64)"
+  uptime_seconds: number
+  battery?:       { percent: number, state: "charging" | "discharging" | "full" | "not_charging" | "unknown" }
+  wakelock:       HostWakelock
+}
+
+HostWakelock { until?: string }   // RFC 3339
+```
+
+A wakelock keeps the machine of the node awake until `until`. An empty
+`until` turns the wakelock off. `9999-12-31T23:59:59Z` keeps it on until a
+client turns it off. The wakelock stays on after a node restart. `battery` is
+absent if the machine has no battery.
+
+`host.setWakelock` fails with `-32600` for an invalid `until`, for an `until`
+in the past, and on a node without wakelock support. Use
+`capabilities.host_wakelock` to check support before the call. Other failures
+are `-32603`.
 
 ### Sessions
 
@@ -1237,11 +1200,18 @@ unix socket and on relay channels.
 | `sessions.exportBundle` | request      | `ExportBundleParams`             | `{ filename, data: bytes }`  |
 
 For a headless agent (opencode, codex), `pane_id` in the `sessions.spawn` result is
-an empty string. A `cwd` of `~` or one that starts with `~/` is resolved against
-the node user's home directory. `sessions.spawn` and `sessions.resume`
-reject (`-32600`) a `cwd` that is relative, does not exist, is not a directory, or
-cannot be entered on the node; `terminal.open` with a `session_id` rejects a
-session whose directory is any of these.
+an empty string. For `sessions.spawn`, a `cwd` of `~` or one that starts with
+`~/` is resolved against the node user's home directory. `sessions.spawn` and
+`sessions.resume` reject (`-32600`) a `cwd` that is relative, does not exist,
+is not a directory, or cannot be entered on the node. `sessions.resume` also
+rejects an empty `cwd` with
+`cannot resume: session working directory is unknown`.
+
+`terminal.open` with the `session_id` of a session without a pane first
+creates a viewer pane. It applies the same `cwd` checks to the directory of
+the session, and fails with
+`cannot open terminal: session working directory is unknown` if the directory
+is unknown.
 
 `agent.model.list` lists the models `agent` can be spawned on, in the agent's
 order. An agent without a model choice returns no models. An unknown `agent` or a
@@ -1281,7 +1251,6 @@ For Claude Code, text that starts with `/` runs as a slash command. Claude Code
 takes no prompt that starts with `/`, so other such text fails.
 
 ```ts
-
 RespondParams {
   session_id:       string
   behavior?:        "allow" | "deny"
@@ -1384,22 +1353,26 @@ HistorySessionsParams {
 | `terminal.output`  | notification | `{ term_id, data }`                                                 | —                           |
 | `terminal.exited`  | notification | `{ term_id, reason? }`                                              | —                           |
 | `terminal.list`    | request      | none                                                                | `{ terminals: Terminal[] }` |
-| `terminal.create`  | request      | `{ node_id? }`                                                      | `Terminal`                  |
+| `terminal.create`  | request      | `{ node_id?, workspace_id? }`                                       | `Terminal`                  |
 | `terminal.kill`    | request      | `{ terminal_id }`                                                   | `null`                      |
 | `terminal.rename`  | request      | `{ terminal_id, name }`                                             | `null`                      |
 | `terminal.changed` | notification | empty; a gateway client adds `{ node_id }`                          | —                           |
 
 `terminal.open` takes exactly one of `session_id` and `terminal_id`.
 
-```
+The `workspace_id` of `terminal.create` is node-local. A gateway client
+removes the node prefix and sends the node id in `node_id`.
+
+```ts
 Terminal {
-  id:          string
-  name?:       string
-  cwd:         string
-  command:     string
-  attached?:   boolean
-  node_id?:    string
-  node_label?: string
+  id:            string
+  name?:         string
+  cwd:           string
+  command:       string
+  attached?:     boolean
+  workspace_id?: string   // the workspace it was created in
+  node_id?:      string
+  node_label?:   string
 }
 ```
 
@@ -1548,7 +1521,6 @@ IssueInfo  { number, title, author?, url? }
 | `push.unregister`   | node                 | `{ device_id }`                | `null`                 |
 | `push.test`         | node                 | `{ device_id }`                | `null`, or error `410` |
 | `push.setPause`     | node                 | `{ device_id, paused_until? }` | `null`                 |
-| `push.deliver`      | gateway (from nodes) | `PushDeliverParams`            | `{ gone?: boolean }`   |
 | `pushport.setToken` | gateway (admin)      | `{ token }`                    | `null`                 |
 
 ```ts
@@ -1558,13 +1530,6 @@ PushRegisterParams {
   p256dh?:       string   // base64url, no padding
   auth?:         string   // base64url, no padding
   paused_until?: string   // RFC 3339; empty means enabled
-}
-
-PushDeliverParams {
-  endpoint:   string
-  ciphertext: string   // standard base64
-  ttl?:       string
-  urgency?:   string
 }
 ```
 
@@ -1662,15 +1627,6 @@ LockLogEntry {
 }
 ```
 
-### Hooks
-
-| Method       | Served by | Params      | Result                |
-| ------------ | --------- | ----------- | --------------------- |
-| `hook.event` | node      | `HookEvent` | `{ output?: string }` |
-
-The `argus hook` command uses the unix socket. The node also serves
-`hook.event` on relay channels. See [Hooks](#hooks).
-
 ## Data types
 
 Session and API types use `snake_case` field names. Transcript types use
@@ -1726,7 +1682,6 @@ Summary {
   tokens?:            number
   task?:              string
   last_activity?:     string          // RFC 3339
-  task_session_keys?: string          // space-separated session UUIDs
 }
 
 Interaction {

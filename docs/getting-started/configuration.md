@@ -38,11 +38,17 @@ log:
   format: pretty        # pretty | json
 ```
 
+## Logs
+
+`pretty` logs have color when they go to a terminal. Set `NO_COLOR` to turn the
+color off, or `CLICOLOR_FORCE=1` to keep it when you pipe the output.
+
 ## Agent hooks
 
-`bin` (default `argus`) is the binary the agent hooks run. Set it to a full path
-when `argus` is not on the agent's `PATH`, for example when the agent starts
-from a desktop launcher. Argus updates the hooks the next time it starts.
+`bin` (default `argus`) is the binary that the Antigravity hooks run. Set it to
+a full path when `argus` is not on the `PATH` of Antigravity, for example when
+it starts from a desktop launcher. Argus updates the hooks the next time it
+starts. The Claude Code plugin does not use this setting.
 
 ## Projects & Workspaces
 

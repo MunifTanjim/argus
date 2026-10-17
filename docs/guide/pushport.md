@@ -25,7 +25,7 @@ Delivery runs over **Firebase Cloud Messaging** on Android and **Apple Push Noti
    and applies it live. No restart is needed.
 
 2. **Android only:** select the provider in the app. Open
-   **Settings → Push → Provider** and select **PushPort / FCM**. The option
+   **Settings → Push Notifications → Provider** and select **PushPort / FCM**. The option
    appears only after step 1.
 
    On iOS the app selects **PushPort / APNs** automatically on its next connection

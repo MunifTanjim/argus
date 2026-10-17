@@ -23,11 +23,26 @@ See [Single Machine](/guide/single-machine) for the node it connects to,
   sessions to the workspace of the session you have open.
 - **Transcript**: the full conversation, with foldable sections and tool-call details.
 - **Live screen**: a session's terminal. You can type into it.
-- **History**: past projects and sessions. You can resume a session.
+- **History**: past projects and sessions. You can resume a session if its
+  directory still exists. In History, `/` filters only the sessions that are
+  loaded. Press `m` to load more.
+- **Terminals**: shells on a node or in a workspace.
+
+## Sessions
+
+A Claude Code session takes a prompt while it works if the
+[Argus plugin](/getting-started/installation#connect-your-agents) is installed.
+The prompt waits above the input until Claude Code takes it. A `/` command
+waits until the turn ends. Other agents take a prompt only when they are idle.
+No agent takes a prompt while a permission request, a question, or a plan waits
+for you.
+
+`r` renames a session in the agent too. For Claude Code, rename needs the Argus
+plugin, and the new name applies after the current turn.
 
 ## Keys
 
-Press `g?` to see every key and its command. The keys follow Vim, and you can
+Press `g?` in a list or the sidebar to see every key and its command. The keys follow Vim, and you can
 change them. See
 [Keymaps](#keymaps).
 
@@ -39,10 +54,10 @@ In a transcript, each run of thinking and tool calls is folded. Press `l` or
 `<CR>` on a folded run, or click it, to expand it. Press `h` or `<CR>` on
 either end of an expanded run to fold it again. To show runs expanded by
 default, set `tui.verbose-transcript` to `true`, or run the
-`toggle verbose-transcript` command for the current session.
+`toggle verbose-transcript` command. The command applies until you quit the TUI.
 
-In a live session, run `open subagent` to pick one of the subagents the
-session has running now and open its transcript.
+In a live Claude Code session, run `open subagent` to pick one of the subagents
+that the session runs now and open its transcript.
 
 ### Select and copy
 
@@ -62,7 +77,7 @@ terminal's clipboard too, which works over SSH.
 
 To use your terminal's own selection instead, hold `Shift` (in most terminals)
 while you drag, or give the mouse back to the terminal: set `tui.mouse` to
-`off`, or run the `toggle mouse` command for the current session.
+`off`, or run the `toggle mouse` command, which applies until you quit the TUI.
 
 ### Palette
 
@@ -150,6 +165,7 @@ keys come from a default keymap, for example `P` runs `:toggle pin<CR>`. The
 | `file` | An open file or diff |
 | `file-tree` | The Files tab |
 | `changes` | The Changes tab |
+| `terminals` | The terminals of Home, a node, or a workspace |
 | `global` | Every section |
 
 ### Key notation

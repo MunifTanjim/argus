@@ -1,8 +1,8 @@
 # Multi Machine
 
-To run Argus across several machines, make one node the **gateway**. Each other
-node connects to it, and your TUI or the mobile app connects to the gateway as a
-single endpoint.
+To run Argus across several machines, run a **gateway** on one machine. The node
+of each machine connects to it, and your TUI or the mobile app connects to the
+gateway as a single endpoint.
 
 ```sh
 # gateway (always-on box)
@@ -15,13 +15,16 @@ argus --gateway wss://gateway.argus --token <TOKEN>
 
 ## Roles
 
-A node's role comes from its flags:
+`argus start` picks its role from its flags:
 
-| `--gateway` | `--token` | role                                                    |
-| ----------- | --------- | ------------------------------------------------------- |
-| unset       | set       | **gateway node**: listens, aggregates, serves clients. |
-| set         | set       | **connected node**: dials the gateway, doesn't listen. |
-| unset       | unset     | **local node**: unix socket only.                       |
+| `--gateway` | `--token` | role                                                          |
+| ----------- | --------- | ------------------------------------------------------------- |
+| unset       | set       | **gateway**: serves clients, and runs a node for this machine. |
+| set         | set       | **connected node**: dials the gateway, does not listen.        |
+| unset       | unset     | **local node**: unix socket only.                              |
+
+To run a gateway without a node, for example on a server with no agents, add
+`--mode gateway`.
 
 `--token` is the shared secret. The gateway requires it, and nodes and clients
 present it. The gateway serves plain `ws://`. For a public or encrypted endpoint,
@@ -37,15 +40,16 @@ open.
 
 ### Tunnel
 
-Argus can manage a Cloudflare tunnel that routes a public URL to the gateway. This
-is the easiest way to reach the gateway from the mobile app:
+Argus can manage a tunnel that routes a public URL to the gateway. This is the
+easiest way to reach the gateway from the mobile app:
 
 ```sh
 argus start --tunnel cloudflare:quick --token <TOKEN>
-# prints: tunnel public URL: https://<random>.trycloudflare.com
 ```
 
-See [Gateway Tunnel](/guide/gateway-tunnel) for stable hostnames and the other Cloudflare modes.
+Argus logs the public URL when the tunnel is up. See
+[Gateway Tunnel](/guide/gateway-tunnel) for stable hostnames and the other
+providers: ngrok, zrok, and a tunnel that you manage.
 
 ### SSH access
 
