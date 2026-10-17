@@ -60,6 +60,7 @@ var nodeAddressed = map[string]bool{
 	api.MethodSessionSpawn:              true,
 	api.MethodSessionResume:             true,
 	api.MethodAgentsList:                true,
+	api.MethodAgentsModels:              true,
 	api.MethodSessionExport:             true,
 	api.MethodSessionsHistorySessions:   true,
 	api.MethodSessionsHistoryTranscript: true,

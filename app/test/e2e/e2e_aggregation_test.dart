@@ -154,6 +154,24 @@ void main() {
     await client.close();
   });
 
+  test('agents.models routes by node_id', () async {
+    final seen = <String>[];
+    final a = LoopbackNode('A', await generateKeyPair(), (m, p) {
+      seen.add('A:$m');
+      return _json({'models': []});
+    });
+    final b = LoopbackNode('B', await generateKeyPair(), (m, p) {
+      seen.add('B:$m');
+      return _json({'models': []});
+    });
+    final lnk = MultiNodeLoopbackLink({'A': a, 'B': b});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+    await client.call('agents.models', {'node_id': 'B', 'agent': 'claude'});
+    expect(seen, ['B:agents.models']);
+    await client.close();
+  });
+
   test('transcript.subscribe records the handle; unsubscribe routes to that node', () async {
     var unsubNode = '';
     final a = LoopbackNode('A', await generateKeyPair(), (m, p) {

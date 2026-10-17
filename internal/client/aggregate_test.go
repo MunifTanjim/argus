@@ -74,6 +74,9 @@ func TestMethodSetsMirrorGateway(t *testing.T) {
 	if !terminalAddressed[api.MethodTerminalKill] || !terminalAddressed[api.MethodTerminalRename] {
 		t.Error("terminalAddressed missing kill/rename")
 	}
+	if !nodeAddressed[api.MethodAgentsModels] {
+		t.Error("nodeAddressed missing agents.models")
+	}
 	if !nodeAddressed[api.MethodTerminalCreate] {
 		t.Error("nodeAddressed missing terminal.create")
 	}

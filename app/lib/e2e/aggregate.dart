@@ -26,7 +26,8 @@ const Set<String> sessionAddressed = {
 
 /// Methods routed by an explicit node_id (or the sole node).
 const Set<String> nodeAddressed = {
-  'sessions.spawn', 'sessions.resume', 'agents.list', 'sessions.exportBundle',
+  'sessions.spawn', 'sessions.resume', 'agents.list', 'agents.models',
+  'sessions.exportBundle',
   'sessions.historySessions', 'sessions.historyTranscript', 'sessions.historyToolDetail',
   'terminal.create', 'host.info', 'host.setWakelock', 'host.completeDir',
 };
