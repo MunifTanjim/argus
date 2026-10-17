@@ -18,6 +18,7 @@ abstract class SessionRepository {
     String? nodeId,
     String? cwd,
     String? agent,
+    String? model,
     required String prompt,
   });
   Future<Result<void>> kill(String sessionId);
@@ -26,6 +27,9 @@ abstract class SessionRepository {
 
   /// Lists every agent [nodeId] knows (empty [nodeId] = sole node).
   Future<Result<List<AgentInfo>>> listAgents(String? nodeId);
+
+  /// Empty means [agent] offers no model choice.
+  Future<Result<List<ModelInfo>>> listModels(String? nodeId, String agent);
 
   /// An empty [nodeId] targets the sole node.
   Future<Result<DirCompletion>> completeDir(String? nodeId, String path);
@@ -68,9 +72,11 @@ class SessionRepositoryRemote implements SessionRepository {
     String? nodeId,
     String? cwd,
     String? agent,
+    String? model,
     required String prompt,
   }) =>
-      _service.spawn(nodeId: nodeId, cwd: cwd, agent: agent, prompt: prompt);
+      _service.spawn(
+          nodeId: nodeId, cwd: cwd, agent: agent, model: model, prompt: prompt);
 
   @override
   Future<Result<void>> kill(String sessionId) => _service.kill(sessionId);
@@ -85,6 +91,10 @@ class SessionRepositoryRemote implements SessionRepository {
   @override
   Future<Result<List<AgentInfo>>> listAgents(String? nodeId) =>
       _service.listAgents(nodeId);
+
+  @override
+  Future<Result<List<ModelInfo>>> listModels(String? nodeId, String agent) =>
+      _service.listModels(nodeId, agent);
 
   @override
   Future<Result<DirCompletion>> completeDir(String? nodeId, String path) =>

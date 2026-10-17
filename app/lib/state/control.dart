@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/legacy.dart';
 
 import '../core/result.dart';
 import '../transport/gateway_client.dart';
+import '../transport/jsonrpc.dart';
 import 'compat.dart';
 import 'gateway.dart';
 import 'grouping.dart';
@@ -64,6 +65,7 @@ class SessionService {
     String? nodeId,
     String? cwd,
     String? agent,
+    String? model,
     required String prompt,
   }) =>
       _guard((c) => c.call('sessions.spawn', {
@@ -71,6 +73,7 @@ class SessionService {
             if (nodeId != null && nodeId.isNotEmpty) 'node_id': nodeId,
             if (cwd != null && cwd.isNotEmpty) 'cwd': cwd,
             if (agent != null && agent.isNotEmpty) 'agent': agent,
+            if (model != null && model.isNotEmpty) 'model': model,
           }));
 
   Future<Result<ResumeOutcome>> resume({
@@ -105,6 +108,29 @@ class SessionService {
               spawnable: a['spawnable'] as bool? ?? false,
             ),
         ];
+      });
+
+  /// An empty [nodeId] targets the sole node. A node too old to know the
+  /// method offers no models.
+  Future<Result<List<ModelInfo>>> listModels(String? nodeId, String agent) =>
+      _guard((c) async {
+        try {
+          final r = await c.call('agent.model.list', {
+            'agent': agent,
+            if (nodeId != null && nodeId.isNotEmpty) 'node_id': nodeId,
+          });
+          final list = (r as Map?)?['models'] as List? ?? const [];
+          return [
+            for (final m in list)
+              ModelInfo(
+                id: (m as Map)['id'] as String? ?? '',
+                name: m['name'] as String? ?? '',
+              ),
+          ];
+        } on RpcError catch (e) {
+          if (e.isMethodNotFound) return const <ModelInfo>[];
+          rethrow;
+        }
       });
 
   /// An empty [nodeId] targets the sole node.
