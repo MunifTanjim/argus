@@ -247,9 +247,13 @@ func TestSendShellInputSendsAShellCommand(t *testing.T) {
 	}
 	got := modPoll(a, context.Background(), "s1")
 	waitUntil(t, func() bool { return a.ModBridge().Reachable("s1") })
-	s := session.Session{ID: "x", AgentSessionID: "s1", Status: session.StatusWorking}
-	if err := a.SendShellInput(context.Background(), s, "! ls"); err != nil {
-		t.Fatal(err)
+	paneless := session.Session{ID: "x", AgentSessionID: "s1", Status: session.StatusWorking}
+	if _, err := a.SendShellInput(context.Background(), paneless, "! ls"); !errors.Is(err, api.ErrShellNeedsPane) {
+		t.Fatalf("paneless: err = %v, want ErrShellNeedsPane", err)
+	}
+	s := session.Session{ID: "x", AgentSessionID: "s1", Status: session.StatusWorking, Tmux: session.TmuxLocation{PaneID: "%1"}}
+	if submit, err := a.SendShellInput(context.Background(), s, "! ls"); err != nil || submit {
+		t.Fatalf("submit = %v, err = %v; want the mod to type the Enter", submit, err)
 	}
 	if cmds := <-got; len(cmds) != 1 || cmds[0].Kind != modbridge.KindShell || cmds[0].Text != "! ls" {
 		t.Fatalf("poll got %v", cmds)
@@ -258,9 +262,9 @@ func TestSendShellInputSendsAShellCommand(t *testing.T) {
 
 func TestSendShellInputIsBusyUnderAnInteractionOrDialog(t *testing.T) {
 	a, _ := newWiredAdapter(t)
-	pending := session.Session{ID: "x", AgentSessionID: "s1", Status: session.StatusAwaitingInput,
+	pending := session.Session{ID: "x", AgentSessionID: "s1", Status: session.StatusAwaitingInput, Tmux: session.TmuxLocation{PaneID: "%1"},
 		Interaction: &session.Interaction{Kind: session.InteractionPermission}}
-	if err := a.SendShellInput(context.Background(), pending, "! ls"); !errors.Is(err, api.ErrSessionBusy) {
+	if _, err := a.SendShellInput(context.Background(), pending, "! ls"); !errors.Is(err, api.ErrSessionBusy) {
 		t.Fatalf("pending interaction: err = %v, want ErrSessionBusy", err)
 	}
 	go func() {
@@ -269,8 +273,8 @@ func TestSendShellInputIsBusyUnderAnInteractionOrDialog(t *testing.T) {
 		}
 	}()
 	waitUntil(t, func() bool { return a.ModBridge().Reachable("s1") })
-	s := session.Session{ID: "x", AgentSessionID: "s1", Status: session.StatusIdle}
-	if err := a.SendShellInput(context.Background(), s, "! ls"); !errors.Is(err, api.ErrSessionBusy) {
+	s := session.Session{ID: "x", AgentSessionID: "s1", Status: session.StatusIdle, Tmux: session.TmuxLocation{PaneID: "%1"}}
+	if _, err := a.SendShellInput(context.Background(), s, "! ls"); !errors.Is(err, api.ErrSessionBusy) {
 		t.Fatalf("dialog: err = %v, want ErrSessionBusy", err)
 	}
 }
