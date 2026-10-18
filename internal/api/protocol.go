@@ -21,7 +21,7 @@ var ErrNoTerminalControl = errors.New("session has no terminal control")
 var ErrSessionBusy = errors.New("session is busy: send the prompt once its turn ends")
 
 // ErrShellNeedsPane is returned for "!" bash mode input to a session without a
-// tmux pane: the agent takes it only as typed keys.
+// tmux pane, for an agent that takes it only as typed keys.
 var ErrShellNeedsPane = errors.New("bash mode (!) needs a tmux session")
 
 const jsonrpcVersion = "2.0"
