@@ -15,6 +15,7 @@ import (
 type fakePi struct {
 	t *testing.T
 
+	state map[string]any // extra get_state fields
 	// promptDisposition answers prompt ("started" when empty); with
 	// promptRelease set, the answer waits for it, as a command's does for
 	// its dialogs.
@@ -45,8 +46,14 @@ func (f *fakePi) run(stdin io.Reader, stdout io.WriteCloser) {
 		case "get_state":
 			// Interleave an event before the response, like real pi does.
 			enc.Encode(map[string]any{"type": "session_info_changed", "name": "x"})
+			data := map[string]any{"sessionId": "ses-1", "sessionFile": "/tmp/ses-1.jsonl"}
+			f.mu.Lock()
+			for k, v := range f.state {
+				data[k] = v
+			}
+			f.mu.Unlock()
 			enc.Encode(map[string]any{"id": rec["id"], "type": "response", "command": "get_state", "success": true,
-				"data": map[string]any{"sessionId": "ses-1", "sessionFile": "/tmp/ses-1.jsonl"}})
+				"data": data})
 		case "bash":
 			enc.Encode(map[string]any{"type": "bash_execution_update", "id": rec["id"], "delta": "hi\n"})
 			enc.Encode(map[string]any{"id": rec["id"], "type": "response", "command": "bash", "success": true,

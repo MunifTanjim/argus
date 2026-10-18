@@ -356,6 +356,29 @@ func TestBeaconInstallCycle(t *testing.T) {
 	}
 }
 
+func TestBeaconReportsModel(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	fb := dialBeacon(t, d)
+	fb.send(map[string]any{
+		"type": "hello", "sessionId": "for-m", "cwd": "/w", "idle": true,
+		"model": "m1", "reasoning": true, "thinkingLevel": "low",
+	})
+	s := waitCard(t, reg, "for-m", session.StatusAwaitingInput)
+	if s.Summary == nil || s.Summary.ModelName != "m1" || s.Summary.Effort != "low" {
+		t.Fatalf("summary = %+v", s.Summary)
+	}
+	fb.send(map[string]any{"type": "event", "name": "model", "model": "m2", "reasoning": false, "thinkingLevel": "off"})
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if s := waitCard(t, reg, "for-m", ""); s.Summary.ModelName == "m2" && s.Summary.Effort == "" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("model event not applied")
+}
+
 func TestForeignSessionGetsNoResumePane(t *testing.T) {
 	reg := registry.New()
 	d := newDiscoverer(reg, nil)

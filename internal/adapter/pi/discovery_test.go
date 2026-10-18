@@ -436,6 +436,77 @@ func snapshotGone(t *testing.T, reg *registry.Registry, id string) {
 	}
 }
 
+func TestSpawnReportsModelAndEffort(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t, state: map[string]any{
+		"model":         map[string]any{"id": "claude-sonnet-4-5", "reasoning": true},
+		"thinkingLevel": "medium",
+	}}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := snapshotByID(t, reg, id)
+	if s.Summary == nil || s.Summary.ModelName != "claude-sonnet-4-5" || s.Summary.Effort != "medium" {
+		t.Fatalf("summary = %+v", s.Summary)
+	}
+	d.handleEvent(id, "thinking_level_changed", json.RawMessage(`{"type":"thinking_level_changed","level":"high"}`))
+	if s := snapshotByID(t, reg, id); s.Summary.Effort != "high" {
+		t.Fatalf("effort after change = %q", s.Summary.Effort)
+	}
+}
+
+func TestModelWithoutReasoningTakesNoEffort(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t, state: map[string]any{
+		"model":         map[string]any{"id": "gpt-4o", "reasoning": false},
+		"thinkingLevel": "off",
+	}}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := snapshotByID(t, reg, id)
+	if s.Summary == nil || s.Summary.ModelName != "gpt-4o" || s.Summary.Effort != "" {
+		t.Fatalf("summary = %+v", s.Summary)
+	}
+}
+
+func TestSettledRereadsModel(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t, state: map[string]any{
+		"model": map[string]any{"id": "m1", "reasoning": true}, "thinkingLevel": "low",
+	}}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.state["model"] = map[string]any{"id": "m2", "reasoning": true}
+	f.mu.Unlock()
+	d.handleEvent(id, "agent_settled", json.RawMessage(`{"type":"agent_settled"}`))
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if s := snapshotByID(t, reg, id); s.Summary != nil && s.Summary.ModelName == "m2" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("model never refreshed after settle")
+}
+
 func TestLiveSessionGetsNoResumePane(t *testing.T) {
 	reg := registry.New()
 	d := newDiscoverer(reg, nil)

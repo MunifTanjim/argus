@@ -131,6 +131,12 @@ export default function (pi: ExtensionAPI) {
 		pi.on("session_info_changed", async (ev) => {
 			beaconSend({ type: "event", name: "session_info_changed", displayName: ev.name ?? null });
 		});
+		pi.on("model_select", async (ev) => {
+			beaconSend({ type: "event", name: "model", ...modelInfo(ev.model, pi.getThinkingLevel()) });
+		});
+		pi.on("thinking_level_select", async (ev, ctx) => {
+			beaconSend({ type: "event", name: "model", ...modelInfo(ctx.model, ev.level) });
+		});
 		// pi shows extensions whether prompts wait, not which: the queue Argus
 		// shows is the prompts it sent while pi was busy, until pi takes each.
 		let queued: string[] = [];
@@ -157,12 +163,16 @@ export default function (pi: ExtensionAPI) {
 				sessionId: ctx.sessionManager.getSessionId(),
 				sessionFile: ctx.sessionManager.getSessionFile() ?? null,
 				cwd: ctx.sessionManager.getCwd(),
-				model: ctx.model?.id ?? null,
+				...modelInfo(ctx.model, pi.getThinkingLevel()),
 				idle: ctx.isIdle(),
 				pid: process.pid,
 			};
 		};
 	}
+}
+
+function modelInfo(model: { id: string; reasoning?: boolean } | undefined, thinkingLevel: string) {
+	return { model: model?.id ?? null, reasoning: model?.reasoning === true, thinkingLevel };
 }
 
 function messageText(content: unknown): string {

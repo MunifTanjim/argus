@@ -37,7 +37,6 @@ type foreignSession struct {
 	wmu  sync.Mutex
 
 	// Guarded by card.mu.
-	model      string
 	pid        int
 	server     session.TmuxServer
 	paneID     string
@@ -116,6 +115,8 @@ type beaconHello struct {
 	SessionFile string `json:"sessionFile"`
 	Cwd         string `json:"cwd"`
 	Model       string `json:"model"`
+	Reasoning   bool   `json:"reasoning"`
+	Level       string `json:"thinkingLevel"`
 	Idle        bool   `json:"idle"`
 	PID         int    `json:"pid"`
 }
@@ -135,8 +136,9 @@ func (d *discoverer) helloForeign(fs *foreignSession, line []byte) string {
 	server, paneID := d.claimPane(h.PID, h.SessionID)
 	repo := gittree.RepoName(h.Cwd)
 	fs.mu.Lock()
-	fs.id, fs.cwd, fs.repo, fs.file, fs.model, fs.pid = h.SessionID, h.Cwd, repo, h.SessionFile, h.Model, h.PID
+	fs.id, fs.cwd, fs.repo, fs.file, fs.pid = h.SessionID, h.Cwd, repo, h.SessionFile, h.PID
 	fs.server, fs.paneID = server, paneID
+	fs.model, fs.reasoning, fs.level = h.Model, h.Reasoning, h.Level
 	fs.lastSeen = time.Now()
 	fs.mu.Unlock()
 	d.mu.Lock()
@@ -227,6 +229,9 @@ func (d *discoverer) forgetForeign(id string) bool {
 type beaconEvent struct {
 	Name        string   `json:"name"`
 	DisplayName string   `json:"displayName"`
+	Model       string   `json:"model"`
+	Reasoning   bool     `json:"reasoning"`
+	Level       string   `json:"thinkingLevel"`
 	Items       []string `json:"items"`
 	Open        bool     `json:"open"`
 	Title       string   `json:"title"`
@@ -269,6 +274,11 @@ func (d *discoverer) foreignEvent(id string, line []byte) {
 		}
 		fs.mu.Lock()
 		fs.name = ev.DisplayName
+		fs.mu.Unlock()
+		d.foreignCard(fs, "", nil, false)
+	case "model":
+		fs.mu.Lock()
+		fs.model, fs.reasoning, fs.level = ev.Model, ev.Reasoning, ev.Level
 		fs.mu.Unlock()
 		d.foreignCard(fs, "", nil, false)
 	case "queue":

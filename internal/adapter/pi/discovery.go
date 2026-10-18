@@ -59,6 +59,9 @@ type card struct {
 	repo      string
 	file      string // may be empty: pi creates it after the first user/assistant message
 	name      string
+	model     string
+	reasoning bool // the model takes a thinking level
+	level     string
 	streaming bool
 	pending   map[string]*pendingUI // ui request id -> dialog
 }
@@ -78,6 +81,7 @@ func (c *card) hookUpdate(st session.Status, ix *session.Interaction, replace bo
 		Status:             st,
 		Interaction:        ix,
 		ReplaceInteraction: replace,
+		Model:              modelUpdate(c.model, c.reasoning, c.level),
 	}
 }
 
@@ -214,22 +218,8 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (stri
 		}
 	}()
 
-	// Hydrate identity: session file and canonical session id.
-	if data, err := conn.call(ctx, d.nextID(), "get_state", nil); err == nil {
-		var st struct {
-			SessionID   string `json:"sessionId"`
-			SessionFile string `json:"sessionFile"`
-			SessionName string `json:"sessionName"`
-		}
-		if json.Unmarshal(data, &st) == nil {
-			if st.SessionFile != "" {
-				p.file = st.SessionFile
-			}
-			if st.SessionName != "" {
-				p.name = st.SessionName
-			}
-		}
-	}
+	// Hydrate identity: session file, name, and model.
+	d.loadState(ctx, p)
 	d.upsert(p, session.StatusWorking, nil, false)
 	if prompt != "" {
 		if err := d.sendPrompt(ctx, id, prompt); err != nil {
@@ -237,6 +227,57 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (stri
 		}
 	}
 	return id, nil
+}
+
+// rpcState is the slice of get_state the card needs.
+type rpcState struct {
+	SessionFile   string `json:"sessionFile"`
+	SessionName   string `json:"sessionName"`
+	ThinkingLevel string `json:"thinkingLevel"`
+	Model         *struct {
+		ID        string `json:"id"`
+		Reasoning bool   `json:"reasoning"`
+	} `json:"model"`
+}
+
+// loadState folds get_state into p and reports whether the card changed. Pi
+// emits no event when the model changes, so this also runs after every settled
+// run.
+func (d *discoverer) loadState(ctx context.Context, p *sessionProc) bool {
+	data, err := p.conn.call(ctx, d.nextID(), "get_state", nil)
+	if err != nil {
+		return false
+	}
+	var st rpcState
+	if json.Unmarshal(data, &st) != nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	file, name, model, reasoning, level := p.file, p.name, p.model, p.reasoning, p.level
+	if st.SessionFile != "" {
+		p.file = st.SessionFile
+	}
+	if st.SessionName != "" {
+		p.name = st.SessionName
+	}
+	if st.Model != nil && st.Model.ID != "" {
+		p.model, p.reasoning, p.level = st.Model.ID, st.Model.Reasoning, st.ThinkingLevel
+	}
+	return p.file != file || p.name != name || p.model != model || p.reasoning != reasoning || p.level != level
+}
+
+// modelUpdate reports a pi model as the card's live model, or nil before one
+// is known. A model without reasoning takes no effort, whatever level pi keeps.
+func modelUpdate(model string, reasoning bool, level string) *registry.ModelUpdate {
+	if model == "" {
+		return nil
+	}
+	effort := ""
+	if reasoning {
+		effort = level
+	}
+	return &registry.ModelUpdate{Name: model, Effort: &effort}
 }
 
 func (d *discoverer) sendPrompt(ctx context.Context, id, text string) error {
@@ -371,10 +412,28 @@ func (d *discoverer) handleEvent(id, typ string, raw json.RawMessage) {
 		p.mu.Lock()
 		p.streaming = false
 		p.mu.Unlock()
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if d.loadState(ctx, p) {
+				d.upsert(p, "", nil, false)
+			}
+		}()
 		if hasPending {
 			return
 		}
 		d.upsert(p, session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle}, true)
+	case "thinking_level_changed":
+		var ev struct {
+			Level string `json:"level"`
+		}
+		if json.Unmarshal(raw, &ev) != nil {
+			return
+		}
+		p.mu.Lock()
+		p.level = ev.Level
+		p.mu.Unlock()
+		d.upsert(p, "", nil, false)
 	case "session_info_changed":
 		var ev struct {
 			Name string `json:"name"`
