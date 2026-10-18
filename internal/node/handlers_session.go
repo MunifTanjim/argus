@@ -270,6 +270,12 @@ func (d *Node) sendPromptInput(ctx context.Context, s session.Session, p api.Inp
 	if p.Text == "" {
 		return nil, fmt.Errorf("%s: %w", s.ID, api.ErrNoTerminalControl)
 	}
+	if si, ok := a.(adapter.ShellInput); ok && p.Submit && si.IsShellInput(p.Text) {
+		if !s.Controllable() {
+			return nil, fmt.Errorf("%s: %w", s.ID, api.ErrShellNeedsPane)
+		}
+		return nil, si.SendShellInput(ctx, s, p.Text)
+	}
 	if f, ok := a.(adapter.PaneFiller); ok && s.Status == session.StatusWorking && s.Controllable() {
 		return nil, d.fillAndSubmit(ctx, s, f, p.Text)
 	}

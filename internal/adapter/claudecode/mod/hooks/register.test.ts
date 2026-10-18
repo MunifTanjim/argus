@@ -771,6 +771,99 @@ test('a fill that lands after its accepted ack gives the draft back', OPTIONS, a
   expect(fills).toEqual(['steer', 'my draft'])
 })
 
+// Claude's input box under tmux keys: a typed "!" on an empty box turns bash
+// mode on, Enter submits, and a replacing fill leaves bash mode.
+function bashBox(on: On, draft: string, opts: { bang?: boolean; submits?: boolean } = {}) {
+  const box = { text: draft, bash: false }
+  const keys: string[][] = []
+  const fills: { text: string; mode: string }[] = []
+  const ran: string[] = []
+  on('prompt.read', () => ({ value: { text: box.text, cursor: box.text.length } }) as never)
+  on('prompt.fill', ($, e) => {
+    fills.push({ text: e.text, mode: e.mode })
+    if (e.mode === 'replace') box.bash = false
+    box.text = e.mode === 'replace' ? e.text : box.text + e.text
+    return { isFilled: true } as never
+  })
+  on('process.run', ($, e) => {
+    const argv = [...e.argv]
+    const sub = argv.indexOf('send-keys') >= 0 ? argv.slice(argv.indexOf('send-keys') + 1) : []
+    if (argv.includes('display-message')) return { value: { exitCode: 0, stdout: '0\n', stderr: '' } } as never
+    keys.push(argv)
+    const typed = sub.slice(sub.indexOf('--') + 1)
+    if (sub.includes('-l') && typed[0] === '!' && box.text === '') {
+      if (opts.bang === false) box.text = '!'
+      else box.bash = true
+    }
+    if (typed[0] === 'Enter' && opts.submits !== false) {
+      ran.push(`${box.bash ? 'bash' : 'prompt'}:${box.text}`)
+      box.text = ''
+      box.bash = false
+    }
+    return { value: { exitCode: 0, stdout: '', stderr: '' } } as never
+  })
+  return { box, keys, fills, ran }
+}
+
+async function runShell($: EngineInterface, on: On, clock: ReturnType<typeof mock.clock>, text: string) {
+  const queue = [{ commands: [{ id: '1', kind: 'shell', text }] }]
+  const sent = argusd(on, s => (s.path === '/claude/poll' ? queue.shift() ?? new Error('hold') : {}))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  for (let i = 0; i < 60; i++) {
+    await clock.settle()
+    await clock.advance(50)
+  }
+  return sent.filter(s => s.path === '/claude/ack').map(s => s.body)
+}
+
+const TMUX_ENV = { TMUX_PANE: '%3', TMUX: '/tmp/tmux-1000/argus,1,0' }
+
+test('a shell command runs in bash mode and the draft comes back', OPTIONS, async ($, on) => {
+  const { clock } = world(on, TMUX_ENV)
+  const b = bashBox(on, 'my draft')
+  const acks = await runShell($, on, clock, '! ls -la')
+  expect(acks).toEqual([{ id: '1', ran: true }])
+  expect(b.ran).toEqual(['bash: ls -la'])
+  expect(b.box).toEqual({ text: 'my draft', bash: false })
+  expect(b.fills).toEqual([{ text: '', mode: 'replace' }, { text: ' ls -la', mode: 'insert' }, { text: 'my draft', mode: 'replace' }])
+  expect(b.keys.every(k => k[0] === 'tmux' && k[1] === '-S' && k[2] === '/tmp/tmux-1000/argus' && k.includes('%3'))).toBe(true)
+})
+
+test('a multi-line shell command runs as one bash mode command', OPTIONS, async ($, on) => {
+  const { clock } = world(on, TMUX_ENV)
+  const b = bashBox(on, '')
+  const acks = await runShell($, on, clock, '! echo a\necho b')
+  expect(acks).toEqual([{ id: '1', ran: true }])
+  expect(b.ran).toEqual(['bash: echo a\necho b'])
+})
+
+test('a shell command needs a tmux pane', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const b = bashBox(on, 'my draft')
+  const acks = await runShell($, on, clock, '! ls')
+  expect(acks).toEqual([{ id: '1', error: 'bash mode needs a tmux pane' }])
+  expect(b.keys).toEqual([])
+  expect(b.box.text).toBe('my draft')
+})
+
+test('a "!" that does not turn bash mode on runs nothing', OPTIONS, async ($, on) => {
+  const { clock } = world(on, TMUX_ENV)
+  const b = bashBox(on, 'my draft', { bang: false })
+  const acks = await runShell($, on, clock, '! ls')
+  expect(acks).toEqual([{ id: '1', error: 'bash mode did not turn on' }])
+  expect(b.ran).toEqual([])
+  expect(b.box).toEqual({ text: 'my draft', bash: false })
+})
+
+test('an Enter Claude never takes keeps the draft out of the box', OPTIONS, async ($, on) => {
+  const { clock } = world(on, TMUX_ENV)
+  const b = bashBox(on, 'my draft', { submits: false })
+  const acks = await runShell($, on, clock, '! ls')
+  expect(acks).toEqual([{ id: '1', error: 'claude did not take the command: the draft was dropped' }])
+  expect(b.box).toEqual({ text: ' ls', bash: true })
+})
+
 function shellEvents(sent: Sent[]) {
   return sent.filter(s => s.body.event === 'Shells').map(s => (s.body.payload as Record<string, unknown>).shells as { id: string }[])
 }

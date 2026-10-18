@@ -865,3 +865,55 @@ func TestSendPromptIsUsedWhenNoFillApplies(t *testing.T) {
 		})
 	}
 }
+
+type fakeShell struct {
+	fakeFiller
+	shell string
+}
+
+func (f *fakeShell) IsShellInput(text string) bool { return strings.HasPrefix(text, "!") }
+
+func (f *fakeShell) SendShellInput(_ context.Context, _ session.Session, text string) error {
+	f.shell = text
+	return nil
+}
+
+func TestShellInputRouting(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		hook      registry.HookUpdate
+		text      string
+		submit    bool
+		wantErr   error
+		wantShell string
+		wantSent  string
+	}{
+		{"working with a pane", registry.HookUpdate{AgentSessionID: "ses_1", Status: session.StatusWorking,
+			Server: session.TmuxServerArgus, PaneID: "%1"}, "! ls", true, nil, "! ls", ""},
+		{"idle with a pane", registry.HookUpdate{AgentSessionID: "ses_2", Status: session.StatusIdle,
+			Server: session.TmuxServerArgus, PaneID: "%2"}, "! ls", true, nil, "! ls", ""},
+		{"paneless", registry.HookUpdate{AgentSessionID: "ses_3", Status: session.StatusIdle}, "! ls", true,
+			api.ErrShellNeedsPane, "", ""},
+		{"not submitted", registry.HookUpdate{AgentSessionID: "ses_4", Status: session.StatusIdle}, "!", false,
+			nil, "", "!"},
+		{"a plain prompt", registry.HookUpdate{AgentSessionID: "ses_5", Status: session.StatusIdle}, "hi", true,
+			nil, "", "hi"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newNode(map[session.TmuxServer]*tmux.Client{})
+			fs := &fakeShell{}
+			d.adapters["opencode"] = fs
+			tc.hook.Agent, tc.hook.Input = "opencode", session.InputAPI
+			s, _ := d.reg.ApplyHook(tc.hook)
+			params, _ := json.Marshal(api.InputParams{SessionID: s.ID, Text: tc.text, Submit: tc.submit})
+			_, err := d.handleSessionInput(context.Background(), params)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tc.wantErr)
+			}
+			if fs.shell != tc.wantShell || fs.gotText != tc.wantSent || fs.filled != "" {
+				t.Fatalf("shell %q, SendPrompt %q, filled %q; want shell %q, SendPrompt %q",
+					fs.shell, fs.gotText, fs.filled, tc.wantShell, tc.wantSent)
+			}
+		})
+	}
+}
