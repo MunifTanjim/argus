@@ -167,11 +167,12 @@ type PaneFiller interface {
 	FillPrompt(ctx context.Context, sess session.Session, text string) (filled bool, err error)
 }
 
-// ShellInput runs "!" bash mode input, which the agent takes only as keys typed
-// in its pane: its prompt API would send the text to the model.
+// ShellInput runs "!" bash mode input, which the agent's prompt API would send
+// to the model as text. submit is true when the input waits in the session's
+// input box for the node to submit with Enter in its pane.
 type ShellInput interface {
 	IsShellInput(text string) bool
-	SendShellInput(ctx context.Context, sess session.Session, text string) error
+	SendShellInput(ctx context.Context, sess session.Session, text string) (submit bool, err error)
 }
 
 // ModBridged is an adapter whose sessions keep a mod connection to argusd (Claude

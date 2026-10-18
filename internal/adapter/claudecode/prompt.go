@@ -56,15 +56,18 @@ func (a *ccAdapter) IsShellInput(text string) bool { return strings.HasPrefix(te
 
 // SendShellInput hands "!" bash mode input to the session's mod, which types the
 // "!" and the Enter in its pane and puts the user's draft back.
-func (a *ccAdapter) SendShellInput(ctx context.Context, sess session.Session, text string) error {
+func (a *ccAdapter) SendShellInput(ctx context.Context, sess session.Session, text string) (bool, error) {
+	if !sess.Controllable() {
+		return false, fmt.Errorf("%s: %w", sess.ID, api.ErrShellNeedsPane)
+	}
 	if sess.InteractionPending() {
-		return fmt.Errorf("%s: %w", sess.ID, api.ErrSessionBusy)
+		return false, fmt.Errorf("%s: %w", sess.ID, api.ErrSessionBusy)
 	}
 	_, err := a.sendMod(ctx, sess, modbridge.Command{Kind: modbridge.KindShell, Text: text})
 	if errors.Is(err, modbridge.ErrBusy) {
-		return fmt.Errorf("%s: %w", sess.ID, api.ErrSessionBusy)
+		return false, fmt.Errorf("%s: %w", sess.ID, api.ErrSessionBusy)
 	}
-	return err
+	return false, err
 }
 
 // FillPrompt puts text in Claude's input box in place of the user's draft, which

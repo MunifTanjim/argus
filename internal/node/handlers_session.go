@@ -271,10 +271,11 @@ func (d *Node) sendPromptInput(ctx context.Context, s session.Session, p api.Inp
 		return nil, fmt.Errorf("%s: %w", s.ID, api.ErrNoTerminalControl)
 	}
 	if si, ok := a.(adapter.ShellInput); ok && p.Submit && si.IsShellInput(p.Text) {
-		if !s.Controllable() {
-			return nil, fmt.Errorf("%s: %w", s.ID, api.ErrShellNeedsPane)
+		submit, err := si.SendShellInput(ctx, s, p.Text)
+		if err != nil || !submit {
+			return nil, err
 		}
-		return nil, si.SendShellInput(ctx, s, p.Text)
+		return nil, d.submitInPane(ctx, s)
 	}
 	if f, ok := a.(adapter.PaneFiller); ok && s.Status == session.StatusWorking && s.Controllable() {
 		return nil, d.fillAndSubmit(ctx, s, f, p.Text)
@@ -289,16 +290,23 @@ func (d *Node) sendPromptInput(ctx context.Context, s session.Session, p api.Inp
 	return nil, nil
 }
 
-// fillAndSubmit leaves copy mode before pressing Enter so the key reaches the
-// agent. A permission, question or plan that opened during the fill gets no
-// Enter: the key would answer it.
 func (d *Node) fillAndSubmit(ctx context.Context, s session.Session, f adapter.PaneFiller, text string) error {
-	_, c, err := d.resolve(s.ID)
-	if err != nil {
+	if _, _, err := d.resolve(s.ID); err != nil {
 		return err
 	}
 	filled, err := f.FillPrompt(ctx, s, text)
 	if err != nil || !filled {
+		return err
+	}
+	return d.submitInPane(ctx, s)
+}
+
+// submitInPane presses Enter in s's pane, leaving copy mode first so the key
+// reaches the agent. A permission, question or plan that opened since the input
+// was staged gets no Enter: the key would answer it.
+func (d *Node) submitInPane(ctx context.Context, s session.Session) error {
+	_, c, err := d.resolve(s.ID)
+	if err != nil {
 		return err
 	}
 	if cur, ok := d.reg.Get(s.ID); !ok || cur.InteractionPending() {
