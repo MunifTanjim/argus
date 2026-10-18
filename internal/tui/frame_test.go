@@ -321,8 +321,8 @@ func TestSpinnerStartsWhenASpinningComponentShows(t *testing.T) {
 	m.left.hidden = true
 	m.spinning = false
 	m, _ = upd(m, keyMsg("esc"))
-	if _, ok := m.main.top().(homeComp); !ok || !m.spinning {
-		t.Errorf("back to Home with a working session should start the spinner: top=%T spinning=%v", m.main.top(), m.spinning)
+	if _, ok := m.main.top().(workspaceComp); !ok || !m.spinning {
+		t.Errorf("back to the workspace with a working session should start the spinner: top=%T spinning=%v", m.main.top(), m.spinning)
 	}
 }
 
