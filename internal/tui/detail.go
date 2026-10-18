@@ -285,6 +285,7 @@ var detailTable = []keyTableEntry{
 }
 
 func (m tview) actDetailDown(tea.KeyPressMsg) tea.Cmd {
+	m.clampDetailScroll() // a layout change can drop lines under the scroll
 	f := m.topFrame()
 	if f.items == nil {
 		f.scroll++
@@ -307,6 +308,7 @@ func (m tview) actDetailDown(tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m tview) actDetailUp(tea.KeyPressMsg) tea.Cmd {
+	m.clampDetailScroll()
 	f := m.topFrame()
 	if f.items == nil {
 		if f.scroll > 0 {
