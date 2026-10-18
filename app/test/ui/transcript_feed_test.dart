@@ -78,6 +78,73 @@ void main() {
         reason: 'scrolled-up view must stay put');
   });
 
+  testWidgets('a shorter viewport keeps the bottom edge in place',
+      (tester) async {
+    Widget sized(double height) => ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.topCenter,
+                child: SizedBox(
+                  height: height,
+                  child: TranscriptFeed(
+                      detailRef: const ToolDetailRef.live('s'),
+                      entries: _chunks(50)),
+                ),
+              ),
+            ),
+          ),
+        );
+    await tester.pumpWidget(sized(500));
+    await tester.pumpAndSettle();
+
+    final c = _controller(tester);
+    c.jumpTo(c.position.maxScrollExtent / 2);
+    await tester.pump();
+    final bottom = c.offset + 500;
+
+    await tester.pumpWidget(sized(200)); // the keyboard opens
+    expect(c.offset + 200, closeTo(bottom, 1));
+
+    await tester.pumpWidget(sized(500)); // the keyboard closes
+    expect(c.offset + 500, closeTo(bottom, 1));
+  });
+
+  testWidgets('follow tails again when near the bottom', (tester) async {
+    await tester.pumpWidget(_feed(_chunks(50)));
+    await tester.pumpAndSettle();
+
+    final c = _controller(tester);
+    c.jumpTo(c.position.maxScrollExtent - c.position.viewportDimension / 4);
+    await tester.pump();
+
+    tester
+        .state<TranscriptFeedState>(find.byKey(const ValueKey('feed')))
+        .follow();
+    await tester.pumpWidget(_feed(_chunks(51))); // the sent prompt arrives
+    await tester.pumpAndSettle();
+
+    expect(_controller(tester).offset,
+        closeTo(_controller(tester).position.maxScrollExtent, 1));
+  });
+
+  testWidgets('follow stays put when far from the bottom', (tester) async {
+    await tester.pumpWidget(_feed(_chunks(50)));
+    await tester.pumpAndSettle();
+
+    final c = _controller(tester);
+    c.jumpTo(0);
+    await tester.pump();
+
+    tester
+        .state<TranscriptFeedState>(find.byKey(const ValueKey('feed')))
+        .follow();
+    await tester.pumpWidget(_feed(_chunks(51))); // the sent prompt arrives
+    await tester.pumpAndSettle();
+
+    expect(_controller(tester).offset, closeTo(0, 1));
+  });
+
   testWidgets('rows are keyed by entry id', (tester) async {
     await tester.pumpWidget(_feed(_chunks(3)));
     await tester.pumpAndSettle();

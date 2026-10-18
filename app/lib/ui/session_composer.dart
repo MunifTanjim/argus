@@ -95,9 +95,12 @@ class SessionComposer extends ConsumerStatefulWidget {
       {super.key,
       required this.session,
       this.inputNotice,
-      this.queue = const []});
+      this.queue = const [],
+      this.onSent});
 
   final Session session;
+
+  final VoidCallback? onSent;
 
   final List<QueuedPrompt> queue;
 
@@ -189,6 +192,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     if (!mounted) return;
     switch (_vm.sendInput.result) {
       case Ok():
+        widget.onSent?.call();
         if (_text.text.trim() == t) {
           _text.clear();
           ref.read(promptDraftsProvider.notifier).clear(_sid);
