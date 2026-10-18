@@ -126,11 +126,22 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   }
 
   // A pop in the current scope's navigator (back or the app bar) forgets the
-  // session detail it closes.
+  // session detail it closes. As in the TUI, it then shows the session's
+  // workspace, whatever scope opened the session.
   void _onPop(_ScopeNavigator nav, Route<dynamic> route) {
     if (nav != _nav || nav.scope != ref.read(scopeProvider)) return;
     final id = sessionDetailRouteId(route);
-    if (id != null) ref.read(rememberedSessionsProvider.notifier).forget(id);
+    if (id == null) return;
+    ref.read(rememberedSessionsProvider.notifier).forget(id);
+    final ws = ref.read(sessionsProvider)[id]?.workspaceId;
+    if (ws == null || ws == nav.scope) return;
+    if (!_available(ref.read(projectsProvider).projects, ws)) return;
+    // Navigator callbacks run mid-build, so the scope is set after the frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(rememberedSessionsProvider.notifier).clear(ws);
+      ref.read(scopeProvider.notifier).state = ws;
+    });
   }
 
   static bool _available(List<ProjectNode> projects, String scope) {
