@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -23,7 +24,7 @@ func TestLiveSmoke(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	conn, cmd, err := spawnRPC(ctx, t.TempDir(), "smoke-"+newSessionID(), "")
+	conn, cmd, err := spawnRPC(ctx, t.TempDir(), "smoke-"+newSessionID(), "", "")
 	if err != nil {
 		t.Fatalf("spawnRPC: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestLiveSupervisedSession(t *testing.T) {
 	defer cancel()
 
 	cwd := t.TempDir()
-	id, err := d.spawnSession(ctx, cwd, "Run the shell command: echo live-supervised. Then reply OK.")
+	id, err := d.spawnSession(ctx, cwd, adapter.SpawnOptions{Prompt: "Run the shell command: echo live-supervised. Then reply OK."})
 	if err != nil {
 		t.Fatalf("spawnSession: %v", err)
 	}

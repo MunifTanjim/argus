@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/MunifTanjim/argus/internal/api"
 )
 
 // fakePi speaks enough RPC to test the client: it answers get_state and bash,
@@ -15,7 +18,8 @@ import (
 type fakePi struct {
 	t *testing.T
 
-	state map[string]any // extra get_state fields
+	state      map[string]any // extra get_state fields
+	spawnModel string
 	// promptDisposition answers prompt ("started" when empty); with
 	// promptRelease set, the answer waits for it, as a command's does for
 	// its dialogs.
@@ -211,6 +215,37 @@ func TestConcurrentCalls(t *testing.T) {
 	for i, err := range errs {
 		if err != nil {
 			t.Fatalf("call %d: %v", i, err)
+		}
+	}
+}
+
+func TestParseModelList(t *testing.T) {
+	out := "provider    model                    context  max-out  thinking  images\n" +
+		"anthropic   claude-sonnet-4-5        200K     64K      yes       yes\n" +
+		"openrouter  liquid/lfm-2.5-2.6b:free 32K      4K       no        no\n"
+	got := parseModelList([]byte(out))
+	want := []api.ModelInfo{
+		{ID: "anthropic/claude-sonnet-4-5", Name: "claude-sonnet-4-5 · anthropic"},
+		{ID: "openrouter/liquid/lfm-2.5-2.6b:free", Name: "liquid/lfm-2.5-2.6b:free · openrouter"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("models = %+v", got)
+	}
+	if got := parseModelList([]byte("No models available. Use /login ...\n")); got != nil {
+		t.Fatalf("guidance parsed as models: %+v", got)
+	}
+}
+
+func TestModelArgs(t *testing.T) {
+	cases := map[string][]string{
+		"":                                    nil,
+		"sonnet":                              {"--model", "sonnet"},
+		"anthropic/claude-sonnet-4-5":         {"--provider", "anthropic", "--model", "claude-sonnet-4-5"},
+		"openrouter/liquid/lfm-2.5-2.6b:free": {"--provider", "openrouter", "--model", "liquid/lfm-2.5-2.6b:free"},
+	}
+	for in, want := range cases {
+		if got := modelArgs(in); !reflect.DeepEqual(got, want) {
+			t.Errorf("modelArgs(%q) = %v, want %v", in, got, want)
 		}
 	}
 }

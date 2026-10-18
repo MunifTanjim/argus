@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -23,12 +27,12 @@ func TestSpawnedProcessOutlivesTheRequest(t *testing.T) {
 	stubSpawn(t, f)
 	var procCtx context.Context
 	stubbed := spawnProc
-	spawnProc = func(ctx context.Context, cwd, id, gate string) (*rpcConn, *exec.Cmd, error) {
+	spawnProc = func(ctx context.Context, cwd, id, gate, model string) (*rpcConn, *exec.Cmd, error) {
 		procCtx = ctx
-		return stubbed(ctx, cwd, id, gate)
+		return stubbed(ctx, cwd, id, gate, model)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	if _, err := d.spawnSession(ctx, "/w", ""); err != nil {
+	if _, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	cancel()
@@ -37,16 +41,40 @@ func TestSpawnedProcessOutlivesTheRequest(t *testing.T) {
 	}
 }
 
+func TestSpawnReportsAnExitAtStart(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "pi")
+	script := "#!/bin/sh\necho 'Error: Failed to load extension \"gate.ts\": ParseError' >&2\nexit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := piBin
+	piBin = bin
+	t.Cleanup(func() { piBin = old })
+	// The exit can land after the first call fails; every spawn must see it.
+	for range 20 {
+		d := newDiscoverer(registry.New(), nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_, err := d.spawnSession(ctx, t.TempDir(), adapter.SpawnOptions{})
+		cancel()
+		if err == nil || !strings.Contains(err.Error(), "Failed to load extension") {
+			t.Fatalf("err = %v, want the exit at start with pi's reason", err)
+		}
+	}
+}
+
 func stubSpawn(t *testing.T, f *fakePi) {
 	t.Helper()
 	old := spawnProc
 	t.Cleanup(func() { spawnProc = old })
-	spawnProc = func(ctx context.Context, cwd, id, gate string) (*rpcConn, *exec.Cmd, error) {
+	spawnProc = func(ctx context.Context, cwd, id, gate, model string) (*rpcConn, *exec.Cmd, error) {
 		if gate == "" {
 			t.Error("gate extension path empty")
 		}
 		fakeStdin, clientStdin := io.Pipe()
 		clientStdout, fakeStdout := io.Pipe()
+		f.mu.Lock()
+		f.spawnModel = model
+		f.mu.Unlock()
 		go f.run(fakeStdin, fakeStdout)
 		cmd := exec.Command("sleep", "30")
 		if err := cmd.Start(); err != nil {
@@ -78,7 +106,7 @@ func TestSpawnTracksWorkingSession(t *testing.T) {
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/work/proj", "")
+	id, err := d.spawnSession(ctx, "/work/proj", adapter.SpawnOptions{})
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
@@ -104,7 +132,7 @@ func TestSpawnWithPromptSends(t *testing.T) {
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/work/proj", "hello")
+	id, err := d.spawnSession(ctx, "/work/proj", adapter.SpawnOptions{Prompt: "hello"})
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
@@ -123,7 +151,7 @@ func TestAgentSettledIdles(t *testing.T) {
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/w", "")
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +180,7 @@ func TestUIDialogParksPermission(t *testing.T) {
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/w", "")
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +212,7 @@ func TestActivityDuringDialogKeepsPrompt(t *testing.T) {
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/w", "")
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +232,7 @@ func TestExtensionDialogsAreQuestions(t *testing.T) {
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/w", "")
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +293,7 @@ func TestPromptForACommandWithDialogsReturns(t *testing.T) {
 	t.Cleanup(func() { quickFail = old })
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/w", "")
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +321,7 @@ func TestExpiredDialogLeavesTheCard(t *testing.T) {
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/w", "")
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +346,7 @@ func TestGateApprovalCarriesTheDenyReason(t *testing.T) {
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/w", "")
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +380,7 @@ func TestRespondAllowDenies(t *testing.T) {
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/w", "")
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +419,7 @@ func TestRespondUnknownIsError(t *testing.T) {
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/w", "")
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +437,7 @@ func TestDismissKillsAndMarksDead(t *testing.T) {
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/w", "")
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,7 +474,7 @@ func TestSpawnReportsModelAndEffort(t *testing.T) {
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/w", "")
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -470,7 +498,7 @@ func TestModelWithoutReasoningTakesNoEffort(t *testing.T) {
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/w", "")
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +517,7 @@ func TestSettledRereadsModel(t *testing.T) {
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/w", "")
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -507,6 +535,23 @@ func TestSettledRereadsModel(t *testing.T) {
 	t.Fatal("model never refreshed after settle")
 }
 
+func TestSpawnPassesModel(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{Model: "anthropic/claude-sonnet-4-5"}); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.spawnModel != "anthropic/claude-sonnet-4-5" {
+		t.Fatalf("spawn model = %q", f.spawnModel)
+	}
+}
+
 func TestLiveSessionGetsNoResumePane(t *testing.T) {
 	reg := registry.New()
 	d := newDiscoverer(reg, nil)
@@ -514,7 +559,7 @@ func TestLiveSessionGetsNoResumePane(t *testing.T) {
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/w", "")
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

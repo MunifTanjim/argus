@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -40,6 +41,10 @@ func awaitQuickFail(ctx context.Context, done <-chan error) error {
 		return nil // the command keeps running
 	}
 }
+
+// startExitWait bounds how long a spawn whose first call failed waits to see
+// whether pi exited at start.
+var startExitWait = 2 * time.Second
 
 // pendingUI is one extension dialog awaiting a user decision: the Argus
 // interaction surfaced for it, answered by extension_ui_response.
@@ -183,7 +188,7 @@ func (d *discoverer) get(id string) *sessionProc {
 // spawnSession starts an owned pi RPC process in cwd and returns the pi
 // session id. A non-empty prompt is sent after the process is tracked, so a
 // send failure still leaves a live, listed session.
-func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (string, error) {
+func (d *discoverer) spawnSession(ctx context.Context, cwd string, opts adapter.SpawnOptions) (string, error) {
 	gate, err := gateExtension()
 	if err != nil {
 		return "", err
@@ -191,7 +196,7 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (stri
 	id := newSessionID()
 	// The process outlives the request: a request's context ends with the
 	// client connection that sent it.
-	conn, cmd, err := spawnProc(context.WithoutCancel(ctx), cwd, id, gate)
+	conn, cmd, err := spawnProc(context.WithoutCancel(ctx), cwd, id, gate, opts.Model)
 	if err != nil {
 		return "", err
 	}
@@ -218,11 +223,23 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd, prompt string) (stri
 		}
 	}()
 
-	// Hydrate identity: session file, name, and model.
-	d.loadState(ctx, p)
+	// Hydrate identity: session file, name, and model. pi exits at start on a
+	// model it cannot resolve.
+	if _, err := d.loadState(ctx, p); err != nil {
+		select {
+		case <-p.exited:
+			if t, ok := cmd.Stderr.(*stderrTail); ok {
+				if why := t.lastLines(3); why != "" {
+					return "", fmt.Errorf("pi: exited at start: %s", why)
+				}
+			}
+			return "", fmt.Errorf("pi: exited at start: %w", err)
+		case <-time.After(startExitWait):
+		}
+	}
 	d.upsert(p, session.StatusWorking, nil, false)
-	if prompt != "" {
-		if err := d.sendPrompt(ctx, id, prompt); err != nil {
+	if opts.Prompt != "" {
+		if err := d.sendPrompt(ctx, id, opts.Prompt); err != nil {
 			return id, err
 		}
 	}
@@ -243,14 +260,14 @@ type rpcState struct {
 // loadState folds get_state into p and reports whether the card changed. Pi
 // emits no event when the model changes, so this also runs after every settled
 // run.
-func (d *discoverer) loadState(ctx context.Context, p *sessionProc) bool {
+func (d *discoverer) loadState(ctx context.Context, p *sessionProc) (bool, error) {
 	data, err := p.conn.call(ctx, d.nextID(), "get_state", nil)
 	if err != nil {
-		return false
+		return false, err
 	}
 	var st rpcState
-	if json.Unmarshal(data, &st) != nil {
-		return false
+	if err := json.Unmarshal(data, &st); err != nil {
+		return false, err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -264,7 +281,7 @@ func (d *discoverer) loadState(ctx context.Context, p *sessionProc) bool {
 	if st.Model != nil && st.Model.ID != "" {
 		p.model, p.reasoning, p.level = st.Model.ID, st.Model.Reasoning, st.ThinkingLevel
 	}
-	return p.file != file || p.name != name || p.model != model || p.reasoning != reasoning || p.level != level
+	return p.file != file || p.name != name || p.model != model || p.reasoning != reasoning || p.level != level, nil
 }
 
 // modelUpdate reports a pi model as the card's live model, or nil before one
@@ -415,7 +432,7 @@ func (d *discoverer) handleEvent(id, typ string, raw json.RawMessage) {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if d.loadState(ctx, p) {
+			if changed, err := d.loadState(ctx, p); err == nil && changed {
 				d.upsert(p, "", nil, false)
 			}
 		}()

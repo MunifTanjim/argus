@@ -9,7 +9,10 @@ import (
 	"io"
 	"maps"
 	"os/exec"
+	"strings"
 	"sync"
+
+	"github.com/MunifTanjim/argus/internal/api"
 )
 
 // response is one stdout record with type "response": the answer to a command
@@ -161,12 +164,14 @@ var piBin = "pi"
 
 // spawnRPC starts `pi --mode rpc --session-id <id>` in cwd with the gate
 // extension loaded and ARGUS_MANAGED set, returning the connected rpcConn.
-// The caller owns the process (reap via cmd.Wait after conn.close).
-func spawnRPC(ctx context.Context, cwd, sessionID, extensionPath string) (*rpcConn, *exec.Cmd, error) {
+// model is a "provider/id" from listModels, or "" for pi's default. The caller
+// owns the process (reap via cmd.Wait after conn.close).
+func spawnRPC(ctx context.Context, cwd, sessionID, extensionPath, model string) (*rpcConn, *exec.Cmd, error) {
 	args := []string{"--mode", "rpc", "--session-id", sessionID}
 	if extensionPath != "" {
 		args = append(args, "--extension", extensionPath)
 	}
+	args = append(args, modelArgs(model)...)
 	cmd := exec.CommandContext(ctx, piBin, args...)
 	cmd.Dir = cwd
 	cmd.Env = append(cmd.Environ(), gateEnv+"=1")
@@ -178,9 +183,87 @@ func spawnRPC(ctx context.Context, cwd, sessionID, extensionPath string) (*rpcCo
 	if err != nil {
 		return nil, nil, fmt.Errorf("pi: stdout pipe: %w", err)
 	}
-	// stderr stays inherited: diagnostics and crash logs, never protocol.
+	cmd.Stderr = &stderrTail{}
 	if err := cmd.Start(); err != nil {
 		return nil, nil, fmt.Errorf("pi: start: %w", err)
 	}
 	return newRPCConn(stdin, stdout), cmd, nil
+}
+
+// stderrTail keeps the end of pi's stderr (diagnostics, never protocol) to
+// explain an exit at start, such as an extension that failed to load.
+type stderrTail struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+const stderrTailMax = 4096
+
+func (t *stderrTail) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.buf = append(t.buf, p...)
+	if over := len(t.buf) - stderrTailMax; over > 0 {
+		t.buf = t.buf[over:]
+	}
+	return len(p), nil
+}
+
+// lastLines returns up to n trailing non-empty lines.
+func (t *stderrTail) lastLines(n int) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var lines []string
+	for _, l := range strings.Split(string(t.buf), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "; ")
+}
+
+// modelArgs splits a "provider/id" model into pi flags. An explicit provider
+// makes pi match the id exactly, so a colon in it is not read as a thinking
+// level.
+func modelArgs(model string) []string {
+	provider, id, ok := strings.Cut(model, "/")
+	switch {
+	case model == "":
+		return nil
+	case !ok:
+		return []string{"--model", model}
+	}
+	return []string{"--provider", provider, "--model", id}
+}
+
+// runListModels runs `pi --list-models` and returns its stdout; a var so
+// tests can stub it.
+var runListModels = func(ctx context.Context) ([]byte, error) {
+	out, err := exec.CommandContext(ctx, piBin, "--list-models").Output()
+	if err != nil {
+		return nil, fmt.Errorf("pi: list models: %w", err)
+	}
+	return out, nil
+}
+
+// parseModelList reads the table `pi --list-models` prints: a header row
+// starting "provider  model", then one model per row. Anything else (pi's
+// no-models guidance) yields no models.
+func parseModelList(out []byte) []api.ModelInfo {
+	lines := strings.Split(string(out), "\n")
+	if head := strings.Fields(lines[0]); len(head) < 2 || head[0] != "provider" || head[1] != "model" {
+		return nil
+	}
+	var models []api.ModelInfo
+	for _, line := range lines[1:] {
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			continue
+		}
+		models = append(models, api.ModelInfo{ID: f[0] + "/" + f[1], Name: f[1] + " · " + f[0]})
+	}
+	return models
 }

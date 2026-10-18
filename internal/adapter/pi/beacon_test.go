@@ -129,7 +129,7 @@ func TestBeaconHelloOwnedIsPassive(t *testing.T) {
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	id, err := d.spawnSession(ctx, "/w", "")
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

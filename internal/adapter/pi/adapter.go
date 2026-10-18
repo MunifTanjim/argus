@@ -27,6 +27,7 @@ var _ adapter.Responder = (*piAdapter)(nil)
 var _ adapter.Dismisser = (*piAdapter)(nil)
 var _ adapter.Prompter = (*piAdapter)(nil)
 var _ adapter.Spawner = (*piAdapter)(nil)
+var _ adapter.ModelLister = (*piAdapter)(nil)
 var _ adapter.Beaconed = (*piAdapter)(nil)
 
 func (piAdapter) Agent() string      { return Agent }
@@ -154,7 +155,15 @@ func (a *piAdapter) SpawnSession(ctx context.Context, cwd string, opts adapter.S
 	if err != nil {
 		return "", err
 	}
-	return d.spawnSession(ctx, cwd, opts.Prompt)
+	return d.spawnSession(ctx, cwd, opts)
+}
+
+func (piAdapter) ListModels(ctx context.Context) ([]api.ModelInfo, error) {
+	out, err := runListModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return parseModelList(out), nil
 }
 
 // beaconPath is the global gate-extension install location. Every pi process
