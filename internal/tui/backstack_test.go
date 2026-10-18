@@ -33,7 +33,10 @@ func TestBackStackHomeSessionScreen(t *testing.T) {
 	assertView(t, "^]", m, viewSession)
 
 	m = pressKeys(m, keyMsg("esc"))
-	assertView(t, "<Esc>", m, viewHome)
+	assertView(t, "<Esc>", m, viewTree)
+	if ws := paneOf(m).ws; ws != "n1:w1" {
+		t.Errorf("<Esc>: workspace = %q, want n1:w1", ws)
+	}
 }
 
 func TestBackStackWorkspaceSession(t *testing.T) {
@@ -46,6 +49,23 @@ func TestBackStackWorkspaceSession(t *testing.T) {
 
 	m = pressKeys(m, keyMsg("esc"))
 	assertView(t, "<Esc>", m, viewTree)
+}
+
+// Back from a session opened over another view, as the sidebar sessions list
+// does, opens the session's workspace and selects its tree row.
+func TestBackStackSessionOverHomeOpensItsWorkspace(t *testing.T) {
+	m := openLive(homeTestModel(), "n1:s2")
+	m = pressKeys(m, keyMsg("esc"))
+	assertView(t, "<Esc>", m, viewTree)
+	if ws := paneOf(m).ws; ws != "n1:w2" || len(m.main) != 1 {
+		t.Errorf("<Esc>: workspace = %q stack = %d, want only n1:w2", ws, len(m.main))
+	}
+	if got := m.left.tree.selectedWorkspaceID(); got != "n1:w2" {
+		t.Errorf("<Esc>: tree selects %q, want n1:w2", got)
+	}
+	if m.focused != mainPane {
+		t.Errorf("<Esc>: focus = %v, want the main pane", m.focused)
+	}
 }
 
 func TestBackStackResumeKeepsFirstReturn(t *testing.T) {
@@ -93,30 +113,34 @@ func TestBackStackHomeSessionTreeKeepsTheStack(t *testing.T) {
 }
 
 // A resume from History opens the session over the History tab, and back
-// returns to the tab, from its session list or from a past session's
-// transcript.
+// opens the session's workspace, from the tab's session list or from a past
+// session's transcript.
 func TestBackStackResumeFromHistory(t *testing.T) {
-	p := histProj
-	p.Cwd = "/p"
-	m := withHistorySessions(homeTestModel(), p, historyPage())
-	m.client = &recordingClient{}
-	m, cmd := typeKeysCmd(m, "R")
+	history := func() model {
+		p := histProj
+		p.Cwd = "/p"
+		m := withHistorySessions(homeTestModel(), p, historyPage())
+		m.client = &recordingClient{}
+		return m
+	}
+	m, cmd := typeKeysCmd(history(), "R")
 	if cmd == nil {
 		t.Fatal("R on a resumable session should send the resume")
 	}
 	m, _ = upd(m, resumeResultMsg{sessionID: "n1:s1"})
 	assertView(t, "resume from the session list", m, viewSession)
 	m = pressKeys(m, keyMsg("esc"))
-	assertView(t, "<Esc>", m, viewHistorySessions)
+	assertView(t, "<Esc>", m, viewTree)
 
-	m = pressKeys(m, keyMsg("enter"))
+	m = pressKeys(history(), keyMsg("enter"))
 	assertView(t, "<CR> on a past session", m, viewHistoryTranscript)
 	m, _ = upd(m, resumeResultMsg{sessionID: "n1:s1"})
 	assertView(t, "resume from the transcript", m, viewSession)
 	m = pressKeys(m, keyMsg("esc"))
-	assertView(t, "<Esc>", m, viewHistoryTranscript)
-	m = pressKeys(m, keyMsg("esc"))
-	assertView(t, "second <Esc>", m, viewHistorySessions)
+	assertView(t, "<Esc>", m, viewTree)
+	if len(m.main) != 1 {
+		t.Errorf("stack = %v, want only the workspace", m.main)
+	}
 }
 
 // A route away from a pane and back brings the pane back with its cursor.
@@ -140,7 +164,7 @@ func TestPanesKeepTheirCursorOnTheWayBack(t *testing.T) {
 	}{
 		{"Home to History and back", home, func(m model) model { return typeKeys(m, "gt") }, func(m model) model { return typeKeys(m, "gT") }, homeCursor},
 		{"Home to Logs and back", home, func(m model) model { return typeKeys(m, "gT") }, func(m model) model { return typeKeys(m, "gt") }, homeCursor},
-		{"Home to a session and back", home, func(m model) model { return pressKeys(m, keyMsg("enter")) }, func(m model) model { return pressKeys(m, keyMsg("esc")) }, homeCursor},
+		{"Home to a session and back", home, func(m model) model { return pressKeys(m, keyMsg("enter")) }, func(m model) model { return goHome(pressKeys(m, keyMsg("esc"))) }, homeCursor},
 		{"workspace pane to a session and back", pane, func(m model) model { return pressKeys(m, keyMsg("enter")) }, func(m model) model { return pressKeys(m, keyMsg("esc")) }, paneCursor},
 	}
 	for _, tc := range cases {

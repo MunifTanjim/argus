@@ -76,8 +76,8 @@ func TestMemoryStoresHomeWithoutAKillPrompt(t *testing.T) {
 func TestBackOutOfASessionForgetsIt(t *testing.T) {
 	m := pressKeys(homeTestModel(), keyMsg("enter"))
 	m = pressKeys(m, keyMsg("esc"))
-	if viewOf(m) != viewHome {
-		t.Fatalf("esc should go back to Home, got %v", viewOf(m))
+	if viewOf(m) != viewTree {
+		t.Fatalf("esc should open the workspace, got %v", viewOf(m))
 	}
 	if _, ok := m.memory.ws["n1:w1"]; ok {
 		t.Error("back out of n1:s1 should make n1:w1 forget it")
@@ -130,7 +130,7 @@ func TestFocusTreeWithUnknownSessionDoesNotMoveToHome(t *testing.T) {
 
 func TestMemoryDropsAWorkspaceTheRegistryRemoved(t *testing.T) {
 	m := pressKeys(homeTestModel(), keyMsg("enter"))
-	m = pressKeys(m, keyMsg("esc"))
+	m = goHome(pressKeys(m, keyMsg("esc")))
 	m.memory.ws["n1:w2"] = "n1:s2"
 	p := m.left.tree.data[0]
 	p.Workspaces = p.Workspaces[:1] // n1:w2 leaves
