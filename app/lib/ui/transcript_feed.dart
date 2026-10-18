@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:super_sliver_list/super_sliver_list.dart';
@@ -138,11 +140,56 @@ class TranscriptFeed extends ConsumerStatefulWidget {
   final bool stickToBottom;
 
   @override
-  ConsumerState<TranscriptFeed> createState() => _TranscriptFeedState();
+  ConsumerState<TranscriptFeed> createState() => TranscriptFeedState();
 }
 
-class _TranscriptFeedState extends ConsumerState<TranscriptFeed> {
-  final ScrollController _sc = ScrollController();
+/// Keeps the content at the bottom edge in place when the viewport resizes, so
+/// the soft keyboard or a growing composer pushes the transcript up instead of
+/// covering it. Only while [anchored] holds, so static feeds stay top-anchored.
+class _BottomAnchoredScrollController extends ScrollController {
+  _BottomAnchoredScrollController(this.anchored);
+
+  final bool Function() anchored;
+
+  @override
+  ScrollPosition createScrollPosition(
+    ScrollPhysics physics,
+    ScrollContext context,
+    ScrollPosition? oldPosition,
+  ) => _BottomAnchoredScrollPosition(
+    anchored: anchored,
+    physics: physics,
+    context: context,
+    oldPosition: oldPosition,
+  );
+}
+
+class _BottomAnchoredScrollPosition extends ScrollPositionWithSingleContext {
+  _BottomAnchoredScrollPosition({
+    required this.anchored,
+    required super.physics,
+    required super.context,
+    super.oldPosition,
+  });
+
+  final bool Function() anchored;
+
+  @override
+  bool applyViewportDimension(double viewportDimension) {
+    final old = hasViewportDimension ? this.viewportDimension : null;
+    final changed = super.applyViewportDimension(viewportDimension);
+    if (old != null && anchored() && hasPixels && hasContentDimensions) {
+      final to = math.max(minScrollExtent, pixels + old - viewportDimension);
+      if (to != pixels) correctPixels(to);
+    }
+    return changed;
+  }
+}
+
+class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
+  late final ScrollController _sc = _BottomAnchoredScrollController(
+    () => widget.stickToBottom,
+  );
   final ListController _lc = ListController();
 
   // Per-run expansion the user chose, overriding the verbose default.
@@ -205,6 +252,13 @@ class _TranscriptFeedState extends ConsumerState<TranscriptFeed> {
         if (head >= 0 && after != null && head < after.$1) jump(head, 0);
       });
     });
+  }
+
+  /// Resumes tailing from the bottom, as after the user sends a prompt.
+  void follow() {
+    if (!widget.stickToBottom || !_sc.hasClients) return;
+    _following = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToBottom());
   }
 
   void _jumpToBottom() {

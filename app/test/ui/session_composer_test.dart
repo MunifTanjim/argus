@@ -41,6 +41,12 @@ class _Slow extends _Recording {
   }
 }
 
+class _Failing extends _Recording {
+  @override
+  Future<Result<void>> sendInput(String sessionId, String text) async =>
+      Result.error(Exception('offline'));
+}
+
 class _Completing extends _Recording {
   _Completing(this.items);
   List<PromptCompletion> items;
@@ -104,7 +110,8 @@ Session _s({
 Future<void> _pump(WidgetTester t, Session s, SessionRepository repo,
         {ProviderContainer? container,
         String? notice,
-        List<QueuedPrompt> queue = const []}) =>
+        List<QueuedPrompt> queue = const [],
+        VoidCallback? onSent}) =>
     t.pumpWidget(UncontrolledProviderScope(
       container: container ??
           ProviderContainer(
@@ -114,7 +121,7 @@ Future<void> _pump(WidgetTester t, Session s, SessionRepository repo,
           body: Align(
             alignment: Alignment.bottomCenter,
             child: SessionComposer(
-                session: s, inputNotice: notice, queue: queue),
+                session: s, inputNotice: notice, queue: queue, onSent: onSent),
           ),
         ),
       ),
@@ -167,6 +174,27 @@ void main() {
     await t.pumpAndSettle();
     expect(repo.inputs.single, ['n:%1', 'next task']);
     expect(find.text('next task'), findsNothing);
+  });
+
+  testWidgets('a sent prompt reports onSent', (t) async {
+    var sent = 0;
+    await _pump(t, _s(), _Recording(), onSent: () => sent++);
+    await t.enterText(find.byType(TextField), 'next task');
+    await t.pump();
+    await t.tap(find.byTooltip('Send'));
+    await t.pumpAndSettle();
+    expect(sent, 1);
+  });
+
+  testWidgets('a failed send does not report onSent', (t) async {
+    var sent = 0;
+    await _pump(t, _s(), _Failing(), onSent: () => sent++);
+    await t.enterText(find.byType(TextField), 'next task');
+    await t.pump();
+    await t.tap(find.byTooltip('Send'));
+    await t.pumpAndSettle();
+    expect(sent, 0);
+    expect(find.textContaining('Failed:'), findsOneWidget);
   });
 
   testWidgets('working: drafting allowed, Send disabled with a reason',

@@ -24,6 +24,7 @@ import 'package:argus/state/transcript_controller.dart';
 import 'package:argus/ui/session_composer.dart';
 import 'package:argus/ui/session_detail_screen.dart';
 import 'package:argus/ui/workspace_screen.dart';
+import 'package:super_sliver_list/super_sliver_list.dart';
 import '../support/fake_gateway_client.dart';
 import '../support/fake_session_repository.dart';
 
@@ -733,6 +734,45 @@ void main() {
     final send = tester
         .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.send));
     expect(send.onPressed, isNull);
+  });
+
+  testWidgets('a send near the bottom scrolls the feed to the bottom',
+      (tester) async {
+    final s = Session.fromJson({
+      'id': 'oc:%1',
+      'agent': 'opencode',
+      'status': 'idle',
+      'source': 'hooked',
+      'frontend': 'external',
+      'input_mode': 'api',
+      'tmux': {'pane_id': ''},
+      'interaction': {'kind': 'idle'},
+      'can_prompt': true,
+    });
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        gatewayProvider.overrideWithValue(null),
+        sessionRepositoryProvider.overrideWithValue(FakeSessionRepository()),
+        transcriptProvider(s.id).overrideWith(() => _SeededTranscript([
+              for (var i = 0; i < 50; i++)
+                Entry(id: 'c$i', kind: EntryKind.user, text: 'message $i'),
+            ])),
+      ],
+      child: MaterialApp(home: SessionDetailScreen(session: s)),
+    ));
+    await tester.pumpAndSettle();
+
+    final c = tester
+        .widget<SuperListView>(find.byType(SuperListView))
+        .controller!;
+    c.jumpTo(c.position.maxScrollExtent - c.position.viewportDimension / 4);
+    await tester.pump();
+
+    await tester.enterText(find.byType(TextField), 'next task');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Send'));
+    await tester.pumpAndSettle();
+    expect(c.offset, closeTo(c.position.maxScrollExtent, 1));
   });
 
   testWidgets('a tall plan with the keyboard up does not overflow the screen',
