@@ -62,6 +62,7 @@ func (m tview) actPromptPrev(tea.KeyPressMsg) tea.Cmd {
 // actScrollDown scrolls while the selected card runs past the viewport bottom;
 // once its bottom is in view it selects the next card.
 func (m tview) actScrollDown(tea.KeyPressMsg) tea.Cmd {
+	m.clampScrollNow() // a layout change can drop lines under the scroll
 	if !m.cursorVisible() {
 		m.keepCursorVisible()
 		return nil
@@ -84,6 +85,7 @@ func (m tview) actScrollDown(tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m tview) actScrollUp(tea.KeyPressMsg) tea.Cmd {
+	m.clampScrollNow()
 	if !m.cursorVisible() {
 		m.keepCursorVisible()
 		return nil

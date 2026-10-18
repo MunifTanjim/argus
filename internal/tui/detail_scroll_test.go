@@ -185,3 +185,15 @@ func TestDetailPageDownScrollsAFullPage(t *testing.T) {
 		t.Fatalf("page-up back to the top: scroll = %d", got)
 	}
 }
+
+// TestDetailUpFromScrollPastEnd verifies Up moves at once when a layout change
+// left the scroll past the frame's end.
+func TestDetailUpFromScrollPastEnd(t *testing.T) {
+	m := tallFocusedDetailModel(t)
+	maxS := m.frameMaxScroll(m.topFrame())
+	m.topFrame().scroll = maxS + 50
+	m.actDetailUp(tea.KeyPressMsg{})
+	if got := m.topFrame().scroll; got != maxS-1 {
+		t.Errorf("Up should clamp then scroll one line: scroll=%d, want %d", got, maxS-1)
+	}
+}

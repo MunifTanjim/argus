@@ -207,3 +207,24 @@ func TestSubagentFrameFollowsWhenCursorOnLast(t *testing.T) {
 		t.Errorf("frame at the bottom: scroll = %d, want %d (still tailing)", f.scroll, max)
 	}
 }
+
+// A layout change that drops lines (closing the sidebars widens the pane) can
+// leave the stored scroll past the end. j/k and the wheel must still move.
+func TestScrollPastEndAfterLayoutChangeStillMoves(t *testing.T) {
+	m := deltaModel()
+	last := len(tvOf(&m).displayRows()) - 1
+	m = withTr(m, func(tr *transcriptComp) {
+		tr.transcript.cursor = last
+		tr.transcript.scroll = tvOf(&m).maxScroll() + 2*tvOf(&m).viewportHeight()
+	})
+
+	m, _ = upd(m, tea.KeyPressMsg{Code: 'k', Text: "k"})
+	m, _ = upd(m, tea.KeyPressMsg{Code: 'k', Text: "k"})
+
+	if got := trOf(m).transcript.cursor; got >= last {
+		t.Errorf("k should move the cursor up from the last row: cursor=%d, last=%d", got, last)
+	}
+	if got, maxS := trOf(m).transcript.scroll, tvOf(&m).maxScroll(); got > maxS {
+		t.Errorf("scroll should be clamped: scroll=%d, maxScroll=%d", got, maxS)
+	}
+}
