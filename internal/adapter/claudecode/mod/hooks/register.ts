@@ -8,6 +8,13 @@ const RETRY_MAX_MS = 15000
 const ACK_WINDOW_MS = 1000
 // How long a fill's saved draft waits for argus's Enter to submit the text.
 const DRAFT_TTL_MS = 5000
+// How long Claude takes to read a typed "!" and turn bash mode on.
+const BANG_MS = 300
+// How long a bash mode command's Enter may take to submit it.
+const SUBMIT_WAIT_MS = 2000
+const SUBMIT_POLL_MS = 25
+// A shell command's ack window: it outlasts both waits, so a failure is acked.
+const SHELL_ACK_WINDOW_MS = 4000
 // The statuses a task notification reports for a task that ended.
 const FINISHED = new Set(['completed', 'failed', 'killed'])
 // How much of a shell's command argusd keeps: clients show one short line.
@@ -15,7 +22,7 @@ const COMMAND_MAX = 200
 // The failure a fill acks when a dialog holds the keys (modbridge.FailBusy).
 const FAIL_BUSY = 'busy'
 
-export type Command = { id: string; kind: 'prompt' | 'exit' | 'fill'; text: string }
+export type Command = { id: string; kind: 'prompt' | 'exit' | 'fill' | 'shell'; text: string }
 
 type Env = { tmuxPane: string; tmux: string; autoMode: boolean }
 
@@ -478,7 +485,8 @@ function schedulePoll($: EngineInterface, delayMs: number, retryMs: number, gen:
 // left to finish.
 export async function run($: EngineInterface, c: Command): Promise<void> {
   if (c.kind === 'exit') return exit($, c)
-  const failure = await Promise.race([execute($, c), $.clock.sleep(ACK_WINDOW_MS).then(() => PENDING)])
+  const window = c.kind === 'shell' ? SHELL_ACK_WINDOW_MS : ACK_WINDOW_MS
+  const failure = await Promise.race([execute($, c), $.clock.sleep(window).then(() => PENDING)])
   if (failure === PENDING) {
     if (c.kind === 'fill') abandoned.add(c.id)
     await post($, '/claude/ack', { id: c.id }).catch(() => '')
@@ -507,6 +515,8 @@ async function execute($: EngineInterface, c: Command): Promise<string> {
     const slash = /^\/(\S+)\s*([\s\S]*)$/.exec(c.text)
     if (c.kind === 'fill') {
       failure = await fill($, c)
+    } else if (c.kind === 'shell') {
+      failure = await shell($, c)
     } else if (slash?.[1].includes('/')) {
       failure = `/${slash[1]} is not a slash command, and Claude takes no prompt starting with /`
     } else if (slash) {
@@ -527,7 +537,7 @@ async function execute($: EngineInterface, c: Command): Promise<string> {
 async function fill($: EngineInterface, c: Command): Promise<string> {
   const box = await $.prompt.read()
   const r = await $.prompt.fill({ text: c.text, mode: 'replace' })
-  if (!r.isFilled) return r.refusal === 'dialog' ? FAIL_BUSY : `the input box refused the text (${r.refusal ?? 'unknown'})`
+  if (!r.isFilled) return refused(r)
   // Acked as accepted while this ran: no Enter follows, so give the draft back.
   if (abandoned.delete(c.id)) {
     await $.prompt.fill({ text: box.text, mode: 'replace' })
@@ -535,6 +545,61 @@ async function fill($: EngineInterface, c: Command): Promise<string> {
   }
   filled = { text: c.text, draft: box.text, at: await $.clock.now() }
   return ''
+}
+
+function refused(r: { refusal?: string }): string {
+  return r.refusal === 'dialog' ? FAIL_BUSY : `the input box refused the text (${r.refusal ?? 'unknown'})`
+}
+
+// Runs "!" bash mode input: only a typed "!" turns the mode on. The draft is
+// never put back while the Enter may still submit it. Resolves with the
+// failure, or '' once submitted.
+async function shell($: EngineInterface, c: Command): Promise<string> {
+  const { tmuxPane, tmux } = await readEnv($)
+  if (tmuxPane === '') return 'bash mode needs a tmux pane'
+  const run = (...args: string[]) => tmuxRun($, tmux, args)
+  const box = await $.prompt.read()
+  const cleared = await $.prompt.fill({ text: '', mode: 'replace' })
+  if (!cleared.isFilled) return refused(cleared)
+  let entered = false
+  try {
+    if ((await run('display-message', '-p', '-t', tmuxPane, '#{pane_in_mode}')).trim() === '1') {
+      await run('send-keys', '-t', tmuxPane, '-X', 'cancel')
+    }
+    // Lands in vim INSERT from any state, typing nothing.
+    await run('send-keys', '-t', tmuxPane, '--', 'i', 'BSpace')
+    await run('send-keys', '-t', tmuxPane, '-l', '--', '!')
+    await $.clock.sleep(BANG_MS)
+    // Bash mode keeps the "!" out of the box's text.
+    if ((await $.prompt.read()).text !== '') return 'bash mode did not turn on'
+    const command = c.text.slice(1)
+    // A replacing fill would leave bash mode.
+    const f = await $.prompt.fill({ text: command, mode: 'insert' })
+    if (!f.isFilled) return refused(f)
+    await run('send-keys', '-t', tmuxPane, '--', 'Enter')
+    entered = true
+    if (!(await submitted($, command))) return 'claude did not take the command: the draft was dropped'
+    entered = false
+    return ''
+  } finally {
+    if (!entered) await $.prompt.fill({ text: box.text, mode: 'replace' }).catch(() => undefined)
+  }
+}
+
+async function submitted($: EngineInterface, command: string): Promise<boolean> {
+  for (let waited = 0; waited < SUBMIT_WAIT_MS; waited += SUBMIT_POLL_MS) {
+    await $.clock.sleep(SUBMIT_POLL_MS)
+    if ((await $.prompt.read()).text !== command) return true
+  }
+  return false
+}
+
+// $TMUX starts with the socket of the server that runs Claude's pane.
+async function tmuxRun($: EngineInterface, tmux: string, args: string[]): Promise<string> {
+  const socket = tmux.split(',')[0]
+  const r = await $.process.run(['tmux', ...(socket ? ['-S', socket] : []), ...args])
+  if (r.exitCode !== 0) throw new Error(`tmux ${args[0]}: ${r.stderr.trim()}`)
+  return r.stdout
 }
 
 async function takeDraft($: EngineInterface, text: string): Promise<string | undefined> {

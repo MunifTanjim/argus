@@ -236,3 +236,41 @@ func TestQueuesPromptsFollowsTheModConnection(t *testing.T) {
 		t.Fatal("a keystrokes-only session must not queue prompts")
 	}
 }
+
+func TestSendShellInputSendsAShellCommand(t *testing.T) {
+	a, _ := newWiredAdapter(t)
+	if _, ok := adapter.Adapter(a).(adapter.ShellInput); !ok {
+		t.Fatal("claude adapter must implement adapter.ShellInput")
+	}
+	if !a.IsShellInput("! ls") || a.IsShellInput("ls") || a.IsShellInput(" !ls") {
+		t.Fatal("IsShellInput must match only a leading !")
+	}
+	got := modPoll(a, context.Background(), "s1")
+	waitUntil(t, func() bool { return a.ModBridge().Reachable("s1") })
+	s := session.Session{ID: "x", AgentSessionID: "s1", Status: session.StatusWorking}
+	if err := a.SendShellInput(context.Background(), s, "! ls"); err != nil {
+		t.Fatal(err)
+	}
+	if cmds := <-got; len(cmds) != 1 || cmds[0].Kind != modbridge.KindShell || cmds[0].Text != "! ls" {
+		t.Fatalf("poll got %v", cmds)
+	}
+}
+
+func TestSendShellInputIsBusyUnderAnInteractionOrDialog(t *testing.T) {
+	a, _ := newWiredAdapter(t)
+	pending := session.Session{ID: "x", AgentSessionID: "s1", Status: session.StatusAwaitingInput,
+		Interaction: &session.Interaction{Kind: session.InteractionPermission}}
+	if err := a.SendShellInput(context.Background(), pending, "! ls"); !errors.Is(err, api.ErrSessionBusy) {
+		t.Fatalf("pending interaction: err = %v, want ErrSessionBusy", err)
+	}
+	go func() {
+		for _, c := range a.ModBridge().Wait(context.Background(), "s1", time.Minute) {
+			a.ModBridge().Ack(c.ID, modbridge.FailBusy, false)
+		}
+	}()
+	waitUntil(t, func() bool { return a.ModBridge().Reachable("s1") })
+	s := session.Session{ID: "x", AgentSessionID: "s1", Status: session.StatusIdle}
+	if err := a.SendShellInput(context.Background(), s, "! ls"); !errors.Is(err, api.ErrSessionBusy) {
+		t.Fatalf("dialog: err = %v, want ErrSessionBusy", err)
+	}
+}

@@ -16,6 +16,7 @@ const (
 	KindPrompt = "prompt" // a prompt, or a slash command when it starts with "/"
 	KindExit   = "exit"   // end the session
 	KindFill   = "fill"   // put text in Claude's input box in place of the draft
+	KindShell  = "shell"  // run "!" bash mode input in Claude's pane, keeping the draft
 )
 
 // FailBusy is the failure the mod acks for a fill Claude's input box refused
