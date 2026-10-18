@@ -109,6 +109,7 @@ const (
 	actSetSessionFilter
 	actGoToRow
 	actRunNamed
+	actLeaveSession
 )
 
 type action struct {
@@ -176,6 +177,12 @@ func (c *ctx) openRow(id string) { c.actions = append(c.actions, action{kind: ac
 // goToRow shows tree row id from anywhere: the tree drops its filter and
 // unfolds the rows above id, then the main pane opens the row.
 func (c *ctx) goToRow(id string) { c.actions = append(c.actions, action{kind: actGoToRow, id: id}) }
+
+// leaveSession takes the live session off the main pane and shows its
+// workspace ws, whatever view opened the session.
+func (c *ctx) leaveSession(ws string) {
+	c.actions = append(c.actions, action{kind: actLeaveSession, id: ws})
+}
 
 // toggleActiveOnly switches the session lists between all sessions and the
 // active and awaiting-input ones.
@@ -246,11 +253,7 @@ func (m *model) apply(c *ctx) tea.Cmd {
 		case actOpen:
 			m.main = m.main.push(a.comp)
 		case actBack:
-			var popped component
-			if m.main, popped = m.main.pop(); popped != nil {
-				m.forgetBack(popped)
-				cmds = append(cmds, popped.close(c))
-			}
+			cmds = append(cmds, m.popMain(c))
 		case actReplaceBase:
 			m.underOverlays(func() {
 				if old := m.main.top(); old != nil {
@@ -302,6 +305,21 @@ func (m *model) apply(c *ctx) tea.Cmd {
 		case actGoToRow:
 			m.left.tree.revealRow(a.id)
 			cmds = append(cmds, m.openRow(a.id))
+		case actLeaveSession:
+			// The workspace view right under the session keeps its cursor.
+			if n := len(m.main); n > 1 {
+				if w, ok := m.main[n-2].(workspaceComp); ok && w.ws == a.id {
+					cmds = append(cmds, m.popMain(c))
+					break
+				}
+			}
+			if listed := m.listedWorkspaces(); listed != nil && !listed[a.id] {
+				cmds = append(cmds, m.popMain(c))
+				break
+			}
+			m.left.tree.revealRow(a.id)
+			cmds = append(cmds, m.resetMain(func() component { return workspaceComp{ws: a.id} }))
+			m.focused = mainPane
 		case actFocusTree:
 			m.focusTree()
 		case actOpenSession:
@@ -341,6 +359,15 @@ func (m *model) apply(c *ctx) tea.Cmd {
 	}
 	c.actions = nil
 	return tea.Batch(cmds...)
+}
+
+func (m *model) popMain(c *ctx) tea.Cmd {
+	var popped component
+	if m.main, popped = m.main.pop(); popped == nil {
+		return nil
+	}
+	m.forgetBack(popped)
+	return popped.close(c)
 }
 
 func (m model) baseTop() int {

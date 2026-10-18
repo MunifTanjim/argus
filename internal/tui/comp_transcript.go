@@ -269,7 +269,11 @@ func (m tview) liveKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.historyView == histDetail {
 			return m.detailBack()
 		}
-		m.c.back()
+		if ws := m.c.m.sessions[m.sessionID].WorkspaceID; ws != "" {
+			m.c.leaveSession(ws)
+		} else {
+			m.c.back()
+		}
 		return nil
 	}
 	if m.historyView == histDetail {

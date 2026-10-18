@@ -266,6 +266,12 @@ func framed(m model) bool { return !m.layout().bare }
 
 func homeOf(m model) homeComp { return m.homePane() }
 
+// goHome opens the Home row the way the tree does.
+func goHome(m model) model {
+	m.openRow(homeRowID)
+	return m
+}
+
 func paneOf(m model) workspaceComp {
 	p, _ := m.rootComp().(workspaceComp)
 	return p
