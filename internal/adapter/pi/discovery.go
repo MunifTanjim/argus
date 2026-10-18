@@ -69,6 +69,7 @@ type card struct {
 	level     string
 	streaming bool
 	pending   map[string]*pendingUI // ui request id -> dialog
+	queue     []string              // prompts pi has not taken yet
 }
 
 // hookUpdate builds the card's push; c.mu must be held. Empty status leaves
@@ -312,6 +313,32 @@ func (d *discoverer) sendPrompt(ctx context.Context, id, text string) error {
 	return fmt.Errorf("pi: unknown session %s", id)
 }
 
+// queueFor returns the prompt queue of the session whose file is path. A
+// foreign session's queue holds only the prompts Argus sent.
+func (d *discoverer) queueFor(path string) []string {
+	if path == "" {
+		return nil
+	}
+	d.mu.Lock()
+	cards := make([]*card, 0, len(d.procs)+len(d.foreign))
+	for _, p := range d.procs {
+		cards = append(cards, &p.card)
+	}
+	for _, fs := range d.foreign {
+		cards = append(cards, &fs.card)
+	}
+	d.mu.Unlock()
+	for _, c := range cards {
+		c.mu.Lock()
+		file, q := c.file, c.queue
+		c.mu.Unlock()
+		if file == path {
+			return q
+		}
+	}
+	return nil
+}
+
 // rename sets the pi session name: over RPC for owned sessions, as an intent
 // for foreign ones. The name is held at once so the next card push keeps it.
 func (d *discoverer) rename(ctx context.Context, id, name string) error {
@@ -487,6 +514,17 @@ func (d *discoverer) handleEvent(id, typ string, raw json.RawMessage) {
 		}
 	case "extension_ui_request":
 		d.applyUIRequest(p, raw)
+	case "queue_update":
+		var ev struct {
+			Steering []string `json:"steering"`
+			FollowUp []string `json:"followUp"`
+		}
+		if json.Unmarshal(raw, &ev) != nil {
+			return
+		}
+		p.mu.Lock()
+		p.queue = append(ev.Steering, ev.FollowUp...)
+		p.mu.Unlock()
 	}
 }
 

@@ -2,6 +2,7 @@ package pi
 
 import (
 	"os"
+	"slices"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
@@ -48,10 +49,41 @@ type streamingTranscript struct {
 	file    sessionFile
 	entries []transcript.Entry
 	last    fileStat // zero until the first read: no file matches it
+
+	queue     func() []string // pi's live prompt queue; nil without a node
+	dismissed []string        // queue as of ClearQueue, hidden until it changes
 }
 
-func newStreamingTranscript(path string) adapter.StreamingTranscript {
+var _ adapter.QueueSource = (*streamingTranscript)(nil)
+
+func newStreamingTranscript(path string) *streamingTranscript {
 	return &streamingTranscript{path: path}
+}
+
+// Queue reports the prompts pi has queued for the session: live from RPC
+// queue updates, or for a foreign session, the prompts Argus sent that pi has
+// not taken yet.
+func (s *streamingTranscript) Queue() []transcript.QueuedPrompt {
+	if s.queue == nil {
+		return nil
+	}
+	live := s.queue()
+	if s.dismissed != nil && slices.Equal(live, s.dismissed) {
+		return nil
+	}
+	s.dismissed = nil
+	var q []transcript.QueuedPrompt
+	for _, text := range live {
+		q = append(q, transcript.QueuedPrompt{Text: text})
+	}
+	return q
+}
+
+// ClearQueue hides the current queue until pi reports a different one.
+func (s *streamingTranscript) ClearQueue() {
+	if s.queue != nil {
+		s.dismissed = slices.Clone(s.queue())
+	}
 }
 
 func (s *streamingTranscript) Refresh() ([]transcript.Entry, error) {

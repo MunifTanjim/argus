@@ -29,6 +29,7 @@ var _ adapter.Prompter = (*piAdapter)(nil)
 var _ adapter.Spawner = (*piAdapter)(nil)
 var _ adapter.ModelLister = (*piAdapter)(nil)
 var _ adapter.Renamer = (*piAdapter)(nil)
+var _ adapter.PromptQueuer = (*piAdapter)(nil)
 var _ adapter.Beaconed = (*piAdapter)(nil)
 
 func (piAdapter) Agent() string      { return Agent }
@@ -84,8 +85,13 @@ func (piAdapter) ReadSubagentView(rootPath, agentID string) (transcript.Transcri
 func (piAdapter) FindToolDetail(path, agentID, toolID string) (transcript.ToolDetail, bool, error) {
 	return findToolDetail(path, agentID, toolID)
 }
-func (piAdapter) NewStreamingTranscript(path, rootPath string, isSubagent bool) adapter.StreamingTranscript {
-	return newStreamingTranscript(path)
+func (a *piAdapter) NewStreamingTranscript(path, rootPath string, isSubagent bool) adapter.StreamingTranscript {
+	st := newStreamingTranscript(path)
+	if a.disc != nil {
+		disc := a.disc
+		st.queue = func() []string { return disc.queueFor(path) }
+	}
+	return st
 }
 func (piAdapter) SubagentFilePath(rootPath, agentID string) (string, bool) {
 	return subagentFilePath(rootPath, agentID)
@@ -135,10 +141,16 @@ func (a *piAdapter) Dismiss(ctx context.Context, sess session.Session) error {
 	return d.dismiss(ctx, sess.AgentSessionID)
 }
 
+// QueuesPrompts: pi steers a prompt sent mid-run into the running turn.
+func (piAdapter) QueuesPrompts(session.Session) bool { return true }
+
 func (a *piAdapter) SendPrompt(ctx context.Context, sess session.Session, text string) error {
 	d, err := a.live()
 	if err != nil {
 		return err
+	}
+	if sess.InteractionPending() {
+		return fmt.Errorf("%s: %w", sess.ID, api.ErrSessionBusy)
 	}
 	return d.sendPrompt(ctx, sess.AgentSessionID, text)
 }

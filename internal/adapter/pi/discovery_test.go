@@ -3,10 +3,12 @@ package pi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -16,6 +18,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // stubSpawn replaces process launch with a fake RPC peer plus a real (sleep)
@@ -573,6 +576,68 @@ func TestRenameOwnedSetsSessionName(t *testing.T) {
 	d.handleEvent(id, "agent_start", json.RawMessage(`{"type":"agent_start"}`))
 	if s := snapshotByID(t, reg, id); s.Name != "fix login" {
 		t.Fatalf("name = %q", s.Name)
+	}
+}
+
+func TestQueueFollowsQueueUpdates(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &piAdapter{disc: d}
+	st := a.NewStreamingTranscript("/tmp/ses-1.jsonl", "/tmp/ses-1.jsonl", false).(adapter.QueueSource)
+	if q := st.Queue(); len(q) != 0 {
+		t.Fatalf("initial queue = %v", q)
+	}
+	d.handleEvent(id, "queue_update", json.RawMessage(`{"type":"queue_update","steering":["one"],"followUp":["two"]}`))
+	want := []transcript.QueuedPrompt{{Text: "one"}, {Text: "two"}}
+	if q := st.Queue(); !reflect.DeepEqual(q, want) {
+		t.Fatalf("queue = %v", q)
+	}
+	st.ClearQueue()
+	if q := st.Queue(); len(q) != 0 {
+		t.Fatalf("queue after clear = %v", q)
+	}
+	d.handleEvent(id, "queue_update", json.RawMessage(`{"type":"queue_update","steering":["three"],"followUp":[]}`))
+	if q := st.Queue(); !reflect.DeepEqual(q, []transcript.QueuedPrompt{{Text: "three"}}) {
+		t.Fatalf("queue after new update = %v", q)
+	}
+	d.handleEvent(id, "queue_update", json.RawMessage(`{"type":"queue_update","steering":[],"followUp":[]}`))
+	if q := st.Queue(); len(q) != 0 {
+		t.Fatalf("drained queue = %v", q)
+	}
+}
+
+func TestSendPromptRefusesPendingInteraction(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &piAdapter{disc: d}
+	if !a.QueuesPrompts(snapshotByID(t, reg, id)) {
+		t.Fatal("pi must take prompts mid-run")
+	}
+	d.handleEvent(id, "extension_ui_request", json.RawMessage(`{"type":"extension_ui_request","id":"u1","method":"confirm","title":"Allow bash?","message":"bash"}`))
+	err = a.SendPrompt(ctx, snapshotByID(t, reg, id), "hi")
+	if !errors.Is(err, api.ErrSessionBusy) {
+		t.Fatalf("err = %v, want busy", err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.prompts) != 0 {
+		t.Fatalf("prompt reached pi: %v", f.prompts)
 	}
 }
 

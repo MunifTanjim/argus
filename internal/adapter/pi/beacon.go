@@ -30,6 +30,7 @@ const sessionIdleTTL = time.Hour
 // connection on the mod socket. Control flows as intents over that connection;
 // status and approvals flow back the same way. Dismiss only untracks the card —
 // the user's process is never touched.
+// Its card queue holds the prompts Argus sent that pi has not taken yet.
 type foreignSession struct {
 	card
 
@@ -42,7 +43,6 @@ type foreignSession struct {
 	paneID     string
 	lastSeen   time.Time
 	shellWaits map[string]chan beaconShellReady // intent_shell id -> its answer
-	queue      []string                         // prompts Argus sent that pi has not taken yet
 	dialogs    []string                         // titles of other extensions' dialogs open in pi
 }
 
