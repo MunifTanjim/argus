@@ -29,6 +29,7 @@ type fakePi struct {
 	mu      sync.Mutex
 	gotUI   []map[string]any
 	prompts []map[string]any
+	calls   []map[string]any // other commands, answered with success
 }
 
 func (f *fakePi) run(stdin io.Reader, stdout io.WriteCloser) {
@@ -86,8 +87,25 @@ func (f *fakePi) run(stdin io.Reader, stdout io.WriteCloser) {
 			f.mu.Lock()
 			f.gotUI = append(f.gotUI, rec)
 			f.mu.Unlock()
+		default:
+			f.mu.Lock()
+			f.calls = append(f.calls, rec)
+			f.mu.Unlock()
+			enc.Encode(map[string]any{"id": rec["id"], "type": "response", "command": rec["type"], "success": true})
 		}
 	}
+}
+
+// call returns the last received command of type typ, or nil.
+func (f *fakePi) call(typ string) map[string]any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := len(f.calls) - 1; i >= 0; i-- {
+		if f.calls[i]["type"] == typ {
+			return f.calls[i]
+		}
+	}
+	return nil
 }
 
 func (f *fakePi) uiResponses() []map[string]any {

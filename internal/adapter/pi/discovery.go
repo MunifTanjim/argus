@@ -312,6 +312,30 @@ func (d *discoverer) sendPrompt(ctx context.Context, id, text string) error {
 	return fmt.Errorf("pi: unknown session %s", id)
 }
 
+// rename sets the pi session name: over RPC for owned sessions, as an intent
+// for foreign ones. The name is held at once so the next card push keeps it.
+func (d *discoverer) rename(ctx context.Context, id, name string) error {
+	if p := d.get(id); p != nil {
+		if _, err := p.conn.call(ctx, d.nextID(), "set_session_name", map[string]any{"name": name}); err != nil {
+			return err
+		}
+		p.mu.Lock()
+		p.name = name
+		p.mu.Unlock()
+		return nil
+	}
+	if fs := d.lookupForeign(id); fs != nil {
+		if err := d.beaconSend(fs, map[string]any{"type": "intent_rename", "name": name}); err != nil {
+			return err
+		}
+		fs.mu.Lock()
+		fs.name = name
+		fs.mu.Unlock()
+		return nil
+	}
+	return fmt.Errorf("pi: unknown session %s", id)
+}
+
 func (d *discoverer) sendPromptOwned(ctx context.Context, p *sessionProc, text string) error {
 	p.mu.Lock()
 	busy := p.streaming

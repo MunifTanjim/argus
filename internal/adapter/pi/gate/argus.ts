@@ -156,6 +156,38 @@ export default function (pi: ExtensionAPI) {
 			pi.sendUserMessage(text, { expandPromptTemplates: true, ...(busy ? { deliverAs: "steer" } : {}) });
 			if (busy && !text.startsWith("/")) setQueued([...queued, text]);
 		};
+		beaconIntents.onRename = (name) => pi.setSessionName(name);
+		// pi gives extensions no way to submit "!" input, so the gate stages it in
+		// the editor and Argus presses Enter in the pane. The user's draft waits
+		// aside until pi runs the command.
+		let staged: { text: string; draft: string; timer: ReturnType<typeof setTimeout> } | null = null;
+		const putDraftBack = (ran: boolean) => {
+			const s = staged;
+			if (!s) return;
+			staged = null;
+			clearTimeout(s.timer);
+			// Without a run, the editor holds the command only if Enter never
+			// landed or pi refused it; anything else is the user's new input.
+			if (liveCtx && (ran || liveCtx.ui.getEditorText() === s.text)) liveCtx.ui.setEditorText(s.draft);
+		};
+		beaconIntents.onShell = (id, text) => {
+			const ctx = liveCtx;
+			if (!ctx?.hasUI) {
+				beaconSend({ type: "shell_ready", id, ok: false, reason: "the session has no editor" });
+				return;
+			}
+			putDraftBack(false);
+			const draft = ctx.ui.getEditorText();
+			ctx.ui.setEditorText(text);
+			staged = { text, draft, timer: setTimeout(() => putDraftBack(false), 3000) };
+			beaconSend({ type: "shell_ready", id, ok: true });
+		};
+		pi.on("user_bash", async (ev) => {
+			const excluded = staged?.text.startsWith("!!") ?? false;
+			const command = staged?.text.slice(excluded ? 2 : 1).trim();
+			if (staged && ev.command === command && ev.excludeFromContext === excluded) putDraftBack(true);
+			return undefined;
+		});
 		beaconIntents.describe = () => {
 			const ctx = liveCtx;
 			if (!ctx) return null;
@@ -214,8 +246,10 @@ const ownDialogs = new Set<string>();
 
 const beaconIntents: {
 	onPrompt: ((text: string, busy: boolean) => void) | null;
+	onRename: ((name: string) => void) | null;
+	onShell: ((id: string, text: string) => void) | null;
 	describe: (() => unknown) | null;
-} = { onPrompt: null, describe: null };
+} = { onPrompt: null, onRename: null, onShell: null, describe: null };
 
 let beaconConn: { write: (s: string) => void; close: () => void } | null = null;
 
@@ -352,5 +386,9 @@ function handleBeaconLine(line: string) {
 	}
 	if (msg?.type === "intent_prompt" && typeof msg.text === "string") {
 		beaconIntents.onPrompt?.(msg.text, msg.busy === true);
+	} else if (msg?.type === "intent_rename" && typeof msg.name === "string") {
+		beaconIntents.onRename?.(msg.name);
+	} else if (msg?.type === "intent_shell" && typeof msg.id === "string" && typeof msg.text === "string") {
+		beaconIntents.onShell?.(msg.id, msg.text);
 	}
 }

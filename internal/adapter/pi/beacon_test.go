@@ -379,6 +379,20 @@ func TestBeaconReportsModel(t *testing.T) {
 	t.Fatal("model event not applied")
 }
 
+func TestBeaconRenameIntent(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	fb := dialBeacon(t, d)
+	fb.send(map[string]any{"type": "hello", "sessionId": "for-r", "cwd": "/w", "idle": true})
+	waitCard(t, reg, "for-r", session.StatusAwaitingInput)
+	if err := d.rename(context.Background(), "for-r", "fix login"); err != nil {
+		t.Fatal(err)
+	}
+	if intent := fb.waitFor(t, "intent_rename"); intent["name"] != "fix login" {
+		t.Fatalf("intent = %v", intent)
+	}
+}
+
 func TestForeignSessionGetsNoResumePane(t *testing.T) {
 	reg := registry.New()
 	d := newDiscoverer(reg, nil)

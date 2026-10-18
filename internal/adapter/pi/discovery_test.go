@@ -552,6 +552,30 @@ func TestSpawnPassesModel(t *testing.T) {
 	}
 }
 
+func TestRenameOwnedSetsSessionName(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.rename(ctx, id, "fix login"); err != nil {
+		t.Fatal(err)
+	}
+	if c := f.call("set_session_name"); c == nil || c["name"] != "fix login" {
+		t.Fatalf("set_session_name = %v", c)
+	}
+	// A later card push keeps the new name.
+	d.handleEvent(id, "agent_start", json.RawMessage(`{"type":"agent_start"}`))
+	if s := snapshotByID(t, reg, id); s.Name != "fix login" {
+		t.Fatalf("name = %q", s.Name)
+	}
+}
+
 func TestLiveSessionGetsNoResumePane(t *testing.T) {
 	reg := registry.New()
 	d := newDiscoverer(reg, nil)

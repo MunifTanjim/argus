@@ -28,6 +28,7 @@ var _ adapter.Dismisser = (*piAdapter)(nil)
 var _ adapter.Prompter = (*piAdapter)(nil)
 var _ adapter.Spawner = (*piAdapter)(nil)
 var _ adapter.ModelLister = (*piAdapter)(nil)
+var _ adapter.Renamer = (*piAdapter)(nil)
 var _ adapter.Beaconed = (*piAdapter)(nil)
 
 func (piAdapter) Agent() string      { return Agent }
@@ -156,6 +157,14 @@ func (a *piAdapter) SpawnSession(ctx context.Context, cwd string, opts adapter.S
 		return "", err
 	}
 	return d.spawnSession(ctx, cwd, opts)
+}
+
+func (a *piAdapter) RenameSession(ctx context.Context, sess session.Session, name string) (bool, error) {
+	d, err := a.live()
+	if err != nil {
+		return false, err
+	}
+	return true, d.rename(ctx, sess.AgentSessionID, name)
 }
 
 func (piAdapter) ListModels(ctx context.Context) ([]api.ModelInfo, error) {
