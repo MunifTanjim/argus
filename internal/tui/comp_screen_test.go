@@ -267,17 +267,13 @@ func TestResumeOverTheLiveScreenFollowsTheShownSession(t *testing.T) {
 		t.Fatalf("the resume reply: %+v, want %+v", got, bravo)
 	}
 	m = pressKeys(m, keyMsg("esc"))
-	if got := openSessionOf(t, m); got != alphaScreen {
-		t.Fatalf("<Esc>: %+v, want %+v", got, alphaScreen)
-	}
-	m = pressKeys(m, screenLeaveKey)
-	if got := openSessionOf(t, m); got != alpha {
-		t.Fatalf("^]: %+v, want %+v", got, alpha)
+	if viewOf(m) != viewTree || paneOf(m).ws != "n1:w2" || len(m.main) != 1 {
+		t.Fatalf("<Esc>: view=%v ws=%q stack=%d, want only bravo's workspace", viewOf(m), paneOf(m).ws, len(m.main))
 	}
 }
 
 // A live screen that a resumed transcript covers still closes when its
-// terminal ends, and back from the transcript skips it.
+// terminal ends, and back from the transcript opens its workspace.
 func TestABuriedLiveScreenClosesWhenItsTerminalEnds(t *testing.T) {
 	ends := map[string]func(m model, termID string) model{
 		"exited": func(m model, termID string) model {
@@ -309,8 +305,8 @@ func TestABuriedLiveScreenClosesWhenItsTerminalEnds(t *testing.T) {
 			t.Errorf("%s: closed an attach the node already ended", name)
 		}
 		m = pressKeys(m, keyMsg("esc"))
-		if tr, ok := m.main.top().(transcriptComp); !ok || tr.sessionID != "n1:s1" {
-			t.Errorf("%s: <Esc>: top = %#v, want n1:s1's transcript", name, m.main.top())
+		if w, ok := m.main.top().(workspaceComp); !ok || w.ws != "n1:w2" {
+			t.Errorf("%s: <Esc>: top = %T, want n1:s2's workspace", name, m.main.top())
 		}
 	}
 }

@@ -115,7 +115,7 @@ func TestHomeKillDisarmsUnderAResumedSession(t *testing.T) {
 	if viewOf(m) != viewSession || homeOf(m).killID != "" {
 		t.Fatalf("a resumed session over Home: view=%v kill=%q, want the prompt dropped", viewOf(m), homeOf(m).killID)
 	}
-	m = pressKeys(m, keyMsg("esc"))
+	m = goHome(pressKeys(m, keyMsg("esc")))
 	if viewOf(m) != viewHome || m.keysRaw() {
 		t.Fatalf("back on Home: view=%v raw=%v, want Home with keys through the keymap", viewOf(m), m.keysRaw())
 	}
@@ -143,7 +143,7 @@ func TestHomeCursorSurvivesASessionAndTheTabs(t *testing.T) {
 	if viewOf(m) != viewSession || m.liveSessionID() != "n1:s2" {
 		t.Fatalf("enter should open the second session: view=%v id=%q", viewOf(m), m.liveSessionID())
 	}
-	m = pressKeys(m, keyMsg("esc"))
+	m = goHome(pressKeys(m, keyMsg("esc")))
 	if viewOf(m) != viewHome || homeOf(m).cursor != 1 {
 		t.Fatalf("back from the session: view=%v cursor=%d, want Home on card 1", viewOf(m), homeOf(m).cursor)
 	}
