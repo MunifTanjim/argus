@@ -641,6 +641,46 @@ func TestSendPromptRefusesPendingInteraction(t *testing.T) {
 	}
 }
 
+func TestShellInputRunsBash(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &piAdapter{disc: d}
+	if !a.IsShellInput("!ls") || a.IsShellInput("ls") {
+		t.Fatal("IsShellInput must match only a leading !")
+	}
+	for _, tc := range []struct {
+		text    string
+		command string
+		exclude bool
+	}{
+		{"! ls -la", "ls -la", false},
+		{"!!git status", "git status", true},
+	} {
+		if submit, err := a.SendShellInput(ctx, snapshotByID(t, reg, id), tc.text); err != nil || submit {
+			t.Fatalf("%q: submit = %v, err = %v", tc.text, submit, err)
+		}
+		c := f.call("bash")
+		if c == nil || c["command"] != tc.command || c["excludeFromContext"] != tc.exclude {
+			t.Fatalf("%q: bash = %v", tc.text, c)
+		}
+	}
+	if _, err := a.SendShellInput(ctx, snapshotByID(t, reg, id), "!  "); err == nil {
+		t.Fatal("empty command must fail")
+	}
+	s := waitCard(t, reg, id, session.StatusAwaitingInput)
+	if s.Interaction == nil || s.Interaction.Kind != session.InteractionIdle {
+		t.Fatalf("after bash: interaction = %+v", s.Interaction)
+	}
+}
+
 func TestLiveSessionGetsNoResumePane(t *testing.T) {
 	reg := registry.New()
 	d := newDiscoverer(reg, nil)

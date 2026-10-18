@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -390,6 +392,136 @@ func TestBeaconRenameIntent(t *testing.T) {
 	}
 	if intent := fb.waitFor(t, "intent_rename"); intent["name"] != "fix login" {
 		t.Fatalf("intent = %v", intent)
+	}
+}
+
+func TestBeaconReportsTheQueue(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	fb := dialBeacon(t, d)
+	fb.send(map[string]any{"type": "hello", "sessionId": "for-q", "sessionFile": "/s/for-q.jsonl", "cwd": "/w", "idle": false})
+	waitCard(t, reg, "for-q", session.StatusWorking)
+	fb.send(map[string]any{"type": "event", "name": "queue", "items": []string{"one", "two"}})
+	waitQueue := func(want []string) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if slices.Equal(d.queueFor("/s/for-q.jsonl"), want) {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("queue = %v, want %v", d.queueFor("/s/for-q.jsonl"), want)
+	}
+	waitQueue([]string{"one", "two"})
+	fb.send(map[string]any{"type": "event", "name": "queue", "items": []string{}})
+	waitQueue(nil)
+}
+
+func TestBeaconShowsADialogWaitingInPi(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	fb := dialBeacon(t, d)
+	fb.send(map[string]any{"type": "hello", "sessionId": "for-d", "cwd": "/w", "idle": true})
+	waitCard(t, reg, "for-d", session.StatusAwaitingInput)
+	waitMessage := func(want string) session.Session {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if s := waitCard(t, reg, "for-d", ""); s.Interaction != nil && s.Interaction.Message == want {
+				return s
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("card = %+v, want message %q", waitCard(t, reg, "for-d", ""), want)
+		return session.Session{}
+	}
+
+	fb.send(map[string]any{"type": "event", "name": "ui_prompt", "open": true, "title": "Pick a branch"})
+	s := waitMessage("Waiting in pi: Pick a branch")
+	if s.Status != session.StatusAwaitingInput || s.InteractionPending() {
+		t.Fatalf("card = %+v, want it waiting on you, with nothing to answer in Argus", s)
+	}
+	fb.send(map[string]any{"type": "event", "name": "agent_start"})
+	fb.send(map[string]any{"type": "event", "name": "model", "model": "m1"})
+	waitMessage("Waiting in pi: Pick a branch")
+
+	fb.send(map[string]any{"type": "event", "name": "ui_prompt", "open": false, "title": "Pick a branch"})
+	waitCard(t, reg, "for-d", session.StatusWorking)
+}
+
+func TestBeaconShellNeedsAPane(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	fb := dialBeacon(t, d)
+	fb.send(map[string]any{"type": "hello", "sessionId": "for-sh", "cwd": "/w", "idle": true})
+	waitCard(t, reg, "for-sh", session.StatusAwaitingInput)
+	if _, err := d.runShell(context.Background(), "for-sh", "!ls"); !errors.Is(err, api.ErrShellNeedsPane) {
+		t.Fatalf("err = %v, want ErrShellNeedsPane", err)
+	}
+}
+
+// shellBeacon is a foreign session in pane %7.
+func shellBeacon(t *testing.T) (*discoverer, *fakeBeacon) {
+	t.Helper()
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	d.paneFor = func(context.Context, int) (session.TmuxServer, string) { return session.TmuxServerArgus, "%7" }
+	fb := dialBeacon(t, d)
+	fb.send(map[string]any{"type": "hello", "sessionId": "for-sh", "cwd": "/w", "idle": true, "pid": 42})
+	waitCard(t, reg, "for-sh", session.StatusAwaitingInput)
+	return d, fb
+}
+
+type shellResult struct {
+	submit bool
+	err    error
+}
+
+func runShellAsync(d *discoverer, text string) <-chan shellResult {
+	done := make(chan shellResult, 1)
+	go func() {
+		submit, err := d.runShell(context.Background(), "for-sh", text)
+		done <- shellResult{submit, err}
+	}()
+	return done
+}
+
+func TestBeaconShellStagesForEnter(t *testing.T) {
+	d, fb := shellBeacon(t)
+	done := runShellAsync(d, " !!ls -la ")
+	intent := fb.waitFor(t, "intent_shell")
+	if intent["text"] != "!!ls -la" {
+		t.Fatalf("intent = %v, want the trimmed command", intent)
+	}
+	select {
+	case r := <-done:
+		t.Fatalf("runShell = %+v before the gate staged the command", r)
+	default:
+	}
+	fb.send(map[string]any{"type": "shell_ready", "id": intent["id"], "ok": true})
+	if r := <-done; r.err != nil || !r.submit {
+		t.Fatalf("runShell = %+v, want it staged for Enter", r)
+	}
+}
+
+func TestBeaconShellRefused(t *testing.T) {
+	d, fb := shellBeacon(t)
+	done := runShellAsync(d, "!ls")
+	intent := fb.waitFor(t, "intent_shell")
+	fb.send(map[string]any{"type": "shell_ready", "id": intent["id"], "ok": false, "reason": "the session has no editor"})
+	if r := <-done; r.err == nil || !strings.Contains(r.err.Error(), "no editor") {
+		t.Fatalf("err = %v, want the gate's reason", r.err)
+	}
+}
+
+func TestBeaconShellOldGate(t *testing.T) {
+	old := shellReadyTimeout
+	shellReadyTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { shellReadyTimeout = old })
+	d, _ := shellBeacon(t)
+	if _, err := d.runShell(context.Background(), "for-sh", "!ls"); err == nil || !strings.Contains(err.Error(), "/reload") {
+		t.Fatalf("err = %v, want a hint to reload the gate", err)
 	}
 }
 

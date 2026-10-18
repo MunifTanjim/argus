@@ -60,6 +60,9 @@ func (f *fakePi) run(stdin io.Reader, stdout io.WriteCloser) {
 			enc.Encode(map[string]any{"id": rec["id"], "type": "response", "command": "get_state", "success": true,
 				"data": data})
 		case "bash":
+			f.mu.Lock()
+			f.calls = append(f.calls, rec)
+			f.mu.Unlock()
 			enc.Encode(map[string]any{"type": "bash_execution_update", "id": rec["id"], "delta": "hi\n"})
 			enc.Encode(map[string]any{"id": rec["id"], "type": "response", "command": "bash", "success": true,
 				"data": map[string]any{"output": "hi\n", "exitCode": 0}})

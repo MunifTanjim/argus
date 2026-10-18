@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -26,21 +27,6 @@ var spawnProc = spawnRPC
 
 // dismissKillAfter bounds graceful shutdown before SIGKILL.
 var dismissKillAfter = 5 * time.Second
-
-// quickFail bounds how long a request waits for pi to reject a command; one
-// still running past it finishes in the background.
-var quickFail = time.Second
-
-func awaitQuickFail(ctx context.Context, done <-chan error) error {
-	select {
-	case err := <-done:
-		return err
-	case <-time.After(quickFail):
-		return nil
-	case <-ctx.Done():
-		return nil // the command keeps running
-	}
-}
 
 // startExitWait bounds how long a spawn whose first call failed waits to see
 // whether pi exited at start.
@@ -311,6 +297,53 @@ func (d *discoverer) sendPrompt(ctx context.Context, id, text string) error {
 		})
 	}
 	return fmt.Errorf("pi: unknown session %s", id)
+}
+
+// quickFail bounds how long a request waits for pi to reject a command; one
+// still running past it finishes in the background.
+var quickFail = time.Second
+
+func awaitQuickFail(ctx context.Context, done <-chan error) error {
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(quickFail):
+		return nil
+	case <-ctx.Done():
+		return nil // the command keeps running
+	}
+}
+
+// runShell runs "!cmd" / "!!cmd" in a session. An owned session shows working
+// until the command ends.
+// It reports whether the command waits in the session's pane for Enter.
+func (d *discoverer) runShell(ctx context.Context, id, text string) (bool, error) {
+	exclude := strings.HasPrefix(text, "!!")
+	command := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "!"), "!"))
+	if command == "" {
+		return false, errors.New("pi: empty shell command")
+	}
+	p := d.get(id)
+	if p == nil {
+		if fs := d.lookupForeign(id); fs != nil {
+			err := d.runForeignShell(ctx, fs, strings.TrimSpace(text))
+			return err == nil, err
+		}
+		return false, fmt.Errorf("pi: unknown session %s", id)
+	}
+	d.upsert(p, session.StatusWorking, nil, false)
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.conn.call(context.Background(), d.nextID(), "bash", map[string]any{"command": command, "excludeFromContext": exclude})
+		done <- err
+		p.mu.Lock()
+		settled := !p.streaming && len(p.pending) == 0
+		p.mu.Unlock()
+		if settled {
+			d.upsert(p, session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle}, true)
+		}
+	}()
+	return false, awaitQuickFail(ctx, done)
 }
 
 // queueFor returns the prompt queue of the session whose file is path. A

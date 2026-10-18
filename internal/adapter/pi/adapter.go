@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
@@ -30,6 +31,7 @@ var _ adapter.Spawner = (*piAdapter)(nil)
 var _ adapter.ModelLister = (*piAdapter)(nil)
 var _ adapter.Renamer = (*piAdapter)(nil)
 var _ adapter.PromptQueuer = (*piAdapter)(nil)
+var _ adapter.ShellInput = (*piAdapter)(nil)
 var _ adapter.Beaconed = (*piAdapter)(nil)
 
 func (piAdapter) Agent() string      { return Agent }
@@ -153,6 +155,21 @@ func (a *piAdapter) SendPrompt(ctx context.Context, sess session.Session, text s
 		return fmt.Errorf("%s: %w", sess.ID, api.ErrSessionBusy)
 	}
 	return d.sendPrompt(ctx, sess.AgentSessionID, text)
+}
+
+func (piAdapter) IsShellInput(text string) bool { return strings.HasPrefix(text, "!") }
+
+// SendShellInput runs "!cmd" through pi's bash command, as pi's own editor
+// does; "!!cmd" keeps the output out of the model's context.
+func (a *piAdapter) SendShellInput(ctx context.Context, sess session.Session, text string) (bool, error) {
+	d, err := a.live()
+	if err != nil {
+		return false, err
+	}
+	if sess.InteractionPending() {
+		return false, fmt.Errorf("%s: %w", sess.ID, api.ErrSessionBusy)
+	}
+	return d.runShell(ctx, sess.AgentSessionID, text)
 }
 
 func (a *piAdapter) ServeBeacon(conn net.Conn) {
