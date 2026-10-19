@@ -178,6 +178,24 @@ func (d *Node) adoptSessionWorkspace(ctx context.Context, s session.Session) {
 	}
 }
 
+// watchSessionWorkspacesLoop gives a session added outside a scan (a beacon
+// hello, a hook) its workspace now rather than at the next scan.
+func (d *Node) watchSessionWorkspacesLoop(ctx context.Context, events <-chan registry.Event) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			if ev.Type == registry.EventAdded && ev.Session.WorkspaceID == "" {
+				go d.adoptSessionWorkspace(ctx, ev.Session)
+			}
+		}
+	}
+}
+
 func (d *Node) adapterFor(agent string) adapter.Adapter {
 	if a, ok := d.adapters[agent]; ok {
 		return a
@@ -547,6 +565,10 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	// Sweep orphaned mirror sessions left by unclean disconnects before any
 	// scan so stale sessions don't surface as live ones.
 	d.reapMirrors(context.Background())
+
+	workspaceEvents, stopWorkspaceEvents := d.reg.Subscribe()
+	defer stopWorkspaceEvents()
+	go d.watchSessionWorkspacesLoop(ctx, workspaceEvents)
 
 	// Subsequent scans are on demand (client refresh, hook events, spawn/kill).
 	go d.scan(ctx)
