@@ -100,6 +100,8 @@ type Node struct {
 	desktopNotify bool      // render desktop notifications on this machine
 	notifier      push.Sink // renders desktop notifications (OSNotifier in production)
 
+	adopting sync.Map // session id -> struct{}; one workspace adoption at a time
+
 	scripts         *wsscript.Runner
 	projreg         *projectreg.Registry                                              // node-local project/workspace registry; nil = disabled
 	worktreeDirTmpl string                                                            // Go-template path for new worktrees
@@ -202,6 +204,14 @@ func (d *Node) adoptSessionWorkspace(ctx context.Context, s session.Session) {
 	if d.projreg == nil || s.WorkspaceID != "" || s.Status == session.StatusDead {
 		return
 	}
+	// A scan's add event and the scan's own pass both reach new sessions.
+	if _, busy := d.adopting.LoadOrStore(s.ID, struct{}{}); busy {
+		return
+	}
+	defer d.adopting.Delete(s.ID)
+	if cur, ok := d.reg.Get(s.ID); ok && cur.WorkspaceID != "" {
+		return
+	}
 	dir := sessionDir(s)
 	if dir == "" {
 		return
@@ -216,6 +226,24 @@ func (d *Node) adoptSessionWorkspace(ctx context.Context, s session.Session) {
 	}
 	if isNew {
 		d.notifyProjectsChanged()
+	}
+}
+
+// watchSessionWorkspacesLoop gives a session added outside a scan (a beacon
+// hello, a hook) its workspace now rather than at the next scan.
+func (d *Node) watchSessionWorkspacesLoop(ctx context.Context, events <-chan registry.Event) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			if ev.Type == registry.EventAdded && ev.Session.WorkspaceID == "" {
+				go d.adoptSessionWorkspace(ctx, ev.Session)
+			}
+		}
 	}
 }
 
@@ -628,6 +656,10 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	// Sweep orphaned mirror sessions left by unclean disconnects before any
 	// scan so stale sessions don't surface as live ones.
 	d.reapMirrors(context.Background())
+
+	workspaceEvents, stopWorkspaceEvents := d.reg.Subscribe()
+	defer stopWorkspaceEvents()
+	go d.watchSessionWorkspacesLoop(ctx, workspaceEvents)
 
 	// Subsequent scans are on demand (client refresh, hook events, spawn/kill).
 	go func() {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/db"
@@ -119,5 +120,53 @@ func TestProjectNodesCarryGitError(t *testing.T) {
 	nodes := newTestNode(t).toProjectNodes([]projectreg.Project{{ID: "p1", Kind: "git", Error: "worktree list: git missing"}})
 	if nodes[0].Error != "worktree list: git missing" {
 		t.Errorf("error = %q", nodes[0].Error)
+	}
+}
+
+func TestSessionAddedOutsideScanGetsWorkspace(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init", "-b", "main")
+
+	d := nodeWithRegistry(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, stop := d.reg.Subscribe()
+	defer stop()
+	go d.watchSessionWorkspacesLoop(ctx, events)
+
+	s, _ := d.reg.ApplyHook(registry.HookUpdate{
+		Agent: "pi", AgentSessionID: "p1", Cwd: dir,
+		Frontend: session.FrontendExternal, Input: session.InputAPI, Status: session.StatusAwaitingInput,
+	})
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if got, _ := d.reg.Get(s.ID); got.WorkspaceID != "" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("session added outside a scan never got a workspace")
+}
+
+func TestAdoptSessionWorkspaceRunsOnce(t *testing.T) {
+	ctx := context.Background()
+	d := nodeWithRegistry(t)
+	d.reg.ReconcileSessions("claude", []registry.DiscoveredSession{{AgentSessionID: "s1", Cwd: t.TempDir(), Frontend: session.FrontendTmux}})
+	stale := d.reg.Snapshot()[0]
+
+	d.adopting.Store(stale.ID, struct{}{})
+	d.adoptSessionWorkspace(ctx, stale)
+	if got, _ := d.reg.Get(stale.ID); got.WorkspaceID != "" {
+		t.Fatalf("adopted during another adoption: workspace %q", got.WorkspaceID)
+	}
+	d.adopting.Delete(stale.ID)
+
+	d.reg.SetWorkspaceID(stale.ID, "ws-earlier")
+	d.adoptSessionWorkspace(ctx, stale)
+	if got, _ := d.reg.Get(stale.ID); got.WorkspaceID != "ws-earlier" {
+		t.Fatalf("a stale snapshot adopted again: workspace %q", got.WorkspaceID)
 	}
 }
