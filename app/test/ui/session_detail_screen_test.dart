@@ -559,6 +559,28 @@ void main() {
     expect(repo.stores.last, same(store));
   });
 
+  testWidgets('an exited session drops the input until it is re-listed',
+      (tester) async {
+    await tester.pumpWidget(_app([
+      gatewayProvider.overrideWithValue(null),
+      transcriptProvider('c9')
+          .overrideWith(() => _SeededTranscript(const [])),
+    ], session: _s(agentSessionId: 'c9')));
+    final container =
+        ProviderScope.containerOf(tester.element(find.byType(SessionDetailScreen)));
+    container.read(sessionsProvider.notifier).replaceAll([_s(agentSessionId: 'c9')]);
+    await tester.pump();
+    expect(find.byType(SessionComposer), findsOneWidget);
+
+    container.read(sessionsProvider.notifier).replaceAll([]);
+    await tester.pump();
+    expect(find.byType(SessionComposer), findsNothing);
+
+    container.read(sessionsProvider.notifier).replaceAll([_s(agentSessionId: 'c9')]);
+    await tester.pump();
+    expect(find.byType(SessionComposer), findsOneWidget);
+  });
+
   // opencode: paneless, input_mode api, so it accepts prompts and can be torn
   // down via the single Kill Session action.
   Session oc({String status = 'idle', String inputMode = 'api', String? nodeId}) =>
