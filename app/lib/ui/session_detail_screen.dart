@@ -62,6 +62,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
   String? _openKey; // the store the stream feeds
   StreamSubscription<RpcMessage>? _tasksSub;
   RouteObserver<PageRoute<dynamic>>? _observer;
+  final _feedKey = GlobalKey<TranscriptFeedState>();
 
   String get _sid => widget.session.id;
 
@@ -405,6 +406,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                         _ when !st.loaded && st.error == null =>
                           const Center(child: CircularProgressIndicator()),
                         _ => TranscriptFeed(
+                            key: _feedKey,
                             detailRef:
                                 ToolDetailRef.live(_sid, agent: live.agent),
                             entries: st.entries),
@@ -416,7 +418,8 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                         child: SessionComposer(
                             session: live,
                             inputNotice: inputNotice,
-                            queue: st.queue),
+                            queue: st.queue,
+                            onSent: () => _feedKey.currentState?.follow()),
                       ),
                   ],
                 ),
