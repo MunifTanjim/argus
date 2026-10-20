@@ -60,6 +60,8 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     with RouteAware, WidgetsBindingObserver {
   TranscriptSubscription? _sub;
   String? _openKey; // the store the stream feeds
+  // The session left the registry after this screen saw it.
+  bool _gone = false;
   StreamSubscription<RpcMessage>? _tasksSub;
   RouteObserver<PageRoute<dynamic>>? _observer;
 
@@ -193,7 +195,11 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     ref.listen<Session?>(
       sessionsProvider.select((m) => m[_sid]),
       (prev, next) {
-        if (next == null) return;
+        if (next == null) {
+          if (prev != null) setState(() => _gone = true);
+          return;
+        }
+        if (_gone) setState(() => _gone = false);
         final back = !next.offline && (prev == null || prev.offline);
         final prevKey = _openKey;
         if (_cacheKey(next) == prevKey && !back) return;
@@ -410,7 +416,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                             entries: st.entries),
                       },
                     ),
-                    if (live.status != SessionStatus.dead)
+                    if (!_gone && live.status != SessionStatus.dead)
                       ConstrainedBox(
                         constraints: BoxConstraints(maxHeight: box.maxHeight),
                         child: SessionComposer(
