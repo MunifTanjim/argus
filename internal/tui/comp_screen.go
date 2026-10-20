@@ -50,6 +50,7 @@ type screenComp struct {
 	row         string
 	term        *vt.Emulator
 	cursorState *screenCursor // nil without an attach
+	frame       *screenFrame  // nil without an attach
 	termID      string        // unique per attach; the gateway and node key on it
 	stop        chan struct{} // closed to stop the emulator drain goroutine
 	err         error         // terminal.open failure, shown in the box
@@ -150,6 +151,8 @@ func (s screenComp) view(c *ctx, w, h int) string {
 	switch {
 	case s.err != nil:
 		body = dimStyle.Render("terminal unavailable: " + s.err.Error())
+	case s.frame.held():
+		body = s.frame.body
 	case s.term != nil:
 		body = s.term.Render()
 	}
@@ -198,10 +201,16 @@ func (s screenComp) paneHeader(c *ctx, _ int) (string, int) {
 // cursor is the program's cursor on the frame, with the box at origin and rows
 // visible rows, or nil when the program hides it or it is off the box.
 func (s screenComp) cursor(origin uv.Position, rows int) *tea.Cursor {
-	if s.term == nil || s.err != nil || s.cursorState == nil || s.cursorState.hidden.Load() {
+	if s.term == nil || s.err != nil || s.cursorState == nil {
 		return nil
 	}
-	p := s.term.CursorPosition()
+	p, hidden := s.term.CursorPosition(), s.cursorState.hidden.Load()
+	if s.frame.held() {
+		p, hidden = s.frame.cursor, s.frame.hidden
+	}
+	if hidden {
+		return nil
+	}
 	y := p.Y - max(0, s.term.Height()-rows)
 	if y < 0 || y >= rows || p.X >= s.term.Width() {
 		return nil
