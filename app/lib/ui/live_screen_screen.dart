@@ -15,6 +15,7 @@ import '../state/terminal_controller.dart';
 import '../state/terminal_prefs.dart';
 import '../state/terminals.dart';
 import '../transport/connection.dart';
+import '../util/sync_frames.dart';
 import 'live_emulator.dart';
 
 
@@ -35,6 +36,9 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
   // A terminal takes keys straight from the keyboard; they and the key bar go
   // out in batches. A session keeps the text box and sends each input at once.
   late final InputBatcher _batcher = InputBatcher((b) => _attach?.send(b));
+  late final SyncFrames _frames = SyncFrames((b) {
+    if (mounted) _emulator.write(b);
+  });
   final _inputBar = GlobalKey<_InputBarState>();
   bool get _direct => widget.terminal != null;
   late final LiveEmulator _emulator = LiveEmulator(
@@ -104,13 +108,14 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
     _attach?.dispose();
     // A partial UTF-8 sequence from a dead attach must not corrupt the next one.
     _emulator.reset();
+    _frames.reset();
     _attach = ref.read(terminalRepositoryProvider).open(
           sessionId: widget.session?.id,
           terminalId: widget.terminal?.id,
           cols: _emulator.cols,
           rows: _emulator.rows,
           onData: (bytes) {
-            if (mounted) _emulator.write(bytes);
+            if (mounted) _frames.add(bytes);
           },
           onExited: _onExited,
           onError: (e) {
@@ -152,6 +157,7 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
   @override
   void dispose() {
     _batcher.flush();
+    _frames.dispose();
     _attach?.dispose();
     _emulator.dispose();
     _textController.dispose();

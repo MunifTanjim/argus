@@ -120,10 +120,10 @@ func terminalClientPane(t api.Terminal, hostname, tmuxEnv, tmuxPane string) stri
 func attachTerminal(c *ctx, t api.Terminal, row string) tea.Cmd {
 	m := c.m
 	cols, rows := m.termDims()
-	emu, cur := newScreenEmulator(cols, rows)
+	emu, cur, frame := newScreenEmulator(cols, rows)
 	s := screenComp{
 		terminalID: t.ID, title: terminalTitle(t), node: nodeName(t.NodeLabel, t.NodeID), row: row,
-		termID: newTermID(), term: emu, cursorState: cur, stop: make(chan struct{}),
+		termID: newTermID(), term: emu, cursorState: cur, frame: frame, stop: make(chan struct{}),
 	}
 	go drainEmulator(s.term, s.stop)
 	c.open(s)
