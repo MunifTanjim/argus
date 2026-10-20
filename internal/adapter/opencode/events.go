@@ -233,7 +233,7 @@ func (d *discoverer) applyEvent(frame sseFrame) {
 }
 
 // session.updated signals metadata, not activity: preserve status;
-// unknown sessions surface as Working.
+// unknown sessions surface as idle, like seedIdle.
 func (d *discoverer) applySessionUpdated(data json.RawMessage) {
 	var p struct {
 		Info ocSession `json:"info"`
@@ -245,11 +245,12 @@ func (d *discoverer) applySessionUpdated(data json.RawMessage) {
 
 	d.mu.Lock()
 	e, tracked := d.presence[info.ID]
-	status := session.StatusWorking
-	if tracked {
-		status = e.status
-		e.lastActivity = time.Now()
+	if !tracked {
+		e = &presenceEntry{status: session.StatusAwaitingInput, hydrated: true}
+		d.presence[info.ID] = e
 	}
+	e.lastActivity = time.Now()
+	status := e.status
 	d.mu.Unlock()
 
 	u := registry.HookUpdate{
@@ -259,6 +260,10 @@ func (d *discoverer) applySessionUpdated(data json.RawMessage) {
 		Frontend:       session.FrontendExternal,
 		TranscriptPath: info.ID,
 		Input:          session.InputAPI,
+	}
+	if !tracked {
+		u.Interaction = &session.Interaction{Kind: session.InteractionIdle}
+		u.ReplaceInteraction = true
 	}
 	if info.Title != "" {
 		u.Name = info.Title

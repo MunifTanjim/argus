@@ -122,6 +122,39 @@ func TestApplyEventFormCreatedSurfacesQuestion(t *testing.T) {
 	}
 }
 
+func TestSessionUpdatedUntrackedSurfacesIdleAndAgesOut(t *testing.T) {
+	reg := registry.New()
+	d := newTestDiscoverer(reg, nil)
+
+	d.applyEvent(sseFrame{Type: "session.updated", Data: []byte(`{"info":{"id":"ses_1","title":"Renamed"}}`)})
+	s, ok := reg.Get(sessionKeyFor(reg, "ses_1"))
+	if !ok {
+		t.Fatal("untracked session.updated must surface the session")
+	}
+	if s.Status != session.StatusAwaitingInput {
+		t.Fatalf("status = %q, want awaiting_input", s.Status)
+	}
+	if s.Interaction == nil || s.Interaction.Kind != session.InteractionIdle {
+		t.Fatalf("expected idle interaction, got %+v", s.Interaction)
+	}
+
+	d.mu.Lock()
+	e, tracked := d.presence["ses_1"]
+	if tracked {
+		e.lastActivity = time.Now().Add(-2 * sessionIdleTTL)
+	}
+	d.mu.Unlock()
+	if !tracked {
+		t.Fatal("untracked session.updated must create a presence entry")
+	}
+	d.sweepIdle()
+	for _, s := range reg.Snapshot() {
+		if s.AgentSessionID == "ses_1" {
+			t.Fatal("session surfaced by session.updated must age out")
+		}
+	}
+}
+
 func TestSessionUpdatedDoesNotSetWorking(t *testing.T) {
 	reg := registry.New()
 	d := newTestDiscoverer(reg, nil)
