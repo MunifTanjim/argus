@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
@@ -21,6 +22,9 @@ const (
 
 // screenWheelMsg is the wheel at (x, y) in the main pane.
 type screenWheelMsg struct{ x, y, delta int }
+
+// screenRepaintMsg only causes a redraw, once a held frame has expired.
+type screenRepaintMsg struct{}
 
 type screenMouseKind int
 
@@ -50,6 +54,7 @@ type screenComp struct {
 	row         string
 	term        *vt.Emulator
 	cursorState *screenCursor // nil without an attach
+	frame       *screenFrame  // nil without an attach
 	termID      string        // unique per attach; the gateway and node key on it
 	stop        chan struct{} // closed to stop the emulator drain goroutine
 	err         error         // terminal.open failure, shown in the box
@@ -113,8 +118,14 @@ func (s screenComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 		if s.term == nil {
 			return s, nil
 		}
-		if raw, err := base64.StdEncoding.DecodeString(msg.Data); err == nil {
-			_, _ = s.term.Write(raw)
+		raw, err := base64.StdEncoding.DecodeString(msg.Data)
+		if err != nil {
+			return s, nil
+		}
+		wasHeld := s.frame.held()
+		_, _ = s.term.Write(raw)
+		if !wasHeld && s.frame.held() {
+			return s, tea.Tick(syncFrameTimeout, func(time.Time) tea.Msg { return screenRepaintMsg{} })
 		}
 	case api.TerminalExited:
 		s.gone = true
@@ -150,6 +161,8 @@ func (s screenComp) view(c *ctx, w, h int) string {
 	switch {
 	case s.err != nil:
 		body = dimStyle.Render("terminal unavailable: " + s.err.Error())
+	case s.frame.held():
+		body = s.frame.body
 	case s.term != nil:
 		body = s.term.Render()
 	}
@@ -198,10 +211,16 @@ func (s screenComp) paneHeader(c *ctx, _ int) (string, int) {
 // cursor is the program's cursor on the frame, with the box at origin and rows
 // visible rows, or nil when the program hides it or it is off the box.
 func (s screenComp) cursor(origin uv.Position, rows int) *tea.Cursor {
-	if s.term == nil || s.err != nil || s.cursorState == nil || s.cursorState.hidden.Load() {
+	if s.term == nil || s.err != nil || s.cursorState == nil {
 		return nil
 	}
-	p := s.term.CursorPosition()
+	p, hidden := s.term.CursorPosition(), s.cursorState.hidden.Load()
+	if s.frame.held() {
+		p, hidden = s.frame.cursor, s.frame.hidden
+	}
+	if hidden {
+		return nil
+	}
 	y := p.Y - max(0, s.term.Height()-rows)
 	if y < 0 || y >= rows || p.X >= s.term.Width() {
 		return nil

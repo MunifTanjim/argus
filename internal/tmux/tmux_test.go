@@ -510,6 +510,38 @@ func TestAttachArgs(t *testing.T) {
 	}
 }
 
+func TestVersionTakesFeatures(t *testing.T) {
+	for v, want := range map[string]bool{
+		"tmux 3.1c":        false,
+		"tmux 3.2":         true,
+		"tmux 3.2a":        true,
+		"tmux 3.10":        true,
+		"tmux 2.9":         false,
+		"tmux 4.0":         true,
+		"tmux next-3.7":    true,
+		"tmux master":      true,
+		"tmux openbsd-6.8": false,
+		"tmux openbsd-7.5": true,
+		"tmux":             false,
+	} {
+		if got := versionTakesFeatures(v); got != want {
+			t.Errorf("versionTakesFeatures(%q) = %v, want %v", v, got, want)
+		}
+	}
+}
+
+func TestAttachCommandDeclaresSync(t *testing.T) {
+	c := testClient(t)
+	v, err := c.Version(context.Background())
+	if err != nil {
+		t.Skipf("tmux unavailable: %v", err)
+	}
+	args := c.AttachCommand(context.Background(), "work").Args
+	if got := slices.Contains(args, "sync"); got != versionTakesFeatures(v) {
+		t.Fatalf("AttachCommand args = %#v for %q", args, v)
+	}
+}
+
 func TestAttachEnvGuaranteesTerm(t *testing.T) {
 	got := attachEnv([]string{"HOME=/home/argus"})
 	if !slices.Contains(got, "TERM="+fallbackTerm) {

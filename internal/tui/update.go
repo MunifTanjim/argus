@@ -286,6 +286,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateTranscript(msg, isHistory)
 	case termOpenedMsg:
 		return m.updateScreen(m.screenAt(msg.termID), msg)
+	case screenRepaintMsg:
+		return m, nil
 	case logTickMsg:
 		// Returning re-renders, which re-reads the log buffer.
 		return m, nil

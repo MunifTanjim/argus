@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
@@ -335,6 +336,40 @@ func TestLiveScreenShowsTheProgramCursor(t *testing.T) {
 	}
 }
 
+func TestLiveScreenHoldsTheFrameDuringASynchronizedUpdate(t *testing.T) {
+	m, _ := liveSession(t)
+	m = openScreen(t, m)
+	s, _ := m.liveScreen()
+	out := func(m model, raw string) model {
+		b, _ := json.Marshal(api.TerminalOutput{TermID: s.termID, Data: base64.StdEncoding.EncodeToString([]byte(raw))})
+		m, _ = upd(m, notificationMsg(api.Notification{Method: api.MethodTerminalOutput, Params: b}))
+		return m
+	}
+	r := m.mainRect()
+	m = out(m, "old")
+	// tmux redraws the whole pane for a synchronized update, hiding the cursor
+	// first; the redraw can arrive split across outputs.
+	m = out(m, "\x1b[?2026h\x1b[?25l\x1b[Hnew")
+	if v := m.View(); !strings.Contains(v.Content, "old") || strings.Contains(v.Content, "new") {
+		t.Fatalf("mid-update view shows the partial redraw, want the last whole frame:\n%s", v.Content)
+	} else if v.Cursor == nil || v.Cursor.X != r.Min.X+screenBodyX+3 || v.Cursor.Y != r.Min.Y+screenBodyY {
+		t.Fatalf("mid-update cursor = %+v, want the last frame's, after \"old\"", v.Cursor)
+	}
+	m = out(m, "\x1b[2;1H\x1b[?25h\x1b[?2026l")
+	if v := m.View(); !strings.Contains(v.Content, "new") {
+		t.Fatalf("view after the update ended does not show it:\n%s", v.Content)
+	} else if v.Cursor == nil || v.Cursor.Y != r.Min.Y+screenBodyY+1 {
+		t.Fatalf("cursor after the update = %+v, want on the second row", v.Cursor)
+	}
+
+	m = out(m, "\x1b[?2026h\x1b[Hnever ends")
+	s, _ = m.liveScreen()
+	s.frame.since = time.Now().Add(-syncFrameTimeout)
+	if v := m.View(); !strings.Contains(v.Content, "never ends") {
+		t.Fatalf("view past the timeout still holds the frame:\n%s", v.Content)
+	}
+}
+
 func TestLiveScreenFillsThePaneFromTheStart(t *testing.T) {
 	m, _ := liveSession(t)
 	m = openScreen(t, m)
@@ -490,5 +525,37 @@ func TestScreenCloseButtonLeavesTheScreen(t *testing.T) {
 	m, _ = click(m, x, y)
 	if m.topScreen() >= 0 {
 		t.Error("the close button should leave the screen")
+	}
+}
+
+func TestHeldFrameSchedulesARepaint(t *testing.T) {
+	old := syncFrameTimeout
+	syncFrameTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { syncFrameTimeout = old })
+
+	m, _ := liveSession(t)
+	m = openScreen(t, m)
+	s, _ := m.liveScreen()
+	b, _ := json.Marshal(api.TerminalOutput{TermID: s.termID, Data: base64.StdEncoding.EncodeToString([]byte("\x1b[?2026hpartial"))})
+	m, cmd := upd(m, notificationMsg(api.Notification{Method: api.MethodTerminalOutput, Params: b}))
+	if cmd == nil {
+		t.Fatal("no repaint scheduled for a held frame")
+	}
+	if strings.Contains(m.View().Content, "partial") {
+		t.Fatal("held frame shows the partial redraw")
+	}
+	msgs := make(chan tea.Msg, 4)
+	go func() { msgs <- cmd() }()
+	select {
+	case msg := <-msgs:
+		if _, ok := msg.(tea.BatchMsg); ok {
+			t.Fatalf("cmd returned a batch %T; want the repaint tick", msg)
+		}
+		m, _ = upd(m, msg)
+	case <-time.After(2 * time.Second):
+		t.Fatal("repaint never fired")
+	}
+	if !strings.Contains(m.View().Content, "partial") {
+		t.Fatalf("view after the timeout still holds the frame:\n%s", m.View().Content)
 	}
 }
