@@ -176,6 +176,54 @@ func TestManagedServerStopsOnEOF(t *testing.T) {
 	}
 }
 
+func testManagedStopsOnServerStop(t *testing.T, spec spawnSpec) {
+	t.Helper()
+	srv, err := startManagedReady(spec, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { srv.stop(managedStopTimeout) })
+	c, err := api.Dial(spec.readySocket())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.Call(api.MethodServerStop, nil, nil); err != nil {
+		t.Fatalf("server.stop = %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- srv.wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("exit after server.stop = %v, want a clean exit", err)
+		}
+	case <-time.After(managedStopTimeout):
+		t.Fatal("server did not exit after server.stop")
+	}
+	if _, err := api.Dial(spec.readySocket()); err == nil {
+		t.Error("the server still serves after server.stop")
+	}
+}
+
+func TestManagedServerStopsOnServerStop(t *testing.T) {
+	sandboxChild(t)
+	testManagedStopsOnServerStop(t, testSpec(t))
+}
+
+func TestManagedGatewayStopsOnServerStop(t *testing.T) {
+	sandboxChild(t)
+	addr, _, err := resolveListenAddr("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := testSpec(t)
+	spec.role = roleGateway
+	spec.listenAddr = addr
+	spec.token = "test-token"
+	testManagedStopsOnServerStop(t, spec)
+}
+
 func TestManagedStopKillsAfterTimeout(t *testing.T) {
 	sandboxChild(t)
 	t.Setenv("ARGUS_TEST_IGNORE_STDIN", "1")
