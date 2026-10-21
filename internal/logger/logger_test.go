@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"os"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/config"
@@ -14,7 +15,7 @@ import (
 func TestInitHonorsLevel(t *testing.T) {
 	config.LogLevel.Set(slog.LevelWarn)
 	config.LogFormat = "pretty"
-	Init()
+	Init(os.Stderr)
 	if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
 		t.Error("debug should be disabled at warn level")
 	}
@@ -32,7 +33,7 @@ func TestInitHonorsLevel(t *testing.T) {
 func TestInitJSONFormat(t *testing.T) {
 	config.LogFormat = "json"
 	config.LogLevel.Set(slog.LevelInfo)
-	Init() // smoke: must not panic with the json handler
+	Init(os.Stderr) // smoke: must not panic with the json handler
 }
 
 func TestColorEnabled(t *testing.T) {
@@ -70,5 +71,24 @@ func TestPrettyHandlerNoColorWritesNoEscapes(t *testing.T) {
 	}
 	if !bytes.Contains(buf.Bytes(), []byte("node")) {
 		t.Fatalf("output lacks the scope prefix: %q", buf.String())
+	}
+}
+
+func TestInitWritesToWriterWithoutColor(t *testing.T) {
+	prevLogger, prevFormat, prevLevel := slog.Default(), config.LogFormat, config.LogLevel.Level()
+	t.Cleanup(func() {
+		slog.SetDefault(prevLogger)
+		config.LogFormat = prevFormat
+		config.LogLevel.Set(prevLevel)
+	})
+	config.LogLevel.Set(slog.LevelInfo)
+	config.LogFormat = "pretty"
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("CLICOLOR_FORCE", "")
+	var buf bytes.Buffer
+	Init(&buf)
+	slog.Info("hello")
+	if !bytes.Contains(buf.Bytes(), []byte("hello")) || bytes.Contains(buf.Bytes(), []byte("\x1b[")) {
+		t.Fatalf("output = %q", buf.String())
 	}
 }
