@@ -7,6 +7,7 @@ const (
 	agentCodex       = "codex"
 	agentAntigravity = "antigravity"
 	agentOpenCode    = "opencode"
+	agentPi          = "pi"
 )
 
 type toolCategory int
@@ -133,6 +134,17 @@ var toolRegistry = map[string]map[string]toolMeta{
 		"task":      {"Task", catTask, (model).opencodeTaskDetail},
 		"subagent":  {"Subagent", catTask, (model).opencodeTaskDetail},
 		"question":  {"Question", catOther, (model).opencodeQuestionDetail},
+	},
+	agentPi: {
+		// Pi's built-ins share opencode's lowercase names and input shapes
+		// (path/command/pattern keys), so the same renderers apply.
+		"read":  {"Read", catRead, (model).readDetail},
+		"edit":  {"Edit", catEdit, (model).editToolDetail},
+		"write": {"Write", catWrite, (model).editToolDetail},
+		"bash":  {"Bash", catBash, (model).bashDetail},
+		"grep":  {"Grep", catGrep, (model).grepDetail},
+		"find":  {"Find", catGlob, (model).globDetail},
+		"ls":    {"Ls", catGlob, (model).globDetail},
 	},
 	agentAntigravity: {
 		"run_command":                {"Run Command", catBash, (model).runCommandDetail},

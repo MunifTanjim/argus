@@ -240,6 +240,13 @@ void main() {
     expect(toolMeta('opencode', 'question')!.category, ToolCategory.other);
   });
 
+  test('pi tool names are registered with display and category', () {
+    expect(toolMeta('pi', 'read')!.display, 'Read');
+    expect(toolMeta('pi', 'read')!.category, ToolCategory.read);
+    expect(toolMeta('pi', 'bash')!.category, ToolCategory.bash);
+    expect(toolMeta('pi', 'find')!.category, ToolCategory.glob);
+  });
+
   test('answeredAnswers parses question→answer pairs', () {
     const r =
         'Your questions have been answered: "Pick one"="A", "Colors"="red, blue"';

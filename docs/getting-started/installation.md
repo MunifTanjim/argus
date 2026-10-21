@@ -14,8 +14,9 @@ You need these to *run* Argus, however you install it:
   - [Codex](https://developers.openai.com/codex/cli): the OpenAI Codex CLI, run as `codex`
   - [Antigravity](https://antigravity.google/): Google's terminal agent, run as `agy`
   - [OpenCode](https://opencode.ai/) 2 or later: run as `opencode`
+  - [Pi](https://pi.dev/)
 
-Argus watches the agents you have installed. You don't need all four.
+Argus watches the agents you have installed. You don't need all five.
 
 ## Install Pre-built Binary
 
@@ -113,12 +114,17 @@ Codex needs no hooks. Argus connects to Codex's background app-server daemon,
 which `codex` starts automatically. Sessions started with `codex --no-daemon` are
 not visible to Argus.
 
+Pi needs no hooks. Argus spawns and owns one `pi --mode rpc` process per
+session. Argus shows the select, confirm, input, and editor dialogs that pi's
+own extensions open. Past sessions remain available as history once they hold
+conversation.
+
 ### Agent tools
 
 Argus gives Claude Code, Codex, and OpenCode a set of MCP tools. With these
 tools, an agent can start other agent sessions, send messages to them, read
-their output, answer their prompts, and stop them. Antigravity does not get the
-tools.
+their output, answer their prompts, and stop them. Antigravity and Pi do not
+get the tools.
 
 The node serves the tools on `127.0.0.1`, on the port that
 [`mcp.port`](/getting-started/configuration#agent-tools) sets. Each request

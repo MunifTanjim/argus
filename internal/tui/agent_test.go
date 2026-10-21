@@ -11,6 +11,7 @@ func TestAgentLabel(t *testing.T) {
 		{"codex", "Codex"},
 		{"antigravity", "Antigravity"},
 		{"opencode", "OpenCode"},
+		{"pi", "Pi"},
 		{"future-agent", "future-agent"}, // unknown: raw id
 		{"", ""},                         // empty: no label
 	}
