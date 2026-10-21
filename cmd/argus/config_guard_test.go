@@ -43,7 +43,7 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"no-restart":       true, // `upgrade` only: per-invocation step selection
 		"no-download":      true, // `upgrade` only: per-invocation step selection
 		"beta":             true, // `upgrade` only: per-invocation channel selection
-		"cwd":              true, // `session spawn` only: per-invocation working directory
+		"cwd":              true, // `session spawn` and `pi-host`: per-invocation working directory
 		"node":             true, // `session spawn` only: per-invocation target node
 		"name":             true, // `session spawn` only: per-invocation session name
 		"model":            true, // `session spawn` only: per-invocation model

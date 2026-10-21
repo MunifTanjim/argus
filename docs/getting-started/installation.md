@@ -116,8 +116,11 @@ not visible to Argus.
 
 Pi needs no hooks. Argus spawns and owns one `pi --mode rpc` process per
 session, with a bundled gate extension. Argus shows the select, confirm, and
-input dialogs that pi's own extensions open. Past sessions remain available as
-history once they hold conversation.
+input dialogs that pi's own extensions open. Pi sessions that Argus started
+keep running when the node stops, and the node attaches to them again when it
+starts. If Argus runs as a `systemd` service, set `KillMode=process` in the
+unit. Otherwise, stopping or restarting the unit also stops these sessions.
+Past sessions remain available as history once they hold conversation.
 
 Argus also installs the same gate extension globally when it starts, so
 interactive `pi` sessions started outside Argus show up too, with their status

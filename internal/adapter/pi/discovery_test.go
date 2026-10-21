@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,8 +23,6 @@ import (
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-// stubSpawn replaces process launch with a fake RPC peer plus a real (sleep)
-// child so dismiss/reap paths exercise real *exec.Cmd behavior.
 func TestSpawnedProcessOutlivesTheRequest(t *testing.T) {
 	reg := registry.New()
 	d := newDiscoverer(reg, nil)
@@ -30,7 +30,7 @@ func TestSpawnedProcessOutlivesTheRequest(t *testing.T) {
 	stubSpawn(t, f)
 	var procCtx context.Context
 	stubbed := spawnProc
-	spawnProc = func(ctx context.Context, cwd, id, gate, model string) (*rpcConn, *exec.Cmd, error) {
+	spawnProc = func(ctx context.Context, cwd, id, gate, model string) (*rpcConn, error) {
 		procCtx = ctx
 		return stubbed(ctx, cwd, id, gate, model)
 	}
@@ -53,6 +53,7 @@ func TestSpawnReportsAnExitAtStart(t *testing.T) {
 	old := piBin
 	piBin = bin
 	t.Cleanup(func() { piBin = old })
+	useRealRelay(t)
 	// The exit can land after the first call fails; every spawn must see it.
 	for range 20 {
 		d := newDiscoverer(registry.New(), nil)
@@ -75,16 +76,17 @@ func isIdle(s session.Session) bool {
 	return s.Status == session.StatusAwaitingInput && s.Interaction != nil && s.Interaction.Kind == session.InteractionIdle
 }
 
+// stubSpawn runs each spawned session under an in-process relay (serveHost)
+// wired to f, so the supervisor talks to it over a real socket.
 func stubSpawn(t *testing.T, f *fakePi) {
 	t.Helper()
+	useHostDir(t)
 	old := spawnProc
 	t.Cleanup(func() { spawnProc = old })
-	spawnProc = func(ctx context.Context, cwd, id, gate, model string) (*rpcConn, *exec.Cmd, error) {
+	spawnProc = func(ctx context.Context, cwd, id, gate, model string) (*rpcConn, error) {
 		if gate == "" {
 			t.Error("gate extension path empty")
 		}
-		fakeStdin, clientStdin := io.Pipe()
-		clientStdout, fakeStdout := io.Pipe()
 		f.mu.Lock()
 		f.spawnModel = model
 		// Like real pi, get_state reports the --session-id until /new.
@@ -95,17 +97,86 @@ func stubSpawn(t *testing.T, f *fakePi) {
 			f.state["sessionId"] = id
 		}
 		f.mu.Unlock()
-		go f.run(fakeStdin, fakeStdout)
-		cmd := exec.Command("sleep", "30")
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
+		path := hostSocketPath(id)
+		ln, err := net.Listen("unix", path)
+		if err != nil {
+			return nil, err
 		}
-		t.Cleanup(func() { _ = cmd.Process.Kill() })
-		return newRPCConn(clientStdin, clientStdout), cmd, nil
+		tl := &trackedListener{Listener: ln}
+		fakeStdin, piIn := io.Pipe()
+		piOut, fakeStdout := io.Pipe()
+		exited := make(chan hostExit, 1)
+		go func() {
+			f.run(fakeStdin, fakeStdout)
+			exited <- hostExit{}
+		}()
+		kill := func() { fakeStdin.Close() }
+		hostDone := make(chan struct{})
+		go func() {
+			defer close(hostDone)
+			serveHost(tl, cwd, piIn, piOut, kill, exited)
+		}()
+		f.mu.Lock()
+		f.kill, f.lose = kill, tl.lose
+		f.mu.Unlock()
+		t.Cleanup(func() {
+			kill()
+			<-hostDone
+		})
+		return dialHost(ctx, path)
 	}
 	oldKill := dismissKillAfter
 	dismissKillAfter = 200 * time.Millisecond
 	t.Cleanup(func() { dismissKillAfter = oldKill })
+}
+
+func useHostDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "aph")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := hostDir
+	hostDir = func() string { return dir }
+	t.Cleanup(func() {
+		hostDir = old
+		os.RemoveAll(dir)
+	})
+	return dir
+}
+
+// trackedListener can drop every accepted connection, as a relay that died
+// without a word would.
+type trackedListener struct {
+	net.Listener
+	mu    sync.Mutex
+	conns []net.Conn
+}
+
+func (l *trackedListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err == nil {
+		l.mu.Lock()
+		l.conns = append(l.conns, c)
+		l.mu.Unlock()
+	}
+	return c, err
+}
+
+func (l *trackedListener) lose() {
+	l.Listener.Close()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, c := range l.conns {
+		c.Close()
+	}
+}
+
+func (f *fakePi) exit() {
+	f.mu.Lock()
+	kill := f.kill
+	f.mu.Unlock()
+	kill()
 }
 
 func snapshotByID(t *testing.T, reg *registry.Registry, id string) session.Session {
@@ -613,7 +684,7 @@ func TestExitAfterNewSessionEndsTheNewCard(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitCardState(t, reg, "ses-new", isIdle)
-	_ = d.get("ses-new").cmd.Process.Kill()
+	f.exit()
 	deadline := time.Now().Add(5 * time.Second)
 	for d.get("ses-new") != nil {
 		if time.Now().After(deadline) {
@@ -998,5 +1069,347 @@ func TestLiveSessionGetsNoResumePane(t *testing.T) {
 	}
 	if _, _, ok := a.ResumeCommand(id); !ok {
 		t.Fatal("a dismissed session must be resumable again")
+	}
+}
+
+// useRealRelay runs relays as child processes of the test binary, which
+// TestMain turns into RunHost.
+func useRealRelay(t *testing.T) string {
+	t.Helper()
+	dir := useHostDir(t)
+	t.Setenv("ARGUS_TEST_PI_HOST", "1")
+	old := hostBin
+	hostBin = os.Executable
+	t.Cleanup(func() {
+		hostBin = old
+		_ = exec.Command("pkill", "-f", dir).Run()
+	})
+	return dir
+}
+
+func relayRunning(dir string) bool {
+	return exec.Command("pgrep", "-f", dir).Run() == nil
+}
+
+func waitFileGone(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s still present", path)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestReattachRestoresAnOwnedSession(t *testing.T) {
+	f := &fakePi{t: t, state: map[string]any{"model": map[string]any{"id": "m1"}, "isStreaming": false}}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	d1 := newDiscoverer(registry.New(), nil)
+	id, err := d1.spawnSession(ctx, "/work/p", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d1.get(id).conn.close()
+
+	reg2 := registry.New()
+	d2 := newDiscoverer(reg2, nil)
+	if err := d2.ScanOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s := snapshotByID(t, reg2, id)
+	if s.Cwd != "/work/p" || s.Summary == nil || s.Summary.ModelName != "m1" || !isIdle(s) {
+		t.Fatalf("card = %+v summary = %+v", s, s.Summary)
+	}
+	if err := d2.sendPrompt(ctx, id, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		f.mu.Lock()
+		n := len(f.prompts)
+		f.mu.Unlock()
+		if n == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the prompt never reached pi")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestReattachShowsAnOpenDialogAgain(t *testing.T) {
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	d1 := newDiscoverer(registry.New(), nil)
+	id, err := d1.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d1.get(id).conn.close()
+	f.emit(map[string]any{"type": "extension_ui_request", "id": "u1", "method": "select", "title": "Pick", "options": []string{"a", "b"}})
+
+	reg2 := registry.New()
+	d2 := newDiscoverer(reg2, nil)
+	if err := d2.ScanOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s := waitCardState(t, reg2, id, func(s session.Session) bool {
+		return s.Interaction != nil && s.Interaction.RequestID == "u1"
+	})
+	q := s.Interaction.Questions[0].Question
+	if err := d2.respond(ctx, s, api.RespondParams{RequestID: "u1", Behavior: "allow", Answers: map[string]any{q: "b"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.waitUIResponses(1); len(got) != 1 || got[0]["id"] != "u1" || got[0]["value"] != "b" {
+		t.Fatalf("ui responses = %v", got)
+	}
+}
+
+func TestReattachKeepsASocketItCannotDial(t *testing.T) {
+	dir := useHostDir(t)
+	path := filepath.Join(dir, "busy.sock")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := newDiscoverer(registry.New(), nil).ScanOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("socket of a live relay removed: %v", err)
+	}
+}
+
+func TestReattachRemovesAStaleSocket(t *testing.T) {
+	dir := useHostDir(t)
+	plain := filepath.Join(dir, "dead.sock")
+	if err := os.WriteFile(plain, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	closed := filepath.Join(dir, "gone.sock")
+	ln, err := net.Listen("unix", closed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	if err := d.ScanOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 500*time.Millisecond {
+		t.Fatalf("stale sockets took %v", took)
+	}
+	for _, p := range []string{plain, closed} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("%s not removed: %v", p, err)
+		}
+	}
+	if got := reg.Snapshot(); len(got) != 0 {
+		t.Fatalf("cards = %+v", got)
+	}
+}
+
+func TestDismissStopsTheRelay(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := hostSocketPath(id)
+	if err := d.dismiss(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if !f.sawEOF() {
+		t.Fatal("pi's stdin was not closed")
+	}
+	waitFileGone(t, path)
+	snapshotGone(t, reg, id)
+}
+
+func TestLostRelayEndsTheCard(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	lose := f.lose
+	f.mu.Unlock()
+	lose()
+	deadline := time.Now().Add(5 * time.Second)
+	for d.get(id) != nil {
+		if time.Now().After(deadline) {
+			t.Fatal("the lost session was never dropped")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	snapshotGone(t, reg, id)
+}
+
+func TestOwnedSessionSurvivesARealRelay(t *testing.T) {
+	dir := useRealRelay(t)
+	t.Setenv("ARGUS_TEST_FAKE_PI", "1")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := piBin
+	piBin = exe
+	t.Cleanup(func() { piBin = old })
+	// Unresolved and uncleaned: on macOS the temp dir sits behind the /var
+	// symlink, and the card must keep the cwd exactly as it was spawned with.
+	cwd := t.TempDir() + "/"
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	d1 := newDiscoverer(registry.New(), nil)
+	id, err := d1.spawnSession(ctx, cwd, adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d1.get(id).conn.close()
+
+	reg2 := registry.New()
+	d2 := newDiscoverer(reg2, nil)
+	if err := d2.ScanOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s := snapshotByID(t, reg2, id)
+	if s.Cwd != cwd || s.Summary == nil || s.Summary.ModelName != "m1" || !isIdle(s) {
+		t.Fatalf("card = %+v summary = %+v", s, s.Summary)
+	}
+	if err := d2.sendPrompt(ctx, id, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	waitCardState(t, reg2, id, func(s session.Session) bool { return s.Name == "hello" })
+
+	if err := d2.dismiss(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	snapshotGone(t, reg2, id)
+	waitFileGone(t, hostSocketPath(id))
+	deadline := time.Now().Add(5 * time.Second)
+	for relayRunning(dir) {
+		if time.Now().After(deadline) {
+			t.Fatal("the relay is still running after dismiss")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestReattachOutlivesTheScanRequest(t *testing.T) {
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	d1 := newDiscoverer(registry.New(), nil)
+	id, err := d1.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d1.get(id).conn.close()
+
+	reg2 := registry.New()
+	d2 := newDiscoverer(reg2, nil)
+	ended, end := context.WithCancel(context.Background())
+	end()
+	if err := d2.ScanOnce(ended); err != nil {
+		t.Fatal(err)
+	}
+	if d2.get(id) == nil {
+		t.Fatal("a scan under an ended request skipped the reattach for good")
+	}
+}
+
+func TestSpawnWaitsForTheFirstReattach(t *testing.T) {
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	d1 := newDiscoverer(registry.New(), nil)
+	id, err := d1.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d1.get(id).conn.close()
+
+	d2 := newDiscoverer(registry.New(), nil)
+	reattached := false
+	spawnProc = func(context.Context, string, string, string, string) (*rpcConn, error) {
+		reattached = d2.get(id) != nil
+		return nil, errors.New("stop")
+	}
+	_, _ = d2.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if !reattached {
+		t.Fatal("a spawn ran before the first reattach")
+	}
+}
+
+func TestSpawnStopsARelayItCannotReach(t *testing.T) {
+	dir := useHostDir(t)
+	pidFile := filepath.Join(dir, "pid")
+	relay := filepath.Join(dir, "relay")
+	script := "#!/bin/sh\necho $$ > " + pidFile + "\nexec sleep 30\n"
+	if err := os.WriteFile(relay, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldBin, oldLimit := hostBin, hostDialLimit
+	hostBin = func() (string, error) { return relay, nil }
+	hostDialLimit = 2 * time.Second
+	t.Cleanup(func() { hostBin, hostDialLimit = oldBin, oldLimit })
+	id := newSessionID()
+	// A plain file refuses every dial, as a socket would before a stuck relay
+	// listens.
+	if err := os.WriteFile(hostSocketPath(id), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := spawnHosted(context.Background(), dir, id, "", ""); err == nil {
+		t.Fatal("expected a dial error")
+	}
+	pid, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for exec.Command("kill", "-0", strings.TrimSpace(string(pid))).Run() == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("the unreachable relay still runs")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(hostSocketPath(id)); !os.IsNotExist(err) {
+		t.Fatalf("socket path not removed: %v", err)
 	}
 }
