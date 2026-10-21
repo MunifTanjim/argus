@@ -271,10 +271,11 @@ func (d *Node) sendPromptInput(ctx context.Context, s session.Session, p api.Inp
 		return nil, fmt.Errorf("%s: %w", s.ID, api.ErrNoTerminalControl)
 	}
 	if si, ok := a.(adapter.ShellInput); ok && p.Submit && si.IsShellInput(p.Text) {
-		if !s.Controllable() {
-			return nil, fmt.Errorf("%s: %w", s.ID, api.ErrShellNeedsPane)
+		submit, err := si.SendShellInput(ctx, s, p.Text)
+		if err != nil || !submit {
+			return nil, err
 		}
-		return nil, si.SendShellInput(ctx, s, p.Text)
+		return nil, d.submitInPane(ctx, s)
 	}
 	if f, ok := a.(adapter.PaneFiller); ok && s.Status == session.StatusWorking && s.Controllable() {
 		return nil, d.fillAndSubmit(ctx, s, f, p.Text)
@@ -289,16 +290,23 @@ func (d *Node) sendPromptInput(ctx context.Context, s session.Session, p api.Inp
 	return nil, nil
 }
 
-// fillAndSubmit leaves copy mode before pressing Enter so the key reaches the
-// agent. A permission, question or plan that opened during the fill gets no
-// Enter: the key would answer it.
 func (d *Node) fillAndSubmit(ctx context.Context, s session.Session, f adapter.PaneFiller, text string) error {
-	_, c, err := d.resolve(s.ID)
-	if err != nil {
+	if _, _, err := d.resolve(s.ID); err != nil {
 		return err
 	}
 	filled, err := f.FillPrompt(ctx, s, text)
 	if err != nil || !filled {
+		return err
+	}
+	return d.submitInPane(ctx, s)
+}
+
+// submitInPane presses Enter in s's pane, leaving copy mode first so the key
+// reaches the agent. A permission, question or plan that opened since the input
+// was staged gets no Enter: the key would answer it.
+func (d *Node) submitInPane(ctx context.Context, s session.Session) error {
+	_, c, err := d.resolve(s.ID)
+	if err != nil {
 		return err
 	}
 	if cur, ok := d.reg.Get(s.ID); !ok || cur.InteractionPending() {
@@ -629,7 +637,7 @@ func (d *Node) spawnAndAdopt(ctx context.Context, agent, agentSessionID, cwd, ex
 		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "terminal unavailable: tmux not found on node " + d.label}
 	}
 
-	key := agent + "\x00" + agentSessionID
+	key := resumeKey(agent, agentSessionID)
 	d.resumeMu.Lock()
 	unlocked := false
 	unlock := func() {
@@ -644,8 +652,8 @@ func (d *Node) spawnAndAdopt(ctx context.Context, agent, agentSessionID, cwd, ex
 	// would race discovery. Jump to it once live, else tell the caller to retry (a
 	// kill clears this guard immediately; see clearResuming).
 	if id, ok := d.resuming[key]; ok {
-		if s, ok := d.reg.Get(id); ok && s.Controllable() {
-			return id, nil
+		if live, ok := d.controllableFor(id, agent, agentSessionID); ok {
+			return live, nil
 		}
 		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "session is starting; try again in a moment"}
 	}
@@ -676,25 +684,38 @@ func (d *Node) spawnAndAdopt(ctx context.Context, agent, agentSessionID, cwd, ex
 	// Release before the wait so an unrelated launch is not blocked behind it.
 	unlock()
 
-	if !d.waitControllable(sid) {
+	live, ok := d.waitControllable(sid, agent, agentSessionID)
+	if !ok {
 		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "session is starting; try again in a moment"}
 	}
-	return sid, nil
+	return live, nil
 }
 
 // waitControllable rescans discovery with backoff until the session has adopted
 // its spawned pane (Controllable), covering the lag between the pane existing and
-// the agent process appearing in ps. Returns false if it never adopts in time.
-func (d *Node) waitControllable(id string) bool {
+// the agent process appearing in ps. It returns the id of the controllable record,
+// or false if none adopts in time.
+func (d *Node) waitControllable(id, agent, agentSessionID string) (string, bool) {
 	backoffs := []time.Duration{0, 250 * time.Millisecond, 500 * time.Millisecond, 750 * time.Millisecond, 1500 * time.Millisecond, 2 * time.Second}
 	for _, wait := range backoffs {
 		time.Sleep(wait)
 		d.scan(context.Background())
-		if s, ok := d.reg.Get(id); ok && s.Controllable() {
-			return true
+		if live, ok := d.controllableFor(id, agent, agentSessionID); ok {
+			return live, true
 		}
 	}
-	return false
+	return "", false
+}
+
+// controllableFor finds the controllable record for a launch: id itself, or the
+// agent's own record when the agent keys it by session id (a pi beacon).
+func (d *Node) controllableFor(id, agent, agentSessionID string) (string, bool) {
+	for _, id := range []string{id, registry.AgentSessionKey(agent, agentSessionID)} {
+		if s, ok := d.reg.Get(id); ok && s.Controllable() {
+			return id, true
+		}
+	}
+	return "", false
 }
 
 // handleSessionKill removes a session from the list: it kills the tmux pane when
@@ -710,14 +731,14 @@ func (d *Node) handleSessionKill(ctx context.Context, params json.RawMessage) (a
 	}
 	// A headless agent's pane is a disposable viewer, not the session's process:
 	// killing it alone leaves the session in the list. Remove the session, tearing
-	// down the adopted viewer pane too when one is present.
+	// down a viewer pane argus launched; a pane on another server is the user's.
 	if d.adapterFor(s.Agent).IsHeadless() {
-		if s.Controllable() {
+		if killsViewerPane(s) {
 			if c, err := d.clientFor(s); err == nil {
 				_ = c.KillPane(ctx, s.Tmux.PaneID)
 			}
 		}
-		d.clearResuming(s.ID)
+		d.clearResuming(s)
 		return d.dismissSession(ctx, s)
 	}
 	if !s.Controllable() {
@@ -730,9 +751,15 @@ func (d *Node) handleSessionKill(ctx context.Context, params json.RawMessage) (a
 	if err := c.KillPane(ctx, s.Tmux.PaneID); err != nil {
 		return nil, err
 	}
-	d.clearResuming(s.ID)
+	d.clearResuming(s)
 	go d.scan(context.Background())
 	return nil, nil
+}
+
+// killsViewerPane reports whether killing a headless session also closes its
+// pane: argus launches viewer panes only on its own server.
+func killsViewerPane(s session.Session) bool {
+	return s.Controllable() && s.Tmux.Server == session.TmuxServerArgus
 }
 
 // handleSessionRename renames a session through its agent; it needs no tmux
@@ -780,13 +807,19 @@ func (d *Node) dismissSession(ctx context.Context, s session.Session) (any, erro
 	return nil, nil
 }
 
-// clearResuming drops sid's in-flight guard so a session killed inside the grace
-// window can be resumed again immediately.
-func (d *Node) clearResuming(sid string) {
+func resumeKey(agent, agentSessionID string) string {
+	return agent + "\x00" + agentSessionID
+}
+
+// clearResuming drops s's in-flight guard so a session killed inside the grace
+// window can be resumed again immediately. The guard holds the launched pane's
+// id, which an agent keyed by session id (pi) does not keep, so match its key too.
+func (d *Node) clearResuming(s session.Session) {
+	key := resumeKey(s.Agent, s.AgentSessionID)
 	d.resumeMu.Lock()
 	defer d.resumeMu.Unlock()
 	for k, v := range d.resuming {
-		if v == sid {
+		if v == s.ID || (s.AgentSessionID != "" && k == key) {
 			delete(d.resuming, k)
 		}
 	}

@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -32,6 +33,9 @@ const fieldSep = "\x1f"
 type Client struct {
 	bin    string
 	socket string
+
+	featuresOnce sync.Once
+	features     bool // the binary takes -T (client terminal features)
 }
 
 // New returns a Client for the given socket name. Pass "" for the default server.
@@ -588,11 +592,54 @@ func (c *Client) SetPaneZoom(ctx context.Context, target, paneID string, zoom bo
 const fallbackTerm = "xterm-256color"
 
 // AttachCommand builds the `tmux attach-session` command (with this client's -L
-// socket) for running under a PTY.
+// socket) for running under a PTY. tmux turns each synchronized update (mode
+// 2026) in the pane into a full pane redraw; declaring sync makes it bracket
+// that redraw, so the reader can show it whole.
 func (c *Client) AttachCommand(ctx context.Context, session string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, c.bin, c.args("attach-session", "-t", session)...)
+	args := c.args("attach-session", "-t", session)
+	if c.takesFeatures(ctx) {
+		args = append([]string{"-T", "sync"}, args...)
+	}
+	cmd := exec.CommandContext(ctx, c.bin, args...)
 	cmd.Env = attachEnv(os.Environ())
 	return cmd
+}
+
+func (c *Client) takesFeatures(ctx context.Context) bool {
+	c.featuresOnce.Do(func() {
+		v, err := c.Version(ctx)
+		c.features = err == nil && versionTakesFeatures(v)
+	})
+	return c.features
+}
+
+// versionTakesFeatures reports whether a `tmux -V` version takes -T, added in
+// tmux 3.2 (OpenBSD 6.9 for its base tmux). An older tmux refuses to start
+// with it.
+func versionTakesFeatures(v string) bool {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "tmux ")
+	if v == "master" {
+		return true
+	}
+	major, minor := 3, 2
+	if rest, ok := strings.CutPrefix(v, "openbsd-"); ok {
+		v, major, minor = rest, 6, 9
+	}
+	v = strings.TrimPrefix(v, "next-")
+	maj, rest, ok := strings.Cut(v, ".")
+	if !ok {
+		return false
+	}
+	end := 0
+	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+		end++
+	}
+	x, err1 := strconv.Atoi(maj)
+	y, err2 := strconv.Atoi(rest[:end])
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return x > major || x == major && y >= minor
 }
 
 // attachEnv sets TERM to xterm-256color whatever the node inherited. The PTY's

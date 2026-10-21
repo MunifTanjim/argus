@@ -484,12 +484,18 @@ func TestClearResumingOnKill(t *testing.T) {
 	d := New()
 	d.resuming["claude\x00sess-1"] = "argus:%7"
 	d.resuming["claude\x00sess-2"] = "argus:%8"
-	d.clearResuming("argus:%7")
+	d.resuming["pi\x00p1"] = "argus:%9"
+	d.clearResuming(session.Session{ID: "argus:%7", Agent: "claude", AgentSessionID: "sess-1"})
 	if _, ok := d.resuming["claude\x00sess-1"]; ok {
 		t.Fatal("guard for the killed pane should be cleared")
 	}
 	if _, ok := d.resuming["claude\x00sess-2"]; !ok {
 		t.Fatal("guard for an unrelated pane must survive")
+	}
+	// A pi launch is guarded under its pane id, but its live record is pi:<id>.
+	d.clearResuming(session.Session{ID: "pi:p1", Agent: "pi", AgentSessionID: "p1"})
+	if _, ok := d.resuming["pi\x00p1"]; ok {
+		t.Fatal("guard for the killed agent session should be cleared")
 	}
 }
 
@@ -868,14 +874,15 @@ func TestSendPromptIsUsedWhenNoFillApplies(t *testing.T) {
 
 type fakeShell struct {
 	fakeFiller
-	shell string
+	shell  string
+	submit bool // staged for the node's Enter
 }
 
 func (f *fakeShell) IsShellInput(text string) bool { return strings.HasPrefix(text, "!") }
 
-func (f *fakeShell) SendShellInput(_ context.Context, _ session.Session, text string) error {
+func (f *fakeShell) SendShellInput(_ context.Context, _ session.Session, text string) (bool, error) {
 	f.shell = text
-	return nil
+	return f.submit, nil
 }
 
 func TestShellInputRouting(t *testing.T) {
@@ -893,7 +900,7 @@ func TestShellInputRouting(t *testing.T) {
 		{"idle with a pane", registry.HookUpdate{AgentSessionID: "ses_2", Status: session.StatusIdle,
 			Server: session.TmuxServerArgus, PaneID: "%2"}, "! ls", true, nil, "! ls", ""},
 		{"paneless", registry.HookUpdate{AgentSessionID: "ses_3", Status: session.StatusIdle}, "! ls", true,
-			api.ErrShellNeedsPane, "", ""},
+			nil, "! ls", ""},
 		{"not submitted", registry.HookUpdate{AgentSessionID: "ses_4", Status: session.StatusIdle}, "!", false,
 			nil, "", "!"},
 		{"a plain prompt", registry.HookUpdate{AgentSessionID: "ses_5", Status: session.StatusIdle}, "hi", true,
@@ -915,5 +922,52 @@ func TestShellInputRouting(t *testing.T) {
 					fs.shell, fs.gotText, fs.filled, tc.wantShell, tc.wantSent)
 			}
 		})
+	}
+}
+
+func TestStagedShellInputIsSubmitted(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	ctx := context.Background()
+	tc := tmux.New("argus-shell-test")
+	t.Cleanup(func() { _ = tc.KillServer(context.Background()) })
+	paneID, err := tc.NewSession(ctx, tmux.NewSessionOpts{Name: "sh", Command: "/bin/sh -c 'read x; echo GOT-ENTER; sleep 30'"})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	d := newNode(map[session.TmuxServer]*tmux.Client{session.TmuxServerArgus: tc})
+	fs := &fakeShell{submit: true}
+	d.adapters["opencode"] = fs
+	s, _ := d.reg.ApplyHook(registry.HookUpdate{Agent: "opencode", Server: session.TmuxServerArgus, PaneID: paneID,
+		AgentSessionID: "ses_1", Status: session.StatusIdle, Input: session.InputAPI})
+	params, _ := json.Marshal(api.InputParams{SessionID: s.ID, Text: "! ls", Submit: true})
+	if _, err := d.handleSessionInput(ctx, params); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		out, _ := tc.CapturePane(ctx, paneID, tmux.CaptureOpts{})
+		if strings.Contains(out, "GOT-ENTER") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Enter never reached the pane")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestControllableForFindsAgentRecord(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.reg.ApplyHook(registry.HookUpdate{
+		Agent: "pi", AgentSessionID: "x", Server: session.TmuxServerArgus, PaneID: "%9",
+		Input: session.InputAPI, Status: session.StatusAwaitingInput,
+	})
+	if id, ok := d.controllableFor("argus:%9", "pi", "x"); !ok || id != "pi:x" {
+		t.Fatalf("controllableFor = (%q, %v), want (\"pi:x\", true)", id, ok)
+	}
+	if id, ok := d.controllableFor("argus:%9", "pi", "other"); ok || id != "" {
+		t.Fatalf("controllableFor other = (%q, %v), want (\"\", false)", id, ok)
 	}
 }

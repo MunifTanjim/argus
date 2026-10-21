@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/db"
@@ -120,4 +121,32 @@ func TestProjectNodesCarryGitError(t *testing.T) {
 	if nodes[0].Error != "worktree list: git missing" {
 		t.Errorf("error = %q", nodes[0].Error)
 	}
+}
+
+func TestSessionAddedOutsideScanGetsWorkspace(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init", "-b", "main")
+
+	d := nodeWithRegistry(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, stop := d.reg.Subscribe()
+	defer stop()
+	go d.watchSessionWorkspacesLoop(ctx, events)
+
+	s, _ := d.reg.ApplyHook(registry.HookUpdate{
+		Agent: "pi", AgentSessionID: "p1", Cwd: dir,
+		Frontend: session.FrontendExternal, Input: session.InputAPI, Status: session.StatusAwaitingInput,
+	})
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if got, _ := d.reg.Get(s.ID); got.WorkspaceID != "" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("session added outside a scan never got a workspace")
 }

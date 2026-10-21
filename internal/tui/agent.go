@@ -16,6 +16,8 @@ func agentLabel(agent string) (string, color.Color) {
 		return "Antigravity", ColorAgentAntigravity
 	case "opencode":
 		return "OpenCode", ColorAgentOpenCode
+	case "pi":
+		return "Pi", ColorAgentPi
 	default:
 		return agent, ColorTextDim
 	}

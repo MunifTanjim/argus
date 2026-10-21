@@ -47,6 +47,9 @@ and permission answers if the
 Codex and OpenCode sessions do not need tmux. To open a terminal for a Codex
 session, Argus starts a `codex resume <id>` viewer.
 
+Pi sessions do not need tmux either. Argus spawns `pi --mode rpc` sessions
+itself; opening a terminal for one attaches a `pi --session <id>` viewer.
+
 ## Don't use tmux? Let Argus wrap it
 
 `argus spawn` starts an agent inside tmux and attaches you to it with tmux

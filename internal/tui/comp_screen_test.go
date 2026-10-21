@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
@@ -332,6 +333,40 @@ func TestLiveScreenShowsTheProgramCursor(t *testing.T) {
 	}
 	if m = out(m, "\x1b[?25l"); m.View().Cursor != nil {
 		t.Errorf("cursor = %+v after the program hid it, want none", m.View().Cursor)
+	}
+}
+
+func TestLiveScreenHoldsTheFrameDuringASynchronizedUpdate(t *testing.T) {
+	m, _ := liveSession(t)
+	m = openScreen(t, m)
+	s, _ := m.liveScreen()
+	out := func(m model, raw string) model {
+		b, _ := json.Marshal(api.TerminalOutput{TermID: s.termID, Data: base64.StdEncoding.EncodeToString([]byte(raw))})
+		m, _ = upd(m, notificationMsg(api.Notification{Method: api.MethodTerminalOutput, Params: b}))
+		return m
+	}
+	r := m.mainRect()
+	m = out(m, "old")
+	// tmux redraws the whole pane for a synchronized update, hiding the cursor
+	// first; the redraw can arrive split across outputs.
+	m = out(m, "\x1b[?2026h\x1b[?25l\x1b[Hnew")
+	if v := m.View(); !strings.Contains(v.Content, "old") || strings.Contains(v.Content, "new") {
+		t.Fatalf("mid-update view shows the partial redraw, want the last whole frame:\n%s", v.Content)
+	} else if v.Cursor == nil || v.Cursor.X != r.Min.X+screenBodyX+3 || v.Cursor.Y != r.Min.Y+screenBodyY {
+		t.Fatalf("mid-update cursor = %+v, want the last frame's, after \"old\"", v.Cursor)
+	}
+	m = out(m, "\x1b[2;1H\x1b[?25h\x1b[?2026l")
+	if v := m.View(); !strings.Contains(v.Content, "new") {
+		t.Fatalf("view after the update ended does not show it:\n%s", v.Content)
+	} else if v.Cursor == nil || v.Cursor.Y != r.Min.Y+screenBodyY+1 {
+		t.Fatalf("cursor after the update = %+v, want on the second row", v.Cursor)
+	}
+
+	m = out(m, "\x1b[?2026h\x1b[Hnever ends")
+	s, _ = m.liveScreen()
+	s.frame.since = time.Now().Add(-syncFrameTimeout)
+	if v := m.View(); !strings.Contains(v.Content, "never ends") {
+		t.Fatalf("view past the timeout still holds the frame:\n%s", v.Content)
 	}
 }
 
