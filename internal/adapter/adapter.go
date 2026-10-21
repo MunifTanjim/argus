@@ -200,6 +200,20 @@ type ModelLister interface {
 	ListModels(ctx context.Context) ([]api.ModelInfo, error)
 }
 
+// PromptCompleter is an adapter that lists the commands and skills a prompt
+// can invoke after a trigger character.
+type PromptCompleter interface {
+	CompletePrompt(ctx context.Context, sess session.Session, trigger string) ([]api.PromptCompletion, error)
+}
+
+// CompactCompletion is /compact for agents whose API runs it.
+var CompactCompletion = api.PromptCompletion{
+	Name:        "compact",
+	Description: "summarize conversation to prevent hitting the context limit",
+}
+
+func IsCompact(text string) bool { return strings.TrimSpace(text) == "/"+CompactCompletion.Name }
+
 type Adapter interface {
 	Agent() string
 	AgentName() string

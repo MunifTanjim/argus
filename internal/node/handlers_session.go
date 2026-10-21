@@ -382,6 +382,30 @@ func (d *Node) handleAgentModelList(ctx context.Context, params json.RawMessage)
 	return api.AgentModelListResult{Models: models}, nil
 }
 
+func (d *Node) handleSessionPromptComplete(ctx context.Context, params json.RawMessage) (any, error) {
+	p, err := api.Decode[api.PromptCompleteParams](params)
+	if err != nil {
+		return nil, err
+	}
+	s, ok := d.reg.Get(p.SessionID)
+	if !ok {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session " + p.SessionID}
+	}
+	var items []api.PromptCompletion
+	if pc, ok := d.adapterFor(s.Agent).(adapter.PromptCompleter); ok {
+		if items, err = pc.CompletePrompt(ctx, s, p.Trigger); err != nil {
+			return nil, &api.RPCError{
+				Code:    api.CodeInvalidRequest,
+				Message: "cannot complete prompt: " + err.Error(),
+			}
+		}
+	}
+	if items == nil {
+		items = []api.PromptCompletion{}
+	}
+	return api.PromptCompleteResult{Items: items}, nil
+}
+
 // handleAgentsList reports agents with spawnable flags. Probed live per call so an
 // agent installed after startup is offered.
 func (d *Node) handleAgentsList(_ context.Context, params json.RawMessage) (any, error) {

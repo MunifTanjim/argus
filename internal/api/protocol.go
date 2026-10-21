@@ -41,11 +41,12 @@ const (
 	MethodSessionSpawn          = "sessions.spawn"          // request: SpawnParams; result: SpawnResult
 	MethodSessionResume         = "sessions.resume"         // request: ResumeParams; result: ResumeResult (reuses/adopts/launches a pane, waits until openable)
 	// Probed live per call.
-	MethodAgentsList     = "agents.list"      // request: AgentsListParams; result: AgentsListResult
-	MethodAgentModelList = "agent.model.list" // request: AgentModelListParams; result: AgentModelListResult
-	MethodSessionKill    = "sessions.kill"    // request: SessionRef; result: nil (kills the tmux pane, or dismisses a paneless presence card)
-	MethodSessionFocus   = "sessions.focus"   // request: SessionRef; result: nil (focus the session's tmux pane on its owning node)
-	MethodSessionRename  = "session.rename"   // request: SessionRenameParams; result: SessionRenameResult
+	MethodAgentsList            = "agents.list"             // request: AgentsListParams; result: AgentsListResult
+	MethodAgentModelList        = "agent.model.list"        // request: AgentModelListParams; result: AgentModelListResult
+	MethodSessionKill           = "sessions.kill"           // request: SessionRef; result: nil (kills the tmux pane, or dismisses a paneless presence card)
+	MethodSessionFocus          = "sessions.focus"          // request: SessionRef; result: nil (focus the session's tmux pane on its owning node)
+	MethodSessionRename         = "session.rename"          // request: SessionRenameParams; result: SessionRenameResult
+	MethodSessionPromptComplete = "session.prompt.complete" // request: PromptCompleteParams; result: PromptCompleteResult
 	// History (read-only, past sessions discovered on disk). Projects are aggregated
 	// across nodes by the gateway; sessions/transcript are routed to the owning node.
 	MethodSessionsHistoryProjects   = "sessions.historyProjects"   // request: no params; result: []session.HistoryProject
@@ -796,6 +797,22 @@ type ModelInfo struct {
 // offers no model choice.
 type AgentModelListResult struct {
 	Models []ModelInfo `json:"models"`
+}
+
+type PromptCompleteParams struct {
+	SessionID string `json:"session_id"`
+	Trigger   string `json:"trigger"` // "/", "$" or "@"
+}
+
+// PromptCompletion is one menu entry. Name omits the trigger character.
+type PromptCompletion struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// PromptCompleteResult is empty when the agent has nothing for the trigger.
+type PromptCompleteResult struct {
+	Items []PromptCompletion `json:"items"`
 }
 
 // HistorySessionsParams: Limit <= 0 returns all from Offset.

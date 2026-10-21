@@ -583,7 +583,7 @@ The client picks the node for each call:
 | ---- | ------- |
 | All nodes; merge results | `sessions.list`, `sessions.refresh`, `sessions.historyProjects`, `project.list`, `terminal.list` |
 | All nodes; success if one node succeeds | `push.register`, `push.unregister`, `push.test`, `push.setPause` |
-| Node from composite `session_id` | `sessions.transcriptView`, `sessions.toolDetail`, `sessions.capture`, `sessions.input`, `sessions.key`, `sessions.respond`, `sessions.kill`, `sessions.focus`, `session.rename`, `sessions.tasks`, `sessions.changedFiles`, `sessions.fileDiff`, `sessions.commits`, `sessions.commitFiles`, `transcript.subscribe`, `terminal.open` with `session_id` |
+| Node from composite `session_id` | `sessions.transcriptView`, `sessions.toolDetail`, `sessions.capture`, `sessions.input`, `sessions.key`, `sessions.respond`, `sessions.kill`, `sessions.focus`, `session.rename`, `session.prompt.complete`, `sessions.tasks`, `sessions.changedFiles`, `sessions.fileDiff`, `sessions.commits`, `sessions.commitFiles`, `transcript.subscribe`, `terminal.open` with `session_id` |
 | Node from composite `terminal_id` | `terminal.kill`, `terminal.rename`, `terminal.open` with `terminal_id` |
 | Node from composite `workspace_id` | `workspace.changedFiles`, `workspace.diff`, `workspace.listDir`, `workspace.readFile`, `workspace.commits`, `workspace.commitFiles`, `workspace.remove`, `workspace.setTarget`, `workspace.runSetup`, `workspace.setupLog` |
 | Node from composite `project_id` | `workspace.create`, `project.rename`, `project.setHidden`, `project.setPinned`, `project.forget`, `project.branches`, `project.prs`, `project.issues` |
@@ -1178,26 +1178,27 @@ are `-32603`.
 All methods in this table are served by the node. The node serves them on the
 unix socket and on relay channels.
 
-| Method                  | Kind         | Params                           | Result                       |
-| ----------------------- | ------------ | -------------------------------- | ---------------------------- |
-| `sessions.list`         | request      | none                             | `Session[]`                  |
-| `sessions.refresh`      | request      | none                             | `Session[]` (after a rescan) |
-| `session.event`         | notification | `{ type, session: Session }`     | —                            |
-| `sessions.capture`      | request      | `SessionRef`                     | `{ screen: string }`         |
-| `sessions.input`        | request      | `InputParams`                    | `null`                       |
-| `sessions.key`          | request      | `{ session_id, keys: string[] }` | `null`                       |
-| `sessions.respond`      | request      | `RespondParams`                  | `null`                       |
-| `sessions.spawn`        | request      | `SpawnParams`                    | `{ session_id, pane_id }`    |
-| `sessions.resume`       | request      | `ResumeParams`                   | `{ session_id }`             |
-| `sessions.kill`         | request      | `SessionRef`                     | `null`                       |
-| `sessions.focus`        | request      | `SessionRef`                     | `null`                       |
-| `session.rename`        | request      | `{ session_id, name }`           | `{ name, applied }`          |
-| `agents.list`           | request      | `{ node_id? }`                   | `{ agents: AgentInfo[] }`    |
-| `agent.model.list`      | request      | `{ node_id?, agent }`            | `{ models: ModelInfo[] }`    |
-| `host.completeDir`      | request      | `{ node_id?, path }`             | `{ home, paths: string[] }`  |
-| `sessions.tasks`        | request      | `SessionRef`                     | `{ tasks: Task[] }`          |
-| `tasks.changed`         | notification | `{ sub_id, session_id }`         | —                            |
-| `sessions.exportBundle` | request      | `ExportBundleParams`             | `{ filename, data: bytes }`  |
+| Method                    | Kind         | Params                           | Result                          |
+| ------------------------- | ------------ | -------------------------------- | ------------------------------- |
+| `sessions.list`           | request      | none                             | `Session[]`                     |
+| `sessions.refresh`        | request      | none                             | `Session[]` (after a rescan)    |
+| `session.event`           | notification | `{ type, session: Session }`     | —                               |
+| `sessions.capture`        | request      | `SessionRef`                     | `{ screen: string }`            |
+| `sessions.input`          | request      | `InputParams`                    | `null`                          |
+| `sessions.key`            | request      | `{ session_id, keys: string[] }` | `null`                          |
+| `sessions.respond`        | request      | `RespondParams`                  | `null`                          |
+| `sessions.spawn`          | request      | `SpawnParams`                    | `{ session_id, pane_id }`       |
+| `sessions.resume`         | request      | `ResumeParams`                   | `{ session_id }`                |
+| `sessions.kill`           | request      | `SessionRef`                     | `null`                          |
+| `sessions.focus`          | request      | `SessionRef`                     | `null`                          |
+| `session.rename`          | request      | `{ session_id, name }`           | `{ name, applied }`             |
+| `agents.list`             | request      | `{ node_id? }`                   | `{ agents: AgentInfo[] }`       |
+| `agent.model.list`        | request      | `{ node_id?, agent }`            | `{ models: ModelInfo[] }`       |
+| `session.prompt.complete` | request      | `{ session_id, trigger }`        | `{ items: PromptCompletion[] }` |
+| `host.completeDir`        | request      | `{ node_id?, path }`             | `{ home, paths: string[] }`     |
+| `sessions.tasks`          | request      | `SessionRef`                     | `{ tasks: Task[] }`             |
+| `tasks.changed`           | notification | `{ sub_id, session_id }`         | —                               |
+| `sessions.exportBundle`   | request      | `ExportBundleParams`             | `{ filename, data: bytes }`     |
 
 For a headless agent (opencode, codex), `pane_id` in the `sessions.spawn` result is
 an empty string. For `sessions.spawn`, a `cwd` of `~` or one that starts with
@@ -1219,6 +1220,11 @@ failed listing is rejected (`-32600`). A `ModelInfo.id` is opaque: a client show
 `name` and passes `id` back unchanged as `model` in `sessions.spawn`.
 `sessions.spawn` rejects (`-32600`) a `model` given with a `command`, or for an
 agent without a model choice.
+
+`session.prompt.complete` lists the commands and skills the session's agent
+accepts after `trigger` (`/`, `$`, or `@`), as `{ name, description }`. `name` has
+no trigger character. An agent without a list for the trigger returns no items.
+An unknown session or a failed listing is rejected (`-32600`).
 
 `host.completeDir` returns the node user's home directory as `home`. `paths` holds
 the subdirectories of `path`'s parent whose names start with `path`'s last
@@ -1249,6 +1255,10 @@ agent fails the call with `session is busy` while a permission, question, or
 plan is pending.
 For Claude Code, text that starts with `/` runs as a slash command. Claude Code
 takes no prompt that starts with `/`, so other such text fails.
+Codex and opencode run a prompt that is only `/compact` as a compaction.
+opencode runs `/name args` as its command `name` when `name` is in its command
+list. Codex attaches a skill input item for each `$skill` word, and opencode a
+skill part for each `@skill` word, that names a listed skill.
 
 ```ts
 RespondParams {
@@ -1286,6 +1296,8 @@ ResumeParams {
 AgentInfo { id, name, color: string, spawnable: boolean }
 
 ModelInfo { id, name: string }
+
+PromptCompletion { name, description: string }
 
 Task {
   id, subject:  string
