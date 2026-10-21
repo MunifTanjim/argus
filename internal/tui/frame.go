@@ -32,8 +32,8 @@ func (m model) layout() frameLayout {
 	if full == fullTerminal {
 		return frameLayout{full: true, bare: true, w: m.width, h: m.height, dockW: m.width}
 	}
-	l := frameLayout{full: full == fullWidth, h: m.framedHeight()}
-	if m.filesVisible() {
+	l := frameLayout{full: full == fullWidth || full == fullFrame, h: m.framedHeight()}
+	if m.filesVisible() && full != fullFrame {
 		l.right = m.projectsFilesW()
 	}
 	switch {

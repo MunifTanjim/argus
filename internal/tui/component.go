@@ -62,6 +62,9 @@ const (
 	// fullWidth spans the frame: no left sidebar and no margin. The title, the
 	// footer, and the right sidebar stay.
 	fullWidth
+	// fullFrame spans the frame like fullWidth and also drops the right
+	// sidebar. The title and the footer stay.
+	fullFrame
 	// fullTerminal takes the whole terminal; the component draws its own title.
 	fullTerminal
 )

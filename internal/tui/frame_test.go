@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
 
@@ -466,5 +467,52 @@ func TestPickerInputAndDetailFramesUnchanged(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) { assertGolden(t, tc.name, tc.build()) })
+	}
+}
+
+type fullFrameComp struct{ stubComp }
+
+func (fullFrameComp) fullScreen(*ctx) fullLevel { return fullFrame }
+
+func (f fullFrameComp) handleKey(*ctx, tea.KeyPressMsg) (component, tea.Cmd, bool) {
+	return f, nil, false
+}
+
+func (f fullFrameComp) update(*ctx, tea.Msg) (component, tea.Cmd) { return f, nil }
+
+func fullFrameModel() model {
+	m := projectsTestModel()
+	m.width, m.height = 160, 30
+	m.left.hidden, m.right.hidden = false, false
+	m.main = m.main.push(fullFrameComp{stubComp{name: "settings"}})
+	return m
+}
+
+func TestFullFrameDropsBothSidebars(t *testing.T) {
+	m := fullFrameModel()
+	l := m.layout()
+	if l.left != 0 || l.right != 0 || !l.full || l.bare || l.w != m.width {
+		t.Errorf("layout = %+v, want no sidebars, full, not bare, w=%d", l, m.width)
+	}
+	if m.filesVisible() {
+		t.Error("filesVisible should be false over a full frame")
+	}
+	if m.treeReachable() {
+		t.Error("the tree should not be reachable over a full frame")
+	}
+}
+
+func TestSidebarTogglesDoNothingOverAFullFrame(t *testing.T) {
+	m := fullFrameModel()
+	m.focused = mainPane
+	for _, keys := range []string{" o", " e"} {
+		m = typeKeys(m, keys)
+		if m.left.hidden || m.right.hidden || m.focused != mainPane {
+			t.Fatalf("%q changed state: left.hidden=%v right.hidden=%v focus=%v", keys, m.left.hidden, m.right.hidden, m.focused)
+		}
+	}
+	m = m.titleClick(&hitArea{zones: []hitZone{{rect: uv.Rect(0, 0, 1, 1), target: hitTarget{kind: hitTab, index: treeIcon}}}}, tea.Mouse{X: 0, Y: 0, Button: tea.MouseLeft})
+	if m.left.hidden || m.focused != mainPane {
+		t.Errorf("the title icon changed state: left.hidden=%v focus=%v", m.left.hidden, m.focused)
 	}
 }
