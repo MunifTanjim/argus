@@ -23,7 +23,7 @@ var upgradeInProcessFn = upgradeInProcess
 // newUpgradeCmd builds `argus upgrade`: swap in the latest release and restart
 // the running argus in place.
 func newUpgradeCmd() *cobra.Command {
-	var noRestart, noDownload bool
+	var noRestart, noDownload, beta bool
 	cmd := &cobra.Command{
 		Use:           "upgrade",
 		Short:         "Upgrade to the latest version and restart the running argus",
@@ -40,21 +40,17 @@ func newUpgradeCmd() *cobra.Command {
 					d.client.Close()
 				}
 			}()
-			steps, err := planUpgrade(noRestart, noDownload, len(daemons) > 0)
+			steps, err := planUpgrade(noRestart, noDownload, beta, len(daemons) > 0)
 			if err != nil {
 				return fail(cmd, err)
 			}
 			if len(daemons) == 0 {
 				ctx, cancel := context.WithTimeout(cmd.Context(), selfupgrade.Timeout)
 				defer cancel()
-				return upgradeInProcessFn(ctx, cmd)
+				return upgradeInProcessFn(ctx, cmd, steps.beta)
 			}
 			for _, d := range daemons {
-				var prefix string
-				if len(daemons) > 1 {
-					prefix = d.kind + ": "
-				}
-				if err := upgradeDaemonWithin(cmd, d, steps, prefix); err != nil {
+				if err := upgradeDaemonWithin(cmd, d, steps, daemonPrefix(d, len(daemons))); err != nil {
 					return err
 				}
 			}
@@ -64,12 +60,20 @@ func newUpgradeCmd() *cobra.Command {
 	addSocketFlag(cmd.Flags())
 	cmd.Flags().BoolVar(&noRestart, "no-restart", false, "replace the binary without restarting the running argus")
 	cmd.Flags().BoolVar(&noDownload, "no-download", false, "restart the running argus with the binary on disk")
+	cmd.Flags().BoolVar(&beta, "beta", false, "upgrade to the newest release, betas included")
 	return cmd
 }
 
 // daemonUpgradeTimeout outlasts the daemon's own download budget, so the CLI
 // does not report a failure for a swap that is about to succeed.
 const daemonUpgradeTimeout = selfupgrade.Timeout + time.Minute
+
+func daemonPrefix(d daemonConn, n int) string {
+	if n > 1 {
+		return d.kind + ": "
+	}
+	return ""
+}
 
 func upgradeDaemonWithin(cmd *cobra.Command, d daemonConn, steps upgradeSteps, prefix string) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), daemonUpgradeTimeout)
@@ -91,18 +95,20 @@ func upgradeSocket(cmd *cobra.Command) string {
 	return config.DefaultSocket()
 }
 
-type upgradeSteps struct{ download, restart bool }
+type upgradeSteps struct{ download, restart, beta bool }
 
-func planUpgrade(noRestart, noDownload, daemon bool) (upgradeSteps, error) {
+func planUpgrade(noRestart, noDownload, beta, daemon bool) (upgradeSteps, error) {
 	switch {
 	case noRestart && noDownload:
 		return upgradeSteps{}, errors.New("--no-restart with --no-download leaves nothing to do")
+	case beta && noDownload:
+		return upgradeSteps{}, errors.New("--beta with --no-download downloads nothing")
 	case !daemon && noDownload:
 		return upgradeSteps{}, errors.New("no running argus process")
 	case !daemon:
-		return upgradeSteps{download: true}, nil
+		return upgradeSteps{download: true, beta: beta}, nil
 	}
-	return upgradeSteps{download: !noDownload, restart: !noRestart}, nil
+	return upgradeSteps{download: !noDownload, restart: !noRestart, beta: beta}, nil
 }
 
 type daemonConn struct {
@@ -150,9 +156,9 @@ func upgradeDaemon(ctx context.Context, cmd *cobra.Command, d daemonConn, steps 
 	if steps.download {
 		shell.StdErrLn(prefix + "Upgrading the running argus...")
 		var c api.CheckUpgradeResult
-		err := d.client.CallContext(ctx, api.MethodServerCheckUpgrade, api.UpgradeParams{Fresh: true}, &c)
+		err := d.client.CallContext(ctx, api.MethodServerCheckUpgrade, api.UpgradeParams{Beta: steps.beta, Fresh: true}, &c)
 		if api.IsMethodNotFound(err) {
-			if err := upgradeInProcessFn(ctx, cmd); err != nil {
+			if err := upgradeInProcessFn(ctx, cmd, steps.beta); err != nil {
 				return err
 			}
 			shell.StdErrLn(prefix + "The running argus cannot restart itself. Restart it to use the new version.")
@@ -161,20 +167,28 @@ func upgradeDaemon(ctx context.Context, cmd *cobra.Command, d daemonConn, steps 
 		if err != nil {
 			return fail(cmd, fmt.Errorf("%supgrade check failed: %w", prefix, err))
 		}
-		// Daemons before the Newer check in Apply would swap a build made
-		// after the latest tag back to that tag.
-		if printVersions(prefix, c.Current, c.Latest) {
-			return nil
+		if steps.beta && !c.Beta {
+			// A daemon from before --beta ignores it, so swap the binary here
+			// and restart the daemon onto it.
+			if err := upgradeInProcessFn(ctx, cmd, true); err != nil {
+				return err
+			}
+		} else {
+			// Daemons before the Newer check in Apply would swap a build made
+			// after the latest tag back to that tag.
+			if printVersions(prefix, c.Current, c.Latest) {
+				return nil
+			}
+			var r api.UpgradeResult
+			if err := d.client.CallContext(ctx, api.MethodServerUpgrade, api.UpgradeParams{Beta: steps.beta}, &r); err != nil {
+				return fail(cmd, fmt.Errorf("%supgrade failed: %w", prefix, err))
+			}
+			if r.To == r.From {
+				shell.StdErrLn(prefix + "Already on the latest version!")
+				return nil
+			}
+			printUpgraded(cmd, prefix, r.To)
 		}
-		var r api.UpgradeResult
-		if err := d.client.CallContext(ctx, api.MethodServerUpgrade, nil, &r); err != nil {
-			return fail(cmd, fmt.Errorf("%supgrade failed: %w", prefix, err))
-		}
-		if r.To == r.From {
-			shell.StdErrLn(prefix + "Already on the latest version!")
-			return nil
-		}
-		printUpgraded(cmd, prefix, r.To)
 	}
 	if !steps.restart {
 		return nil
@@ -245,12 +259,12 @@ func probeServerInfo(socket string) (api.ServerInfo, error) {
 	return info, err
 }
 
-func upgradeInProcess(ctx context.Context, cmd *cobra.Command) error {
+func upgradeInProcess(ctx context.Context, cmd *cobra.Command, beta bool) error {
 	up, err := selfupgrade.New(cmd.Root().Version)
 	if err != nil {
 		return fail(cmd, err)
 	}
-	c, err := up.Check(ctx)
+	c, err := up.Check(ctx, beta)
 	if err != nil {
 		return fail(cmd, err)
 	}
@@ -258,7 +272,7 @@ func upgradeInProcess(ctx context.Context, cmd *cobra.Command) error {
 		return nil
 	}
 	shell.StdErrF("Downloading %s...\n", c.Latest)
-	_, to, err := up.Apply(ctx)
+	_, to, err := up.Apply(ctx, beta)
 	if err != nil {
 		return fail(cmd, err)
 	}

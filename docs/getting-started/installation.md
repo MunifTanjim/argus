@@ -68,6 +68,8 @@ completion, the upgrade updates it too.
 - `--no-restart` replaces the binary, but does not restart the running argus.
 - `--no-download` restarts the running argus with the binary that is already on
   disk.
+- `--beta` upgrades to the newest release, betas included. A beta build keeps
+  getting betas until a stable release is newer.
 
 Argus must be able to write to the directory that holds its binary.
 

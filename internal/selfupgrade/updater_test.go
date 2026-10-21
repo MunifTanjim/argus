@@ -21,8 +21,15 @@ import (
 
 var newBinary = []byte("#!/bin/sh\necho new\n")
 
+type fakeEntry struct {
+	tag        string
+	prerelease bool
+}
+
 type fakeRelease struct {
 	tag          string
+	noAssets     bool
+	extra        []fakeEntry
 	latestStatus atomic.Int32
 	bin          []byte
 	sum          string
@@ -30,21 +37,38 @@ type fakeRelease struct {
 	binHit       atomic.Int32
 }
 
+func fakeJSON(tag string, prerelease, assets bool) string {
+	names := "[]"
+	if assets {
+		a := AssetName(tag, runtime.GOOS, runtime.GOARCH)
+		names = fmt.Sprintf(`[{"name":%q},{"name":%q}]`, a, a+".sha256")
+	}
+	return fmt.Sprintf(`{"tag_name":%q,"prerelease":%t,"assets":%s}`, tag, prerelease, names)
+}
+
+func (f *fakeRelease) releasesJSON() string {
+	items := []string{fakeJSON(f.tag, false, !f.noAssets)}
+	for _, e := range f.extra {
+		items = append(items, fakeJSON(e.tag, e.prerelease, true))
+	}
+	return "[" + strings.Join(items, ",") + "]"
+}
+
 func newFakeRelease(t *testing.T, tag string, bin []byte) (*fakeRelease, *httptest.Server) {
 	t.Helper()
 	h := sha256.Sum256(bin)
 	f := &fakeRelease{tag: tag, bin: bin, sum: hex.EncodeToString(h[:]) + "\n"}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/"+config.Repo+"/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/repos/"+config.Repo+"/releases", func(w http.ResponseWriter, _ *http.Request) {
 		f.latestHit.Add(1)
 		if code := f.latestStatus.Load(); code != 0 {
 			w.WriteHeader(int(code))
 			return
 		}
-		fmt.Fprintf(w, `{"tag_name":%q}`, f.tag)
+		_, _ = w.Write([]byte(f.releasesJSON()))
 	})
 	mux.HandleFunc("/"+config.Repo+"/releases/download/", func(w http.ResponseWriter, r *http.Request) {
-		asset := AssetName(f.tag, runtime.GOOS, runtime.GOARCH)
+		asset := AssetName(filepath.Base(filepath.Dir(r.URL.Path)), runtime.GOOS, runtime.GOARCH)
 		switch filepath.Base(r.URL.Path) {
 		case asset:
 			f.binHit.Add(1)
@@ -99,7 +123,7 @@ func TestAssetName(t *testing.T) {
 func TestApplyReplacesBinary(t *testing.T) {
 	_, srv := newFakeRelease(t, "1.1.0", newBinary)
 	u := testUpdater(t, srv, "argus")
-	from, to, err := u.Apply(context.Background())
+	from, to, err := u.Apply(context.Background(), false)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -118,7 +142,7 @@ func TestApplySkipsDownloadOfBinaryOnDisk(t *testing.T) {
 	if err := os.WriteFile(u.ExecPath, newBinary, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	from, to, err := u.Apply(context.Background())
+	from, to, err := u.Apply(context.Background(), false)
 	if err != nil || from != "1.0.0" || to != "1.1.0" {
 		t.Fatalf("Apply = %q, %q, %v", from, to, err)
 	}
@@ -135,7 +159,7 @@ func TestApplyLeavesOtherTempPathsAlone(t *testing.T) {
 	if err := os.WriteFile(other, []byte("other"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := u.Apply(context.Background()); err != nil {
+	if _, _, err := u.Apply(context.Background(), false); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	if got := readFile(t, other); got != "other" {
@@ -158,7 +182,7 @@ func TestApplyRemovesStaleTempsOnly(t *testing.T) {
 	if err := os.Chtimes(stale, old, old); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := u.Apply(context.Background()); err != nil {
+	if _, _, err := u.Apply(context.Background(), false); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
@@ -172,7 +196,7 @@ func TestApplyRemovesStaleTempsOnly(t *testing.T) {
 func TestApplyAlreadyLatest(t *testing.T) {
 	f, srv := newFakeRelease(t, "1.0.0", newBinary)
 	u := testUpdater(t, srv, "argus")
-	from, to, err := u.Apply(context.Background())
+	from, to, err := u.Apply(context.Background(), false)
 	if err != nil || from != "1.0.0" || to != "1.0.0" {
 		t.Fatalf("Apply = %q, %q, %v", from, to, err)
 	}
@@ -185,7 +209,7 @@ func TestApplyKeepsBuildPastLatestTag(t *testing.T) {
 	f, srv := newFakeRelease(t, "1.0.0", newBinary)
 	u := testUpdater(t, srv, "argus")
 	u.Version = "1.0.0-14-g0cac2131"
-	from, to, err := u.Apply(context.Background())
+	from, to, err := u.Apply(context.Background(), false)
 	if err != nil || from != u.Version || to != u.Version {
 		t.Fatalf("Apply = %q, %q, %v", from, to, err)
 	}
@@ -197,10 +221,10 @@ func TestApplyKeepsBuildPastLatestTag(t *testing.T) {
 func TestApplyTwiceDownloadsOnce(t *testing.T) {
 	f, srv := newFakeRelease(t, "1.1.0", newBinary)
 	u := testUpdater(t, srv, "argus")
-	if _, _, err := u.Apply(context.Background()); err != nil {
+	if _, _, err := u.Apply(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
-	from, to, err := u.Apply(context.Background())
+	from, to, err := u.Apply(context.Background(), false)
 	if err != nil || from != "1.0.0" || to != "1.1.0" {
 		t.Fatalf("second Apply = %q, %q, %v; want 1.0.0, 1.1.0 so that the caller restarts", from, to, err)
 	}
@@ -213,7 +237,7 @@ func TestApplyChecksumMismatch(t *testing.T) {
 	f, srv := newFakeRelease(t, "1.1.0", newBinary)
 	f.sum = strings.Repeat("0", 64) + "  whatever\n"
 	u := testUpdater(t, srv, "argus")
-	_, _, err := u.Apply(context.Background())
+	_, _, err := u.Apply(context.Background(), false)
 	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Fatalf("err = %v, want checksum mismatch", err)
 	}
@@ -227,7 +251,7 @@ func TestApplyMalformedChecksum(t *testing.T) {
 	f, srv := newFakeRelease(t, "1.1.0", newBinary)
 	f.sum = "not-a-hash\n"
 	u := testUpdater(t, srv, "argus")
-	if _, _, err := u.Apply(context.Background()); err == nil || !strings.Contains(err.Error(), "malformed checksum") {
+	if _, _, err := u.Apply(context.Background(), false); err == nil || !strings.Contains(err.Error(), "malformed checksum") {
 		t.Fatalf("err = %v, want malformed checksum", err)
 	}
 	if got := readFile(t, u.ExecPath); !strings.Contains(got, "old") {
@@ -239,7 +263,7 @@ func TestApplyMalformedChecksum(t *testing.T) {
 func TestApplyVersionCheckFails(t *testing.T) {
 	_, srv := newFakeRelease(t, "1.1.0", []byte("#!/bin/sh\nexit 3\n"))
 	u := testUpdater(t, srv, "argus")
-	if _, _, err := u.Apply(context.Background()); err == nil || !strings.Contains(err.Error(), "verification failed") {
+	if _, _, err := u.Apply(context.Background(), false); err == nil || !strings.Contains(err.Error(), "verification failed") {
 		t.Fatalf("err = %v, want verification failed", err)
 	}
 	if got := readFile(t, u.ExecPath); !strings.Contains(got, "old") {
@@ -251,7 +275,7 @@ func TestApplyVersionCheckFails(t *testing.T) {
 func TestApplyRefusesOtherBinaryName(t *testing.T) {
 	_, srv := newFakeRelease(t, "1.1.0", newBinary)
 	u := testUpdater(t, srv, "go-build-123")
-	if _, _, err := u.Apply(context.Background()); err == nil || !strings.Contains(err.Error(), "only be run with the argus binary") {
+	if _, _, err := u.Apply(context.Background(), false); err == nil || !strings.Contains(err.Error(), "only be run with the argus binary") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -267,7 +291,7 @@ func TestApplyUnwritableDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
-	_, _, err := u.Apply(context.Background())
+	_, _, err := u.Apply(context.Background(), false)
 	want := "cannot write " + dir + ": permission denied (argus must be able to replace its own binary)"
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
@@ -280,7 +304,7 @@ func TestApplyBusy(t *testing.T) {
 	if !u.BeginRestart() {
 		t.Fatal("BeginRestart on an idle updater must succeed")
 	}
-	if _, _, err := u.Apply(context.Background()); !errors.Is(err, ErrBusy) {
+	if _, _, err := u.Apply(context.Background(), false); !errors.Is(err, ErrBusy) {
 		t.Fatalf("err = %v, want ErrBusy", err)
 	}
 }
@@ -291,7 +315,7 @@ func TestCheckCachesLatest(t *testing.T) {
 	now := time.Date(2026, 10, 13, 9, 0, 0, 0, time.UTC)
 	u.now = func() time.Time { return now }
 	for range 2 {
-		c, err := u.Check(context.Background())
+		c, err := u.Check(context.Background(), false)
 		if err != nil || c.Current != "1.0.0" || c.Latest != "1.1.0" {
 			t.Fatalf("Check = %+v, %v", c, err)
 		}
@@ -300,7 +324,7 @@ func TestCheckCachesLatest(t *testing.T) {
 		t.Fatalf("latest fetched %d times within the cache window, want 1", n)
 	}
 	now = now.Add(11 * time.Minute)
-	if _, err := u.Check(context.Background()); err != nil {
+	if _, err := u.Check(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
 	if n := f.latestHit.Load(); n != 2 {
@@ -311,35 +335,38 @@ func TestCheckCachesLatest(t *testing.T) {
 func TestApplyIgnoresCachedLatest(t *testing.T) {
 	f, srv := newFakeRelease(t, "1.1.0", newBinary)
 	u := testUpdater(t, srv, "argus")
-	if _, err := u.Check(context.Background()); err != nil {
+	if _, err := u.Check(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
 	f.tag = "1.2.0"
-	_, to, err := u.Apply(context.Background())
+	_, to, err := u.Apply(context.Background(), false)
 	if err != nil || to != "1.2.0" {
 		t.Fatalf("Apply to %q, %v; want 1.2.0", to, err)
 	}
-	c, err := u.Check(context.Background())
+	c, err := u.Check(context.Background(), false)
 	if err != nil || c.Latest != "1.2.0" {
 		t.Fatalf("Check after Apply = %+v, %v", c, err)
 	}
 }
 
 func TestCheckLatestFailureCachesNothing(t *testing.T) {
-	for name, breakRelease := range map[string]func(*fakeRelease){
-		"non-200":        func(f *fakeRelease) { f.latestStatus.Store(http.StatusInternalServerError) },
-		"empty tag_name": func(f *fakeRelease) { f.tag = "" },
+	for name, tc := range map[string]struct {
+		breakRelease func(*fakeRelease)
+		wantErr      string
+	}{
+		"non-200":   {func(f *fakeRelease) { f.latestStatus.Store(http.StatusInternalServerError) }, "unexpected status"},
+		"no assets": {func(f *fakeRelease) { f.noAssets = true }, "no release with assets"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, srv := newFakeRelease(t, "1.1.0", newBinary)
 			u := testUpdater(t, srv, "argus")
-			breakRelease(f)
-			if c, err := u.Check(context.Background()); err == nil {
-				t.Fatalf("Check = %+v, want an error", c)
+			tc.breakRelease(f)
+			if c, err := u.Check(context.Background(), false); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Check = %+v, %v; want %q", c, err, tc.wantErr)
 			}
-			f.tag = "1.1.0"
+			f.noAssets = false
 			f.latestStatus.Store(0)
-			c, err := u.Check(context.Background())
+			c, err := u.Check(context.Background(), false)
 			if err != nil || c.Latest != "1.1.0" {
 				t.Fatalf("Check after recovery = %+v, %v", c, err)
 			}
@@ -384,7 +411,7 @@ func TestApplyFallsBackToHTTPWhenGHFails(t *testing.T) {
 	_, srv := newFakeRelease(t, "1.1.0", newBinary)
 	u := testUpdater(t, srv, "argus")
 	u.UseGH = true
-	if _, to, err := u.Apply(context.Background()); err != nil || to != "1.1.0" {
+	if _, to, err := u.Apply(context.Background(), false); err != nil || to != "1.1.0" {
 		t.Fatalf("Apply to %q, %v", to, err)
 	}
 	if got := readFile(t, u.ExecPath); got != string(newBinary) {
@@ -398,8 +425,81 @@ func TestCheckReportsBothErrorsWhenGHAndHTTPFail(t *testing.T) {
 	f.latestStatus.Store(http.StatusInternalServerError)
 	u := testUpdater(t, srv, "argus")
 	u.UseGH = true
-	_, err := u.Check(context.Background())
+	_, err := u.Check(context.Background(), false)
 	if err == nil || !strings.Contains(err.Error(), "500") || !strings.Contains(err.Error(), "not logged in") {
 		t.Fatalf("err = %v, want both the HTTP and the gh error", err)
+	}
+}
+
+func TestCheckBetaNeverDowngrades(t *testing.T) {
+	f, srv := newFakeRelease(t, "0.1.3", newBinary)
+	u := testUpdater(t, srv, "argus")
+	u.Version = "0.1.4-beta.2"
+	c, err := u.Check(context.Background(), false)
+	if err != nil || c.Latest != "0.1.3" || !c.Beta {
+		t.Fatalf("Check = %+v, %v", c, err)
+	}
+	from, to, err := u.Apply(context.Background(), false)
+	if err != nil || from != "0.1.4-beta.2" || to != "0.1.4-beta.2" {
+		t.Fatalf("Apply = %q, %q, %v", from, to, err)
+	}
+	if f.binHit.Load() != 0 {
+		t.Fatal("must not downgrade a beta build to an older stable release")
+	}
+}
+
+func TestCheckRunningBetaSeesBetas(t *testing.T) {
+	f, srv := newFakeRelease(t, "0.1.3", newBinary)
+	f.extra = []fakeEntry{{"0.1.4-beta.2", true}}
+	u := testUpdater(t, srv, "argus")
+	u.Version = "0.1.4-beta.1"
+	c, err := u.Check(context.Background(), false)
+	if err != nil || c.Latest != "0.1.4-beta.2" {
+		t.Fatalf("Check = %+v, %v", c, err)
+	}
+}
+
+func TestCheckCachesPerChannel(t *testing.T) {
+	f, srv := newFakeRelease(t, "0.1.3", newBinary)
+	f.extra = []fakeEntry{{"0.1.4-beta.1", true}}
+	u := testUpdater(t, srv, "argus")
+	u.Version = "0.1.3"
+	for _, tt := range []struct {
+		beta bool
+		want string
+	}{{false, "0.1.3"}, {true, "0.1.4-beta.1"}, {false, "0.1.3"}} {
+		c, err := u.Check(context.Background(), tt.beta)
+		if err != nil || c.Latest != tt.want {
+			t.Fatalf("Check(beta=%t) = %+v, %v; want %s", tt.beta, c, err, tt.want)
+		}
+	}
+	if n := f.latestHit.Load(); n != 2 {
+		t.Fatalf("releases fetched %d times, want 2", n)
+	}
+}
+
+func TestApplyBetaInstallsPrerelease(t *testing.T) {
+	f, srv := newFakeRelease(t, "0.1.3", newBinary)
+	f.extra = []fakeEntry{{"0.1.4-beta.1", true}}
+	u := testUpdater(t, srv, "argus")
+	u.Version = "0.1.3"
+	_, to, err := u.Apply(context.Background(), true)
+	if err != nil || to != "0.1.4-beta.1" {
+		t.Fatalf("Apply to %q, %v", to, err)
+	}
+	if got := readFile(t, u.ExecPath); got != string(newBinary) {
+		t.Fatalf("binary not replaced: %q", got)
+	}
+}
+
+func TestCheckUsesGHReleases(t *testing.T) {
+	fakeGH(t, "cat <<'EOF'\n["+fakeJSON("1.2.0", false, true)+"]\nEOF\n")
+	f, srv := newFakeRelease(t, "1.1.0", newBinary)
+	f.latestStatus.Store(http.StatusInternalServerError)
+	u := testUpdater(t, srv, "argus")
+	u.UseGH = true
+	c, err := u.Check(context.Background(), false)
+	if err != nil || c.Latest != "1.2.0" {
+		t.Fatalf("Check = %+v, %v; want Latest 1.2.0 from gh", c, err)
 	}
 }

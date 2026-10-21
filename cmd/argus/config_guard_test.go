@@ -41,6 +41,7 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"fork-from":        true, // `lock revoke-signer` only: ceremony argument, not a config key
 		"no-restart":       true, // `upgrade` only: per-invocation step selection
 		"no-download":      true, // `upgrade` only: per-invocation step selection
+		"beta":             true, // `upgrade` only: per-invocation channel selection
 	}
 
 	seen := map[string]bool{}

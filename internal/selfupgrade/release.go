@@ -3,11 +3,13 @@ package selfupgrade
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"runtime"
+
+	"golang.org/x/mod/semver"
 
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/shell"
@@ -34,43 +36,92 @@ func viaGH[T any](useGH bool, gh, plain func() (T, error)) (T, error) {
 	return v, nil
 }
 
-func (u *Updater) fetchLatestTag(ctx context.Context) (string, error) {
-	tag, err := viaGH(u.UseGH, func() (string, error) {
-		out := shell.NewCommandContext(ctx, "gh", "release", "view", "--repo", config.Repo, "--json", "tagName", "--jq", ".tagName")
-		if err := out.Run(); err != nil {
-			return "", fmt.Errorf("%w: %s", err, out.StdErr().TrimSpace())
-		}
-		return out.StdOut().TrimSpace().String(), nil
-	}, func() (string, error) {
-		return u.httpLatestTag(ctx)
-	})
-	if err == nil && tag == "" {
-		return "", errors.New("release tag missing in response")
-	}
-	return tag, err
+type release struct {
+	TagName    string `json:"tag_name"`
+	Draft      bool   `json:"draft"`
+	Prerelease bool   `json:"prerelease"`
+	Assets     []struct {
+		Name string `json:"name"`
+	} `json:"assets"`
 }
 
-func (u *Updater) httpLatestTag(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/repos/%s/releases/latest", u.APIBase, config.Repo), nil)
+func (r release) hasAssets(goos, goarch string) bool {
+	want := AssetName(r.TagName, goos, goarch)
+	var bin, sum bool
+	for _, a := range r.Assets {
+		switch a.Name {
+		case want:
+			bin = true
+		case want + ".sha256":
+			sum = true
+		}
+	}
+	return bin && sum
+}
+
+// pickRelease returns the highest tag that has the binary and checksum for the
+// platform, or "". The stable channel skips prereleases.
+func pickRelease(releases []release, beta bool, goos, goarch string) string {
+	best, bestV := "", ""
+	for _, r := range releases {
+		if r.Draft || !r.hasAssets(goos, goarch) {
+			continue
+		}
+		v := canonicalVersion(r.TagName)
+		if v == "" || !beta && (r.Prerelease || semver.Prerelease(v) != "") {
+			continue
+		}
+		if bestV == "" || semver.Compare(v, bestV) > 0 {
+			best, bestV = r.TagName, v
+		}
+	}
+	return best
+}
+
+func (u *Updater) fetchLatestTag(ctx context.Context, beta bool) (string, error) {
+	path := fmt.Sprintf("repos/%s/releases?per_page=100", config.Repo)
+	releases, err := viaGH(u.UseGH, func() ([]release, error) {
+		out := shell.NewCommandContext(ctx, "gh", "api", path)
+		if err := out.Run(); err != nil {
+			return nil, fmt.Errorf("%w: %s", err, out.StdErr().TrimSpace())
+		}
+		var rs []release
+		if err := out.StdOut().JSONUnmarshal(&rs); err != nil {
+			return nil, err
+		}
+		return rs, nil
+	}, func() ([]release, error) {
+		return u.httpReleases(ctx, path)
+	})
 	if err != nil {
 		return "", err
+	}
+	tag := pickRelease(releases, beta, runtime.GOOS, runtime.GOARCH)
+	if tag == "" {
+		return "", fmt.Errorf("no release with assets for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	return tag, nil
+}
+
+func (u *Updater) httpReleases(ctx context.Context, path string) ([]release, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/%s", u.APIBase, path), nil)
+	if err != nil {
+		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := u.Client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status %s", resp.Status)
+		return nil, fmt.Errorf("unexpected status %s", resp.Status)
 	}
-	var release struct {
-		TagName string `json:"tag_name"`
+	var rs []release
+	if err := json.NewDecoder(resp.Body).Decode(&rs); err != nil {
+		return nil, err
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return "", err
-	}
-	return release.TagName, nil
+	return rs, nil
 }
 
 func (u *Updater) downloadAsset(ctx context.Context, tag, name, dst string) error {

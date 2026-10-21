@@ -56,7 +56,7 @@ const (
 	MethodNodeIdentify              = "node.identify"              // request: no params; result: IdentifyResult
 	MethodServerInfo                = "server.info"                // request: no params; result: ServerInfo
 	MethodServerCheckUpgrade        = "server.checkUpgrade"        // request: UpgradeParams; result: CheckUpgradeResult
-	MethodServerUpgrade             = "server.upgrade"             // request: ServerTargetParams; result: UpgradeResult (swaps the binary, no restart)
+	MethodServerUpgrade             = "server.upgrade"             // request: UpgradeParams; result: UpgradeResult (swaps the binary, no restart)
 	MethodServerRestart             = "server.restart"             // request: ServerTargetParams; result: nil (execs the binary on disk after replying)
 	MethodNodesList                 = "nodes.list"                 // request: no params; result: NodesListResult
 	MethodNodeEvent                 = "node.event"                 // notification: NodeEvent
@@ -657,6 +657,7 @@ type ServerTargetParams struct {
 
 type UpgradeParams struct {
 	ServerTargetParams
+	Beta bool `json:"beta,omitempty"`
 	// Fresh makes server.checkUpgrade skip its cache.
 	Fresh bool `json:"fresh,omitempty"`
 }
@@ -664,6 +665,8 @@ type UpgradeParams struct {
 type CheckUpgradeResult struct {
 	Current string `json:"current"`
 	Latest  string `json:"latest"`
+	// Beta is true when the result includes prereleases.
+	Beta bool `json:"beta,omitempty"`
 }
 
 // UpgradeResult: To == From means the target already runs the latest version.
