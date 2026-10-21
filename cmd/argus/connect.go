@@ -99,7 +99,7 @@ func refuseRunning(socket string) error {
 		return err
 	}
 	if running {
-		return fmt.Errorf("argus is already running at %s", socket)
+		return fmt.Errorf("argus is already running at %s; run 'argus stop' first", socket)
 	}
 	return nil
 }
