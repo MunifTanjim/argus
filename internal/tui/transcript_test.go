@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/glamour"
 
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
@@ -18,11 +19,12 @@ func testModel() model {
 			mdRenderers: map[int]*glamour.TermRenderer{},
 			mdCache:     map[string]string{},
 		},
-		dock:       newDock(),
-		termKeyCh:  make(chan termKey, termKeyBuf),
-		listScroll: map[string]int{},
-		width:      80,
-		height:     24,
+		dock:        newDock(),
+		termKeyCh:   make(chan termKey, termKeyBuf),
+		listScroll:  map[string]int{},
+		completions: map[string]map[byte][]api.PromptCompletion{},
+		width:       80,
+		height:      24,
 		// No sidebars: views get the full width under the frame header, so view
 		// tests need not account for the tree or file columns.
 		left:  leftSidebarState{hidden: true},

@@ -92,7 +92,8 @@ type model struct {
 
 	termKeyCh chan termKey // ordered keystroke queue drained by sendTermKeyLoop
 
-	dock dockComp
+	dock        dockComp
+	completions map[string]map[byte][]api.PromptCompletion // session id -> trigger -> the agent's menu items
 
 	flash string // transient list-view status (e.g. why a jump was refused)
 
@@ -175,6 +176,7 @@ func newModel(client Client, hasDark bool, logs *logbuf.Buffer) model {
 		hosts:           make(map[string]hostEntry),
 		transcriptCache: make(map[string]cachedTranscript),
 		listScroll:      make(map[string]int),
+		completions:     make(map[string]map[byte][]api.PromptCompletion),
 		render:          newRenderCache(hasDark),
 		dock:            newDock(),
 		left:            leftSidebarState{tree: newProjectTree()},
