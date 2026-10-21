@@ -36,9 +36,9 @@ type Client interface {
 }
 
 // Run connects the TUI and blocks until the user quits. gatewayURL is empty
-// when client drives a local socket. Non-nil logs (the managed server's
-// output) are tailed in the Logs tab.
-func Run(client Client, gatewayURL string, logs *logbuf.Buffer, serverExit <-chan error, cfg config.TUIConfig) error {
+// when client drives a local socket. Non-nil logs (the started servers' log
+// files) are shown in the Logs tab and also receive the TUI's own log output.
+func Run(client Client, gatewayURL string, logs *logbuf.Buffer, cfg config.TUIConfig) error {
 	// The client library logs warnings (e.g. a node timing out) via the standard
 	// logger; keep them off the alt-screen.
 	if logs != nil {
@@ -93,11 +93,6 @@ func Run(client Client, gatewayURL string, logs *logbuf.Buffer, serverExit <-cha
 			for range logs.Notify() {
 				p.Send(logTickMsg{})
 			}
-		}()
-	}
-	if serverExit != nil {
-		go func() {
-			p.Send(serverExitedMsg{err: <-serverExit})
 		}()
 	}
 	_, err = p.Run()

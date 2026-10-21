@@ -68,12 +68,11 @@ type model struct {
 	hostGen       int
 	width         int
 	height        int
-	reconnecting  bool   // connection dropped; the client is retrying
-	serverExited  string // exit status of the managed server; empty while it runs
-	refreshes     int    // sessions.refresh calls in flight; the session lists show a hint
-	hasDark       bool   // terminal background; drives glamour/highlight styling
-	viewer        bool   // offline viewer mode: opens directly in transcript view
-	brand         int    // the title icon, an index into brandGlyphs
+	reconnecting  bool // connection dropped; the client is retrying
+	refreshes     int  // sessions.refresh calls in flight; the session lists show a hint
+	hasDark       bool // terminal background; drives glamour/highlight styling
+	viewer        bool // offline viewer mode: opens directly in transcript view
+	brand         int  // the title icon, an index into brandGlyphs
 
 	redactMode   bool   // --redact: interactive redaction affordance in the viewer
 	bundlePath   string // source .argus path (for the -redacted output name)
