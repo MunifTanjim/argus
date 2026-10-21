@@ -45,18 +45,21 @@ func waitForNodes(t *testing.T, c tui.Client) {
 func TestConnectLocalSpawn(t *testing.T) {
 	sandboxChild(t)
 	spec := testSpec(t)
-	c, srv, err := connectLocalSpawn(context.Background(), &config.Config{}, spec)
+	c, err := connectLocalSpawn(context.Background(), &config.Config{}, spec)
 	if err != nil {
 		t.Fatalf("connectLocalSpawn should start a node: %v", err)
 	}
+	t.Cleanup(func() { stopSockets(t, spec.socket) })
+	defer c.Close()
 	var out []any
 	if err := c.Call(api.MethodSessionsRefresh, nil, &out); err != nil {
 		t.Fatalf("managed node should answer: %v", err)
 	}
-	c.Close()
-	srv.stop(managedStopTimeout)
-	if _, err := api.Dial(spec.socket); err == nil {
-		t.Fatal("managed node still serves after stop")
+	if st, err := loadLaunchState(spec.socket); err != nil || st == nil || *st != (launchState{Mode: launchModeIsolated}) {
+		t.Fatalf("launch state = %+v, %v", st, err)
+	}
+	if b, _ := os.ReadFile(serverLogPath(spec.socket, roleNode)); !strings.Contains(string(b), "starting argus node") {
+		t.Fatalf("log = %q", b)
 	}
 }
 
@@ -68,11 +71,12 @@ func TestConnectLocalSpawnWithGatewayEnrolls(t *testing.T) {
 	ts := httptest.NewServer(hsrv.Handler())
 	defer ts.Close()
 
-	c, srv, err := connectLocalSpawnWithGateway(context.Background(), &config.Config{}, testSpec(t), wsURL(ts.URL), "", nil)
+	spec := testSpec(t)
+	c, err := connectLocalSpawnWithGateway(context.Background(), &config.Config{}, spec, wsURL(ts.URL), "", nil)
 	if err != nil {
 		t.Fatalf("connectLocalSpawnWithGateway: %v", err)
 	}
-	defer srv.stop(managedStopTimeout)
+	t.Cleanup(func() { stopSockets(t, spec.socket) })
 	defer c.Close()
 	waitForNodes(t, c)
 }
@@ -87,10 +91,10 @@ func TestConnectLocalSpawnWithGatewayReportsBadGateway(t *testing.T) {
 	managedBin = func() (string, error) { return "", errors.New("the child must not start") }
 	t.Cleanup(func() { managedBin = os.Executable })
 
-	if _, _, err := connectLocalSpawnWithGateway(context.Background(), &config.Config{}, testSpec(t), wsURL(ts.URL), "WRONG", nil); err == nil || strings.Contains(err.Error(), "must not start") {
+	if _, err := connectLocalSpawnWithGateway(context.Background(), &config.Config{}, testSpec(t), wsURL(ts.URL), "WRONG", nil); err == nil || strings.Contains(err.Error(), "must not start") {
 		t.Fatalf("want the probe error for a rejected token, got %v", err)
 	}
-	if _, _, err := connectLocalSpawnWithGateway(context.Background(), &config.Config{}, testSpec(t), "ws://127.0.0.1:1", "right", nil); err == nil || strings.Contains(err.Error(), "must not start") {
+	if _, err := connectLocalSpawnWithGateway(context.Background(), &config.Config{}, testSpec(t), "ws://127.0.0.1:1", "right", nil); err == nil || strings.Contains(err.Error(), "must not start") {
 		t.Fatalf("want the probe error for an unreachable gateway, got %v", err)
 	}
 }
@@ -104,20 +108,23 @@ func TestConnectLocalGatewayRunsTwoProcesses(t *testing.T) {
 	cfg.Gateway.ListenAddr = "127.0.0.1:0"
 	cfg.Token = "tok"
 	spec := testSpec(t)
-	c, g, _, err := connectLocalGateway(context.Background(), cfg, spec)
+	c, _, err := connectLocalGateway(context.Background(), cfg, spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer g.stop(managedStopTimeout)
+	t.Cleanup(func() { stopSockets(t, spec.socket, gatewaySocketPath(spec.socket)) })
 	defer c.Close()
-	if len(g.servers) != 2 {
-		t.Fatalf("want 2 managed servers, got %d", len(g.servers))
-	}
-	if g.servers[0].cmd.Process.Pid == g.servers[1].cmd.Process.Pid {
-		t.Fatal("the gateway and the node share a process")
+	if st, err := loadLaunchState(spec.socket); err != nil || st == nil || st.Mode != launchModeGateway || st.Token != "tok" || st.GatewayURL == "" {
+		t.Fatalf("launch state = %+v, %v", st, err)
 	}
 	if _, err := probeServerInfo(gatewaySocketPath(spec.socket)); err != nil {
 		t.Fatalf("gateway socket: %v", err)
 	}
 	waitForNodes(t, c)
+	for role, line := range map[spawnRole]string{roleGateway: "gateway listening", roleNode: "starting argus node"} {
+		path := serverLogPath(spec.socket, role)
+		if b, _ := os.ReadFile(path); !strings.Contains(string(b), line) {
+			t.Errorf("%s = %q, want %q", path, b, line)
+		}
+	}
 }

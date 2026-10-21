@@ -112,6 +112,12 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		if err := refuseRunning(cfg.Socket); err != nil {
 			return fail(cmd, err)
 		}
+		// The TUI records the servers it starts; any state file left now is stale.
+		if logPath, _ := cmd.Flags().GetString("argus-log-file"); logPath == "" {
+			if err := removeLaunchState(cfg.Socket); err != nil {
+				return fail(cmd, err)
+			}
+		}
 	}
 	onTTY := isatty.IsTerminal(os.Stdin.Fd())
 	if local {

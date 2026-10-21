@@ -139,9 +139,6 @@ func (h homeComp) view(c *ctx, w, ht int) string {
 		if m.reconnecting {
 			title += dimStyle.Render("  (reconnecting…)")
 		}
-		if m.serverExited != "" {
-			title += "  " + StyleErrorBold.Render("⚠ server exited")
-		}
 	}
 	// chrome counts non-content rows: title, the blank after it, the footer, and
 	// the blank before it; the quarantine banner adds a second title row.
