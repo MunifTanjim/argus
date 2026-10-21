@@ -58,6 +58,7 @@ const (
 	MethodServerCheckUpgrade        = "server.checkUpgrade"        // request: UpgradeParams; result: CheckUpgradeResult
 	MethodServerUpgrade             = "server.upgrade"             // request: UpgradeParams; result: UpgradeResult (swaps the binary, no restart)
 	MethodServerRestart             = "server.restart"             // request: ServerTargetParams; result: nil (execs the binary on disk after replying)
+	MethodServerStop                = "server.stop"                // request: no params; result: nil (shuts down after replying)
 	MethodNodesList                 = "nodes.list"                 // request: no params; result: NodesListResult
 	MethodNodeEvent                 = "node.event"                 // notification: NodeEvent
 	MethodTranscriptSubscribe       = "transcript.subscribe"       // request: TranscriptSubscribeParams; result: TranscriptDelta

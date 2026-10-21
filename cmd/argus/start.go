@@ -107,6 +107,11 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		return fail(cmd, err)
 	}
 	local := runLocalNode(cfg)
+	if local {
+		if err := refuseRunning(cfg.Socket); err != nil {
+			return fail(cmd, err)
+		}
+	}
 	onTTY := isatty.IsTerminal(os.Stdin.Fd())
 	if local {
 		logger.Scoped("node").Info("starting argus node", "version", version)
@@ -133,6 +138,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		d = node.New()
 		d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
 		d.SetVersion(version)
+		d.SetStop(stop)
 		d.SetSelfUpgrade(upgrades)
 		d.SetWakelockPath(config.GetStatePath("wakelock.json"))
 		d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
@@ -225,7 +231,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 	if local {
 		err = d.Run(ctx, cfg.Socket) // blocks until the signal cancels ctx
 	} else {
-		err = serveGatewaySocket(ctx, gwSock, version, upgrades)
+		err = serveGatewaySocket(ctx, gwSock, version, upgrades, stop)
 	}
 
 	if httpSrv != nil {
@@ -254,12 +260,13 @@ func gatewaySocketPath(nodeSocket string) string {
 
 // serveGatewaySocket lets `argus upgrade` reach a gateway. It blocks until ctx
 // is done.
-func serveGatewaySocket(ctx context.Context, l net.Listener, version string, upgrades *selfupgrade.Service) error {
+func serveGatewaySocket(ctx context.Context, l net.Listener, version string, upgrades *selfupgrade.Service, stop func()) error {
 	srv := api.NewServer()
 	srv.Handle(api.MethodServerInfo, func(context.Context, json.RawMessage) (any, error) {
 		return api.ServerInfo{Version: version, StartedAt: api.StartedAtRFC3339()}, nil
 	})
 	upgrades.Register(srv)
+	api.HandleStop(srv, stop)
 	return srv.ServeContext(ctx, l)
 }
 

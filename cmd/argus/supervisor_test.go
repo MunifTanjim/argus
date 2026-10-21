@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net"
 	"slices"
 	"strings"
@@ -99,5 +100,22 @@ func TestWaitSupervisedTreatsExitDuringShutdownAsClean(t *testing.T) {
 		if err := waitSupervised(ctx, g); err != nil {
 			t.Fatalf("waitSupervised = %v, want nil once ctx is done", err)
 		}
+	}
+}
+
+func TestWaitSupervisedTreatsCleanChildExitAsStop(t *testing.T) {
+	g := &managedGroup{exited: make(chan error, 1)}
+	g.exited <- nil
+	if err := waitSupervised(context.Background(), g); err != nil {
+		t.Fatalf("waitSupervised = %v, want nil for a clean child exit", err)
+	}
+}
+
+func TestWaitSupervisedReportsFailedChildExit(t *testing.T) {
+	g := &managedGroup{exited: make(chan error, 1)}
+	g.exited <- errors.New("exit status 1")
+	err := waitSupervised(context.Background(), g)
+	if err == nil || !strings.Contains(err.Error(), "a managed server exited") {
+		t.Fatalf("waitSupervised = %v, want a managed server exited error", err)
 	}
 }

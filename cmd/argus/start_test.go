@@ -5,7 +5,11 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -221,6 +225,48 @@ func TestStartStandaloneGatewayFailsFastOnTakenSocket(t *testing.T) {
 		t.Fatalf("gateway TCP listener was started: %v", err)
 	}
 	ln.Close()
+}
+
+func TestRefuseRunningHintsStop(t *testing.T) {
+	sock := shortSocket(t)
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	err = refuseRunning(sock)
+	if err == nil || !strings.Contains(err.Error(), "run 'argus stop' first") {
+		t.Fatalf("refuseRunning = %v, want the stop hint", err)
+	}
+}
+
+func TestRunStartRefusesRunningNodeBeforeUplink(t *testing.T) {
+	t.Cleanup(func() { config.LogLevel.Set(slog.LevelInfo) })
+	var attempts atomic.Int32
+	ws := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { attempts.Add(1) }))
+	defer ws.Close()
+
+	cfg := cfgWith("ws"+strings.TrimPrefix(ws.URL, "http"), "")
+	cfg.Socket = shortSocket(t)
+	cfg.Log.Level = "error"
+	l, err := net.Listen("unix", cfg.Socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var runErr error
+	out := captureStderr(t, func() {
+		runErr = runStart(ctx, cancel, newStartCmd("test"), cfg, "test", false)
+	})
+	if runErr == nil || !strings.Contains(out, "run 'argus stop' first") {
+		t.Fatalf("runStart = %v, stderr %q, want the stop hint", runErr, out)
+	}
+	if n := attempts.Load(); n != 0 {
+		t.Fatalf("gateway saw %d connection attempts, want 0", n)
+	}
 }
 
 func TestArgusManagedFlagIsHidden(t *testing.T) {
