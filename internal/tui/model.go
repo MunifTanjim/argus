@@ -53,7 +53,8 @@ func (r subRef) key() string {
 
 type model struct {
 	client        Client
-	gatewayURL    string // empty: client drives a local socket
+	swap          *swapClient // nil outside Run
+	gatewayURL    string      // empty: client drives a local socket
 	sessions      map[string]session.Session
 	order         []string       // session IDs, sorted for stable display
 	activeOnly    bool           // the session lists show only active and awaiting-input sessions

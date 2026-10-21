@@ -99,8 +99,6 @@ func newRootCmd(version string) *cobra.Command {
 			if err != nil {
 				return errSilent // connect/connectLocalSpawn already printed the diagnostic
 			}
-			defer client.Close()
-
 			if err := tui.Run(client, gatewayURL, srv.Logs(), srv.Exited(), cfg.TUI); err != nil {
 				return fail(cmd, err)
 			}
