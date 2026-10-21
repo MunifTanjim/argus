@@ -138,7 +138,10 @@ func (a *cxAdapter) SendPrompt(ctx context.Context, sess session.Session, text s
 	if err != nil {
 		return err
 	}
-	return d.sendPrompt(ctx, sess.AgentSessionID, text)
+	if adapter.IsCompact(text) {
+		return d.compact(ctx, sess.AgentSessionID)
+	}
+	return d.sendPrompt(ctx, sess.AgentSessionID, d.promptInput(ctx, sess, text))
 }
 
 func (a *cxAdapter) SpawnSession(ctx context.Context, cwd string, opts adapter.SpawnOptions) (string, error) {
