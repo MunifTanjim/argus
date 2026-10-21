@@ -13,8 +13,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -45,7 +47,7 @@ type pendingUI struct {
 // card is the state a pi session's card shows, owned or foreign.
 type card struct {
 	mu        sync.Mutex
-	id        string // pi session id (AgentSessionID)
+	id        string // pi session id (AgentSessionID); /new changes it
 	cwd       string
 	repo      string
 	file      string // may be empty: pi creates it after the first user/assistant message
@@ -56,6 +58,12 @@ type card struct {
 	streaming bool
 	pending   map[string]*pendingUI // ui request id -> dialog
 	queue     []string              // prompts pi has not taken yet
+}
+
+func (c *card) sessionID() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.id
 }
 
 // hookUpdate builds the card's push; c.mu must be held. Empty status leaves
@@ -193,7 +201,7 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd string, opts adapter.
 		cmd:    cmd,
 		exited: make(chan struct{}),
 	}
-	conn.start(func(typ string, raw json.RawMessage) { d.handleEvent(id, typ, raw) })
+	conn.start(func(typ string, raw json.RawMessage) { d.procEvent(p, typ, raw) })
 	d.mu.Lock()
 	d.procs[id] = p
 	d.mu.Unlock()
@@ -203,6 +211,7 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd string, opts adapter.
 		_ = cmd.Wait()
 		close(p.exited)
 		d.mu.Lock()
+		id := p.sessionID()
 		still := d.procs[id] == p
 		d.mu.Unlock()
 		if still {
@@ -224,6 +233,7 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd string, opts adapter.
 		case <-time.After(startExitWait):
 		}
 	}
+	id = p.sessionID()
 	d.upsert(p, session.StatusWorking, nil, false)
 	if opts.Prompt != "" {
 		if err := d.sendPrompt(ctx, id, opts.Prompt); err != nil {
@@ -235,6 +245,7 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd string, opts adapter.
 
 // rpcState is the slice of get_state the card needs.
 type rpcState struct {
+	SessionID     string `json:"sessionId"`
 	SessionFile   string `json:"sessionFile"`
 	SessionName   string `json:"sessionName"`
 	ThinkingLevel string `json:"thinkingLevel"`
@@ -248,6 +259,7 @@ type rpcState struct {
 // emits no event when the model changes, so this also runs after every settled
 // run.
 func (d *discoverer) loadState(ctx context.Context, p *sessionProc) (bool, error) {
+	id := p.sessionID()
 	data, err := p.conn.call(ctx, d.nextID(), "get_state", nil)
 	if err != nil {
 		return false, err
@@ -256,8 +268,28 @@ func (d *discoverer) loadState(ctx context.Context, p *sessionProc) (bool, error
 	if err := json.Unmarshal(data, &st); err != nil {
 		return false, err
 	}
+	d.mu.Lock()
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// A concurrent get_state moved p, or p exited or was dismissed, since this
+	// one was asked.
+	if p.id != id || d.procs[id] != p {
+		d.mu.Unlock()
+		return false, nil
+	}
+	// The process moved to another session (/new, or an extension switching
+	// sessions): the old session's card ends and the next push lists the new one.
+	rekeyed := st.SessionID != "" && st.SessionID != id
+	if rekeyed {
+		p.id, p.name, p.file, p.queue, p.pending = st.SessionID, "", "", nil, map[string]*pendingUI{}
+		delete(d.procs, id)
+		d.procs[st.SessionID] = p
+	}
+	d.mu.Unlock()
+	if rekeyed {
+		// Under p.mu, so no upsert built for the old id lands after it.
+		d.markDead(id)
+	}
 	file, name, model, reasoning, level := p.file, p.name, p.model, p.reasoning, p.level
 	if st.SessionFile != "" {
 		p.file = st.SessionFile
@@ -268,7 +300,26 @@ func (d *discoverer) loadState(ctx context.Context, p *sessionProc) (bool, error
 	if st.Model != nil && st.Model.ID != "" {
 		p.model, p.reasoning, p.level = st.Model.ID, st.Model.Reasoning, st.ThinkingLevel
 	}
-	return p.file != file || p.name != name || p.model != model || p.reasoning != reasoning || p.level != level, nil
+	return rekeyed || p.file != file || p.name != name || p.model != model || p.reasoning != reasoning || p.level != level, nil
+}
+
+// inBackground runs fn past the request: pi answers some commands only once
+// they end. A quick failure still reaches the caller.
+func inBackground(ctx context.Context, fn func() error) error {
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
+	return awaitQuickFail(ctx, done)
+}
+
+// settleIdle shows the session idle unless a run or a dialog is under way:
+// commands that run no agent turn get no agent_settled.
+func (d *discoverer) settleIdle(p *sessionProc) {
+	p.mu.Lock()
+	settled := !p.streaming && len(p.pending) == 0
+	p.mu.Unlock()
+	if settled {
+		d.upsert(p, session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle}, true)
+	}
 }
 
 // modelUpdate reports a pi model as the card's live model, or nil before one
@@ -289,6 +340,9 @@ func (d *discoverer) sendPrompt(ctx context.Context, id, text string) error {
 		return d.sendPromptOwned(ctx, p, text)
 	}
 	if fs := d.lookupForeign(id); fs != nil {
+		if name, args := slashCommand(text); name == "/compact" {
+			return d.beaconSend(fs, map[string]any{"type": "intent_compact", "instructions": args})
+		}
 		fs.mu.Lock()
 		busy := fs.streaming
 		fs.mu.Unlock()
@@ -297,6 +351,20 @@ func (d *discoverer) sendPrompt(ctx context.Context, id, text string) error {
 		})
 	}
 	return fmt.Errorf("pi: unknown session %s", id)
+}
+
+// slashCommand splits a prompt into its first word and the rest.
+func slashCommand(text string) (name, args string) {
+	name = strings.TrimSpace(text)
+	if i := strings.IndexFunc(name, unicode.IsSpace); i >= 0 {
+		name, args = name[:i], strings.TrimSpace(name[i:])
+	}
+	return name, args
+}
+
+func isNewCommand(text string) bool {
+	name, args := slashCommand(text)
+	return name == "/new" && args == ""
 }
 
 // quickFail bounds how long a request waits for pi to reject a command; one
@@ -318,6 +386,9 @@ func awaitQuickFail(ctx context.Context, done <-chan error) error {
 // until the command ends.
 // It reports whether the command waits in the session's pane for Enter.
 func (d *discoverer) runShell(ctx context.Context, id, text string) (bool, error) {
+	if isNewCommand(text) {
+		return d.runNew(ctx, id)
+	}
 	exclude := strings.HasPrefix(text, "!!")
 	command := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "!"), "!"))
 	if command == "" {
@@ -326,25 +397,33 @@ func (d *discoverer) runShell(ctx context.Context, id, text string) (bool, error
 	p := d.get(id)
 	if p == nil {
 		if fs := d.lookupForeign(id); fs != nil {
-			err := d.runForeignShell(ctx, fs, strings.TrimSpace(text))
+			err := d.stageForeign(ctx, fs, strings.TrimSpace(text), api.ErrShellNeedsPane)
 			return err == nil, err
 		}
 		return false, fmt.Errorf("pi: unknown session %s", id)
 	}
 	d.upsert(p, session.StatusWorking, nil, false)
-	done := make(chan error, 1)
-	go func() {
+	return false, inBackground(ctx, func() error {
 		_, err := p.conn.call(context.Background(), d.nextID(), "bash", map[string]any{"command": command, "excludeFromContext": exclude})
-		done <- err
-		p.mu.Lock()
-		settled := !p.streaming && len(p.pending) == 0
-		p.mu.Unlock()
-		if settled {
-			d.upsert(p, session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle}, true)
-		}
-	}()
-	return false, awaitQuickFail(ctx, done)
+		d.settleIdle(p)
+		return err
+	})
 }
+
+// runNew starts a new session in place of id. A foreign session runs /new only
+// from pi's editor, so it waits there for Enter in the session's pane.
+func (d *discoverer) runNew(ctx context.Context, id string) (bool, error) {
+	if p := d.get(id); p != nil {
+		return false, d.newSession(ctx, p)
+	}
+	if fs := d.lookupForeign(id); fs != nil {
+		err := d.stageForeign(ctx, fs, "/new", errNewNeedsPane)
+		return err == nil, err
+	}
+	return false, fmt.Errorf("pi: unknown session %s", id)
+}
+
+var errNewNeedsPane = errors.New("/new needs a tmux session")
 
 // queueFor returns the prompt queue of the session whose file is path. A
 // foreign session's queue holds only the prompts Argus sent.
@@ -397,6 +476,12 @@ func (d *discoverer) rename(ctx context.Context, id, name string) error {
 }
 
 func (d *discoverer) sendPromptOwned(ctx context.Context, p *sessionProc, text string) error {
+	if name, args := slashCommand(text); name == "/compact" {
+		return d.compact(ctx, p, args)
+	}
+	if isNewCommand(text) {
+		return d.newSession(ctx, p)
+	}
 	p.mu.Lock()
 	busy := p.streaming
 	p.mu.Unlock()
@@ -406,17 +491,48 @@ func (d *discoverer) sendPromptOwned(ctx context.Context, p *sessionProc, text s
 		// steer delivers after the current turn's tool calls.
 		params["streamingBehavior"] = "steer"
 	}
-	// pi answers a slash command only once it ends, dialogs included, so the
-	// answer is followed in the background.
-	done := make(chan error, 1)
-	go func() {
+	// pi answers a slash command only once it ends, dialogs included.
+	return inBackground(ctx, func() error {
 		data, err := p.conn.call(context.Background(), d.nextID(), "prompt", params)
 		if err == nil {
 			d.afterPrompt(p, data)
 		}
-		done <- err
-	}()
-	return awaitQuickFail(ctx, done)
+		return err
+	})
+}
+
+// compact runs pi's /compact, which pi keeps out of RPC prompts.
+func (d *discoverer) compact(ctx context.Context, p *sessionProc, instructions string) error {
+	params := map[string]any{}
+	if instructions != "" {
+		params["customInstructions"] = instructions
+	}
+	return inBackground(ctx, func() error {
+		_, err := p.conn.call(context.Background(), d.nextID(), "compact", params)
+		d.settleIdle(p)
+		return err
+	})
+}
+
+// newSession runs pi's /new, which pi keeps out of RPC prompts. The process
+// moves to a new session id; loadState follows it.
+func (d *discoverer) newSession(ctx context.Context, p *sessionProc) error {
+	return inBackground(ctx, func() error {
+		defer d.settleIdle(p)
+		data, err := p.conn.call(context.Background(), d.nextID(), "new_session", nil)
+		if err != nil {
+			return err
+		}
+		var r struct {
+			Cancelled bool `json:"cancelled"`
+		}
+		_ = json.Unmarshal(data, &r)
+		if r.Cancelled {
+			return errors.New("pi: an extension cancelled the new session")
+		}
+		_, err = d.loadState(context.Background(), p)
+		return err
+	})
 }
 
 func (d *discoverer) afterPrompt(p *sessionProc, data json.RawMessage) {
@@ -429,12 +545,7 @@ func (d *discoverer) afterPrompt(p *sessionProc, data json.RawMessage) {
 		return
 	}
 	// A command or input handler took it: no run follows to settle the card.
-	p.mu.Lock()
-	settled := !p.streaming && len(p.pending) == 0
-	p.mu.Unlock()
-	if settled {
-		d.upsert(p, session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle}, true)
-	}
+	d.settleIdle(p)
 }
 
 func (d *discoverer) dismiss(ctx context.Context, id string) error {
@@ -477,17 +588,11 @@ func (d *discoverer) markDead(id string) {
 
 func (d *discoverer) upsert(p *sessionProc, st session.Status, ix *session.Interaction, replace bool) {
 	p.mu.Lock()
-	u := p.hookUpdate(st, ix, replace)
-	p.mu.Unlock()
-	d.reg.ApplyHook(u)
+	defer p.mu.Unlock()
+	d.reg.ApplyHook(p.hookUpdate(st, ix, replace))
 }
 
-// handleEvent translates one RPC stdout record for the given session.
-func (d *discoverer) handleEvent(id, typ string, raw json.RawMessage) {
-	p := d.get(id)
-	if p == nil {
-		return
-	}
+func (d *discoverer) procEvent(p *sessionProc, typ string, raw json.RawMessage) {
 	p.mu.Lock()
 	hasPending := len(p.pending) > 0
 	p.mu.Unlock()
@@ -496,15 +601,14 @@ func (d *discoverer) handleEvent(id, typ string, raw json.RawMessage) {
 		p.mu.Lock()
 		p.streaming = true
 		p.mu.Unlock()
+		fallthrough
+	// agent_end ends one low-level run; retries/compaction/queued work may
+	// follow, and agent_settled is the authoritative idle signal. A manual
+	// /compact aborts the run first, so its agent_settled comes before
+	// compaction_start; the compact reply settles the card.
+	case "compaction_start", "agent_end":
 		// A trailing activity event after a dialog must not clear the pending
 		// prompt (same hazard as opencode's post-permission activity).
-		if hasPending {
-			return
-		}
-		d.upsert(p, session.StatusWorking, nil, false)
-	case "agent_end":
-		// One low-level run ended; retries/compaction/queued work may follow.
-		// agent_settled is the authoritative idle signal.
 		if hasPending {
 			return
 		}

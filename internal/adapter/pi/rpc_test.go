@@ -25,6 +25,11 @@ type fakePi struct {
 	// its dialogs.
 	promptDisposition string
 	promptRelease     chan struct{}
+	// newSessionCancelled answers new_session as an extension cancelling it.
+	newSessionCancelled bool
+	// stateHold holds the next get_state answer, built when asked, until it
+	// closes; stateHeld closes once that answer is held.
+	stateHold, stateHeld chan struct{}
 
 	mu      sync.Mutex
 	gotUI   []map[string]any
@@ -56,9 +61,20 @@ func (f *fakePi) run(stdin io.Reader, stdout io.WriteCloser) {
 			for k, v := range f.state {
 				data[k] = v
 			}
+			hold, held := f.stateHold, f.stateHeld
+			f.stateHold, f.stateHeld = nil, nil
 			f.mu.Unlock()
-			enc.Encode(map[string]any{"id": rec["id"], "type": "response", "command": "get_state", "success": true,
-				"data": data})
+			resp := map[string]any{"id": rec["id"], "type": "response", "command": "get_state", "success": true,
+				"data": data}
+			if hold == nil {
+				enc.Encode(resp)
+				break
+			}
+			go func() {
+				close(held)
+				<-hold
+				enc.Encode(resp)
+			}()
 		case "bash":
 			f.mu.Lock()
 			f.calls = append(f.calls, rec)
@@ -66,6 +82,13 @@ func (f *fakePi) run(stdin io.Reader, stdout io.WriteCloser) {
 			enc.Encode(map[string]any{"type": "bash_execution_update", "id": rec["id"], "delta": "hi\n"})
 			enc.Encode(map[string]any{"id": rec["id"], "type": "response", "command": "bash", "success": true,
 				"data": map[string]any{"output": "hi\n", "exitCode": 0}})
+		case "new_session":
+			f.mu.Lock()
+			f.calls = append(f.calls, rec)
+			cancelled := f.newSessionCancelled
+			f.mu.Unlock()
+			enc.Encode(map[string]any{"id": rec["id"], "type": "response", "command": "new_session", "success": true,
+				"data": map[string]any{"cancelled": cancelled}})
 		case "fail_me":
 			enc.Encode(map[string]any{"id": rec["id"], "type": "response", "command": "fail_me", "success": false, "error": "nope"})
 		case "prompt":

@@ -89,16 +89,21 @@ func (f *fakeBeacon) waitFor(t *testing.T, typ string) map[string]any {
 
 func waitCard(t *testing.T, reg *registry.Registry, id string, want session.Status) session.Session {
 	t.Helper()
+	return waitCardState(t, reg, id, func(s session.Session) bool { return want == "" || s.Status == want })
+}
+
+func waitCardState(t *testing.T, reg *registry.Registry, id string, ok func(session.Session) bool) session.Session {
+	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		for _, s := range reg.Snapshot() {
-			if s.AgentSessionID == id && (want == "" || s.Status == want) {
+			if s.AgentSessionID == id && ok(s) {
 				return s
 			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("card %s status %v never appeared", id, want)
+	t.Fatalf("card for %s never matched: %+v", id, reg.Snapshot())
 	return session.Session{}
 }
 
@@ -220,6 +225,32 @@ func TestBeaconPromptIntent(t *testing.T) {
 	if intent["text"] != "hello there" {
 		t.Fatalf("intent = %v", intent)
 	}
+}
+
+func TestBeaconCompactIntent(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	fb := dialBeacon(t, d)
+	fb.send(map[string]any{"type": "hello", "sessionId": "for-c", "cwd": "/w", "idle": true})
+	waitCard(t, reg, "for-c", session.StatusAwaitingInput)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := d.sendPrompt(ctx, "for-c", " /compact\nkeep the tests"); err != nil {
+		t.Fatal(err)
+	}
+	if intent := fb.waitFor(t, "intent_compact"); intent["instructions"] != "keep the tests" {
+		t.Fatalf("intent = %v, want the instructions", intent)
+	}
+	for _, m := range fb.received() {
+		if m["type"] == "intent_prompt" {
+			t.Fatalf("intent_prompt = %v: pi keeps /compact out of prompts", m)
+		}
+	}
+
+	fb.send(map[string]any{"type": "event", "name": "compaction", "open": true})
+	waitCard(t, reg, "for-c", session.StatusWorking)
+	fb.send(map[string]any{"type": "event", "name": "compaction", "open": false})
+	waitCardState(t, reg, "for-c", isIdle)
 }
 
 func TestBeaconLifecycleEvents(t *testing.T) {
@@ -502,6 +533,30 @@ func TestBeaconShellStagesForEnter(t *testing.T) {
 	fb.send(map[string]any{"type": "shell_ready", "id": intent["id"], "ok": true})
 	if r := <-done; r.err != nil || !r.submit {
 		t.Fatalf("runShell = %+v, want it staged for Enter", r)
+	}
+}
+
+func TestBeaconNewStagesForEnter(t *testing.T) {
+	d, fb := shellBeacon(t)
+	done := runShellAsync(d, " /new ")
+	intent := fb.waitFor(t, "intent_shell")
+	if intent["text"] != "/new" {
+		t.Fatalf("intent = %v, want /new staged", intent)
+	}
+	fb.send(map[string]any{"type": "shell_ready", "id": intent["id"], "ok": true})
+	if r := <-done; r.err != nil || !r.submit {
+		t.Fatalf("runShell = %+v, want it staged for Enter", r)
+	}
+}
+
+func TestBeaconNewNeedsAPane(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	fb := dialBeacon(t, d)
+	fb.send(map[string]any{"type": "hello", "sessionId": "for-sh", "cwd": "/w", "idle": true})
+	waitCard(t, reg, "for-sh", session.StatusAwaitingInput)
+	if _, err := d.runShell(context.Background(), "for-sh", "/new"); !errors.Is(err, errNewNeedsPane) {
+		t.Fatalf("err = %v, want errNewNeedsPane", err)
 	}
 }
 

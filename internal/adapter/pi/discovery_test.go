@@ -65,6 +65,16 @@ func TestSpawnReportsAnExitAtStart(t *testing.T) {
 	}
 }
 
+func (d *discoverer) handleEvent(id, typ string, raw json.RawMessage) {
+	if p := d.get(id); p != nil {
+		d.procEvent(p, typ, raw)
+	}
+}
+
+func isIdle(s session.Session) bool {
+	return s.Status == session.StatusAwaitingInput && s.Interaction != nil && s.Interaction.Kind == session.InteractionIdle
+}
+
 func stubSpawn(t *testing.T, f *fakePi) {
 	t.Helper()
 	old := spawnProc
@@ -77,6 +87,13 @@ func stubSpawn(t *testing.T, f *fakePi) {
 		clientStdout, fakeStdout := io.Pipe()
 		f.mu.Lock()
 		f.spawnModel = model
+		// Like real pi, get_state reports the --session-id until /new.
+		if f.state == nil {
+			f.state = map[string]any{}
+		}
+		if _, ok := f.state["sessionId"]; !ok {
+			f.state["sessionId"] = id
+		}
 		f.mu.Unlock()
 		go f.run(fakeStdin, fakeStdout)
 		cmd := exec.Command("sleep", "30")
@@ -307,14 +324,186 @@ func TestPromptForACommandWithDialogsReturns(t *testing.T) {
 		t.Fatalf("sendPrompt = %v, want it back before the command ends", err)
 	}
 	close(f.promptRelease)
+	waitCardState(t, reg, id, isIdle)
+}
+
+func TestCompactRunsThroughRPC(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.sendPrompt(ctx, id, " /compact\nkeep the tests "); err != nil {
+		t.Fatal(err)
+	}
+	if c := f.call("compact"); c == nil || c["customInstructions"] != "keep the tests" {
+		t.Fatalf("compact = %v, want the instructions", c)
+	}
+	f.mu.Lock()
+	prompts := f.prompts
+	f.mu.Unlock()
+	if len(prompts) != 0 {
+		t.Fatalf("prompts = %v, want none: pi keeps /compact out of prompts", prompts)
+	}
+	waitCardState(t, reg, id, isIdle)
+
+	if err := d.sendPrompt(ctx, id, "/compact"); err != nil {
+		t.Fatal(err)
+	}
+	if c := f.call("compact"); c == nil || c["customInstructions"] != nil {
+		t.Fatalf("compact = %v, want no instructions", c)
+	}
+}
+
+func TestCompactionShowsWorkingAfterTheAbortSettles(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.handleEvent(id, "agent_start", json.RawMessage(`{"type":"agent_start"}`))
+	d.handleEvent(id, "agent_settled", json.RawMessage(`{"type":"agent_settled","aborted":true}`))
+	waitCardState(t, reg, id, isIdle)
+	d.handleEvent(id, "compaction_start", json.RawMessage(`{"type":"compaction_start","reason":"manual"}`))
+	waitCard(t, reg, id, session.StatusWorking)
+}
+
+func TestStaleStateKeepsTheNewSession(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hold, held := make(chan struct{}), make(chan struct{})
+	f.mu.Lock()
+	f.stateHold, f.stateHeld = hold, held
+	f.mu.Unlock()
+	// The abort that /new starts with settles the run: that get_state answers
+	// with the old id, and arrives after /new moved the process.
+	d.handleEvent(id, "agent_settled", json.RawMessage(`{"type":"agent_settled","aborted":true}`))
+	<-held
+	f.mu.Lock()
+	f.state["sessionId"], f.state["sessionFile"] = "ses-new", "/tmp/ses-new.jsonl"
+	f.mu.Unlock()
+	if err := d.sendPrompt(ctx, id, "/new"); err != nil {
+		t.Fatal(err)
+	}
+	waitCardState(t, reg, "ses-new", isIdle)
+	close(hold)
+
+	time.Sleep(200 * time.Millisecond)
+	if d.get(id) != nil || d.get("ses-new") == nil {
+		t.Fatal("a stale get_state must not move the process back")
+	}
+	snapshotGone(t, reg, id)
+	if s := snapshotByID(t, reg, "ses-new"); s.Status == session.StatusDead || s.TranscriptPath != "/tmp/ses-new.jsonl" {
+		t.Fatalf("card = %+v, want the new session live on its own file", s)
+	}
+}
+
+func TestNewSessionFollowsTheNewID(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.state["sessionId"], f.state["sessionFile"] = "ses-new", "/tmp/ses-new.jsonl"
+	f.mu.Unlock()
+	if err := d.sendPrompt(ctx, id, "/new"); err != nil {
+		t.Fatal(err)
+	}
+	if f.call("new_session") == nil {
+		t.Fatal("new_session never sent")
+	}
+	s := waitCardState(t, reg, "ses-new", isIdle)
+	if s.TranscriptPath != "/tmp/ses-new.jsonl" {
+		t.Fatalf("transcript = %q, want the new session's file", s.TranscriptPath)
+	}
+	snapshotGone(t, reg, id)
+	if d.get(id) != nil || d.get("ses-new") == nil {
+		t.Fatal("the process must be tracked under the new id only")
+	}
+	// Events and prompts follow the process to its new session.
+	d.get("ses-new").conn.onEvent("agent_start", json.RawMessage(`{"type":"agent_start"}`))
+	waitCard(t, reg, "ses-new", session.StatusWorking)
+	if err := d.sendPrompt(ctx, "ses-new", "hi"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNewSessionCancelledByAnExtension(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.newSessionCancelled = true
+	f.mu.Unlock()
+	// An answered dialog of the extension leaves the card working.
+	d.upsert(d.get(id), session.StatusWorking, nil, false)
+	if err := d.sendPrompt(ctx, id, "/new"); err == nil || !strings.Contains(err.Error(), "cancelled") {
+		t.Fatalf("err = %v, want the cancel reported", err)
+	}
+	if d.get(id) == nil {
+		t.Fatal("a cancelled /new must keep the session")
+	}
+	waitCardState(t, reg, id, isIdle)
+}
+
+func TestExitAfterNewSessionEndsTheNewCard(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.state["sessionId"] = "ses-new"
+	f.mu.Unlock()
+	if err := d.sendPrompt(ctx, id, "/new"); err != nil {
+		t.Fatal(err)
+	}
+	waitCardState(t, reg, "ses-new", isIdle)
+	_ = d.get("ses-new").cmd.Process.Kill()
 	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if s := snapshotByID(t, reg, id); s.Status == session.StatusAwaitingInput && s.Interaction != nil && s.Interaction.Kind == session.InteractionIdle {
-			return
+	for d.get("ses-new") != nil {
+		if time.Now().After(deadline) {
+			t.Fatal("the exited process was never dropped")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("card = %+v after the command ended with no run, want idle", snapshotByID(t, reg, id))
+	snapshotGone(t, reg, "ses-new")
 }
 
 func TestExpiredDialogLeavesTheCard(t *testing.T) {
@@ -653,8 +842,8 @@ func TestShellInputRunsBash(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &piAdapter{disc: d}
-	if !a.IsShellInput("!ls") || a.IsShellInput("ls") {
-		t.Fatal("IsShellInput must match only a leading !")
+	if !a.IsShellInput("!ls") || a.IsShellInput("ls") || !a.IsShellInput(" /new ") || a.IsShellInput("/new foo") || a.IsShellInput("/newer") {
+		t.Fatal("IsShellInput must match only a leading ! and a bare /new")
 	}
 	for _, tc := range []struct {
 		text    string
@@ -675,10 +864,31 @@ func TestShellInputRunsBash(t *testing.T) {
 	if _, err := a.SendShellInput(ctx, snapshotByID(t, reg, id), "!  "); err == nil {
 		t.Fatal("empty command must fail")
 	}
-	s := waitCard(t, reg, id, session.StatusAwaitingInput)
-	if s.Interaction == nil || s.Interaction.Kind != session.InteractionIdle {
-		t.Fatalf("after bash: interaction = %+v", s.Interaction)
+	waitCardState(t, reg, id, isIdle)
+}
+
+func TestShellInputRunsNewSession(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	f := &fakePi{t: t}
+	stubSpawn(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	id, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
+	f.mu.Lock()
+	f.state["sessionId"] = "ses-new"
+	f.mu.Unlock()
+	a := &piAdapter{disc: d}
+	if submit, err := a.SendShellInput(ctx, snapshotByID(t, reg, id), "/new"); err != nil || submit {
+		t.Fatalf("submit = %v, err = %v, want /new run over RPC", submit, err)
+	}
+	if f.call("new_session") == nil {
+		t.Fatal("new_session never sent")
+	}
+	waitCardState(t, reg, "ses-new", isIdle)
 }
 
 func TestLiveSessionGetsNoResumePane(t *testing.T) {

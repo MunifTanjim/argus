@@ -157,6 +157,15 @@ export default function (pi: ExtensionAPI) {
 			if (busy && !text.startsWith("/")) setQueued([...queued, text]);
 		};
 		beaconIntents.onRename = (name) => pi.setSessionName(name);
+		beaconIntents.onCompact = (instructions) => liveCtx?.compact(instructions ? { customInstructions: instructions } : undefined);
+		pi.on("session_before_compact", async () => {
+			beaconSend({ type: "event", name: "compaction", open: true });
+		});
+		const compactionEnded = async () => {
+			beaconSend({ type: "event", name: "compaction", open: false });
+		};
+		pi.on("session_compact", compactionEnded);
+		pi.on("session_compact_failed", compactionEnded);
 		// pi gives extensions no way to submit "!" input, so the gate stages it in
 		// the editor and Argus presses Enter in the pane. The user's draft waits
 		// aside until pi runs the command.
@@ -186,6 +195,12 @@ export default function (pi: ExtensionAPI) {
 			const excluded = staged?.text.startsWith("!!") ?? false;
 			const command = staged?.text.slice(excluded ? 2 : 1).trim();
 			if (staged && ev.command === command && ev.excludeFromContext === excluded) putDraftBack(true);
+			return undefined;
+		});
+		// pi clears the editor before it switches; the draft carries over to the
+		// new session.
+		pi.on("session_before_switch", async (ev) => {
+			if (ev.reason === "new" && staged?.text === "/new") putDraftBack(true);
 			return undefined;
 		});
 		beaconIntents.describe = () => {
@@ -248,8 +263,9 @@ const beaconIntents: {
 	onPrompt: ((text: string, busy: boolean) => void) | null;
 	onRename: ((name: string) => void) | null;
 	onShell: ((id: string, text: string) => void) | null;
+	onCompact: ((instructions: string) => void) | null;
 	describe: (() => unknown) | null;
-} = { onPrompt: null, onRename: null, onShell: null, describe: null };
+} = { onPrompt: null, onRename: null, onShell: null, onCompact: null, describe: null };
 
 let beaconConn: { write: (s: string) => void; close: () => void } | null = null;
 
@@ -390,5 +406,7 @@ function handleBeaconLine(line: string) {
 		beaconIntents.onRename?.(msg.name);
 	} else if (msg?.type === "intent_shell" && typeof msg.id === "string" && typeof msg.text === "string") {
 		beaconIntents.onShell?.(msg.id, msg.text);
+	} else if (msg?.type === "intent_compact") {
+		beaconIntents.onCompact?.(typeof msg.instructions === "string" ? msg.instructions : "");
 	}
 }

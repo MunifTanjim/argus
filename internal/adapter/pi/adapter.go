@@ -157,10 +157,14 @@ func (a *piAdapter) SendPrompt(ctx context.Context, sess session.Session, text s
 	return d.sendPrompt(ctx, sess.AgentSessionID, text)
 }
 
-func (piAdapter) IsShellInput(text string) bool { return strings.HasPrefix(text, "!") }
+// IsShellInput also takes /new: a foreign session runs it only from pi's editor.
+func (piAdapter) IsShellInput(text string) bool {
+	return strings.HasPrefix(text, "!") || isNewCommand(text)
+}
 
 // SendShellInput runs "!cmd" through pi's bash command, as pi's own editor
-// does; "!!cmd" keeps the output out of the model's context.
+// does; "!!cmd" keeps the output out of the model's context. /new starts a new
+// session.
 func (a *piAdapter) SendShellInput(ctx context.Context, sess session.Session, text string) (bool, error) {
 	d, err := a.live()
 	if err != nil {

@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -285,6 +284,15 @@ func (d *discoverer) foreignEvent(id string, line []byte) {
 		fs.mu.Lock()
 		fs.queue = ev.Items
 		fs.mu.Unlock()
+	case "compaction":
+		if !ev.Open {
+			d.foreignSettle(fs)
+			return
+		}
+		if hasPending {
+			return
+		}
+		d.foreignCard(fs, session.StatusWorking, nil, false)
 	case "ui_prompt":
 		fs.mu.Lock()
 		if ev.Open {
@@ -373,17 +381,17 @@ type beaconShellReady struct {
 	Reason string `json:"reason"`
 }
 
-// runForeignShell stages "!cmd" as the user's own input in a foreign session:
-// the gate sets it in pi's editor, keeping the user's draft aside, for Enter in
-// the session's pane to submit. pi offers extensions no way to submit it
-// themselves.
-func (d *discoverer) runForeignShell(ctx context.Context, fs *foreignSession, text string) error {
+// stageForeign stages text ("!cmd", /new) as the user's own input in a foreign
+// session: the gate sets it in pi's editor, keeping the user's draft aside, for
+// Enter in the session's pane to submit. pi offers extensions no way to submit
+// it themselves. A session without a pane fails with noPane.
+func (d *discoverer) stageForeign(ctx context.Context, fs *foreignSession, text string, noPane error) error {
 	reqID := d.nextID()
 	ready := make(chan beaconShellReady, 1)
 	fs.mu.Lock()
 	if fs.paneID == "" {
 		fs.mu.Unlock()
-		return fmt.Errorf("pi: %w", api.ErrShellNeedsPane)
+		return fmt.Errorf("pi: %w", noPane)
 	}
 	if fs.shellWaits == nil {
 		fs.shellWaits = map[string]chan beaconShellReady{}
