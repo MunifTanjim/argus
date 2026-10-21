@@ -1010,3 +1010,26 @@ func TestStagedShellInputIsSubmitted(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+type fakeNoResume struct{ adapter.Adapter }
+
+func (fakeNoResume) ResumeCommand(string) (string, []string, bool) { return "", nil, false }
+
+func TestResumeOfARunningPanelessSessionOpensIt(t *testing.T) {
+	d := New()
+	d.caps.SpawnSession = true
+	d.discs = nil
+	d.adapters["pi"] = fakeNoResume{}
+	live, _ := d.reg.ApplyHook(registry.HookUpdate{Agent: "pi", AgentSessionID: "s1", Input: session.InputAPI})
+	if live.Controllable() {
+		t.Fatal("seed should be paneless")
+	}
+	raw, _ := json.Marshal(api.ResumeParams{Agent: "pi", AgentSessionID: "s1", Cwd: t.TempDir()})
+	res, err := d.handleSessionResume(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if r := res.(api.ResumeResult); r.SessionID != live.ID {
+		t.Fatalf("got %#v, want SessionID=%q", r, live.ID)
+	}
+}

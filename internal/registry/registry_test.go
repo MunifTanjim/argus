@@ -260,3 +260,82 @@ func TestClearPendingDecision(t *testing.T) {
 	default:
 	}
 }
+
+func TestApplyHookFollowsThePreviousAgentSession(t *testing.T) {
+	r := New()
+	first, _ := r.ApplyHook(HookUpdate{Agent: "pi", AgentSessionID: "a", Name: "old", TranscriptPath: "/a.jsonl", Input: session.InputAPI, Status: session.StatusWorking})
+	if first.ID != "pi:a" {
+		t.Fatalf("first id = %q, want pi:a", first.ID)
+	}
+	ch, cancel := r.Subscribe()
+	defer cancel()
+
+	got, alive := r.ApplyHook(HookUpdate{Agent: "pi", AgentSessionID: "b", PrevAgentSessionID: "a", Input: session.InputAPI, Status: session.StatusWorking})
+	if !alive || got.ID != "pi:a" || got.AgentSessionID != "b" {
+		t.Fatalf("got %+v alive=%v, want id pi:a agent session b", got, alive)
+	}
+	if got.Name != "" || got.TranscriptPath != "" {
+		t.Fatalf("name %q transcript %q carried over from the previous session", got.Name, got.TranscriptPath)
+	}
+	if n := len(r.Snapshot()); n != 1 {
+		t.Fatalf("want 1 session, got %d", n)
+	}
+	select {
+	case ev := <-ch:
+		if ev.Type != EventUpdated || ev.Session.ID != "pi:a" {
+			t.Fatalf("event = %+v, want updated pi:a", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no event")
+	}
+	if s, ok := r.FindByAgentSession("b"); !ok || s.ID != "pi:a" {
+		t.Fatalf("FindByAgentSession(b) = %+v,%v", s, ok)
+	}
+	if _, ok := r.FindByAgentSession("a"); ok {
+		t.Fatal("FindByAgentSession(a) still finds the record")
+	}
+}
+
+func TestApplyHookSwitchOnAPaneDropsTheOldName(t *testing.T) {
+	r := New()
+	r.ApplyHook(HookUpdate{Agent: "pi", AgentSessionID: "a", Server: session.TmuxServerArgus, PaneID: "%7", Name: "old", TranscriptPath: "/a.jsonl", Input: session.InputAPI, Status: session.StatusWorking})
+	got, _ := r.ApplyHook(HookUpdate{Agent: "pi", AgentSessionID: "b", PrevAgentSessionID: "a", Server: session.TmuxServerArgus, PaneID: "%7", Input: session.InputAPI, Status: session.StatusWorking})
+	if got.ID != "pi:a" || got.AgentSessionID != "b" || got.Name != "" || got.TranscriptPath != "" {
+		t.Fatalf("got id %q session %q name %q transcript %q", got.ID, got.AgentSessionID, got.Name, got.TranscriptPath)
+	}
+}
+
+func TestApplyHookCreateAvoidsASwitchedRecordsID(t *testing.T) {
+	r := New()
+	r.ApplyHook(HookUpdate{Agent: "pi", AgentSessionID: "a", Input: session.InputAPI, Status: session.StatusWorking})
+	r.ApplyHook(HookUpdate{Agent: "pi", AgentSessionID: "b", PrevAgentSessionID: "a", Input: session.InputAPI, Status: session.StatusWorking})
+	ch, cancel := r.Subscribe()
+	defer cancel()
+
+	if dead, alive := r.ApplyHook(HookUpdate{Agent: "pi", AgentSessionID: "a", Status: session.StatusDead}); alive || dead.ID == "pi:a" {
+		t.Fatalf("dead for unheld a = %+v alive=%v, want a removal under another id", dead, alive)
+	}
+	select {
+	case ev := <-ch:
+		if ev.Session.ID == "pi:a" {
+			t.Fatalf("event for the switched record: %+v", ev)
+		}
+	case <-time.After(time.Second):
+	}
+	if s, ok := r.Get("pi:a"); !ok || s.AgentSessionID != "b" {
+		t.Fatalf("switched record = %+v,%v", s, ok)
+	}
+
+	got, _ := r.ApplyHook(HookUpdate{Agent: "pi", AgentSessionID: "a", Input: session.InputAPI, Status: session.StatusWorking})
+	if got.ID == "pi:a" || got.AgentSessionID != "a" {
+		t.Fatalf("new record = id %q session %q", got.ID, got.AgentSessionID)
+	}
+	if n := len(r.Snapshot()); n != 2 {
+		t.Fatalf("want 2 sessions, got %d", n)
+	}
+	a, okA := r.FindByAgentSession("a")
+	b, okB := r.FindByAgentSession("b")
+	if !okA || !okB || a.ID == b.ID || a.AgentSessionID != "a" || b.AgentSessionID != "b" || b.ID != "pi:a" {
+		t.Fatalf("FindByAgentSession a = %+v,%v b = %+v,%v", a, okA, b, okB)
+	}
+}

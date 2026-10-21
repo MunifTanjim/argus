@@ -167,9 +167,10 @@ type PaneFiller interface {
 	FillPrompt(ctx context.Context, sess session.Session, text string) (filled bool, err error)
 }
 
-// ShellInput runs "!" bash mode input, which the agent's prompt API would send
-// to the model as text. submit is true when the input waits in the session's
-// input box for the node to submit with Enter in its pane.
+// ShellInput runs input the agent's prompt API would send to the model as text:
+// "!" bash mode, and commands only the agent's editor runs. submit is true when
+// the input waits in the session's input box for the node to submit with Enter
+// in its pane.
 type ShellInput interface {
 	IsShellInput(text string) bool
 	SendShellInput(ctx context.Context, sess session.Session, text string) (submit bool, err error)

@@ -635,6 +635,9 @@ func (d *Node) handleSessionResume(ctx context.Context, params json.RawMessage) 
 		if s.Controllable() {
 			return api.ResumeResult{SessionID: s.ID}, nil
 		}
+		if _, _, ok := d.adapterFor(p.Agent).ResumeCommand(p.AgentSessionID); !ok {
+			return api.ResumeResult{SessionID: s.ID}, nil
+		}
 		adoptID = s.ID
 	}
 
