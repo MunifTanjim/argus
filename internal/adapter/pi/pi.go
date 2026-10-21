@@ -1,7 +1,8 @@
 // Package pi is the argus adapter for Pi (https://pi.dev), a minimal,
 // extensible coding-agent harness. Argus owns one `pi --mode rpc` child
-// process per session and drives it over JSONL on stdin/stdout. The dialogs
-// of pi's own extensions arrive as extension_ui_request records in RPC mode.
+// process per session and drives it over JSONL on stdin/stdout; a bundled
+// gate extension (loaded with -e at spawn) adds no approvals; the dialogs of
+// pi's own extensions arrive as extension_ui_request records in RPC mode.
 //
 // Transcripts and history read the session files under
 // ~/.pi/agent/sessions/--<cwd>--/<ts>_<id>.jsonl.
@@ -17,6 +18,10 @@ import (
 
 // Agent is the adapter's coding-agent identifier, stored on every session it owns.
 const Agent = "pi"
+
+// gateEnv marks a pi child process as Argus-owned. The bundled gate extension
+// branches on it: RPC-dialog mode when set, socket-beacon mode otherwise.
+const gateEnv = "ARGUS_MANAGED"
 
 // piHome returns pi's agent dir: PI_CODING_AGENT_DIR, else ~/.pi/agent.
 func piHome() (string, error) {

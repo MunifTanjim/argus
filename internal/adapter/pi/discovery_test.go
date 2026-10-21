@@ -25,14 +25,14 @@ import (
 // child so dismiss/reap paths exercise real *exec.Cmd behavior.
 func TestSpawnedProcessOutlivesTheRequest(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	var procCtx context.Context
 	stubbed := spawnProc
-	spawnProc = func(ctx context.Context, cwd, id, model string) (*rpcConn, *exec.Cmd, error) {
+	spawnProc = func(ctx context.Context, cwd, id, gate, model string) (*rpcConn, *exec.Cmd, error) {
 		procCtx = ctx
-		return stubbed(ctx, cwd, id, model)
+		return stubbed(ctx, cwd, id, gate, model)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	if _, err := d.spawnSession(ctx, "/w", adapter.SpawnOptions{}); err != nil {
@@ -55,7 +55,7 @@ func TestSpawnReportsAnExitAtStart(t *testing.T) {
 	t.Cleanup(func() { piBin = old })
 	// The exit can land after the first call fails; every spawn must see it.
 	for range 20 {
-		d := newDiscoverer(registry.New())
+		d := newDiscoverer(registry.New(), nil)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		_, err := d.spawnSession(ctx, t.TempDir(), adapter.SpawnOptions{})
 		cancel()
@@ -79,7 +79,10 @@ func stubSpawn(t *testing.T, f *fakePi) {
 	t.Helper()
 	old := spawnProc
 	t.Cleanup(func() { spawnProc = old })
-	spawnProc = func(ctx context.Context, cwd, id, model string) (*rpcConn, *exec.Cmd, error) {
+	spawnProc = func(ctx context.Context, cwd, id, gate, model string) (*rpcConn, *exec.Cmd, error) {
+		if gate == "" {
+			t.Error("gate extension path empty")
+		}
 		fakeStdin, clientStdin := io.Pipe()
 		clientStdout, fakeStdout := io.Pipe()
 		f.mu.Lock()
@@ -118,7 +121,7 @@ func snapshotByID(t *testing.T, reg *registry.Registry, id string) session.Sessi
 
 func TestSpawnTracksWorkingSession(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -144,7 +147,7 @@ func TestSpawnTracksWorkingSession(t *testing.T) {
 
 func TestSpawnWithPromptSends(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -163,7 +166,7 @@ func TestSpawnWithPromptSends(t *testing.T) {
 
 func TestAgentSettledIdles(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -192,7 +195,7 @@ func TestAgentSettledIdles(t *testing.T) {
 
 func TestUIDialogParksPermission(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -230,7 +233,7 @@ func TestUIDialogParksPermission(t *testing.T) {
 
 func TestActivityDuringDialogKeepsPrompt(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -250,7 +253,7 @@ func TestActivityDuringDialogKeepsPrompt(t *testing.T) {
 
 func TestSettledRunDropsItsAbortedDialog(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	stubSpawn(t, &fakePi{t: t})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -282,7 +285,7 @@ func TestSettledRunDropsItsAbortedDialog(t *testing.T) {
 
 func TestExtensionDialogsAreQuestions(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -340,7 +343,7 @@ func TestExtensionDialogsAreQuestions(t *testing.T) {
 
 func TestPromptForACommandWithDialogsReturns(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t, promptDisposition: "handled", promptRelease: make(chan struct{})}
 	stubSpawn(t, f)
 	old := quickFail
@@ -364,7 +367,7 @@ func TestPromptForACommandWithDialogsReturns(t *testing.T) {
 
 func TestCompactRunsThroughRPC(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -397,7 +400,7 @@ func TestCompactRunsThroughRPC(t *testing.T) {
 
 func TestCompactionShowsWorkingAfterTheAbortSettles(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -415,7 +418,7 @@ func TestCompactionShowsWorkingAfterTheAbortSettles(t *testing.T) {
 
 func TestStaleStateKeepsTheNewSession(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -453,7 +456,7 @@ func TestStaleStateKeepsTheNewSession(t *testing.T) {
 
 func TestNewSessionFollowsTheNewID(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -489,7 +492,7 @@ func TestNewSessionFollowsTheNewID(t *testing.T) {
 
 func TestTwoSwitchesBeforeAPushKeepTheCard(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -523,7 +526,7 @@ func TestTwoSwitchesBeforeAPushKeepTheCard(t *testing.T) {
 
 func TestNewSessionKeepsTheCard(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -569,7 +572,7 @@ func TestNewSessionKeepsTheCard(t *testing.T) {
 
 func TestNewSessionCancelledByAnExtension(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -594,7 +597,7 @@ func TestNewSessionCancelledByAnExtension(t *testing.T) {
 
 func TestExitAfterNewSessionEndsTheNewCard(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -623,7 +626,7 @@ func TestExitAfterNewSessionEndsTheNewCard(t *testing.T) {
 
 func TestExpiredDialogLeavesTheCard(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -648,7 +651,7 @@ func TestExpiredDialogLeavesTheCard(t *testing.T) {
 
 func TestRespondAllowDenies(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -687,7 +690,7 @@ func TestRespondAllowDenies(t *testing.T) {
 
 func TestRespondUnknownIsError(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -705,7 +708,7 @@ func TestRespondUnknownIsError(t *testing.T) {
 
 func TestDismissKillsAndMarksDead(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -739,7 +742,7 @@ func snapshotGone(t *testing.T, reg *registry.Registry, id string) {
 
 func TestSpawnReportsModelAndEffort(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t, state: map[string]any{
 		"model":         map[string]any{"id": "claude-sonnet-4-5", "reasoning": true},
 		"thinkingLevel": "medium",
@@ -763,7 +766,7 @@ func TestSpawnReportsModelAndEffort(t *testing.T) {
 
 func TestModelWithoutReasoningTakesNoEffort(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t, state: map[string]any{
 		"model":         map[string]any{"id": "gpt-4o", "reasoning": false},
 		"thinkingLevel": "off",
@@ -783,7 +786,7 @@ func TestModelWithoutReasoningTakesNoEffort(t *testing.T) {
 
 func TestSettledRereadsModel(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t, state: map[string]any{
 		"model": map[string]any{"id": "m1", "reasoning": true}, "thinkingLevel": "low",
 	}}
@@ -810,7 +813,7 @@ func TestSettledRereadsModel(t *testing.T) {
 
 func TestSpawnPassesModel(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -827,7 +830,7 @@ func TestSpawnPassesModel(t *testing.T) {
 
 func TestRenameOwnedSetsSessionName(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -851,7 +854,7 @@ func TestRenameOwnedSetsSessionName(t *testing.T) {
 
 func TestQueueFollowsQueueUpdates(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -886,7 +889,7 @@ func TestQueueFollowsQueueUpdates(t *testing.T) {
 
 func TestSendPromptRefusesPendingInteraction(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -913,7 +916,7 @@ func TestSendPromptRefusesPendingInteraction(t *testing.T) {
 
 func TestShellInputRunsBash(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -950,7 +953,7 @@ func TestShellInputRunsBash(t *testing.T) {
 
 func TestShellInputRunsNewSession(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -974,7 +977,7 @@ func TestShellInputRunsNewSession(t *testing.T) {
 
 func TestLiveSessionGetsNoResumePane(t *testing.T) {
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	f := &fakePi{t: t}
 	stubSpawn(t, f)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -996,24 +999,4 @@ func TestLiveSessionGetsNoResumePane(t *testing.T) {
 	if _, _, ok := a.ResumeCommand(id); !ok {
 		t.Fatal("a dismissed session must be resumable again")
 	}
-}
-
-func waitCard(t *testing.T, reg *registry.Registry, id string, want session.Status) session.Session {
-	t.Helper()
-	return waitCardState(t, reg, id, func(s session.Session) bool { return want == "" || s.Status == want })
-}
-
-func waitCardState(t *testing.T, reg *registry.Registry, id string, ok func(session.Session) bool) session.Session {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		for _, s := range reg.Snapshot() {
-			if s.AgentSessionID == id && ok(s) {
-				return s
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("card for %s never matched: %+v", id, reg.Snapshot())
-	return session.Session{}
 }
