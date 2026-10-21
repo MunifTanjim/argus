@@ -381,7 +381,7 @@ func TestSetupManagedChild(t *testing.T) {
 	t.Setenv("ARGUS_TOKEN", "tok")
 	parent, w := io.Pipe()
 	stopped := make(chan struct{})
-	setupManagedChild(parent, func() { close(stopped) })
+	setupManagedChild(parent, func() { close(stopped) }, true)
 	w.Close()
 	<-stopped
 	if v, ok := os.LookupEnv("ARGUS_TOKEN"); ok {
@@ -395,6 +395,100 @@ func TestSetupManagedChild(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "Broken pipe") {
 		t.Fatalf("child inherited ignored SIGPIPE: %s", stderr.String())
+	}
+}
+
+func TestSetupManagedChildWithoutWatch(t *testing.T) {
+	if os.Getenv("ARGUS_TEST_SETUP_MANAGED_CHILD_NOWATCH") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestSetupManagedChildWithoutWatch$")
+		cmd.Env = append(os.Environ(), "ARGUS_TEST_SETUP_MANAGED_CHILD_NOWATCH=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		return
+	}
+	t.Setenv("ARGUS_TOKEN", "tok")
+	stopped := make(chan struct{})
+	setupManagedChild(strings.NewReader(""), func() { close(stopped) }, false)
+	select {
+	case <-stopped:
+		t.Fatal("stdin EOF stopped a child that does not watch it")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if v, ok := os.LookupEnv("ARGUS_TOKEN"); ok {
+		t.Fatalf("ARGUS_TOKEN still in env: %q", v)
+	}
+}
+
+func startDetached(t *testing.T, logPath string, extra ...string) (*exec.Cmd, chan error) {
+	t.Helper()
+	args := append([]string{"start", "--argus-managed", "--argus-log-file=" + logPath}, extra...)
+	cmd := exec.Command(os.Args[0], args...)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	return cmd, done
+}
+
+func stopDetached(t *testing.T, cmd *exec.Cmd, done chan error, socket string) {
+	t.Helper()
+	if c, err := api.Dial(socket); err == nil {
+		_ = c.Call(api.MethodServerStop, nil, nil)
+		c.Close()
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+	}
+}
+
+func TestDetachedChildLogsToFile(t *testing.T) {
+	sandboxChild(t)
+	root := shortTempDir(t)
+	sock := filepath.Join(root, "s.sock")
+	logPath := filepath.Join(root, "logs", "n.log")
+	cmd, done := startDetached(t, logPath, "--socket", sock, "--no-config")
+	t.Cleanup(func() { stopDetached(t, cmd, done, sock) })
+
+	waitFor(t, "the detached child to serve", 10*time.Second, func() bool {
+		_, err := probeServerInfo(sock)
+		return err == nil
+	}, func() string { b, _ := os.ReadFile(logPath); return string(b) })
+	time.Sleep(500 * time.Millisecond)
+	if _, err := probeServerInfo(sock); err != nil {
+		t.Fatalf("the child stopped after stdin EOF: %v", err)
+	}
+	b, err := os.ReadFile(logPath)
+	if err != nil || !strings.Contains(string(b), "starting argus node") {
+		t.Fatalf("log = %q, %v", b, err)
+	}
+}
+
+func TestDetachedChildConfigErrorReachesLog(t *testing.T) {
+	sandboxChild(t)
+	root := shortTempDir(t)
+	cfgPath := filepath.Join(root, "bad.yaml")
+	if err := os.WriteFile(cfgPath, []byte("log: [unclosed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(root, "n.log")
+	cmd, done := startDetached(t, logPath, "--socket", filepath.Join(root, "s.sock"), "--config", cfgPath)
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("want a non-zero exit")
+		}
+	case <-time.After(10 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("child did not exit")
+	}
+	b, _ := os.ReadFile(logPath)
+	if !strings.Contains(string(b), "bad.yaml") {
+		t.Fatalf("log = %q, want the config error", b)
 	}
 }
 
@@ -419,7 +513,7 @@ func TestSetupLoggerDropsForcedColorInManagedChild(t *testing.T) {
 	}
 	cfg := &config.Config{}
 	cfg.Log.Level = "info"
-	if err := setupLogger(cfg, true); err != nil {
+	if err := setupLogger(cfg, os.Stderr, true); err != nil {
 		t.Fatal(err)
 	}
 	slog.Info("colored")

@@ -36,8 +36,11 @@ type Logger = log.Logger
 // once after config is loaded. config.LogLevel is a *slog.LevelVar, so later level
 // changes still take effect on the built handler.
 func Init() {
-	w := os.Stderr
+	InitWriter(os.Stderr)
+}
 
+// InitWriter is Init writing to w. Color is auto-detected only for a terminal file.
+func InitWriter(w io.Writer) {
 	var handler slog.Handler
 	if config.LogFormat == "json" {
 		handler = slog.NewJSONHandler(w, &slog.HandlerOptions{
@@ -45,12 +48,17 @@ func Init() {
 			ReplaceAttr: log.JSONReplaceAttr,
 		})
 	} else {
-		handler = prettyHandler(w, !colorEnabled(isatty.IsTerminal(w.Fd()), os.Getenv))
+		handler = prettyHandler(w, !colorEnabled(isTerminal(w), os.Getenv))
 	}
 
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 	slog.SetLogLoggerLevel(slog.LevelInfo)
+}
+
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && isatty.IsTerminal(f.Fd())
 }
 
 // colorEnabled follows the NO_COLOR and CLICOLOR_FORCE conventions, so a
