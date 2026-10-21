@@ -21,7 +21,7 @@ const Set<String> sessionAddressed = {
   'sessions.transcriptView', 'sessions.toolDetail', 'sessions.capture', 'sessions.input',
   'sessions.key', 'sessions.respond', 'sessions.kill', 'sessions.changedFiles',
   'sessions.fileDiff', 'sessions.commits', 'sessions.commitFiles', 'sessions.focus',
-  'session.rename', 'sessions.tasks', 'transcript.subscribe', 'terminal.open',
+  'session.rename', 'session.prompt.complete', 'sessions.tasks', 'transcript.subscribe', 'terminal.open',
 };
 
 /// Methods routed by an explicit node_id (or the sole node).

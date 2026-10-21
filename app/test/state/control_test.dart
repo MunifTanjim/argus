@@ -193,6 +193,36 @@ void main() {
     expect((await fut as Ok<List<ModelInfo>>).value, isEmpty);
   });
 
+  test('completePrompt sends the session and trigger and parses the items',
+      () async {
+    final frames = <String>[];
+    final incoming = StreamController<RpcMessage>();
+    final client = RpcClient(incoming: incoming.stream, sendFrame: frames.add);
+    final fut = SessionService(() => client).completePrompt('s', '/');
+    await Future<void>.delayed(Duration.zero);
+    expect(frames.single, contains('"method":"session.prompt.complete"'));
+    expect(frames.single, contains('"session_id":"s"'));
+    expect(frames.single, contains('"trigger":"/"'));
+    final id = (jsonDecode(frames.single.trim()) as Map)['id'];
+    incoming.add(RpcMessage.fromJson(jsonDecode(
+        '{"jsonrpc":"2.0","id":"$id","result":{"items":[{"name":"compact","description":"Compact it"}]}}')));
+    final items = (await fut as Ok<List<PromptCompletion>>).value;
+    expect(items.single.name, 'compact');
+    expect(items.single.description, 'Compact it');
+  });
+
+  test('completePrompt maps method-not-found to an empty list', () async {
+    final frames = <String>[];
+    final incoming = StreamController<RpcMessage>();
+    final client = RpcClient(incoming: incoming.stream, sendFrame: frames.add);
+    final fut = SessionService(() => client).completePrompt('s', '/');
+    await Future<void>.delayed(Duration.zero);
+    final id = (jsonDecode(frames.single.trim()) as Map)['id'];
+    incoming.add(RpcMessage.fromJson(jsonDecode(
+        '{"jsonrpc":"2.0","id":"$id","error":{"code":-32601,"message":"nope"}}')));
+    expect((await fut as Ok<List<PromptCompletion>>).value, isEmpty);
+  });
+
   test('nodes derives from server.info and parses id/label', () async {
     final frames = <String>[];
     final incoming = StreamController<RpcMessage>();

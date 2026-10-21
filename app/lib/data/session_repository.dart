@@ -34,6 +34,10 @@ abstract class SessionRepository {
   /// An empty [nodeId] targets the sole node.
   Future<Result<DirCompletion>> completeDir(String? nodeId, String path);
 
+  /// The commands and skills [sessionId]'s agent offers after [trigger].
+  Future<Result<List<PromptCompletion>>> completePrompt(
+      String sessionId, String trigger);
+
   Future<Result<ResumeOutcome>> resume({
     String? nodeId,
     required String agent,
@@ -99,6 +103,11 @@ class SessionRepositoryRemote implements SessionRepository {
   @override
   Future<Result<DirCompletion>> completeDir(String? nodeId, String path) =>
       _service.completeDir(nodeId, path);
+
+  @override
+  Future<Result<List<PromptCompletion>>> completePrompt(
+          String sessionId, String trigger) =>
+      _service.completePrompt(sessionId, trigger);
 
   @override
   Future<Result<ResumeOutcome>> resume({

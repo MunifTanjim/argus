@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/result.dart';
@@ -10,9 +11,11 @@ import '../data/session_repository.dart';
 import '../models/entry.dart';
 import '../models/enums.dart';
 import '../models/session.dart';
+import '../state/grouping.dart';
 import '../state/prompt_drafts.dart';
 import '../state/respond_view_model.dart';
 import 'interaction_panel.dart';
+import 'prompt_completion.dart';
 import 'running_shells_sheet.dart';
 import 'running_subagents_sheet.dart';
 import 'status_style.dart';
@@ -88,6 +91,20 @@ const _maxQueued = 3;
 
 final _whitespace = RegExp(r'\s+');
 
+// The completion menu's least distance from the top of the screen.
+const _menuMargin = 8.0;
+
+/// The completion menu while the cursor ends a word that starts with
+/// [trigger]. [dismissed] hides it until the cursor leaves that word.
+class _Menu {
+  _Menu(this.trigger, this.query);
+  final String trigger;
+  String query;
+  bool dismissed = false;
+  int selected = 0;
+  List<PromptMatch> matches = const [];
+}
+
 /// The prompt input, or the pending prompt in its place, between a status line
 /// and a model line.
 class SessionComposer extends ConsumerStatefulWidget {
@@ -111,7 +128,14 @@ class SessionComposer extends ConsumerStatefulWidget {
 class _SessionComposerState extends ConsumerState<SessionComposer> {
   late final RespondViewModel _vm;
   final _text = TextEditingController();
+  late final _focus = FocusNode(onKeyEvent: _menuKey);
+  final _portal = OverlayPortalController()..show();
   Timer? _tick;
+
+  /// Completion items by session id, then trigger.
+  final _completions = <String, Map<String, List<PromptCompletion>>>{};
+  _Menu? _menu;
+  int _completeSeq = 0;
   bool _collapsed = false;
 
   /// The panel's height cap set by dragging the status line; null until then.
@@ -137,6 +161,8 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     final draft = ref.read(promptDraftsProvider.notifier).get(_sid);
     _text.text = draft;
     _text.selection = TextSelection.collapsed(offset: draft.length);
+    _text.addListener(_syncMenu);
+    _focus.addListener(_refresh);
     _syncTick();
   }
 
@@ -149,6 +175,8 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
       _panelHeight = null;
     }
     if (old.session.id != _sid) {
+      _completeSeq++;
+      _menu = null;
       _text.text = ref.read(promptDraftsProvider.notifier).get(_sid);
     }
     _syncTick();
@@ -174,6 +202,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     _vm.sendInput.removeListener(_refresh);
     _vm.dispose();
     _text.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
@@ -185,6 +214,9 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   Future<void> _send() async {
     if (!_canSend) return;
     final t = _text.text.trim();
+    _completions.remove(_sid);
+    _completeSeq++;
+    _menu = null;
     await _vm.sendInput.execute((sessionId: _sid, text: t));
     if (!mounted) return;
     switch (_vm.sendInput.result) {
@@ -204,6 +236,103 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   void _onChanged(String v) {
     ref.read(promptDraftsProvider.notifier).set(_sid, v);
     setState(() {});
+  }
+
+  String? get _before {
+    final at = _text.selection.baseOffset;
+    return at < 0 || at > _text.text.length
+        ? null
+        : _text.text.substring(0, at);
+  }
+
+  List<PromptMatch> get _matches {
+    final m = _menu;
+    if (m == null || m.dismissed || !_focus.hasFocus) return const [];
+    return m.matches;
+  }
+
+  List<PromptMatch> _matchFor(String trigger, String query) =>
+      matchCompletions(_completions[_sid]?[trigger] ?? const [], query);
+
+  // Entering a trigger word with no cached items asks the agent for them; a
+  // later fetch supersedes it.
+  void _syncMenu() {
+    final before = _before;
+    final q = before == null
+        ? null
+        : completionQuery(promptTriggers(widget.session.agent), before);
+    final m = _menu;
+    if (q == null) {
+      if (m != null) setState(() => _menu = null);
+      return;
+    }
+    if (m != null && m.trigger == q.trigger) {
+      if (m.query != q.query) {
+        setState(() => m
+          ..query = q.query
+          ..selected = 0
+          ..matches = _matchFor(q.trigger, q.query));
+      }
+      return;
+    }
+    setState(() => _menu = _Menu(q.trigger, q.query)
+      ..matches = _matchFor(q.trigger, q.query));
+    if (_completions[_sid]?.containsKey(q.trigger) ?? false) return;
+    final seq = ++_completeSeq;
+    ref
+        .read(sessionRepositoryProvider)
+        .completePrompt(_sid, q.trigger)
+        .then((r) {
+      if (!mounted || seq != _completeSeq) return;
+      if (r case Ok(:final value) when value.isNotEmpty) {
+        setState(() {
+          (_completions[_sid] ??= {})[q.trigger] = value;
+          final m = _menu;
+          if (m != null && m.trigger == q.trigger) {
+            m.matches = _matchFor(m.trigger, m.query);
+          }
+        });
+      }
+    });
+  }
+
+  // Keeps the text after the cursor and leaves the cursor after the name.
+  void _select(PromptCompletion item) {
+    final m = _menu;
+    final before = _before;
+    if (m == null || before == null) return;
+    final after = _text.text.substring(before.length);
+    final head = applyCompletion(before, m.trigger, m.query, item.name);
+    _menu = null;
+    _text.value = TextEditingValue(
+        text: head + after,
+        selection: TextSelection.collapsed(offset: head.length));
+    _onChanged(_text.text);
+  }
+
+  KeyEventResult _menuKey(FocusNode _, KeyEvent e) {
+    final items = _matches;
+    if (items.isEmpty || e is KeyUpEvent) return KeyEventResult.ignored;
+    final m = _menu!;
+    final n = items.length;
+    final ctrl = HardwareKeyboard.instance.isControlPressed;
+    final k = e.logicalKey;
+    if (k == LogicalKeyboardKey.arrowDown ||
+        ctrl && k == LogicalKeyboardKey.keyN) {
+      setState(() => m.selected = (m.selected + 1) % n);
+    } else if (k == LogicalKeyboardKey.arrowUp ||
+        ctrl && k == LogicalKeyboardKey.keyP) {
+      setState(() => m.selected = (m.selected - 1 + n) % n);
+    } else if (k == LogicalKeyboardKey.enter ||
+        k == LogicalKeyboardKey.numpadEnter ||
+        k == LogicalKeyboardKey.tab) {
+      _select(items[m.selected].item);
+    } else if (k == LogicalKeyboardKey.escape) {
+      setState(() => m.dismissed = true);
+    } else {
+      return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
   }
 
   // Dragging the status line resizes the panel: up to the full height, down
@@ -342,20 +471,25 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Expanded(
-              child: VoiceInputField(
-                controller: _text,
-                onChanged: _onChanged,
-                field: (suffixIcon) => TextField(
+              child: OverlayPortal.overlayChildLayoutBuilder(
+                controller: _portal,
+                overlayChildBuilder: _menuOverlay,
+                child: VoiceInputField(
                   controller: _text,
-                  minLines: 1,
-                  maxLines: 6,
-                  textCapitalization: TextCapitalization.sentences,
                   onChanged: _onChanged,
-                  decoration: InputDecoration(
-                    hintText: 'Reply',
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                    suffixIcon: suffixIcon,
+                  field: (suffixIcon) => TextField(
+                    controller: _text,
+                    focusNode: _focus,
+                    minLines: 1,
+                    maxLines: 6,
+                    textCapitalization: TextCapitalization.sentences,
+                    onChanged: _onChanged,
+                    decoration: InputDecoration(
+                      hintText: 'Reply',
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                      suffixIcon: suffixIcon,
+                    ),
                   ),
                 ),
               ),
@@ -374,6 +508,32 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
           ],
         ),
       );
+
+  // Over the transcript, right above the input, so nothing resizes.
+  Widget _menuOverlay(BuildContext context, OverlayChildLayoutInfo info) {
+    final items = _matches;
+    if (items.isEmpty) return const SizedBox.shrink();
+    final top =
+        MatrixUtils.transformPoint(info.childPaintTransform, Offset.zero);
+    final room = top.dy - 4 - _menuMargin;
+    if (room <= 0) return const SizedBox.shrink();
+    return Stack(children: [
+      Positioned(
+        left: top.dx,
+        bottom: info.overlaySize.height - top.dy + 4,
+        width: info.childSize.width,
+        // Part of the field's tap region, so a click on a row keeps its focus.
+        child: TextFieldTapRegion(
+          child: PromptMenu(
+            items: items,
+            selected: _menu!.selected,
+            maxHeight: room,
+            onSelect: _select,
+          ),
+        ),
+      ),
+    ]);
+  }
 
   Widget _notice(String text) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
