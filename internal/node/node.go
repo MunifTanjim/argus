@@ -249,6 +249,10 @@ func (d *Node) SetVersion(v string) { d.version = v }
 // relay channels. Call before Run.
 func (d *Node) SetSelfUpgrade(s *selfupgrade.Service) { s.Register(d.server) }
 
+// SetStop serves server.stop on the socket only; remote channels cannot reach
+// it. Call before Run.
+func (d *Node) SetStop(stop func()) { api.HandleStop(d.server, stop) }
+
 // SetIdentityKey's public half is announced to the gateway (identity_pubkey). Call before Run.
 func (d *Node) SetIdentityKey(kp e2e.KeyPair) {
 	d.identity = kp
@@ -289,11 +293,11 @@ func (d *Node) reevaluateTrustChannels() {
 	}
 }
 
-// remoteDispatch rejects lock.* methods (local-admin only) and dispatches the rest.
+// remoteDispatch rejects lock.* and server.stop (local-admin only) and dispatches the rest.
 func (d *Node) remoteDispatch() api.DispatchFunc {
 	full := d.server.DispatchFunc()
 	return func(ctx context.Context, method string, params json.RawMessage) (any, error) {
-		if strings.HasPrefix(method, "lock.") {
+		if strings.HasPrefix(method, "lock.") || method == api.MethodServerStop {
 			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
 		}
 		return full(ctx, method, params)

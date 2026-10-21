@@ -911,3 +911,12 @@ func TestFirstStillTrusted(t *testing.T) {
 		t.Errorf("still-trusted revoked key = %x, want %x", got, a)
 	}
 }
+
+func TestRemoteDispatchRejectsServerStop(t *testing.T) {
+	d, _ := newLockNode(t)
+	d.SetStop(func() { t.Error("stop called") })
+	_, err := d.DispatchFunc()(context.Background(), api.MethodServerStop, nil)
+	if !api.IsMethodNotFound(err) {
+		t.Fatalf("server.stop via DispatchFunc = %v, want method not found", err)
+	}
+}

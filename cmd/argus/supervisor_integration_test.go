@@ -221,6 +221,57 @@ func TestSupervisorKilledStopsChildren(t *testing.T) {
 	}
 }
 
+func TestSupervisorExitsCleanlyOnServerStop(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds argus")
+	}
+	root := shortTempDir(t)
+	bin := filepath.Join(root, "argus")
+	buildArgus(t, bin, "1.0.0")
+	sock := filepath.Join(root, "s.sock")
+	gwSock := gatewaySocketPath(sock)
+
+	sup := exec.Command(bin, "start", "--no-config", "--socket", sock, "--listen-addr", freeAddr(t), "--log-format", "json")
+	sup.Env = append(sandboxEnv(root), "ARGUS_TOKEN=tok")
+	var out syncBuffer
+	sup.Stderr = &out
+	if err := sup.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- sup.Wait() }()
+	t.Cleanup(func() { _ = sup.Process.Kill() })
+
+	waitFor(t, "both sockets", 15*time.Second, func() bool {
+		_, e1 := probeServerInfo(sock)
+		_, e2 := probeServerInfo(gwSock)
+		return e1 == nil && e2 == nil
+	}, out.String)
+
+	c, err := api.Dial(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Call(api.MethodServerStop, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+
+	select {
+	case err := <-exited:
+		if err != nil {
+			t.Fatalf("supervisor exit = %v, want status 0\n%s", err, out.String())
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatalf("supervisor did not exit after server.stop\n%s", out.String())
+	}
+	for _, s := range []string{sock, gwSock} {
+		if _, err := api.Dial(s); err == nil {
+			t.Fatalf("%s still serves after the supervisor exited", s)
+		}
+	}
+}
+
 // A combined child from an older TUI runs the new binary after an in-place
 // upgrade. It must supervise two children and still stop on stdin EOF.
 func TestManagedCombinedChildSupervises(t *testing.T) {
