@@ -11,9 +11,6 @@ type notificationMsg api.Notification
 // connStateMsg reports a connection-state transition from the reconnecting client.
 type connStateMsg struct{ connected bool }
 
-// serverExitedMsg reports that the server process the TUI started has exited.
-type serverExitedMsg struct{ err error }
-
 // sessionsReplacedMsg carries an authoritative session list for a post-reconnect resync.
 type sessionsReplacedMsg []session.Session
 

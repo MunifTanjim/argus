@@ -28,17 +28,20 @@ func runSupervisor(ctx context.Context, cmd *cobra.Command, cfg *config.Config, 
 	if err := setupLogger(cfg, logOut, false); err != nil {
 		return fail(cmd, err)
 	}
+	if err := refuseRunning(cfg.Socket); err != nil {
+		return fail(cmd, err)
+	}
+	if err := refuseRunning(gatewaySocketPath(cfg.Socket)); err != nil {
+		return fail(cmd, err)
+	}
+	if err := removeLaunchState(cfg.Socket); err != nil {
+		return fail(cmd, err)
+	}
 	tun, _, err := resolveTunnel(tunnelOpts(cfg, true))
 	if err != nil {
 		return fail(cmd, err)
 	}
 	if err := prepareTunnel(ctx, tun, isatty.IsTerminal(os.Stdin.Fd())); err != nil {
-		return fail(cmd, err)
-	}
-	if err := refuseRunning(cfg.Socket); err != nil {
-		return fail(cmd, err)
-	}
-	if err := refuseRunning(gatewaySocketPath(cfg.Socket)); err != nil {
 		return fail(cmd, err)
 	}
 	addr, bound, err := resolveListenAddr(cfg.Gateway.ListenAddr)

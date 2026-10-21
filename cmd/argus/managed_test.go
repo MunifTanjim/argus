@@ -15,9 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/config"
-	"github.com/MunifTanjim/argus/internal/logbuf"
 )
 
 // TestMain lets the test binary act as argus, so managed-server tests run
@@ -66,6 +67,9 @@ func sandboxChild(t *testing.T) {
 	t.Setenv("HOME", filepath.Join(root, "home"))
 	t.Setenv("SHELL", "/bin/sh")
 	t.Setenv("ARGUS_TEST_RUN_MAIN", "1")
+	oldState := config.StateDir
+	config.StateDir = filepath.Join(root, "state")
+	t.Cleanup(func() { config.StateDir = oldState })
 }
 
 func testSpec(t *testing.T) spawnSpec {
@@ -420,7 +424,7 @@ func TestSetupManagedChildWithoutWatch(t *testing.T) {
 	}
 }
 
-func startDetached(t *testing.T, logPath string, extra ...string) (*exec.Cmd, chan error) {
+func startDetachedChild(t *testing.T, logPath string, extra ...string) (*exec.Cmd, chan error) {
 	t.Helper()
 	args := append([]string{"start", "--argus-managed", "--argus-log-file=" + logPath}, extra...)
 	cmd := exec.Command(os.Args[0], args...)
@@ -451,7 +455,7 @@ func TestDetachedChildLogsToFile(t *testing.T) {
 	root := shortTempDir(t)
 	sock := filepath.Join(root, "s.sock")
 	logPath := filepath.Join(root, "logs", "n.log")
-	cmd, done := startDetached(t, logPath, "--socket", sock, "--no-config")
+	cmd, done := startDetachedChild(t, logPath, "--socket", sock, "--no-config")
 	t.Cleanup(func() { stopDetached(t, cmd, done, sock) })
 
 	waitFor(t, "the detached child to serve", 10*time.Second, func() bool {
@@ -476,7 +480,7 @@ func TestDetachedChildConfigErrorReachesLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(root, "n.log")
-	cmd, done := startDetached(t, logPath, "--socket", filepath.Join(root, "s.sock"), "--config", cfgPath)
+	cmd, done := startDetachedChild(t, logPath, "--socket", filepath.Join(root, "s.sock"), "--config", cfgPath)
 	select {
 	case err := <-done:
 		if err == nil {
@@ -484,6 +488,7 @@ func TestDetachedChildConfigErrorReachesLog(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		_ = cmd.Process.Kill()
+		<-done
 		t.Fatal("child did not exit")
 	}
 	b, _ := os.ReadFile(logPath)
@@ -578,7 +583,8 @@ func TestManagedGroupStartsGatewayThenNode(t *testing.T) {
 	sandboxChild(t)
 	gw := gatewayTestSpec(t)
 	n := spawnSpec{socket: gw.socket, gatewayURL: "ws://" + gw.listenAddr, token: "tok", configArgs: []string{"--no-config"}}
-	g, err := startManagedGroup([]spawnSpec{gw, n}, nil)
+	var out syncBuffer
+	g, err := startManagedGroup([]spawnSpec{gw, n}, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -588,8 +594,8 @@ func TestManagedGroupStartsGatewayThenNode(t *testing.T) {
 			t.Fatalf("%s: %v", sock, err)
 		}
 	}
-	waitForLog(t, g.Logs(), "gateway uplink established")
-	waitForLog(t, g.Logs(), "gateway listening")
+	waitForLog(t, &out, "gateway uplink established")
+	waitForLog(t, &out, "gateway listening")
 }
 
 func TestManagedGroupStopsStartedChildrenOnFailure(t *testing.T) {
@@ -642,16 +648,15 @@ func TestManagedGroupStopsNodeFirst(t *testing.T) {
 	sandboxChild(t)
 	gw := gatewayTestSpec(t)
 	n := spawnSpec{socket: gw.socket, gatewayURL: "ws://" + gw.listenAddr, token: "tok", configArgs: []string{"--no-config"}}
-	g, err := startManagedGroup([]spawnSpec{gw, n}, nil)
+	var out syncBuffer
+	g, err := startManagedGroup([]spawnSpec{gw, n}, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitForLog(t, g.Logs(), "gateway uplink established")
+	waitForLog(t, &out, "gateway uplink established")
 	g.stop(managedStopTimeout)
-	for _, l := range g.Logs().Lines() {
-		if strings.Contains(l, "gateway uplink closed") {
-			t.Fatalf("the gateway stopped before the node:\n%s", strings.Join(g.Logs().Lines(), "\n"))
-		}
+	if strings.Contains(out.String(), "gateway uplink closed") {
+		t.Fatalf("the gateway stopped before the node:\n%s", out.String())
 	}
 }
 
@@ -665,9 +670,6 @@ func TestManagedGroupCopiesLinesToOut(t *testing.T) {
 	g.stop(managedStopTimeout)
 	if !strings.Contains(out.String(), "starting argus node") {
 		t.Fatalf("out = %q", out.String())
-	}
-	if g.Logs() != nil {
-		t.Fatal("a group with out must not keep the lines")
 	}
 }
 
@@ -689,17 +691,17 @@ func TestManagedGroupRefusesServedGatewaySocket(t *testing.T) {
 
 func TestManagedGroupNilSafe(t *testing.T) {
 	var g *managedGroup
-	if g.Logs() != nil || g.Exited() != nil {
+	if g.Exited() != nil {
 		t.Fatal("nil group must return nil")
 	}
 	g.stop(time.Second)
 }
 
-func waitForLog(t *testing.T, b *logbuf.Buffer, substr string) {
+func waitForLog(t *testing.T, b *syncBuffer, substr string) {
 	t.Helper()
 	waitFor(t, "a log line with "+strconv.Quote(substr), 10*time.Second, func() bool {
-		return slices.ContainsFunc(b.Lines(), func(l string) bool { return strings.Contains(l, substr) })
-	}, func() string { return strings.Join(b.Lines(), "\n") })
+		return strings.Contains(b.String(), substr)
+	}, b.String)
 }
 
 func TestTUISpecForcesPrettyColorLogs(t *testing.T) {
@@ -721,5 +723,181 @@ func TestSpawnArgsHaveNoCombinedForm(t *testing.T) {
 	s := spawnSpec{socket: "/s", listenAddr: "127.0.0.1:9"}
 	if slices.Contains(s.args(), "--mode=") {
 		t.Fatalf("a node spec gave the combined form: %v", s.args())
+	}
+}
+
+func TestSpawnArgsAddLogFile(t *testing.T) {
+	s := spawnSpec{socket: "/s", logFile: "/x/n.log"}
+	if !slices.Contains(s.args(), "--argus-log-file=/x/n.log") {
+		t.Fatalf("args = %v", s.args())
+	}
+	s.logFile = ""
+	if slices.ContainsFunc(s.args(), func(a string) bool { return strings.HasPrefix(a, "--argus-log-file") }) {
+		t.Fatalf("args without a log file = %v", s.args())
+	}
+}
+
+func TestServerLogPathPerSocket(t *testing.T) {
+	a := serverLogPath("/tmp/a.sock", roleNode)
+	b := serverLogPath("/tmp/b.sock", roleNode)
+	g := serverLogPath("/tmp/a.sock", roleGateway)
+	if a == b || a == g {
+		t.Fatalf("paths must differ: %q %q %q", a, b, g)
+	}
+	if !strings.HasSuffix(a, "-node.log") || !strings.HasSuffix(g, "-gateway.log") {
+		t.Fatalf("paths = %q %q", a, g)
+	}
+	dir := filepath.Join(config.StateDir, "logs")
+	for _, p := range []string{a, b, g} {
+		if filepath.Dir(p) != dir {
+			t.Fatalf("%q is not in %q", p, dir)
+		}
+	}
+}
+
+func detachedTestSpec(t *testing.T) spawnSpec {
+	t.Helper()
+	s := testSpec(t)
+	s.logFile = filepath.Join(filepath.Dir(s.socket), "n.log")
+	return s
+}
+
+func TestStartDetachedNewSession(t *testing.T) {
+	sandboxChild(t)
+	spec := detachedTestSpec(t)
+	s, err := startDetachedReady(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopSockets(t, spec.socket) })
+	pid := s.cmd.Process.Pid
+	if sid, err := unix.Getsid(pid); err != nil || sid != pid {
+		t.Fatalf("sid = %d, %v; want %d", sid, err, pid)
+	}
+	if b, _ := os.ReadFile(spec.logFile); !strings.Contains(string(b), "starting argus node") {
+		t.Fatalf("log = %q", b)
+	}
+}
+
+func TestStartDetachedReportsEarlyExitWithLogTail(t *testing.T) {
+	sandboxChild(t)
+	spec := detachedTestSpec(t)
+	cfgPath := filepath.Join(filepath.Dir(spec.socket), "bad.yaml")
+	if err := os.WriteFile(cfgPath, []byte("log: [unclosed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spec.configArgs = []string{"--config", cfgPath}
+	_, err := startDetachedReady(spec)
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	for _, want := range []string{"exit status", "before it was ready", spec.logFile, "bad.yaml"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "\x1b[") {
+		t.Errorf("error must not carry color codes: %q", err)
+	}
+}
+
+func TestStartDetachedGroupStopsStartedOnFailure(t *testing.T) {
+	sandboxChild(t)
+	gw := gatewayTestSpec(t)
+	gw.logFile = filepath.Join(filepath.Dir(gw.socket), "g.log")
+	t.Cleanup(func() { stopSockets(t, gatewaySocketPath(gw.socket)) })
+	bad := spawnSpec{
+		socket:     gw.socket,
+		gatewayURL: "ws://" + gw.listenAddr,
+		configArgs: []string{"--config", filepath.Join(t.TempDir(), "missing.yaml")},
+		logFile:    filepath.Join(filepath.Dir(gw.socket), "n.log"),
+	}
+	if _, err := startDetachedGroup([]spawnSpec{gw, bad}); err == nil {
+		t.Fatal("want a startup error")
+	}
+	if _, err := api.Dial(gatewaySocketPath(gw.socket)); err == nil {
+		t.Fatal("the gateway still serves after the node failed to start")
+	}
+}
+
+func TestStartDetachedOmitsTailOfEarlierRun(t *testing.T) {
+	sandboxChild(t)
+	spec := detachedTestSpec(t)
+	if err := os.WriteFile(spec.logFile, []byte("earlier-run-line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The child cannot rotate in a read-only directory.
+	dir := filepath.Dir(spec.logFile)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	_, err := startDetachedReady(spec)
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	for _, want := range []string{"exit status", spec.logFile} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "earlier-run-line") {
+		t.Errorf("error shows an earlier run's log: %v", err)
+	}
+}
+
+func TestStopSpawnedKillsServerThatRejectsStop(t *testing.T) {
+	sock := shortSocket(t)
+	serveOldDaemon(t, sock)
+	cmd := exec.Command("sleep", "60")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	s := &detachedServer{spec: spawnSpec{socket: sock}, cmd: cmd, done: make(chan struct{})}
+	go func() {
+		s.err = cmd.Wait()
+		close(s.done)
+	}()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-s.done
+	})
+	err := stopSpawned([]*detachedServer{s})
+	if err == nil || !strings.Contains(err.Error(), "does not support stop") {
+		t.Fatalf("stopSpawned = %v, want the stop error", err)
+	}
+	select {
+	case <-s.done:
+	default:
+		t.Fatal("the server still runs")
+	}
+}
+
+func TestLogFileTailStripsANSI(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "x.log")
+	if err := os.WriteFile(p, []byte("one\n\x1b[31mtwo\x1b[0m\nthree\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := logFileTail(p, 2); got != "two\nthree" {
+		t.Fatalf("tail = %q", got)
+	}
+	if got := logFileTail(filepath.Join(t.TempDir(), "none"), 2); got != "" {
+		t.Fatalf("missing file tail = %q", got)
+	}
+}
+
+// stopSockets asks each server to stop and waits until its socket is gone.
+func stopSockets(t *testing.T, sockets ...string) {
+	t.Helper()
+	for _, sock := range sockets {
+		if c, err := api.Dial(sock); err == nil {
+			_ = c.Call(api.MethodServerStop, nil, nil)
+			c.Close()
+		}
+		waitFor(t, sock+" to stop serving", managedStopTimeout, func() bool {
+			running, _ := localNodeRunning(sock)
+			return !running
+		}, func() string { return "" })
 	}
 }
