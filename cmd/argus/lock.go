@@ -19,6 +19,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/keyfmt"
 	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/trustpin"
+	"github.com/MunifTanjim/argus/internal/tui"
 )
 
 func newLockCmd() *cobra.Command {
@@ -42,7 +43,7 @@ func callLocal[R any](ctx context.Context, cfg *config.Config, method string, pa
 	}
 	c := api.NewClient(conn)
 	defer c.Close()
-	if err := c.Call(method, params, &res); err != nil {
+	if err := c.CallContext(ctx, method, params, &res); err != nil {
 		return res, err
 	}
 	return res, nil
@@ -75,9 +76,7 @@ func newLockStatusCmd() *cobra.Command {
 				if ierr != nil {
 					return fail(cmd, err) // surface the original node-dial error
 				}
-				shell.StdOutF("locked mode: (no local node)\n\nthis tui\n  identity: %s\n  → to authorize this tui, run on a signer node:\n      %s\n",
-					keyfmt.DeviceKey.Encode(kp.Public), lockSignHint(kp.Public))
-				printClientPinStatus(ctx, cfg)
+				shell.StdOutF("%s", noLocalNodeText(kp.Public, checkClientPin(ctx, cfg)))
 				// Exit 0 only when the socket was not explicitly requested and simply
 				// does not exist: that is a machine with no local node (client-only).
 				// An explicit --socket flag, or any error other than ENOENT (ECONNREFUSED,
@@ -105,16 +104,23 @@ func newLockStatusCmd() *cobra.Command {
 // hang `lock status` — the one command run when the gateway is broken.
 var gatewayProbeTimeout = 5 * time.Second
 
-type gatewayEndpoint struct{ URL, Token string }
-
-func configEndpoint(cfg *config.Config) gatewayEndpoint {
-	return gatewayEndpoint{URL: cfg.Gateway.URL, Token: cfg.Token}
+func probeGateway(ctx context.Context, probe func(context.Context) error) error {
+	pctx, cancel := context.WithTimeout(ctx, gatewayProbeTimeout)
+	defer cancel()
+	err := probe(pctx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("the gateway did not answer within %s", gatewayProbeTimeout)
+	}
+	return err
 }
 
-func printClientPinStatus(ctx context.Context, cfg *config.Config) error {
-	line, err := clientPinLine(ctx, cfg, configEndpoint(cfg))
-	shell.StdOutF("%s", line)
-	return err
+func noLocalNodeText(identity []byte, cp clientPinInfo) string {
+	return fmt.Sprintf("locked mode: (no local node)\n\nthis tui\n  identity: %s\n", keyfmt.DeviceKey.Encode(identity)) +
+		authorizeTUIHint(identity) + cp.text()
+}
+
+func authorizeTUIHint(identity []byte) string {
+	return fmt.Sprintf("  → to authorize this tui, run on a signer node:\n      %s\n", lockSignHint(identity))
 }
 
 // printTUIRole prints the "this tui" block: the dashboard client's identity, whether
@@ -122,32 +128,42 @@ func printClientPinStatus(ctx context.Context, cfg *config.Config) error {
 // not yet authorized. The node RPC says nothing about the client role, so this is the
 // only place it is reported.
 func printTUIRole(ctx context.Context, cfg *config.Config, st api.LockStatusResult) error {
-	text, err := tuiRoleLines(ctx, cfg, configEndpoint(cfg), st)
-	shell.StdOutF("%s", text)
-	return err
+	var identity []byte
+	if kp, err := e2e.LoadOrCreateIdentity(config.GetStatePath("client-identity.json")); err == nil {
+		identity = kp.Public
+	}
+	cp := checkClientPin(ctx, cfg)
+	shell.StdOutF("%s", tuiRoleText(st, identity, cp))
+	return cp.neterr
 }
 
-// tuiRoleLines returns the text printTUIRole prints. A non-nil error means the gateway
-// probe could not complete; the text is still complete.
-func tuiRoleLines(ctx context.Context, cfg *config.Config, ep gatewayEndpoint, st api.LockStatusResult) (string, error) {
-	kp, err := e2e.LoadOrCreateIdentity(config.GetStatePath("client-identity.json"))
-	if err != nil {
-		return clientPinLine(ctx, cfg, ep) // identity unreadable: still show the pin line
+func tuiRoleText(st api.LockStatusResult, identity []byte, cp clientPinInfo) string {
+	if identity == nil {
+		return cp.text()
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "\nthis tui\n  identity: %s", keyfmt.DeviceKey.Encode(kp.Public))
-	showAuthz := st.Enabled && devicesKnown(st)
-	authorized := showAuthz && keyAuthorized(kp.Public, st.Devices)
-	if showAuthz {
-		fmt.Fprintf(&b, "   authorized: %s", yesNo(authorized))
+	fmt.Fprintf(&b, "\nthis tui\n  identity: %s", keyfmt.DeviceKey.Encode(identity))
+	sign := tuiSignStateOf(st, identity)
+	if sign != tui.TUISignUnknown {
+		fmt.Fprintf(&b, "   authorized: %s", yesNo(sign == tui.TUISigned))
 	}
 	b.WriteString("\n")
-	line, pinErr := clientPinLine(ctx, cfg, ep)
-	b.WriteString(line)
-	if showAuthz && !authorized {
-		fmt.Fprintf(&b, "  → to authorize this tui, run on a signer node:\n      %s\n", lockSignHint(kp.Public))
+	b.WriteString(cp.text())
+	if sign == tui.TUIUnsigned {
+		b.WriteString(authorizeTUIHint(identity))
 	}
-	return b.String(), pinErr
+	return b.String()
+}
+
+func tuiSignStateOf(st api.LockStatusResult, identity []byte) tui.TUISignState {
+	switch {
+	case identity == nil || !st.Enabled || !devicesKnown(st):
+		return tui.TUISignUnknown
+	case keyAuthorized(identity, st.Devices):
+		return tui.TUISigned
+	default:
+		return tui.TUIUnsigned
+	}
 }
 
 // devicesKnown reports whether st carries the authorized device set. A daemon that
@@ -165,58 +181,85 @@ func keyAuthorized(key []byte, devices [][]byte) bool {
 	return false
 }
 
-// clientPinLine is the only surface for the client (TUI) role's quarantine: it has no
-// RPC and the node status says nothing about it. A non-nil error means the probe could
-// not complete; the caller still prints the line, then exits non-zero.
-func clientPinLine(ctx context.Context, cfg *config.Config, ep gatewayEndpoint) (string, error) {
-	pin, perr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
-	// A pinned client is checked too, not just an unpinned one: when the chain it
-	// names has been disabled the pin is dead, and the network genesis is what the
-	// operator needs to see to understand why the dashboard went dark.
-	superseded := perr == nil && pin.Genesis != nil && clientPinSuperseded(pin.Genesis)
-	var netGenesis []byte
-	var neterr error
-	if perr == nil && (pin.Genesis == nil || superseded) && ep.URL != "" {
-		pctx, cancel := context.WithTimeout(ctx, gatewayProbeTimeout)
-		defer cancel()
-		if superseded {
-			netGenesis, neterr = supersedingGenesisFromNetwork(pctx, cfg, ep, pin.Genesis)
-		} else {
-			netGenesis, neterr = quarantiningGenesis(pctx, cfg, ep)
-		}
-		if errors.Is(neterr, context.DeadlineExceeded) {
-			neterr = fmt.Errorf("the gateway did not answer within %s", gatewayProbeTimeout)
-		}
-	}
-	return clientPinStatus(pin, perr, netGenesis, neterr, superseded), neterr
-}
-
 // netGenesis is the genesis this network offers (nil when none or unchecked), neterr
 // why the check failed. superseded means the pinned chain was disabled network-wide,
 // making the pin dead rather than protective.
-func clientPinStatus(pin trustpin.Pin, perr error, netGenesis []byte, neterr error, superseded bool) string {
+type clientPinInfo struct {
+	pin        trustpin.Pin
+	perr       error
+	netGenesis []byte
+	neterr     error
+	superseded bool
+}
+
+// checkClientPin is the only surface for the client (TUI) role's quarantine: it has no
+// RPC and the node status says nothing about it. A non-nil neterr means the probe could
+// not complete.
+func checkClientPin(ctx context.Context, cfg *config.Config) clientPinInfo {
+	cp := clientPinInfo{}
+	cp.pin, cp.perr = trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
+	// A pinned client is checked too, not just an unpinned one: when the chain it
+	// names has been disabled the pin is dead, and the network genesis is what the
+	// operator needs to see to understand why the dashboard went dark.
+	cp.superseded = cp.perr == nil && cp.pin.Genesis != nil && clientPinSuperseded(cp.pin.Genesis)
+	if cp.perr == nil && (cp.pin.Genesis == nil || cp.superseded) && cfg.Gateway.URL != "" {
+		cp.neterr = probeGateway(ctx, func(pctx context.Context) (err error) {
+			if cp.superseded {
+				cp.netGenesis, err = supersedingGenesisFromNetwork(pctx, cfg, cp.pin.Genesis)
+			} else {
+				cp.netGenesis, err = quarantiningGenesis(pctx, cfg)
+			}
+			return err
+		})
+	}
+	return cp
+}
+
+func (cp clientPinInfo) state() tui.TUIPinState {
 	switch {
-	case perr != nil:
-		return fmt.Sprintf("  pin: unreadable — %v\n       argus refuses to start until this is resolved\n", perr)
-	case pin.Genesis != nil && superseded:
-		if netGenesis != nil {
-			return fmt.Sprintf("  pin: %s — the network now uses a new root (%s)\n       this tui opens no channels; run:\n         %s\n       then restart argus\n",
-				fingerprintOf(pin.Genesis), fingerprintOf(netGenesis), "argus lock pin "+trustpin.Encode(netGenesis))
+	case cp.perr != nil:
+		return tui.TUIPinUnreadable
+	case cp.pin.Genesis != nil && cp.superseded:
+		switch {
+		case cp.netGenesis != nil:
+			return tui.TUIRootReplaced
+		case cp.neterr != nil:
+			return tui.TUIRootReplacedUnchecked
+		default:
+			return tui.TUIRootDisabled
 		}
-		if neterr != nil {
-			// Probe failed: a replacement root may exist but could not be checked.
-			// Advising lock init here could mint a competing genesis and fork the fleet.
-			return fmt.Sprintf("  pin: %s — the pinned root was replaced, but the gateway could not be reached to find the new one: %v\n       this tui opens no channels; retry once the gateway is reachable\n",
-				fingerprintOf(pin.Genesis), neterr)
-		}
+	case cp.pin.Genesis != nil:
+		return tui.TUIPinned
+	case cp.netGenesis != nil:
+		return tui.TUILockedOut
+	case cp.neterr != nil:
+		return tui.TUICheckFailed
+	default:
+		return tui.TUIUnpinned
+	}
+}
+
+func (cp clientPinInfo) text() string {
+	switch cp.state() {
+	case tui.TUIPinUnreadable:
+		return fmt.Sprintf("  pin: unreadable — %v\n       argus refuses to start until this is resolved\n", cp.perr)
+	case tui.TUIRootReplaced:
+		return fmt.Sprintf("  pin: %s — the network now uses a new root (%s)\n       this tui opens no channels; run:\n         %s\n       then restart argus\n",
+			fingerprintOf(cp.pin.Genesis), fingerprintOf(cp.netGenesis), cp.fix())
+	case tui.TUIRootReplacedUnchecked:
+		// A replacement root may exist but could not be checked. Advising lock init
+		// here could mint a competing genesis and fork the fleet.
+		return fmt.Sprintf("  pin: %s — the pinned root was replaced, but the gateway could not be reached to find the new one: %v\n       this tui opens no channels; retry once the gateway is reachable\n",
+			fingerprintOf(cp.pin.Genesis), cp.neterr)
+	case tui.TUIRootDisabled:
 		return fmt.Sprintf("  pin: %s — the pinned root was disabled network-wide; no new root yet\n       this tui opens no channels\n       a signer must run:\n         argus lock init\n       then on each device:\n         argus lock pin\n",
-			fingerprintOf(pin.Genesis))
-	case pin.Genesis != nil:
-		return fmt.Sprintf("  pin: %s (source: %s)\n", fingerprintOf(pin.Genesis), pin.Source)
-	case netGenesis != nil:
-		return fmt.Sprintf("  pin: none — locked out: not pinned to the network's root (%s)\n       this tui opens no channels; run: argus lock pin\n", fingerprintOf(netGenesis))
-	case neterr != nil:
-		return fmt.Sprintf("  pin: none (could not check this network for a trust log: %v)\n", neterr)
+			fingerprintOf(cp.pin.Genesis))
+	case tui.TUIPinned:
+		return fmt.Sprintf("  pin: %s (source: %s)\n", fingerprintOf(cp.pin.Genesis), cp.pin.Source)
+	case tui.TUILockedOut:
+		return fmt.Sprintf("  pin: none — locked out: not pinned to the network's root (%s)\n       this tui opens no channels; run: argus lock pin\n", fingerprintOf(cp.netGenesis))
+	case tui.TUICheckFailed:
+		return fmt.Sprintf("  pin: none (could not check this network for a trust log: %v)\n", cp.neterr)
 	default:
 		return "  pin: none\n"
 	}
@@ -226,10 +269,34 @@ func clientPinStatus(pin trustpin.Pin, perr error, netGenesis []byte, neterr err
 // chain authorizes nobody, a quarantined device follows a root the network left —
 // both want `argus lock pin`, which the pin line already says.
 func authorizeHint(st api.LockStatusResult) string {
-	if !st.Enabled || st.Authorized || st.Disabled || st.Quarantined || len(st.IdentityPubKey) == 0 {
+	if nodeStateOf(st) != tui.NodeUnsigned || len(st.IdentityPubKey) == 0 {
 		return ""
 	}
 	return fmt.Sprintf("\n  to authorize this node, run on a signer node:\n    %s\n", lockSignHint(st.IdentityPubKey))
+}
+
+func nodeStateOf(st api.LockStatusResult) tui.NodeState {
+	if !st.Enabled || st.Disabled || st.Quarantined {
+		return tui.NodeNotApplicable
+	}
+	if !st.Authorized {
+		return tui.NodeUnsigned
+	}
+	if st.SignerTrusted {
+		return tui.NodeSigner
+	}
+	return tui.NodeSigned
+}
+
+func lockPinFix(st api.LockStatusResult) string {
+	if len(st.SeenGenesis) == 0 {
+		return ""
+	}
+	return "argus lock pin " + keyfmt.Genesis.Encode(st.SeenGenesis)
+}
+
+func (cp clientPinInfo) fix() string {
+	return "argus lock pin " + trustpin.Encode(cp.netGenesis)
 }
 
 func lockSignHint(pub []byte) string {
@@ -253,10 +320,7 @@ func newLockLogCmd() *cobra.Command {
 			if err != nil {
 				return fail(cmd, err)
 			}
-			for _, e := range res.Entries {
-				printLockLogEntry(e)
-			}
-			shell.StdOutF("%s", lockLogTrailer(res))
+			shell.StdOutF("%s", lockLogText(res))
 			return nil
 		},
 	}
@@ -293,36 +357,45 @@ func lockLogTrailer(res api.LockLogResult) string {
 	return b.String()
 }
 
-func printLockLogEntry(e api.LockLogEntry) {
+func lockLogText(res api.LockLogResult) string {
+	var b strings.Builder
+	for _, e := range res.Entries {
+		lockLogEntryText(&b, e)
+	}
+	b.WriteString(lockLogTrailer(res))
+	return b.String()
+}
+
+func lockLogEntryText(b *strings.Builder, e api.LockLogEntry) {
 	switch e.Kind {
 	case "genesis":
-		shell.StdOutF("[%d] genesis: %d signer(s)\n", e.Index, len(e.Signers))
+		fmt.Fprintf(b, "[%d] genesis: %d signer(s)\n", e.Index, len(e.Signers))
 		for _, s := range e.Signers {
-			shell.StdOutF("  signer: %s\n", keyfmt.SignerKey.Encode(s))
+			fmt.Fprintf(b, "  signer: %s\n", keyfmt.SignerKey.Encode(s))
 		}
 	case "add-signer":
-		shell.StdOutF("[%d] add-signer: %s\n", e.Index, keyfmt.SignerKey.Encode(e.Target))
+		fmt.Fprintf(b, "[%d] add-signer: %s\n", e.Index, keyfmt.SignerKey.Encode(e.Target))
 	case "remove-signer":
-		shell.StdOutF("[%d] remove-signer: %s\n", e.Index, keyfmt.SignerKey.Encode(e.Target))
+		fmt.Fprintf(b, "[%d] remove-signer: %s\n", e.Index, keyfmt.SignerKey.Encode(e.Target))
 	case "authorize-device":
-		shell.StdOutF("[%d] authorize-device: %s\n", e.Index, keyfmt.DeviceKey.Encode(e.Target))
+		fmt.Fprintf(b, "[%d] authorize-device: %s\n", e.Index, keyfmt.DeviceKey.Encode(e.Target))
 	case "revoke-device":
-		shell.StdOutF("[%d] revoke-device: %s\n", e.Index, keyfmt.DeviceKey.Encode(e.Target))
+		fmt.Fprintf(b, "[%d] revoke-device: %s\n", e.Index, keyfmt.DeviceKey.Encode(e.Target))
 	case "revoke-signer":
-		shell.StdOutF("[%d] revoke-signer: %d revoked, %d co-sign(s)\n", e.Index, len(e.Revoked), e.CoSignCount)
+		fmt.Fprintf(b, "[%d] revoke-signer: %d revoked, %d co-sign(s)\n", e.Index, len(e.Revoked), e.CoSignCount)
 		for _, r := range e.Revoked {
-			shell.StdOutF("  revoked: %s\n", keyfmt.SignerKey.Encode(r))
+			fmt.Fprintf(b, "  revoked: %s\n", keyfmt.SignerKey.Encode(r))
 		}
 		for _, r := range e.Replaces {
-			shell.StdOutF("  replaces: %s\n", keyfmt.SignerKey.Encode(r))
+			fmt.Fprintf(b, "  replaces: %s\n", keyfmt.SignerKey.Encode(r))
 		}
 	case "disable":
-		shell.StdOutF("[%d] disable\n", e.Index)
+		fmt.Fprintf(b, "[%d] disable\n", e.Index)
 	default:
-		shell.StdOutF("[%d] %s\n", e.Index, e.Kind)
+		fmt.Fprintf(b, "[%d] %s\n", e.Index, e.Kind)
 	}
 	if len(e.Hash) > 0 {
-		shell.StdOutF("  hash: %s\n", entryHashString(e))
+		fmt.Fprintf(b, "  hash: %s\n", entryHashString(e))
 	}
 }
 
@@ -381,24 +454,25 @@ type rosterDevice struct {
 	label string
 }
 
-func gatherRosterDevices(roster []api.NodeDescriptor) []rosterDevice {
-	out := make([]rosterDevice, 0, len(roster))
+// gatherRosterDevices also returns the ids of nodes whose identity key does not decode.
+func gatherRosterDevices(roster []api.NodeDescriptor) (devices []rosterDevice, unparseable []string) {
+	devices = make([]rosterDevice, 0, len(roster))
 	for _, nd := range roster {
 		if nd.IdentityPubKey == "" {
 			continue
 		}
 		pub, err := base64.StdEncoding.DecodeString(nd.IdentityPubKey)
 		if err != nil {
-			shell.StdErrF("WARN: node %q has an unparseable identity key; not authorizing it\n", nd.ID)
+			unparseable = append(unparseable, nd.ID)
 			continue
 		}
 		label := nd.Label
 		if label == "" {
 			label = nd.ID
 		}
-		out = append(out, rosterDevice{pub: pub, label: label})
+		devices = append(devices, rosterDevice{pub: pub, label: label})
 	}
-	return out
+	return devices, unparseable
 }
 
 // Printing the preview and exiting is
@@ -456,8 +530,8 @@ func lockInitFewSignersWarning(signerCount int) string {
 	return ""
 }
 
-func fetchRoster(ctx context.Context, cfg *config.Config, ep gatewayEndpoint) ([]api.NodeDescriptor, error) {
-	dial, err := gatewayDialer(ep.URL, ep.Token, cfg.Socket)
+func fetchRoster(ctx context.Context, cfg *config.Config) ([]api.NodeDescriptor, error) {
+	dial, err := gatewayDialer(cfg.Gateway.URL, cfg.Token, cfg.Socket)
 	if err != nil {
 		return nil, err
 	}
@@ -468,7 +542,7 @@ func fetchRoster(ctx context.Context, cfg *config.Config, ep gatewayEndpoint) ([
 	c := api.NewClient(conn)
 	defer c.Close()
 	var r api.NodesListResult
-	if err := c.Call(api.MethodNodesList, nil, &r); err != nil {
+	if err := c.CallContext(ctx, api.MethodNodesList, nil, &r); err != nil {
 		return nil, fmt.Errorf("nodes.list: %w", err)
 	}
 	return r.Nodes, nil
@@ -558,11 +632,14 @@ func newLockInitCmd() *cobra.Command {
 				return fail(cmd, err)
 			}
 
-			roster, err := fetchRoster(ctx, cfg, configEndpoint(cfg))
+			roster, err := fetchRoster(ctx, cfg)
 			if err != nil {
 				return fail(cmd, err)
 			}
-			rosterDevices := gatherRosterDevices(roster)
+			rosterDevices, unparseable := gatherRosterDevices(roster)
+			for _, id := range unparseable {
+				shell.StdErrF("WARN: node %q has an unparseable identity key; not authorizing it\n", id)
+			}
 			if !confirm {
 				shell.StdOutF("%s", initPreview(own, sigPubs, rosterDevices, genDisablements, initConfirmRerun(cmd, args)))
 				return nil
@@ -634,17 +711,20 @@ func resolveDevice(roster []api.NodeDescriptor, arg string) ([]byte, error) {
 	return pub, nil
 }
 
-func newLockSignCmd() *cobra.Command {
-	return newLockDeviceCmd("sign", "Authorize a device", api.MethodLockSign, "device already authorized; nothing changed")
-}
-func newLockRevokeCmd() *cobra.Command {
-	return newLockDeviceCmd("revoke-device", "Revoke a device", api.MethodLockRevoke, "device not currently authorized; nothing changed")
-}
+type lockDeviceOp struct{ use, short, method, noop string }
 
-func newLockDeviceCmd(use, short, method, noopMsg string) *cobra.Command {
+var (
+	lockSignOp   = lockDeviceOp{"sign", "Authorize a device", api.MethodLockSign, "device already authorized; nothing changed"}
+	lockRevokeOp = lockDeviceOp{"revoke-device", "Revoke a device", api.MethodLockRevoke, "device not currently authorized; nothing changed"}
+)
+
+func newLockSignCmd() *cobra.Command   { return newLockDeviceCmd(lockSignOp) }
+func newLockRevokeCmd() *cobra.Command { return newLockDeviceCmd(lockRevokeOp) }
+
+func newLockDeviceCmd(op lockDeviceOp) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:           use + " <device>",
-		Short:         short + " (node label/id or devpub: key)",
+		Use:           op.use + " <device>",
+		Short:         op.short + " (node label/id or devpub: key)",
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -661,7 +741,7 @@ func newLockDeviceCmd(use, short, method, noopMsg string) *cobra.Command {
 				if cfg.Gateway.URL == "" {
 					return fail(cmd, fmt.Errorf("%v (no gateway configured to resolve a node name)", derr))
 				}
-				roster, rerr := fetchRoster(ctx, cfg, configEndpoint(cfg))
+				roster, rerr := fetchRoster(ctx, cfg)
 				if rerr != nil {
 					return fail(cmd, rerr)
 				}
@@ -670,20 +750,23 @@ func newLockDeviceCmd(use, short, method, noopMsg string) *cobra.Command {
 				}
 			}
 
-			res, err := lockDeviceOnNode(ctx, cfg, method, device)
+			res, err := lockDeviceOnNode(ctx, cfg, op.method, device)
 			if err != nil {
 				return fail(cmd, err)
 			}
-			if !res.Changed {
-				shell.StdOutF("%s: %s\n  current tip (audit): %s\n", use, noopMsg, keyfmt.Tip.Encode(res.Tip))
-				return nil
-			}
-			shell.StdOutF("%s ok\n  current tip (audit): %s\n", use, keyfmt.Tip.Encode(res.Tip))
+			shell.StdOutF("%s\n  current tip (audit): %s\n", op.outcome(res.Changed), keyfmt.Tip.Encode(res.Tip))
 			return nil
 		},
 	}
 	addClientFlags(cmd.Flags())
 	return cmd
+}
+
+func (op lockDeviceOp) outcome(changed bool) string {
+	if !changed {
+		return op.use + ": " + op.noop
+	}
+	return op.use + " ok"
 }
 
 func lockDeviceOnNode(ctx context.Context, cfg *config.Config, method string, device []byte) (api.LockDeviceResult, error) {
@@ -969,20 +1052,35 @@ func lockStatusLines(st api.LockStatusResult) (string, string) {
 // "disabled" is reserved for a network whose break-glass secret was spent, never one
 // simply never locked. Supersession outranks every headline: what matters first is
 // that THIS device serves nobody, not the history of the root it still holds.
-func lockHeadline(st api.LockStatusResult) string {
+func lockStateOf(st api.LockStatusResult) tui.LockState {
 	switch {
 	case st.Quarantined && st.Pinned:
+		return tui.LockOutReplaced
+	case st.Quarantined:
+		return tui.LockOutUnpinned
+	case st.Disabled:
+		return tui.LockDisabled
+	case !st.Enabled:
+		return tui.LockNotEnabled
+	default:
+		return tui.LockEnforcing
+	}
+}
+
+func lockHeadline(st api.LockStatusResult) string {
+	switch lockStateOf(st) {
+	case tui.LockOutReplaced:
 		return "locked mode: locked out — this node opens no channels\n" +
 			"  the trust root it is pinned to was disabled by break-glass (permanently), and\n" +
 			"  the network has since locked again under a new root\n"
-	case st.Quarantined:
+	case tui.LockOutUnpinned:
 		return "locked mode: locked out — the network is locked, but this node is not pinned to it\n" +
 			"  this node opens no channels until you pin it (see pin: below)\n"
-	case st.Disabled:
+	case tui.LockDisabled:
 		return "locked mode: disabled network-wide — break-glass used, nothing is enforced\n" +
 			"  this is permanent: the log can never be re-enabled\n" +
 			"  to lock again: argus lock init (new genesis; every device repins)\n"
-	case !st.Enabled:
+	case tui.LockNotEnabled:
 		return "locked mode: not enabled\n"
 	default:
 		return "locked mode: enforcing\n"
@@ -1075,8 +1173,8 @@ func yesNo(b bool) string {
 // A quarantined device that still holds a pin is superseded: its root was disabled and
 // the network moved on, so it names both.
 func lockPinLines(st api.LockStatusResult) string {
-	switch {
-	case st.Quarantined && st.Pinned:
+	switch lockStateOf(st) {
+	case tui.LockOutReplaced:
 		if len(st.SeenGenesis) == 0 {
 			// Gate tripped but no replacement root observed yet. Naming a new root here
 			// would mislead; advise the operator to wait for a signer to reinit.
@@ -1086,17 +1184,18 @@ func lockPinLines(st api.LockStatusResult) string {
 		// Name the genesis explicitly: a gateway that has seen a relock retains several
 		// competing roots, and bare `lock pin` refuses to pick between them.
 		seen := fingerprintOf(st.SeenGenesis)
-		fix := "argus lock pin " + keyfmt.Genesis.Encode(st.SeenGenesis)
+		fix := lockPinFix(st)
 		return fmt.Sprintf("  pin: %s — the network now uses a new root (%s)\n       run:\n         %s\n",
 			fingerprintOf(st.PinGenesis), seen, fix)
-	case st.Quarantined:
+	case tui.LockOutUnpinned:
 		seen := fingerprintOf(st.SeenGenesis)
-		fix := "argus lock pin " + keyfmt.Genesis.Encode(st.SeenGenesis)
+		fix := lockPinFix(st)
 		return fmt.Sprintf("  pin: none — not pinned to the network's root (%s)\n       run:\n         %s\n", seen, fix)
-	case st.Pinned:
-		return fmt.Sprintf("  pin: %s (source: %s)\n",
-			fingerprintOf(st.PinGenesis), st.PinSource)
 	default:
+		if st.Pinned {
+			return fmt.Sprintf("  pin: %s (source: %s)\n",
+				fingerprintOf(st.PinGenesis), st.PinSource)
+		}
 		return "  pin: none\n"
 	}
 }

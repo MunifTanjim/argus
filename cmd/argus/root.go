@@ -11,7 +11,6 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/shell"
-	"github.com/MunifTanjim/argus/internal/trustpin"
 	"github.com/MunifTanjim/argus/internal/tui"
 )
 
@@ -51,24 +50,20 @@ func newRootCmd(version string) *cobra.Command {
 				return errSilent
 			}
 
-			var head []byte
-			if cfg.E2EE.Enabled {
-				pin, perr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
-				if perr != nil {
-					return fail(cmd, fmt.Errorf("refusing to connect open: %w", perr))
-				}
-				head = pin.Genesis
+			head, perr := clientHead(cfg)
+			if perr != nil {
+				return fail(cmd, fmt.Errorf("refusing to connect open: %w", perr))
 			}
 
 			spec := tuiSpec(cmd, cfg)
 			var client tui.Client
-			var gatewayURL string // empty: the TUI drives a local socket
+			var gatewayURL, gatewayToken string // empty URL: the TUI drives a local socket
 			switch {
 			case cfg.Gateway.URL != "":
 				// The TUI drives the gateway to see the whole fleet. With no local node,
 				// spawn an ephemeral one enrolled on the same gateway so this machine joins
 				// too; otherwise the running node enrolls itself.
-				gatewayURL = cfg.Gateway.URL
+				gatewayURL, gatewayToken = cfg.Gateway.URL, cfg.Token
 				if running {
 					client, err = connect(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket, head)
 				} else {
@@ -88,18 +83,19 @@ func newRootCmd(version string) *cobra.Command {
 					client, srv, err = connectLocalSpawn(ctx, cfg, spec)
 				case launchSpawnGateway:
 					client, srv, gatewayURL, err = connectLocalGateway(ctx, cfg, spec)
+					gatewayToken = cfg.Token
 				case launchSpawnConnected:
-					gatewayURL = choice.gatewayURL
+					gatewayURL, gatewayToken = choice.gatewayURL, choice.token
 					client, srv, err = connectLocalSpawnWithGateway(ctx, cfg, spec, choice.gatewayURL, choice.token, head)
 				case launchGateway:
-					gatewayURL = choice.gatewayURL
+					gatewayURL, gatewayToken = choice.gatewayURL, choice.token
 					client, err = connect(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket, head)
 				}
 			}
 			if err != nil {
 				return errSilent // connect/connectLocalSpawn already printed the diagnostic
 			}
-			if err := tui.Run(client, gatewayURL, srv.Logs(), srv.Exited(), cfg.TUI); err != nil {
+			if err := tui.Run(client, gatewayURL, srv.Logs(), srv.Exited(), cfg.TUI, newSettingsBackend(ctx, cfg, gatewayURL, gatewayToken, head)); err != nil {
 				return fail(cmd, err)
 			}
 			return nil

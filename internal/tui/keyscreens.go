@@ -9,7 +9,7 @@ import (
 // focusMoves are the focus manager's pane moves, sidebar toggles, and the
 // palette key, which apply in every section whose component takes resolved
 // keys.
-var focusMoves = bindingsOf(paneKeys, projectsKeys.ToggleSidebar, projectsKeys.ToggleFiles, projectsKeys.Palette, projectsKeys.ToggleMouse, projectsKeys.ToggleVerbose, upgradeKeys)
+var focusMoves = bindingsOf(paneKeys, projectsKeys.ToggleSidebar, projectsKeys.ToggleFiles, projectsKeys.Palette, projectsKeys.ToggleMouse, projectsKeys.ToggleVerbose, upgradeKeys, settingsKeys.Open)
 
 // offer is the focus manager's help and quit that a section's component
 // offers, and the condition under which it offers them ("" for always). Each
@@ -33,6 +33,7 @@ var sectionOffers = func() map[string]offer {
 		"node":             {keys: helpQuit},
 		"home":             {keys: helpQuit},
 		"logs":             {keys: help},
+		"settings":         {keys: helpQuit},
 		"terminals":        {keys: helpQuit},
 		"history":          {keys: help, where: "project list"},
 		"file":             withPane,
@@ -42,6 +43,12 @@ var sectionOffers = func() map[string]offer {
 }()
 
 func focusFor(s string) []binding { return slices.Concat(focusMoves, sectionOffers[s].keys) }
+
+// focusWithout is focusFor less drop, for a section where they do nothing.
+func focusWithout(s string, drop ...any) []binding {
+	gone := bindingsOf(drop...)
+	return slices.DeleteFunc(focusFor(s), func(b binding) bool { return offersKey(gone, b) })
+}
 
 var (
 	leftSidebarKeys  = []any{projectsKeys.Widen, projectsKeys.Narrow}
@@ -155,6 +162,12 @@ var sectionLists = map[string]sectionList{
 	"logs": {
 		own:   bindingsOf(logsKeys, listKeys.TabPrev, listKeys.TabNext),
 		focus: focusFor("logs"),
+	},
+	"settings": {
+		own: bindingsOf(listKeys.Up, listKeys.Down, listKeys.TabPrev, listKeys.TabNext, listKeys.Refresh, listKeys.Back,
+			settingsKeys.Sign, settingsKeys.SignTUI, settingsKeys.Remove, settingsKeys.Log, settingsKeys.Details, settingsKeys.Pin, settingsKeys.Unpin, settingsKeys.Pair,
+			logsKeys.Up, logsKeys.Down, logsKeys.HalfUp, logsKeys.HalfDown, logsKeys.PageUp, logsKeys.PageDown, logsKeys.Top, logsKeys.Bottom),
+		focus: focusWithout("settings", paneKeys.Left, paneKeys.Right, projectsKeys.ToggleSidebar, projectsKeys.ToggleFiles),
 	},
 	"transcript": {
 		own: bindingsOf(slices.Concat(transcriptViewKeys, []any{detailKeys, sessionKeys.FocusPrompt, sessionKeys.Raw, sessionKeys.Subagents, sessionKeys.Shells,

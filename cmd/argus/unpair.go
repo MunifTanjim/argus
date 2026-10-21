@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/shell"
 )
 
@@ -67,18 +68,10 @@ func newUnpairCmd() *cobra.Command {
 // removeToken revokes one client token on the gateway.
 func removeToken(cmd *cobra.Command, client *api.Client, token string) error {
 	if err := client.Call(api.MethodClientsRemove, api.ClientRemoveParams{Token: token}, nil); err != nil {
-		return fail(cmd, fmt.Errorf("remove %s: %w", shortToken(token), err))
+		return fail(cmd, fmt.Errorf("remove %s: %w", clienttoken.Short(token), err))
 	}
-	shell.StdOutF("revoked %s\n", shortToken(token))
+	shell.StdOutF("revoked %s\n", clienttoken.Short(token))
 	return nil
-}
-
-// shortToken abbreviates a token for display (full tokens are long hex strings).
-func shortToken(tok string) string {
-	if len(tok) <= 12 {
-		return tok
-	}
-	return tok[:12] + "…"
 }
 
 // pickToken runs an interactive picker over the client tokens and returns the
@@ -140,7 +133,7 @@ func (m pickerModel) View() tea.View {
 		if created == "" {
 			created = "unknown"
 		}
-		b.WriteString(fmt.Sprintf("%s%s  paired %s\n", cursor, shortToken(it.Token), created))
+		b.WriteString(fmt.Sprintf("%s%s  paired %s\n", cursor, clienttoken.Short(it.Token), created))
 	}
 	return tea.NewView(b.String())
 }

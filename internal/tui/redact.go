@@ -128,16 +128,12 @@ func (m tview) redactListBody() string {
 	b.WriteString(asstStyle.Render(fmt.Sprintf("queued redactions (%d)", len(m.redact.literals))))
 	b.WriteString("\n\n")
 	for i, lit := range m.redact.literals {
-		marker := "  "
+		sel, focused := i == m.redact.listCursor, m.c.m.mainFocused()
 		row := dimStyle.Render(lit)
-		switch {
-		case i == m.redact.listCursor && m.c.m.mainFocused():
-			marker = cursorStyle.Render("▸ ")
+		if sel && focused {
 			row = cursorStyle.Render(lit)
-		case i == m.redact.listCursor:
-			marker = dimStyle.Render("▸ ")
 		}
-		b.WriteString(marker + row)
+		b.WriteString(rowMarker(sel, focused) + row)
 		if i < len(m.redact.literals)-1 {
 			b.WriteString("\n")
 		}

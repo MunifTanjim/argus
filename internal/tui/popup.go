@@ -139,12 +139,14 @@ const (
 )
 
 // popupFrame is a popup's box: a title line, the parts, and a help line. width
-// and height are the total size; height 0 fits the content.
+// and height are the total size; height 0 fits the content. tight drops the
+// blank rows around the title and the help.
 type popupFrame struct {
 	width, height    int
 	title, titleInfo string
 	parts            []string
 	help             string
+	tight            bool
 }
 
 func (f popupFrame) innerWidth() int { return max(1, f.width-popupFrameW) }
@@ -160,9 +162,17 @@ func (f popupFrame) lines() int {
 	return n
 }
 
+// chrome is the rows the border, the title, and the help take: spaced with the
+// blank rows after the title and before the help, tight without them.
+func (f popupFrame) chrome() (spaced, tight int) {
+	tight = popupFrameH + f.lines()
+	return tight + f.lines(), tight
+}
+
 // spaced reports whether a blank row follows the title and precedes the help.
 func (f popupFrame) spaced() bool {
-	return f.height == 0 || f.height-popupFrameH-2*f.lines() >= popupMinBody
+	sp, _ := f.chrome()
+	return !f.tight && (f.height == 0 || f.height-sp >= popupMinBody)
 }
 
 // bodyCtx is c with its hit origin on the first body cell, inside the border,

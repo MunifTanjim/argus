@@ -38,7 +38,7 @@ type Client interface {
 // Run connects the TUI and blocks until the user quits. gatewayURL is empty
 // when client drives a local socket. Non-nil logs (the managed server's
 // output) are tailed in the Logs tab. Run closes client before it returns.
-func Run(client Client, gatewayURL string, logs *logbuf.Buffer, serverExit <-chan error, cfg config.TUIConfig) error {
+func Run(client Client, gatewayURL string, logs *logbuf.Buffer, serverExit <-chan error, cfg config.TUIConfig, settings Settings) error {
 	// The client library logs warnings (e.g. a node timing out) via the standard
 	// logger; keep them off the alt-screen.
 	if logs != nil {
@@ -55,8 +55,8 @@ func Run(client Client, gatewayURL string, logs *logbuf.Buffer, serverExit <-cha
 	swap := newSwapClient(client)
 	defer swap.Close()
 	m := newModel(swap, hasDark, logs).withKeymaps(cfg)
-	m.swap = swap
 	m.gatewayURL = gatewayURL
+	m.settings = settings
 	m.statePath = config.GetStatePath("tui.json")
 	g, err := loadGroupBy(m.statePath)
 	if err != nil {

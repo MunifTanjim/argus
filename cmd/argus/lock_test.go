@@ -201,7 +201,7 @@ func TestGatherRosterDevices(t *testing.T) {
 		{ID: "a", Label: "alpha", IdentityPubKey: idA},
 		{ID: "b"},
 	}
-	devs := gatherRosterDevices(roster)
+	devs, _ := gatherRosterDevices(roster)
 	if len(devs) != 1 || base64.StdEncoding.EncodeToString(devs[0].pub) != idA {
 		t.Fatalf("gatherRosterDevices = %v", devs)
 	}

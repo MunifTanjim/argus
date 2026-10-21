@@ -544,7 +544,7 @@ const (
 )
 
 func (m model) filesVisible() bool {
-	return !m.right.hidden && m.width >= filesMinWidth && m.topFull() != fullTerminal && m.topFull() != fullFrame
+	return !m.right.hidden && m.width >= filesMinWidth && m.topFull() < fullFrame
 }
 
 func (m model) projectsFilesW() int { return clampWidth(m.rawFilesW(), 20, m.filesMaxW()) }

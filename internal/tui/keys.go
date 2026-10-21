@@ -416,9 +416,24 @@ var upgradeKeys = struct {
 	Gateway: nb("upgrade gateway", "", ""),
 }
 
+var settingsKeys = struct {
+	Open, Sign, SignTUI, Remove, Log, Details, Pin, Unpin, Pair binding
+}{
+	Open:    nm("settings", "g,", "settings"),
+	Sign:    nb("settings sign", "s", "sign"),
+	SignTUI: nb("settings sign-tui", "S", "sign tui"),
+	Remove:  nm("settings remove", "dd", "remove"),
+	Log:     nb("settings log", "L", "log"),
+	Details: nb("settings details", "i", "details"),
+	Pin:     nb("settings pin", "p", "pin"),
+	Unpin:   nb("settings unpin", "P", "unpin"),
+	Pair:    nb("settings pair", "a", "pair"),
+}
+
 func keySets() []any {
 	return []any{listKeys, projectsKeys, fileViewKeys, transcriptKeys, redactListKeys,
-		detailKeys, visualKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, upgradeKeys, spawnKeys}
+		detailKeys, visualKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, upgradeKeys, spawnKeys,
+		settingsKeys}
 }
 
 func allBindingSets() []any { return append(keySets(), textInputSets()...) }

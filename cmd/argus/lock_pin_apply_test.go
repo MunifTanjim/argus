@@ -66,7 +66,7 @@ func TestApplyPinLeavesTheClientUnpinnedWhenTheNodeRefuses(t *testing.T) {
 	tempStateDir(t)
 	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodLockPin: refusePin})}
 
-	_, _, err := applyPin(context.Background(), cfg, testGenesis(0x22))
+	err := applyPin(context.Background(), cfg, testGenesis(0x22), io.Discard, io.Discard)
 
 	if err == nil {
 		t.Fatal("a node-side refusal must fail the command")
@@ -85,7 +85,7 @@ func TestApplyPinWritesTheClientPinWhenTheNodeAccepts(t *testing.T) {
 	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodLockPin: acceptPin})}
 	genesis := testGenesis(0x33)
 
-	if _, _, err := applyPin(context.Background(), cfg, genesis); err != nil {
+	if err := applyPin(context.Background(), cfg, genesis, io.Discard, io.Discard); err != nil {
 		t.Fatalf("applyPin: %v", err)
 	}
 
@@ -102,7 +102,7 @@ func TestApplyPinRefusesWhenAnUnreachableNodeHoldsADifferentPin(t *testing.T) {
 		t.Fatalf("seed node pin: %v", err)
 	}
 
-	_, _, err := applyPin(context.Background(), cfg, testGenesis(0x55))
+	err := applyPin(context.Background(), cfg, testGenesis(0x55), io.Discard, io.Discard)
 
 	if err == nil {
 		t.Fatal("a stopped node pinned to another genesis must still block the client pin")
@@ -118,7 +118,7 @@ func TestApplyPinPinsTheClientWhenNoNodeIsRunning(t *testing.T) {
 	cfg := &config.Config{Socket: filepath.Join(t.TempDir(), "absent.sock")}
 	genesis := testGenesis(0x66)
 
-	if _, _, err := applyPin(context.Background(), cfg, genesis); err != nil {
+	if err := applyPin(context.Background(), cfg, genesis, io.Discard, io.Discard); err != nil {
 		t.Fatalf("a client-only machine must still be pinnable: %v", err)
 	}
 
@@ -213,7 +213,7 @@ func TestClientPinLineReturnsWhenTheGatewayNeverAnswers(t *testing.T) {
 	cfg.Gateway.URL = "ws://" + strings.TrimPrefix(ts.URL, "http://")
 
 	lines := make(chan string, 1)
-	go func() { line, _ := clientPinLine(context.Background(), cfg, configEndpoint(cfg)); lines <- line }()
+	go func() { lines <- checkClientPin(context.Background(), cfg).text() }()
 
 	select {
 	case line := <-lines:
@@ -257,7 +257,7 @@ func TestGuardPinAllowsTheConfigGenesis(t *testing.T) {
 func TestClientPinStatusNamesQuarantine(t *testing.T) {
 	seen := testGenesis(0x11)
 
-	line := clientPinStatus(trustpin.Pin{}, nil, seen, nil, false)
+	line := clientPinInfo{pin: trustpin.Pin{}, netGenesis: seen}.text()
 
 	if !strings.Contains(line, "locked out") {
 		t.Fatalf("line must name the lockout, got: %q", line)
@@ -280,7 +280,7 @@ func TestClientPinStatusNamesACorruptPin(t *testing.T) {
 	}
 
 	pin, perr := trustpin.Resolve("", clientPinFile())
-	line := clientPinStatus(pin, perr, nil, nil, false)
+	line := clientPinInfo{pin: pin, perr: perr}.text()
 
 	if strings.Contains(line, "none") {
 		t.Fatalf("a corrupt pin must not be reported as no pin, got: %q", line)
@@ -293,7 +293,7 @@ func TestClientPinStatusNamesACorruptPin(t *testing.T) {
 func TestClientPinStatusReportsAPinnedClient(t *testing.T) {
 	genesis := testGenesis(0x21)
 
-	line := clientPinStatus(trustpin.Pin{Genesis: genesis, Source: trustpin.SourceConfig}, nil, nil, nil, false)
+	line := clientPinInfo{pin: trustpin.Pin{Genesis: genesis, Source: trustpin.SourceConfig}}.text()
 
 	if !strings.Contains(line, fingerprintOf(genesis)) || !strings.Contains(line, "config") {
 		t.Fatalf("line must show the fingerprint and its source, got: %q", line)
@@ -301,7 +301,7 @@ func TestClientPinStatusReportsAPinnedClient(t *testing.T) {
 }
 
 func TestClientPinStatusUnpinnedOnAnUnlockedNetwork(t *testing.T) {
-	line := clientPinStatus(trustpin.Pin{}, nil, nil, nil, false)
+	line := clientPinInfo{pin: trustpin.Pin{}}.text()
 
 	if strings.Contains(line, "locked out") {
 		t.Fatalf("no trust log on the network must not claim a lockout, got: %q", line)
@@ -326,7 +326,7 @@ func TestQuarantiningGenesisReportsCompetingRoots(t *testing.T) {
 	}
 	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodTrustLogSync: sync})}
 
-	got, err := quarantiningGenesis(context.Background(), cfg, configEndpoint(cfg))
+	got, err := quarantiningGenesis(context.Background(), cfg)
 
 	if err != nil {
 		t.Fatalf("quarantiningGenesis: %v", err)
@@ -346,7 +346,7 @@ func TestQuarantiningGenesisReportsNoneOnAnUnlockedNetwork(t *testing.T) {
 	}
 	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodTrustLogSync: sync})}
 
-	got, err := quarantiningGenesis(context.Background(), cfg, configEndpoint(cfg))
+	got, err := quarantiningGenesis(context.Background(), cfg)
 
 	if err != nil || got != nil {
 		t.Fatalf("no chains → want (nil, nil), got (%x, %v)", got, err)
@@ -367,7 +367,7 @@ func TestUnpinResolvesAConfigFileConflict(t *testing.T) {
 		t.Fatal("precondition: config X + file Y must be a conflict")
 	}
 
-	if _, _, err := unpinDevice(context.Background(), cfg); err != nil {
+	if err := unpinDevice(context.Background(), cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("unpin must be able to clear the file it is documented to clear: %v", err)
 	}
 
@@ -387,7 +387,7 @@ func TestUnpinClearsAFilePin(t *testing.T) {
 		t.Fatalf("seed client pin: %v", err)
 	}
 
-	if _, _, err := unpinDevice(context.Background(), cfg); err != nil {
+	if err := unpinDevice(context.Background(), cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("a file-pinned device must be unpinnable: %v", err)
 	}
 
@@ -408,7 +408,7 @@ func TestUnpinClearsAStoppedNodesPinWhenTheConfigStillPinsIt(t *testing.T) {
 		t.Fatalf("seed node pin: %v", err)
 	}
 
-	if _, _, err := unpinDevice(context.Background(), cfg); err != nil {
+	if err := unpinDevice(context.Background(), cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("unpinDevice: %v", err)
 	}
 
@@ -428,7 +428,7 @@ func TestUnpinLeavesAStoppedNodesPinAloneWithoutAConfigPin(t *testing.T) {
 		t.Fatalf("seed node pin: %v", err)
 	}
 
-	if _, _, err := unpinDevice(context.Background(), cfg); err != nil {
+	if err := unpinDevice(context.Background(), cfg, io.Discard, io.Discard); err != nil {
 		t.Fatalf("unpinDevice: %v", err)
 	}
 
@@ -543,7 +543,7 @@ func TestGuardPinRefusesWhenStalenessCannotBeProven(t *testing.T) {
 // The client role is pinned separately, so after a relock it must say so on its own
 // line — otherwise the only signal is the node's, and a dark dashboard looks fine.
 func TestClientPinStatusNamesSupersession(t *testing.T) {
-	line := clientPinStatus(trustpin.Pin{Genesis: testGenesis(0xC1), Source: trustpin.SourceFile}, nil, testGenesis(0xC2), nil, true)
+	line := clientPinInfo{pin: trustpin.Pin{Genesis: testGenesis(0xC1), Source: trustpin.SourceFile}, netGenesis: testGenesis(0xC2), superseded: true}.text()
 
 	for _, want := range []string{"new root", "argus lock pin", "restart"} {
 		if !strings.Contains(line, want) {
@@ -555,7 +555,7 @@ func TestClientPinStatusNamesSupersession(t *testing.T) {
 // Supersession is proven by the disabled chain, not by the network probe; report it
 // even when the gateway could not be reached for the new fingerprint.
 func TestClientPinStatusNamesSupersessionWithoutTheNetwork(t *testing.T) {
-	line := clientPinStatus(trustpin.Pin{Genesis: testGenesis(0xC1), Source: trustpin.SourceFile}, nil, nil, nil, true)
+	line := clientPinInfo{pin: trustpin.Pin{Genesis: testGenesis(0xC1), Source: trustpin.SourceFile}, superseded: true}.text()
 
 	if !strings.Contains(line, "no new root") {
 		t.Fatalf("line %q must still report supersession", line)
@@ -614,71 +614,71 @@ func TestGuardPinRefusesWhenTheNodeChainIsLive(t *testing.T) {
 	}
 }
 
-func TestApplyPinReturnsItsReportInsteadOfPrinting(t *testing.T) {
+func TestApplyPinWritesItsReportToTheGivenWriters(t *testing.T) {
 	tempStateDir(t)
 	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodLockPin: acceptPin})}
-	var out, notes string
+	var out, notes strings.Builder
 	var err error
 
 	stdout, stderr := captureOutput(t, func() {
-		out, notes, err = applyPin(context.Background(), cfg, testGenesis(0x71))
+		err = applyPin(context.Background(), cfg, testGenesis(0x71), &out, &notes)
 	})
 
 	if err != nil {
 		t.Fatalf("applyPin: %v", err)
 	}
 	for _, want := range []string{"pinned this device", "local node pinned and enforcing"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("out must contain %q, got: %q", want, out)
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("out must contain %q, got: %q", want, out.String())
 		}
 	}
-	if notes != "" {
-		t.Errorf("notes = %q, want empty", notes)
+	if notes.Len() != 0 {
+		t.Errorf("notes = %q, want empty", notes.String())
 	}
 	if stdout != "" || stderr != "" {
 		t.Errorf("applyPin printed stdout=%q stderr=%q", stdout, stderr)
 	}
 }
 
-func TestApplyPinReturnsTheUnreachableNodeNote(t *testing.T) {
+func TestApplyPinWritesTheUnreachableNodeNote(t *testing.T) {
 	tempStateDir(t)
 	cfg := &config.Config{Socket: filepath.Join(t.TempDir(), "absent.sock")}
-	var notes string
+	var notes strings.Builder
 	var err error
 
 	_, stderr := captureOutput(t, func() {
-		_, notes, err = applyPin(context.Background(), cfg, testGenesis(0x72))
+		err = applyPin(context.Background(), cfg, testGenesis(0x72), io.Discard, &notes)
 	})
 
 	if err != nil {
 		t.Fatalf("applyPin: %v", err)
 	}
-	if !strings.Contains(notes, "the local node is unreachable") {
-		t.Errorf("notes must carry the unreachable-node note, got: %q", notes)
+	if !strings.Contains(notes.String(), "the local node is unreachable") {
+		t.Errorf("notes must carry the unreachable-node note, got: %q", notes.String())
 	}
 	if stderr != "" {
 		t.Errorf("applyPin printed to stderr: %q", stderr)
 	}
 }
 
-func TestUnpinDeviceReturnsItsReportInsteadOfPrinting(t *testing.T) {
+func TestUnpinDeviceWritesItsReportToTheGivenWriters(t *testing.T) {
 	tempStateDir(t)
 	cfg := &config.Config{Socket: filepath.Join(t.TempDir(), "absent.sock")}
-	var out, notes string
+	var out, notes strings.Builder
 	var err error
 
 	stdout, stderr := captureOutput(t, func() {
-		out, notes, err = unpinDevice(context.Background(), cfg)
+		err = unpinDevice(context.Background(), cfg, &out, &notes)
 	})
 
 	if err != nil {
 		t.Fatalf("unpinDevice: %v", err)
 	}
-	if !strings.Contains(out, "cleared this device's persisted pin") {
-		t.Errorf("out = %q", out)
+	if !strings.Contains(out.String(), "cleared this device's persisted pin") {
+		t.Errorf("out = %q", out.String())
 	}
-	if !strings.Contains(notes, unpinSummary(nil)) {
-		t.Errorf("notes must contain the unpin summary, got: %q", notes)
+	if !strings.Contains(notes.String(), unpinSummary(nil)) {
+		t.Errorf("notes must contain the unpin summary, got: %q", notes.String())
 	}
 	if stdout != "" || stderr != "" {
 		t.Errorf("unpinDevice printed stdout=%q stderr=%q", stdout, stderr)
@@ -697,27 +697,44 @@ func TestApplyPinKeepsTheNodeNoteWhenALaterStepFails(t *testing.T) {
 	dir := tempStateDir(t)
 	cfg := &config.Config{Socket: filepath.Join(t.TempDir(), "absent.sock")}
 	blockRemoval(t, dir, "client-trustlog-chain")
+	var out, notes strings.Builder
 
-	out, notes, err := applyPin(context.Background(), cfg, testGenesis(0x73))
+	err := applyPin(context.Background(), cfg, testGenesis(0x73), &out, &notes)
 
 	if err == nil {
 		t.Fatal("a chain that cannot be removed must fail the pin")
 	}
-	if out != "" || !strings.Contains(notes, "the local node is unreachable") {
-		t.Fatalf("out = %q, notes = %q; the unreachable-node note must survive the error", out, notes)
+	if out.Len() != 0 || !strings.Contains(notes.String(), "the local node is unreachable") {
+		t.Fatalf("out = %q, notes = %q; the unreachable-node note must survive the error", out.String(), notes.String())
 	}
 }
 
-func TestUnpinPartsKeepTheOriginalStreamOrder(t *testing.T) {
+type streamPart struct {
+	stderr bool
+	text   string
+}
+
+type streamWriter struct {
+	stderr bool
+	parts  *[]streamPart
+}
+
+func (w streamWriter) Write(p []byte) (int, error) {
+	*w.parts = append(*w.parts, streamPart{stderr: w.stderr, text: string(p)})
+	return len(p), nil
+}
+
+func TestUnpinDeviceKeepsTheOriginalStreamOrder(t *testing.T) {
 	dir := tempStateDir(t)
 	cfg := &config.Config{Socket: filepath.Join(t.TempDir(), "absent.sock")}
 	cfg.Lock.Genesis = trustpin.Encode(testGenesis(0x74))
 	blockRemoval(t, dir, "trustlog-chain")
+	var parts []streamPart
 
-	parts, err := unpinParts(context.Background(), cfg)
+	err := unpinDevice(context.Background(), cfg, streamWriter{parts: &parts}, streamWriter{stderr: true, parts: &parts})
 
 	if err != nil {
-		t.Fatalf("unpinParts: %v", err)
+		t.Fatalf("unpinDevice: %v", err)
 	}
 	wantStderr := []bool{false, true, false, true}
 	wantText := []string{"cleared this device's persisted pin", "stored chain could not be removed", "local node is not running", "lock.genesis"}
@@ -728,5 +745,56 @@ func TestUnpinPartsKeepTheOriginalStreamOrder(t *testing.T) {
 		if p.stderr != wantStderr[i] || !strings.Contains(p.text, wantText[i]) {
 			t.Errorf("part %d = %+v, want stderr=%v containing %q", i, p, wantStderr[i], wantText[i])
 		}
+	}
+}
+
+func TestApplyPinAbortsWhenTheNodeDoesNotAnswerInTime(t *testing.T) {
+	tempStateDir(t)
+	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodLockPin: blockingHandler(t)})}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := applyPin(ctx, cfg, testGenesis(0x75), io.Discard, io.Discard)
+
+	if err == nil {
+		t.Fatal("a node that does not answer in time must abort the pin")
+	}
+	if !strings.Contains(err.Error(), "may still apply the pin") || !strings.Contains(err.Error(), "client pin was not written") {
+		t.Fatalf("error = %q, want the may-still-apply and not-written wording", err)
+	}
+	if pin, perr := clientPinFile().Load(); perr != nil || pin != nil {
+		t.Fatalf("client pin = %x (%v), want none written", pin, perr)
+	}
+}
+
+func TestUnpinDeviceKeepsTheNodePinWhenTheNodeDoesNotAnswerInTime(t *testing.T) {
+	tempStateDir(t)
+	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodLockUnpin: blockingHandler(t)})}
+	g := testGenesis(0x76)
+	cfg.Lock.Genesis = trustpin.Encode(g)
+	if err := nodePinFile().Save(g); err != nil {
+		t.Fatalf("seed node pin: %v", err)
+	}
+	if err := os.WriteFile(config.GetStatePath("trustlog-chain"), []byte("chain"), 0o600); err != nil {
+		t.Fatalf("seed node chain: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := unpinDevice(ctx, cfg, io.Discard, io.Discard)
+
+	if err == nil {
+		t.Fatal("a node that does not answer in time must fail the unpin")
+	}
+	for _, want := range []string{"did not answer in time", "may still remove its pin", "this device's persisted pin was cleared"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want it to contain %q", err, want)
+		}
+	}
+	if pin, perr := nodePinFile().Load(); perr != nil || !bytes.Equal(pin, g) {
+		t.Fatalf("node pin = %x (%v), want the untouched %x", pin, perr, g)
+	}
+	if _, serr := os.Stat(config.GetStatePath("trustlog-chain")); serr != nil {
+		t.Fatalf("node chain: %v, want it kept", serr)
 	}
 }

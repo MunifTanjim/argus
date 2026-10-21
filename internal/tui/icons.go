@@ -101,6 +101,7 @@ type iconSet struct {
 	Memory       StyledIcon
 	Node         StyledIcon
 	Home         StyledIcon
+	Phone        StyledIcon
 	Pin          StyledIcon
 	Repo         StyledIcon
 	Hidden       StyledIcon
@@ -108,6 +109,7 @@ type iconSet struct {
 	Selected     StyledIcon
 	Session      StyledIcon
 	Shell        StyledIcon
+	Signed       StyledIcon
 	Skill        StyledIcon
 	Subagent     StyledIcon
 	ShellRunning StyledIcon
@@ -116,6 +118,7 @@ type iconSet struct {
 	Teammate     StyledIcon
 	Thinking     StyledIcon
 	Token        StyledIcon
+	Unsigned     StyledIcon
 	User         StyledIcon
 	Tool         toolIcons
 	Task         taskIcons
@@ -157,19 +160,22 @@ func initIcons() {
 		Memory:       StyledIcon{"\U000F01C0", ColorTextDim},   // nf-md-book_open_variant
 		Node:         StyledIcon{"\uF233", ColorTextSecondary}, // nf-fa-server
 		Home:         StyledIcon{"\U000F02DC", ColorAccent},    // nf-md-home
+		Phone:        StyledIcon{"\U000F011C", ColorAccent},    // nf-md-cellphone
 		Pin:          StyledIcon{"\U000F0403", ColorAccent},    // nf-md-pin
 		Repo:         StyledIcon{"\uF401", ColorTextSecondary}, // nf-oct-repo
 		Hidden:       StyledIcon{"\U000F0209", ColorTextMuted}, // nf-md-eye_off
 		Session:      StyledIcon{"\U000F0237", ColorTextDim},   // nf-md-fingerprint
 		Shell:        StyledIcon{glyphTerminal, ColorToolBash},
+		Signed:       StyledIcon{"✓", ColorContextOk},
 		Skill:        StyledIcon{"\uF19D", ColorToolSkill}, // nf-fa-graduation_cap
 		Subagent:     StyledIcon{glyphRobot, ColorAccent},
 		ShellRunning: StyledIcon{glyphTerminal, ColorAccent},
 		System:       StyledIcon{glyphTerminal, ColorTextMuted},
 		SystemErr:    StyledIcon{"\uF06A", ColorError}, // nf-fa-circle_exclamation
 		Teammate:     StyledIcon{glyphRobot, ColorAccent},
-		Thinking:     StyledIcon{"\uF0EB", ColorTextDim},       // nf-fa-lightbulb
-		Token:        StyledIcon{"\uEDE8", ColorTextDim},       // nf-fa-coins
+		Thinking:     StyledIcon{"\uF0EB", ColorTextDim}, // nf-fa-lightbulb
+		Token:        StyledIcon{"\uEDE8", ColorTextDim}, // nf-fa-coins
+		Unsigned:     StyledIcon{"!", ColorContextWarn},
 		User:         StyledIcon{"\uF007", ColorTextSecondary}, // nf-fa-user
 		Tool: toolIcons{
 			Err:   StyledIcon{glyphWrench, ColorError},

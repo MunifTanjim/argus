@@ -54,7 +54,8 @@ func (l layer) over() bool { return l == fileLayer || l == overLayer }
 // coversFile reports whether the layer leaves an open file under it open.
 func (l layer) coversFile() bool { return l == screenLayer || l == overLayer }
 
-// fullLevel is how much of the screen a component asks the frame for.
+// fullLevel is how much of the screen a component asks the frame for. Each
+// level covers more than the one before it.
 type fullLevel int
 
 const (
@@ -88,6 +89,7 @@ const (
 	actReplaceBase
 	actReplaceFile
 	actCloseFile
+	actCloseOverlays
 	actCloseScreen
 	actFocus
 	actFlash
@@ -159,6 +161,10 @@ func (c *ctx) closeScreen(termID string) {
 // closeFile takes the open file off the main pane, wherever it is under the
 // top.
 func (c *ctx) closeFile() { c.actions = append(c.actions, action{kind: actCloseFile}) }
+
+// closeOverlays takes the open file and the spawn flow off the main pane, so
+// the base under them shows.
+func (c *ctx) closeOverlays() { c.actions = append(c.actions, action{kind: actCloseOverlays}) }
 
 // home moves the tree cursor to the Home row and shows the view that Home
 // remembers.
@@ -262,6 +268,12 @@ func (m *model) apply(c *ctx) tea.Cmd {
 				cmds = append(cmds, m.main[i].close(c))
 				m.main = m.main.removeAt(i)
 			}
+		case actCloseOverlays:
+			b := m.baseTop()
+			for _, comp := range m.main[b:] {
+				cmds = append(cmds, comp.close(c))
+			}
+			m.main = m.main[:b:b]
 		case actCloseScreen:
 			if i := m.screenAt(a.id); i >= 0 {
 				cmds = append(cmds, m.main[i].close(c))

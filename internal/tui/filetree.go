@@ -218,3 +218,14 @@ func sideMarker(sel, focused bool) string {
 	}
 	return strings.Repeat(" ", screenMargin)
 }
+
+// rowMarker is a main pane list's 2-cell cursor gutter.
+func rowMarker(sel, focused bool) string {
+	switch {
+	case sel && focused:
+		return cursorStyle.Render("▸ ")
+	case sel:
+		return dimStyle.Render("▸ ")
+	}
+	return "  "
+}

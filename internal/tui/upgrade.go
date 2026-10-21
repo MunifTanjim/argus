@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/selfupgrade"
@@ -121,7 +120,7 @@ func (m model) updateUpgrade(msg tea.Msg) (model, tea.Cmd) {
 			c.setFlash(msg.target.label + " is already on the latest version (" + msg.res.Current + ")")
 		default:
 			c.setFlash("")
-			c.openPopup(upgradeConfirm{target: msg.target, check: msg.res})
+			c.openPopup(newUpgradeConfirm(c, msg.target, msg.res))
 		}
 	case upgradeDoneMsg:
 		switch {
@@ -138,64 +137,19 @@ func (m model) updateUpgrade(msg tea.Msg) (model, tea.Cmd) {
 	return m, m.apply(c)
 }
 
-var upgradeChoices = []string{"Upgrade and restart", "Cancel"}
-
-type upgradeConfirm struct {
-	target upgradeTarget
-	check  api.CheckUpgradeResult
-	cursor int
-}
-
-func (p upgradeConfirm) id() string                            { return "upgrade" }
-func (p upgradeConfirm) keySection() string                    { return "" }
-func (p upgradeConfirm) spins(*ctx) bool                       { return false }
-func (p upgradeConfirm) update(*ctx, tea.Msg) (popup, tea.Cmd) { return p, nil }
-
-func (p upgradeConfirm) handleKey(c *ctx, msg tea.KeyPressMsg) (popup, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		c.closePopup()
-	case "up", "k":
-		p.cursor = cursorUp(p.cursor)
-	case "down", "j":
-		p.cursor = cursorDown(p.cursor, len(upgradeChoices))
-	case "enter":
-		c.closePopup()
-		if p.cursor == 0 {
-			c.setFlash("upgrading " + p.target.label)
-			return p, c.m.upgradeRunCmd(p.target)
-		}
-	}
-	return p, nil
-}
-
-func (p upgradeConfirm) click(c *ctx, t hitTarget) (popup, tea.Cmd) {
-	p.cursor = t.index
-	return p.handleKey(c, enterKey)
-}
-
-func (p upgradeConfirm) wheel(_ *ctx, d int) (popup, tea.Cmd) {
-	p.cursor = cursorBy(p.cursor, d, len(upgradeChoices))
-	return p, nil
-}
-
-func (p upgradeConfirm) draw(c *ctx, scr uv.Screen, _ uv.Rectangle) {
-	area := c.m.mainRect()
-	f := pickerFrame(area)
-	f.title = "Upgrade " + p.target.label + " from " + p.check.Current + " to " + p.check.Latest + "?"
-	f.help = c.m.hints(f.innerWidth(), hint("↑/↓", "move"), hint("enter", "select"), hint("esc", "cancel"))
+func newUpgradeConfirm(c *ctx, target upgradeTarget, check api.CheckUpgradeResult) confirmPopup {
 	var note string
-	if p.target == gatewayTarget && isQuickTunnelURL(c.m.gatewayURL) {
+	if target == gatewayTarget && isQuickTunnelURL(c.m.gatewayURL) {
 		note = "the quick tunnel gets a new URL"
 	}
-	l := itemLines{key: "upgrade-confirm"}
-	for i, ch := range upgradeChoices {
-		sub := ""
-		if i == 0 {
-			sub = note
-		}
-		l.add(i, spawnChoiceRow(ch, sub, i == p.cursor, f.innerWidth()))
+	return confirmPopup{
+		popupID: "upgrade",
+		title:   "Upgrade " + target.label + " from " + check.Current + " to " + check.Latest + "?",
+		action:  "Upgrade and restart",
+		detail:  note,
+		accept: func(c *ctx) tea.Cmd {
+			c.setFlash("upgrading " + target.label)
+			return c.m.upgradeRunCmd(target)
+		},
 	}
-	f.parts = l.window(f.bodyCtx(c), p.cursor, f.bodyHeight())
-	c.hitRect(drawCenter(scr, area, f.render()))
 }

@@ -46,14 +46,18 @@ func (l *itemLines) add(item int, block string) {
 
 func (l *itemLines) text(block string) { l.lines = append(l.lines, strings.Split(block, "\n")...) }
 
-func (l itemLines) scroll(c *ctx, cursor, avail int) int {
-	start, end := 0, 0
+func (l itemLines) span(i int) rowSpan {
 	for _, s := range l.spans {
-		if s.index == cursor {
-			start, end = s.top, s.bottom
-			break
+		if s.index == i {
+			return s
 		}
 	}
+	return rowSpan{}
+}
+
+func (l itemLines) scroll(c *ctx, cursor, avail int) int {
+	sp := l.span(cursor)
+	start, end := sp.top, sp.bottom
 	var saved map[string]int
 	if c != nil && c.m != nil {
 		saved = c.m.listScroll
@@ -72,10 +76,15 @@ func (l itemLines) window(c *ctx, cursor, avail int) []string {
 	if avail > 0 {
 		end = min(end, scroll+avail)
 	}
+	l.hitVisible(c, scroll, end)
+	return l.lines[scroll:end]
+}
+
+// hitVisible records the rows of the items shown in lines [scroll, end).
+func (l itemLines) hitVisible(c *ctx, scroll, end int) {
 	for _, s := range l.spans {
 		if top, bottom := max(s.top, scroll), min(s.bottom, end); top < bottom {
 			c.hitRows(rowSpan{index: s.index, top: top - scroll, bottom: bottom - scroll})
 		}
 	}
-	return l.lines[scroll:end]
 }
