@@ -78,7 +78,16 @@ type Check struct {
 }
 
 func (u *Updater) Check(ctx context.Context) (Check, error) {
-	tag, err := u.latestTag(ctx, checkCacheTTL)
+	return u.check(ctx, checkCacheTTL)
+}
+
+// CheckFresh is Check without the cache.
+func (u *Updater) CheckFresh(ctx context.Context) (Check, error) {
+	return u.check(ctx, 0)
+}
+
+func (u *Updater) check(ctx context.Context, maxAge time.Duration) (Check, error) {
+	tag, err := u.latestTag(ctx, maxAge)
 	if err != nil {
 		return Check{}, err
 	}
@@ -112,7 +121,10 @@ func (u *Updater) Apply(ctx context.Context) (from, to string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	if tag == u.Version || tag == u.installed {
+	if !Newer(tag, u.Version) {
+		return u.Version, u.Version, nil
+	}
+	if tag == u.installed {
 		return u.Version, tag, nil
 	}
 	if err := u.install(ctx, tag); err != nil {

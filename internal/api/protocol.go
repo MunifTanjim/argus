@@ -54,7 +54,7 @@ const (
 	MethodSessionHistoryToolDetail  = "sessions.historyToolDetail" // request: HistoryToolDetailParams; result: ToolDetail
 	MethodNodeIdentify              = "node.identify"              // request: no params; result: IdentifyResult
 	MethodServerInfo                = "server.info"                // request: no params; result: ServerInfo
-	MethodServerCheckUpgrade        = "server.checkUpgrade"        // request: ServerTargetParams; result: CheckUpgradeResult
+	MethodServerCheckUpgrade        = "server.checkUpgrade"        // request: UpgradeParams; result: CheckUpgradeResult
 	MethodServerUpgrade             = "server.upgrade"             // request: ServerTargetParams; result: UpgradeResult (swaps the binary, no restart)
 	MethodServerRestart             = "server.restart"             // request: ServerTargetParams; result: nil (execs the binary on disk after replying)
 	MethodNodesList                 = "nodes.list"                 // request: no params; result: NodesListResult
@@ -652,6 +652,12 @@ type ServerInfo struct {
 // node named by NodeID, or to the gateway when NodeID is empty.
 type ServerTargetParams struct {
 	NodeID string `json:"node_id,omitempty"`
+}
+
+type UpgradeParams struct {
+	ServerTargetParams
+	// Fresh makes server.checkUpgrade skip its cache.
+	Fresh bool `json:"fresh,omitempty"`
 }
 
 type CheckUpgradeResult struct {

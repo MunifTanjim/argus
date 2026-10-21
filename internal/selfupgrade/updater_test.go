@@ -181,6 +181,19 @@ func TestApplyAlreadyLatest(t *testing.T) {
 	}
 }
 
+func TestApplyKeepsBuildPastLatestTag(t *testing.T) {
+	f, srv := newFakeRelease(t, "1.0.0", newBinary)
+	u := testUpdater(t, srv, "argus")
+	u.Version = "1.0.0-14-g0cac2131"
+	from, to, err := u.Apply(context.Background())
+	if err != nil || from != u.Version || to != u.Version {
+		t.Fatalf("Apply = %q, %q, %v", from, to, err)
+	}
+	if f.binHit.Load() != 0 {
+		t.Fatal("must not downgrade a build made after the latest tag")
+	}
+}
+
 func TestApplyTwiceDownloadsOnce(t *testing.T) {
 	f, srv := newFakeRelease(t, "1.1.0", newBinary)
 	u := testUpdater(t, srv, "argus")

@@ -26,6 +26,29 @@ func TestServiceCheck(t *testing.T) {
 	}
 }
 
+func TestServiceCheckFresh(t *testing.T) {
+	f, srv := newFakeRelease(t, "1.1.0", newBinary)
+	s := NewService(testUpdater(t, srv, "argus"), func() {})
+	server := api.NewServer()
+	s.Register(server)
+	check := func(params string) api.CheckUpgradeResult {
+		t.Helper()
+		res, err := server.DispatchFunc()(context.Background(), api.MethodServerCheckUpgrade, json.RawMessage(params))
+		if err != nil {
+			t.Fatalf("checkUpgrade(%q): %v", params, err)
+		}
+		return res.(api.CheckUpgradeResult)
+	}
+	check(``)
+	f.tag = "1.2.0"
+	if got := check(``).Latest; got != "1.1.0" {
+		t.Fatalf("cached Latest = %q, want 1.1.0", got)
+	}
+	if got := check(`{"fresh":true}`).Latest; got != "1.2.0" {
+		t.Fatalf("fresh Latest = %q, want 1.2.0", got)
+	}
+}
+
 func TestUpgradeSurvivesCancelledRequest(t *testing.T) {
 	_, srv := newFakeRelease(t, "1.1.0", newBinary)
 	u := testUpdater(t, srv, "argus")
