@@ -20,44 +20,48 @@ import (
 // cipher otherwise). The local unix socket uses api.NewReconnectingClient. When head is
 // non-nil the E2E client enforces the trust log (locked mode); otherwise it uses TOFU.
 func connect(ctx context.Context, cfg *config.Config, gatewayURL, token, socket string, head []byte) (tui.Client, error) {
-	dial, err := gatewayDialer(gatewayURL, token, socket)
+	c, err := dialClient(ctx, cfg, gatewayURL, token, socket, head)
 	if err != nil {
 		shell.StdErrF("argus: %v\n", err)
+		return nil, err
+	}
+	return c, nil
+}
+
+// dialClient is connect without the printing: the error text carries what connect prints.
+func dialClient(ctx context.Context, cfg *config.Config, gatewayURL, token, socket string, head []byte) (tui.Client, error) {
+	dial, err := gatewayDialer(gatewayURL, token, socket)
+	if err != nil {
 		return nil, err
 	}
 	if gatewayURL != "" {
 		if !cfg.E2EE.Enabled {
 			c, err := client.NewReconnectingPlainClient(ctx, dial)
 			if err != nil {
-				shell.StdErrF("argus: cannot connect to gateway at %s: %v\n", gatewayURL, err)
-				return nil, err
+				return nil, fmt.Errorf("cannot connect to gateway at %s: %w", gatewayURL, err)
 			}
 			return c, nil
 		}
 		if len(head) > 0 {
 			static, ierr := e2e.LoadOrCreateIdentity(config.GetStatePath("client-identity.json"))
 			if ierr != nil {
-				shell.StdErrF("argus: client identity: %v\n", ierr)
-				return nil, ierr
+				return nil, fmt.Errorf("client identity: %w", ierr)
 			}
 			c, err := client.NewReconnectingE2EClientLocked(ctx, dial, head, static, config.GetStatePath("client-trustlog-chain"))
 			if err != nil {
-				shell.StdErrF("argus: cannot establish e2e session with gateway at %s: %v\n", gatewayURL, err)
-				return nil, err
+				return nil, fmt.Errorf("cannot establish e2e session with gateway at %s: %w", gatewayURL, err)
 			}
 			return c, nil
 		}
 		c, err := client.NewReconnectingE2EClient(ctx, dial)
 		if err != nil {
-			shell.StdErrF("argus: cannot connect to gateway at %s: %v\n", gatewayURL, err)
-			return nil, err
+			return nil, fmt.Errorf("cannot connect to gateway at %s: %w", gatewayURL, err)
 		}
 		return c, nil
 	}
 	c, err := api.NewReconnectingClient(ctx, dial) // local unix socket only
 	if err != nil {
-		shell.StdErrF("argus: cannot connect to argusd at %s: %v\n", socket, err)
-		return nil, err
+		return nil, fmt.Errorf("cannot connect to argusd at %s: %w", socket, err)
 	}
 	return c, nil
 }

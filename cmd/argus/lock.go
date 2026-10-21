@@ -105,8 +105,14 @@ func newLockStatusCmd() *cobra.Command {
 // hang `lock status` — the one command run when the gateway is broken.
 var gatewayProbeTimeout = 5 * time.Second
 
+type gatewayEndpoint struct{ URL, Token string }
+
+func configEndpoint(cfg *config.Config) gatewayEndpoint {
+	return gatewayEndpoint{URL: cfg.Gateway.URL, Token: cfg.Token}
+}
+
 func printClientPinStatus(ctx context.Context, cfg *config.Config) error {
-	line, err := clientPinLine(ctx, cfg)
+	line, err := clientPinLine(ctx, cfg, configEndpoint(cfg))
 	shell.StdOutF("%s", line)
 	return err
 }
@@ -116,22 +122,32 @@ func printClientPinStatus(ctx context.Context, cfg *config.Config) error {
 // not yet authorized. The node RPC says nothing about the client role, so this is the
 // only place it is reported.
 func printTUIRole(ctx context.Context, cfg *config.Config, st api.LockStatusResult) error {
+	text, err := tuiRoleLines(ctx, cfg, configEndpoint(cfg), st)
+	shell.StdOutF("%s", text)
+	return err
+}
+
+// tuiRoleLines returns the text printTUIRole prints. A non-nil error means the gateway
+// probe could not complete; the text is still complete.
+func tuiRoleLines(ctx context.Context, cfg *config.Config, ep gatewayEndpoint, st api.LockStatusResult) (string, error) {
 	kp, err := e2e.LoadOrCreateIdentity(config.GetStatePath("client-identity.json"))
 	if err != nil {
-		return printClientPinStatus(ctx, cfg) // identity unreadable: still show the pin line
+		return clientPinLine(ctx, cfg, ep) // identity unreadable: still show the pin line
 	}
-	shell.StdOutF("\nthis tui\n  identity: %s", keyfmt.DeviceKey.Encode(kp.Public))
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nthis tui\n  identity: %s", keyfmt.DeviceKey.Encode(kp.Public))
 	showAuthz := st.Enabled && devicesKnown(st)
 	authorized := showAuthz && keyAuthorized(kp.Public, st.Devices)
 	if showAuthz {
-		shell.StdOutF("   authorized: %s", yesNo(authorized))
+		fmt.Fprintf(&b, "   authorized: %s", yesNo(authorized))
 	}
-	shell.StdOutF("\n")
-	pinErr := printClientPinStatus(ctx, cfg)
+	b.WriteString("\n")
+	line, pinErr := clientPinLine(ctx, cfg, ep)
+	b.WriteString(line)
 	if showAuthz && !authorized {
-		shell.StdOutF("  → to authorize this tui, run on a signer node:\n      %s\n", lockSignHint(kp.Public))
+		fmt.Fprintf(&b, "  → to authorize this tui, run on a signer node:\n      %s\n", lockSignHint(kp.Public))
 	}
-	return pinErr
+	return b.String(), pinErr
 }
 
 // devicesKnown reports whether st carries the authorized device set. A daemon that
@@ -152,7 +168,7 @@ func keyAuthorized(key []byte, devices [][]byte) bool {
 // clientPinLine is the only surface for the client (TUI) role's quarantine: it has no
 // RPC and the node status says nothing about it. A non-nil error means the probe could
 // not complete; the caller still prints the line, then exits non-zero.
-func clientPinLine(ctx context.Context, cfg *config.Config) (string, error) {
+func clientPinLine(ctx context.Context, cfg *config.Config, ep gatewayEndpoint) (string, error) {
 	pin, perr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
 	// A pinned client is checked too, not just an unpinned one: when the chain it
 	// names has been disabled the pin is dead, and the network genesis is what the
@@ -160,13 +176,13 @@ func clientPinLine(ctx context.Context, cfg *config.Config) (string, error) {
 	superseded := perr == nil && pin.Genesis != nil && clientPinSuperseded(pin.Genesis)
 	var netGenesis []byte
 	var neterr error
-	if perr == nil && (pin.Genesis == nil || superseded) && cfg.Gateway.URL != "" {
+	if perr == nil && (pin.Genesis == nil || superseded) && ep.URL != "" {
 		pctx, cancel := context.WithTimeout(ctx, gatewayProbeTimeout)
 		defer cancel()
 		if superseded {
-			netGenesis, neterr = supersedingGenesisFromNetwork(pctx, cfg, pin.Genesis)
+			netGenesis, neterr = supersedingGenesisFromNetwork(pctx, cfg, ep, pin.Genesis)
 		} else {
-			netGenesis, neterr = quarantiningGenesis(pctx, cfg)
+			netGenesis, neterr = quarantiningGenesis(pctx, cfg, ep)
 		}
 		if errors.Is(neterr, context.DeadlineExceeded) {
 			neterr = fmt.Errorf("the gateway did not answer within %s", gatewayProbeTimeout)
@@ -440,8 +456,8 @@ func lockInitFewSignersWarning(signerCount int) string {
 	return ""
 }
 
-func fetchRoster(ctx context.Context, cfg *config.Config) ([]api.NodeDescriptor, error) {
-	dial, err := gatewayDialer(cfg.Gateway.URL, cfg.Token, cfg.Socket)
+func fetchRoster(ctx context.Context, cfg *config.Config, ep gatewayEndpoint) ([]api.NodeDescriptor, error) {
+	dial, err := gatewayDialer(ep.URL, ep.Token, cfg.Socket)
 	if err != nil {
 		return nil, err
 	}
@@ -542,7 +558,7 @@ func newLockInitCmd() *cobra.Command {
 				return fail(cmd, err)
 			}
 
-			roster, err := fetchRoster(ctx, cfg)
+			roster, err := fetchRoster(ctx, cfg, configEndpoint(cfg))
 			if err != nil {
 				return fail(cmd, err)
 			}
@@ -645,7 +661,7 @@ func newLockDeviceCmd(use, short, method, noopMsg string) *cobra.Command {
 				if cfg.Gateway.URL == "" {
 					return fail(cmd, fmt.Errorf("%v (no gateway configured to resolve a node name)", derr))
 				}
-				roster, rerr := fetchRoster(ctx, cfg)
+				roster, rerr := fetchRoster(ctx, cfg, configEndpoint(cfg))
 				if rerr != nil {
 					return fail(cmd, rerr)
 				}

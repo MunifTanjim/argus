@@ -66,7 +66,7 @@ func TestApplyPinLeavesTheClientUnpinnedWhenTheNodeRefuses(t *testing.T) {
 	tempStateDir(t)
 	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodLockPin: refusePin})}
 
-	err := applyPin(context.Background(), cfg, testGenesis(0x22))
+	_, _, err := applyPin(context.Background(), cfg, testGenesis(0x22))
 
 	if err == nil {
 		t.Fatal("a node-side refusal must fail the command")
@@ -85,7 +85,7 @@ func TestApplyPinWritesTheClientPinWhenTheNodeAccepts(t *testing.T) {
 	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodLockPin: acceptPin})}
 	genesis := testGenesis(0x33)
 
-	if err := applyPin(context.Background(), cfg, genesis); err != nil {
+	if _, _, err := applyPin(context.Background(), cfg, genesis); err != nil {
 		t.Fatalf("applyPin: %v", err)
 	}
 
@@ -102,7 +102,7 @@ func TestApplyPinRefusesWhenAnUnreachableNodeHoldsADifferentPin(t *testing.T) {
 		t.Fatalf("seed node pin: %v", err)
 	}
 
-	err := applyPin(context.Background(), cfg, testGenesis(0x55))
+	_, _, err := applyPin(context.Background(), cfg, testGenesis(0x55))
 
 	if err == nil {
 		t.Fatal("a stopped node pinned to another genesis must still block the client pin")
@@ -118,7 +118,7 @@ func TestApplyPinPinsTheClientWhenNoNodeIsRunning(t *testing.T) {
 	cfg := &config.Config{Socket: filepath.Join(t.TempDir(), "absent.sock")}
 	genesis := testGenesis(0x66)
 
-	if err := applyPin(context.Background(), cfg, genesis); err != nil {
+	if _, _, err := applyPin(context.Background(), cfg, genesis); err != nil {
 		t.Fatalf("a client-only machine must still be pinnable: %v", err)
 	}
 
@@ -213,7 +213,7 @@ func TestClientPinLineReturnsWhenTheGatewayNeverAnswers(t *testing.T) {
 	cfg.Gateway.URL = "ws://" + strings.TrimPrefix(ts.URL, "http://")
 
 	lines := make(chan string, 1)
-	go func() { line, _ := clientPinLine(context.Background(), cfg); lines <- line }()
+	go func() { line, _ := clientPinLine(context.Background(), cfg, configEndpoint(cfg)); lines <- line }()
 
 	select {
 	case line := <-lines:
@@ -326,7 +326,7 @@ func TestQuarantiningGenesisReportsCompetingRoots(t *testing.T) {
 	}
 	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodTrustLogSync: sync})}
 
-	got, err := quarantiningGenesis(context.Background(), cfg)
+	got, err := quarantiningGenesis(context.Background(), cfg, configEndpoint(cfg))
 
 	if err != nil {
 		t.Fatalf("quarantiningGenesis: %v", err)
@@ -346,7 +346,7 @@ func TestQuarantiningGenesisReportsNoneOnAnUnlockedNetwork(t *testing.T) {
 	}
 	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodTrustLogSync: sync})}
 
-	got, err := quarantiningGenesis(context.Background(), cfg)
+	got, err := quarantiningGenesis(context.Background(), cfg, configEndpoint(cfg))
 
 	if err != nil || got != nil {
 		t.Fatalf("no chains → want (nil, nil), got (%x, %v)", got, err)
@@ -367,7 +367,7 @@ func TestUnpinResolvesAConfigFileConflict(t *testing.T) {
 		t.Fatal("precondition: config X + file Y must be a conflict")
 	}
 
-	if err := unpinDevice(context.Background(), cfg); err != nil {
+	if _, _, err := unpinDevice(context.Background(), cfg); err != nil {
 		t.Fatalf("unpin must be able to clear the file it is documented to clear: %v", err)
 	}
 
@@ -387,7 +387,7 @@ func TestUnpinClearsAFilePin(t *testing.T) {
 		t.Fatalf("seed client pin: %v", err)
 	}
 
-	if err := unpinDevice(context.Background(), cfg); err != nil {
+	if _, _, err := unpinDevice(context.Background(), cfg); err != nil {
 		t.Fatalf("a file-pinned device must be unpinnable: %v", err)
 	}
 
@@ -408,7 +408,7 @@ func TestUnpinClearsAStoppedNodesPinWhenTheConfigStillPinsIt(t *testing.T) {
 		t.Fatalf("seed node pin: %v", err)
 	}
 
-	if err := unpinDevice(context.Background(), cfg); err != nil {
+	if _, _, err := unpinDevice(context.Background(), cfg); err != nil {
 		t.Fatalf("unpinDevice: %v", err)
 	}
 
@@ -428,7 +428,7 @@ func TestUnpinLeavesAStoppedNodesPinAloneWithoutAConfigPin(t *testing.T) {
 		t.Fatalf("seed node pin: %v", err)
 	}
 
-	if err := unpinDevice(context.Background(), cfg); err != nil {
+	if _, _, err := unpinDevice(context.Background(), cfg); err != nil {
 		t.Fatalf("unpinDevice: %v", err)
 	}
 
@@ -611,5 +611,122 @@ func TestGuardPinRefusesWhenTheNodeChainIsLive(t *testing.T) {
 
 	if err := guardPin(&config.Config{}, testGenesis(0xEF)); err == nil {
 		t.Fatal("a live node chain must still require unpin")
+	}
+}
+
+func TestApplyPinReturnsItsReportInsteadOfPrinting(t *testing.T) {
+	tempStateDir(t)
+	cfg := &config.Config{Socket: serveFakeNode(t, map[string]api.HandlerFunc{api.MethodLockPin: acceptPin})}
+	var out, notes string
+	var err error
+
+	stdout, stderr := captureOutput(t, func() {
+		out, notes, err = applyPin(context.Background(), cfg, testGenesis(0x71))
+	})
+
+	if err != nil {
+		t.Fatalf("applyPin: %v", err)
+	}
+	for _, want := range []string{"pinned this device", "local node pinned and enforcing"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("out must contain %q, got: %q", want, out)
+		}
+	}
+	if notes != "" {
+		t.Errorf("notes = %q, want empty", notes)
+	}
+	if stdout != "" || stderr != "" {
+		t.Errorf("applyPin printed stdout=%q stderr=%q", stdout, stderr)
+	}
+}
+
+func TestApplyPinReturnsTheUnreachableNodeNote(t *testing.T) {
+	tempStateDir(t)
+	cfg := &config.Config{Socket: filepath.Join(t.TempDir(), "absent.sock")}
+	var notes string
+	var err error
+
+	_, stderr := captureOutput(t, func() {
+		_, notes, err = applyPin(context.Background(), cfg, testGenesis(0x72))
+	})
+
+	if err != nil {
+		t.Fatalf("applyPin: %v", err)
+	}
+	if !strings.Contains(notes, "the local node is unreachable") {
+		t.Errorf("notes must carry the unreachable-node note, got: %q", notes)
+	}
+	if stderr != "" {
+		t.Errorf("applyPin printed to stderr: %q", stderr)
+	}
+}
+
+func TestUnpinDeviceReturnsItsReportInsteadOfPrinting(t *testing.T) {
+	tempStateDir(t)
+	cfg := &config.Config{Socket: filepath.Join(t.TempDir(), "absent.sock")}
+	var out, notes string
+	var err error
+
+	stdout, stderr := captureOutput(t, func() {
+		out, notes, err = unpinDevice(context.Background(), cfg)
+	})
+
+	if err != nil {
+		t.Fatalf("unpinDevice: %v", err)
+	}
+	if !strings.Contains(out, "cleared this device's persisted pin") {
+		t.Errorf("out = %q", out)
+	}
+	if !strings.Contains(notes, unpinSummary(nil)) {
+		t.Errorf("notes must contain the unpin summary, got: %q", notes)
+	}
+	if stdout != "" || stderr != "" {
+		t.Errorf("unpinDevice printed stdout=%q stderr=%q", stdout, stderr)
+	}
+}
+
+func blockRemoval(t *testing.T, dir, name string) {
+	t.Helper()
+	blocked := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Join(blocked, "keep"), 0o700); err != nil {
+		t.Fatalf("block %s: %v", name, err)
+	}
+}
+
+func TestApplyPinKeepsTheNodeNoteWhenALaterStepFails(t *testing.T) {
+	dir := tempStateDir(t)
+	cfg := &config.Config{Socket: filepath.Join(t.TempDir(), "absent.sock")}
+	blockRemoval(t, dir, "client-trustlog-chain")
+
+	out, notes, err := applyPin(context.Background(), cfg, testGenesis(0x73))
+
+	if err == nil {
+		t.Fatal("a chain that cannot be removed must fail the pin")
+	}
+	if out != "" || !strings.Contains(notes, "the local node is unreachable") {
+		t.Fatalf("out = %q, notes = %q; the unreachable-node note must survive the error", out, notes)
+	}
+}
+
+func TestUnpinPartsKeepTheOriginalStreamOrder(t *testing.T) {
+	dir := tempStateDir(t)
+	cfg := &config.Config{Socket: filepath.Join(t.TempDir(), "absent.sock")}
+	cfg.Lock.Genesis = trustpin.Encode(testGenesis(0x74))
+	blockRemoval(t, dir, "trustlog-chain")
+
+	parts, err := unpinParts(context.Background(), cfg)
+
+	if err != nil {
+		t.Fatalf("unpinParts: %v", err)
+	}
+	wantStderr := []bool{false, true, false, true}
+	wantText := []string{"cleared this device's persisted pin", "stored chain could not be removed", "local node is not running", "lock.genesis"}
+	if len(parts) != len(wantText) {
+		t.Fatalf("got %d parts, want %d: %+v", len(parts), len(wantText), parts)
+	}
+	for i, p := range parts {
+		if p.stderr != wantStderr[i] || !strings.Contains(p.text, wantText[i]) {
+			t.Errorf("part %d = %+v, want stderr=%v containing %q", i, p, wantStderr[i], wantText[i])
+		}
 	}
 }
