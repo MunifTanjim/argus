@@ -47,10 +47,14 @@ type Updater struct {
 	// not run until it restarts.
 	installed string
 
-	cacheMu  sync.Mutex
-	latest   string
-	latestAt time.Time
-	now      func() time.Time
+	cacheMu sync.Mutex
+	latest  map[bool]cachedTag
+	now     func() time.Time
+}
+
+type cachedTag struct {
+	tag string
+	at  time.Time
 }
 
 // New returns an Updater for the running executable.
@@ -75,41 +79,53 @@ func New(version string) (*Updater, error) {
 type Check struct {
 	Current string
 	Latest  string
+	Beta    bool
 }
 
-func (u *Updater) Check(ctx context.Context) (Check, error) {
-	return u.check(ctx, checkCacheTTL)
+func (u *Updater) Check(ctx context.Context, beta bool) (Check, error) {
+	return u.check(ctx, beta, checkCacheTTL)
 }
 
 // CheckFresh is Check without the cache.
-func (u *Updater) CheckFresh(ctx context.Context) (Check, error) {
-	return u.check(ctx, 0)
+func (u *Updater) CheckFresh(ctx context.Context, beta bool) (Check, error) {
+	return u.check(ctx, beta, 0)
 }
 
-func (u *Updater) check(ctx context.Context, maxAge time.Duration) (Check, error) {
-	tag, err := u.latestTag(ctx, maxAge)
+func (u *Updater) check(ctx context.Context, beta bool, maxAge time.Duration) (Check, error) {
+	beta = u.channel(beta)
+	tag, err := u.latestTag(ctx, beta, maxAge)
 	if err != nil {
 		return Check{}, err
 	}
-	return Check{Current: u.Version, Latest: tag}, nil
+	return Check{Current: u.Version, Latest: tag, Beta: beta}, nil
 }
 
-func (u *Updater) latestTag(ctx context.Context, maxAge time.Duration) (string, error) {
+// channel keeps a running beta on the beta channel.
+func (u *Updater) channel(beta bool) bool {
+	return beta || IsPrerelease(u.Version)
+}
+
+func (u *Updater) latestTag(ctx context.Context, beta bool, maxAge time.Duration) (string, error) {
 	u.cacheMu.Lock()
 	defer u.cacheMu.Unlock()
-	if u.latest == "" || u.clock().Sub(u.latestAt) >= maxAge {
-		tag, err := u.fetchLatestTag(ctx)
+	c := u.latest[beta]
+	if c.tag == "" || u.clock().Sub(c.at) >= maxAge {
+		tag, err := u.fetchLatestTag(ctx, beta)
 		if err != nil {
 			return "", fmt.Errorf("failed to resolve latest release: %w", err)
 		}
-		u.latest, u.latestAt = tag, u.clock()
+		c = cachedTag{tag: tag, at: u.clock()}
+		if u.latest == nil {
+			u.latest = map[bool]cachedTag{}
+		}
+		u.latest[beta] = c
 	}
-	return u.latest, nil
+	return c.tag, nil
 }
 
 // Apply swaps in the latest release. It does not restart. to == from means
 // the process already runs the latest version.
-func (u *Updater) Apply(ctx context.Context) (from, to string, err error) {
+func (u *Updater) Apply(ctx context.Context, beta bool) (from, to string, err error) {
 	if !u.busy.TryLock() {
 		return "", "", ErrBusy
 	}
@@ -117,7 +133,7 @@ func (u *Updater) Apply(ctx context.Context) (from, to string, err error) {
 	if filepath.Base(u.ExecPath) != config.BinaryName {
 		return "", "", fmt.Errorf("upgrade can only be run with the %s binary", config.BinaryName)
 	}
-	tag, err := u.latestTag(ctx, 0)
+	tag, err := u.latestTag(ctx, u.channel(beta), 0)
 	if err != nil {
 		return "", "", err
 	}

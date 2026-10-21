@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,20 +21,22 @@ import (
 
 func TestPlanUpgrade(t *testing.T) {
 	cases := []struct {
-		name                        string
-		noRestart, noDownload, live bool
-		want                        upgradeSteps
-		err                         string
+		name                              string
+		noRestart, noDownload, beta, live bool
+		want                              upgradeSteps
+		err                               string
 	}{
 		{name: "default with daemon", live: true, want: upgradeSteps{download: true, restart: true}},
 		{name: "default without daemon", want: upgradeSteps{download: true}},
 		{name: "no-restart with daemon", noRestart: true, live: true, want: upgradeSteps{download: true}},
 		{name: "no-download with daemon", noDownload: true, live: true, want: upgradeSteps{restart: true}},
 		{name: "no-download without daemon", noDownload: true, err: "no running argus process"},
+		{name: "beta with daemon", beta: true, live: true, want: upgradeSteps{download: true, restart: true, beta: true}},
+		{name: "beta with no-download", beta: true, noDownload: true, live: true, err: "--beta with --no-download"},
 		{name: "both flags", noRestart: true, noDownload: true, live: true, err: "nothing to do"},
 	}
 	for _, c := range cases {
-		got, err := planUpgrade(c.noRestart, c.noDownload, c.live)
+		got, err := planUpgrade(c.noRestart, c.noDownload, c.beta, c.live)
 		if c.err != "" {
 			if err == nil || !strings.Contains(err.Error(), c.err) {
 				t.Errorf("%s: err %v, want %q", c.name, err, c.err)
@@ -112,15 +116,155 @@ func TestRunningDaemons(t *testing.T) {
 
 func TestUpgradeDaemonFallsBackForOldDaemon(t *testing.T) {
 	sock, c := oldDaemon(t)
-	var inProcess bool
-	upgradeInProcessFn = func(context.Context, *cobra.Command) error { inProcess = true; return nil }
-	t.Cleanup(func() { upgradeInProcessFn = upgradeInProcess })
-	err := upgradeDaemon(context.Background(), &cobra.Command{}, daemonConn{socket: sock, client: c}, upgradeSteps{download: true, restart: true}, "")
+	stub := stubInProcess(t)
+	err := upgradeDaemon(context.Background(), &cobra.Command{}, daemonConn{socket: sock, client: c}, upgradeSteps{download: true, restart: true, beta: true}, "")
 	if err != nil {
 		t.Fatalf("upgradeDaemon: %v", err)
 	}
-	if !inProcess {
+	if !stub.called {
 		t.Fatal("an old daemon must fall back to the in-process upgrade")
+	}
+	if !stub.beta {
+		t.Fatal("the fallback must receive beta")
+	}
+}
+
+type upgradeDaemonFake struct {
+	mu        sync.Mutex
+	checks    []api.UpgradeParams
+	upgrades  []api.UpgradeParams
+	restarts  int
+	startedAt string
+}
+
+func (f *upgradeDaemonFake) record(dst *[]api.UpgradeParams, raw json.RawMessage) {
+	var p api.UpgradeParams
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &p)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	*dst = append(*dst, p)
+}
+
+func (f *upgradeDaemonFake) calls() (checks, upgrades []api.UpgradeParams) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]api.UpgradeParams(nil), f.checks...), append([]api.UpgradeParams(nil), f.upgrades...)
+}
+
+// serveUpgradeDaemon mimics a daemon with server.checkUpgrade,
+// server.upgrade, and server.restart that replies with check.
+func serveUpgradeDaemon(t *testing.T, sock string, check api.CheckUpgradeResult) *upgradeDaemonFake {
+	t.Helper()
+	return serveUpgradeDaemonWith(t, sock, check, api.UpgradeResult{From: check.Current, To: check.Latest})
+}
+
+func serveUpgradeDaemonWith(t *testing.T, sock string, check api.CheckUpgradeResult, upgrade api.UpgradeResult) *upgradeDaemonFake {
+	t.Helper()
+	l, err := api.ListenUnix(sock, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	f := &upgradeDaemonFake{startedAt: "0"}
+	srv := api.NewServer()
+	srv.Handle(api.MethodServerInfo, func(context.Context, json.RawMessage) (any, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return api.ServerInfo{Version: check.Current, StartedAt: f.startedAt}, nil
+	})
+	srv.Handle(api.MethodServerRestart, func(context.Context, json.RawMessage) (any, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.restarts++
+		f.startedAt = fmt.Sprint(f.restarts)
+		return nil, nil
+	})
+	srv.Handle(api.MethodServerCheckUpgrade, func(_ context.Context, raw json.RawMessage) (any, error) {
+		f.record(&f.checks, raw)
+		return check, nil
+	})
+	srv.Handle(api.MethodServerUpgrade, func(_ context.Context, raw json.RawMessage) (any, error) {
+		f.record(&f.upgrades, raw)
+		return upgrade, nil
+	})
+	go func() { _ = srv.Serve(l) }()
+	return f
+}
+
+func dialTest(t *testing.T, sock string) *api.Client {
+	t.Helper()
+	c, err := api.Dial(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	return c
+}
+
+func TestUpgradeDaemonBeta(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	sock := filepath.Join(shortTempDir(t), "argus.sock")
+	f := serveUpgradeDaemon(t, sock, api.CheckUpgradeResult{Current: "0.1.3", Latest: "0.1.4-beta.1", Beta: true})
+	c := dialTest(t, sock)
+	var upgradeErr error
+	out := captureStderr(t, func() {
+		upgradeErr = upgradeDaemon(context.Background(), &cobra.Command{}, daemonConn{socket: sock, client: c}, upgradeSteps{download: true, beta: true}, "")
+	})
+	if upgradeErr != nil {
+		t.Fatalf("upgradeDaemon: %v\n%s", upgradeErr, out)
+	}
+	checks, upgrades := f.calls()
+	if len(checks) != 1 || !checks[0].Beta || !checks[0].Fresh {
+		t.Fatalf("server.checkUpgrade params = %+v, want one call with Beta and Fresh", checks)
+	}
+	if len(upgrades) != 1 || !upgrades[0].Beta {
+		t.Fatalf("server.upgrade params = %+v, want one call with Beta", upgrades)
+	}
+	if !strings.Contains(out, "Upgraded to 0.1.4-beta.1!") {
+		t.Fatalf("output %q lacks the upgraded version", out)
+	}
+}
+
+func TestUpgradeDaemonNothingNewerOnApply(t *testing.T) {
+	sock := filepath.Join(shortTempDir(t), "argus.sock")
+	serveUpgradeDaemonWith(t, sock, api.CheckUpgradeResult{Current: "0.1.3", Latest: "0.1.4"}, api.UpgradeResult{From: "0.1.3", To: "0.1.3"})
+	c := dialTest(t, sock)
+	var upgradeErr error
+	out := captureStderr(t, func() {
+		upgradeErr = upgradeDaemon(context.Background(), &cobra.Command{}, daemonConn{socket: sock, client: c}, upgradeSteps{download: true}, "")
+	})
+	if upgradeErr != nil {
+		t.Fatalf("upgradeDaemon: %v\n%s", upgradeErr, out)
+	}
+	if strings.Contains(out, "Upgraded to") || !strings.Contains(out, "Already on the latest version!") {
+		t.Fatalf("output %q, want already on the latest version", out)
+	}
+}
+
+func TestUpgradeBetaFallsBackForDaemonWithoutBeta(t *testing.T) {
+	stub := stubInProcess(t)
+	sock := filepath.Join(shortTempDir(t), "argus.sock")
+	f := serveUpgradeDaemon(t, sock, api.CheckUpgradeResult{Current: "0.1.3", Latest: "0.1.3"})
+	c := dialTest(t, sock)
+	var upgradeErr error
+	out := captureStderr(t, func() {
+		upgradeErr = upgradeDaemon(context.Background(), &cobra.Command{}, daemonConn{socket: sock, client: c}, upgradeSteps{download: true, restart: true, beta: true}, "")
+	})
+	if upgradeErr != nil {
+		t.Fatalf("upgradeDaemon: %v\n%s", upgradeErr, out)
+	}
+	if !stub.called || !stub.beta {
+		t.Fatalf("in-process upgrade = %+v, want called with beta", *stub)
+	}
+	if _, upgrades := f.calls(); len(upgrades) != 0 {
+		t.Fatalf("server.upgrade called %d times, want 0", len(upgrades))
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.restarts != 1 {
+		t.Fatalf("server.restart called %d times, want 1", f.restarts)
 	}
 }
 
@@ -150,12 +294,17 @@ func captureStderr(t *testing.T, fn func()) string {
 	return <-done
 }
 
-func stubInProcess(t *testing.T) *bool {
+type inProcessStub struct{ called, beta bool }
+
+func stubInProcess(t *testing.T) *inProcessStub {
 	t.Helper()
-	var called bool
-	upgradeInProcessFn = func(context.Context, *cobra.Command) error { called = true; return nil }
+	stub := &inProcessStub{}
+	upgradeInProcessFn = func(_ context.Context, _ *cobra.Command, beta bool) error {
+		stub.called, stub.beta = true, beta
+		return nil
+	}
 	t.Cleanup(func() { upgradeInProcessFn = upgradeInProcess })
-	return &called
+	return stub
 }
 
 func runUpgradeCLI(t *testing.T, args ...string) (string, error) {
@@ -168,18 +317,29 @@ func runUpgradeCLI(t *testing.T, args ...string) (string, error) {
 }
 
 func TestUpgradeWithoutDaemonDownloadsInProcess(t *testing.T) {
-	called := stubInProcess(t)
+	stub := stubInProcess(t)
 	sock := filepath.Join(shortTempDir(t), "argus.sock")
 	if out, err := runUpgradeCLI(t, "--no-config", "--socket", sock); err != nil {
 		t.Fatalf("upgrade: %v\n%s", err, out)
 	}
-	if !*called {
+	if !stub.called {
 		t.Fatal("upgrade without a daemon must download in-process")
 	}
 }
 
+func TestUpgradeBetaWithoutDaemon(t *testing.T) {
+	stub := stubInProcess(t)
+	sock := filepath.Join(shortTempDir(t), "argus.sock")
+	if out, err := runUpgradeCLI(t, "--no-config", "--socket", sock, "--beta"); err != nil {
+		t.Fatalf("upgrade: %v\n%s", err, out)
+	}
+	if !stub.called || !stub.beta {
+		t.Fatalf("in-process upgrade = %+v, want called with beta", *stub)
+	}
+}
+
 func TestUpgradeIgnoresInvalidConfig(t *testing.T) {
-	called := stubInProcess(t)
+	stub := stubInProcess(t)
 	dir := shortTempDir(t)
 	cfg := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(cfg, []byte("tui:\n  mouse: maybe\n"), 0o644); err != nil {
@@ -189,7 +349,7 @@ func TestUpgradeIgnoresInvalidConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upgrade: %v\n%s", err, out)
 	}
-	if !*called {
+	if !stub.called {
 		t.Fatal("an invalid config must not block the upgrade")
 	}
 	if !strings.Contains(out, "Warning:") {

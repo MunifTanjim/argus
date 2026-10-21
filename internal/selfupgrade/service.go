@@ -44,19 +44,23 @@ func (s *Service) handleCheck(ctx context.Context, params json.RawMessage) (any,
 	if p.Fresh {
 		check = s.up.CheckFresh
 	}
-	c, err := check(ctx)
+	c, err := check(ctx, p.Beta)
 	if err != nil {
 		return nil, err
 	}
-	return api.CheckUpgradeResult{Current: c.Current, Latest: c.Latest}, nil
+	return api.CheckUpgradeResult{Current: c.Current, Latest: c.Latest, Beta: c.Beta}, nil
 }
 
 // The download outlives the request: a client that disconnects must not
 // leave the swap half done.
-func (s *Service) handleUpgrade(ctx context.Context, _ json.RawMessage) (any, error) {
+func (s *Service) handleUpgrade(ctx context.Context, params json.RawMessage) (any, error) {
+	p, err := api.Decode[api.UpgradeParams](params)
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), Timeout)
 	defer cancel()
-	from, to, err := s.up.Apply(ctx)
+	from, to, err := s.up.Apply(ctx, p.Beta)
 	if err != nil {
 		return nil, err
 	}

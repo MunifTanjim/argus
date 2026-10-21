@@ -93,3 +93,29 @@ func TestRestartAndUpgradeExcludeEachOther(t *testing.T) {
 		t.Fatalf("second restart: err %v, want ErrBusy", err)
 	}
 }
+
+func TestServiceCheckPassesBeta(t *testing.T) {
+	f, srv := newFakeRelease(t, "0.1.3", newBinary)
+	f.extra = []fakeEntry{{"0.1.4-beta.1", true}}
+	u := testUpdater(t, srv, "argus")
+	u.Version = "0.1.3"
+	s := NewService(u, func() {})
+	server := api.NewServer()
+	s.Register(server)
+	for _, tt := range []struct {
+		params string
+		want   api.CheckUpgradeResult
+	}{
+		{`{"beta":true}`, api.CheckUpgradeResult{Current: "0.1.3", Latest: "0.1.4-beta.1", Beta: true}},
+		{``, api.CheckUpgradeResult{Current: "0.1.3", Latest: "0.1.3"}},
+	} {
+		res, err := server.DispatchFunc()(context.Background(), api.MethodServerCheckUpgrade, json.RawMessage(tt.params))
+		if err != nil || res != tt.want {
+			t.Fatalf("checkUpgrade(%q) = %+v, %v; want %+v", tt.params, res, err, tt.want)
+		}
+	}
+	res, err := server.DispatchFunc()(context.Background(), api.MethodServerUpgrade, json.RawMessage(`{"beta":true}`))
+	if err != nil || res != (api.UpgradeResult{From: "0.1.3", To: "0.1.4-beta.1"}) {
+		t.Fatalf("upgrade(beta) = %+v, %v; want To 0.1.4-beta.1", res, err)
+	}
+}
