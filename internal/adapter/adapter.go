@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"path/filepath"
 	"strings"
 
@@ -21,7 +22,7 @@ import (
 // is already installed.
 type InstallOptions struct {
 	ArgusBin string // binary the hooks invoke (hook-based agents)
-	Socket   string // argusd mod socket (Claude Code)
+	Socket   string // argusd mod socket (Claude Code, Pi)
 }
 
 // ErrAgentNotInstalled reports that an agent's CLI is not available, so there is
@@ -180,6 +181,12 @@ type ShellInput interface {
 // Code); the node serves the mod socket from its bridge.
 type ModBridged interface {
 	ModBridge() *modbridge.Bridge
+}
+
+// Beaconed is an adapter whose sessions hold one open connection to argusd on
+// the mod socket (Pi); the node hands it each connection upgraded there.
+type Beaconed interface {
+	ServeBeacon(conn net.Conn)
 }
 
 // Spawner creates a new session over the agent's own service API, for headless

@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
@@ -29,14 +32,15 @@ var _ adapter.ModelLister = (*piAdapter)(nil)
 var _ adapter.Renamer = (*piAdapter)(nil)
 var _ adapter.PromptQueuer = (*piAdapter)(nil)
 var _ adapter.ShellInput = (*piAdapter)(nil)
+var _ adapter.Beaconed = (*piAdapter)(nil)
 
 func (piAdapter) Agent() string      { return Agent }
 func (piAdapter) AgentName() string  { return "Pi" }
 func (piAdapter) AgentColor() string { return "#b294bb" } // muted purple
 func (piAdapter) IsHeadless() bool   { return true }
 
-func (a *piAdapter) NewDiscoverer(reg *registry.Registry, _ map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
-	a.disc = newDiscoverer(reg)
+func (a *piAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
+	a.disc = newDiscoverer(reg, clients)
 	return a.disc
 }
 
@@ -58,7 +62,8 @@ func (a *piAdapter) ResumeCommand(agentSessionID string) (string, []string, bool
 	return "pi", []string{"--session", agentSessionID}, true
 }
 
-// Pi uses no shell hooks; status and dialogs arrive over RPC.
+// Pi uses no shell hooks; status and dialogs arrive over RPC (owned
+// sessions) or a beacon connection (foreign sessions).
 func (piAdapter) ProcessHook(_ *registry.Registry, _ adapter.HookEvent) (session.Session, bool) {
 	return session.Session{}, false
 }
@@ -152,7 +157,7 @@ func (a *piAdapter) SendPrompt(ctx context.Context, sess session.Session, text s
 	return d.sendPrompt(ctx, sess.AgentSessionID, text)
 }
 
-// IsShellInput also takes /new, which starts a new session.
+// IsShellInput also takes /new: a foreign session runs it only from pi's editor.
 func (piAdapter) IsShellInput(text string) bool {
 	return strings.HasPrefix(text, "!") || isNewCommand(text)
 }
@@ -169,6 +174,14 @@ func (a *piAdapter) SendShellInput(ctx context.Context, sess session.Session, te
 		return false, fmt.Errorf("%s: %w", sess.ID, api.ErrSessionBusy)
 	}
 	return d.runShell(ctx, sess.AgentSessionID, text)
+}
+
+func (a *piAdapter) ServeBeacon(conn net.Conn) {
+	if a.disc == nil {
+		conn.Close()
+		return
+	}
+	a.disc.serveBeacon(conn)
 }
 
 func (a *piAdapter) SpawnSession(ctx context.Context, cwd string, opts adapter.SpawnOptions) (string, error) {
@@ -195,12 +208,72 @@ func (piAdapter) ListModels(ctx context.Context) ([]api.ModelInfo, error) {
 	return parseModelList(out), nil
 }
 
-// Pi needs no argus-managed config: there is nothing to install into pi's
-// settings.
-func (piAdapter) Install(adapter.InstallOptions) error { return nil }
-func (piAdapter) Reconcile(adapter.InstallOptions) ([]string, error) {
-	return nil, nil
+// beaconPath is the global gate-extension install location. Every pi process
+// auto-loads it, so installing here turns the extension into a beacon for
+// foreign (non-Argus-spawned) sessions. Managed sessions are unaffected:
+// ARGUS_MANAGED switches the same file to RPC-dialog mode.
+func beaconPath() (string, error) {
+	home, err := piHome()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "extensions", "argus.ts"), nil
 }
-func (piAdapter) Uninstall() error              { return nil }
-func (piAdapter) SettingsPath() (string, error) { return "", nil }
-func (piAdapter) DefaultHookEvents() []string   { return nil }
+
+// Pi needs no hook config; the integration is the Tier 2 beacon, the gate
+// extension staged where every pi process auto-loads it.
+func (a piAdapter) Install(opts adapter.InstallOptions) error {
+	_, err := a.Reconcile(opts)
+	return err
+}
+
+// Reconcile writes opts.Socket, the node's mod socket, into the installed gate
+// so beacons find the node that installed it.
+func (piAdapter) Reconcile(opts adapter.InstallOptions) ([]string, error) {
+	path, err := beaconPath()
+	if err != nil {
+		return nil, err
+	}
+	cur, readErr := os.ReadFile(path)
+	stamped, ours := stampedSocket(string(cur))
+	if readErr == nil && !ours {
+		return nil, nil
+	}
+	socket := opts.Socket
+	if socket == "" {
+		socket = stamped
+	}
+	want := stampSocket(socket)
+	if string(cur) == want {
+		return nil, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
+		return nil, err
+	}
+	return []string{path}, nil
+}
+
+func (piAdapter) Uninstall() error {
+	path, err := beaconPath()
+	if err != nil {
+		return err
+	}
+	cur, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	if _, ours := stampedSocket(string(cur)); !ours {
+		return nil // user-crafted: leave it alone
+	}
+	return os.Remove(path)
+}
+
+// SettingsPath returns the pi home dir (not a file) so the install happens
+// whenever pi has run once, even though the extensions directory itself is
+// created lazily.
+func (piAdapter) SettingsPath() (string, error) { return piHome() }
+
+func (piAdapter) DefaultHookEvents() []string { return nil }

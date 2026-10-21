@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -613,5 +614,49 @@ func TestModAckCarriesData(t *testing.T) {
 	r := <-got
 	if r.err != nil || string(r.data) != data {
 		t.Fatalf("Request = (%s, %v), want (%s, nil)", r.data, r.err, data)
+	}
+}
+
+func TestModBeaconUpgrade(t *testing.T) {
+	_, srv := modTestNode(t)
+	for path, want := range map[string]int{
+		"/claude/beacon": http.StatusNotFound,
+		"/pi/beacon":     http.StatusUpgradeRequired,
+	} {
+		res, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != want {
+			t.Errorf("%s: status = %d, want %d", path, res.StatusCode, want)
+		}
+	}
+
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	hello := `{"type":"hello","sessionId":"for-1","cwd":"/w","idle":true}` + "\n"
+	if _, err := conn.Write([]byte("GET /pi/beacon HTTP/1.1\r\nHost: argus\r\nConnection: Upgrade\r\nUpgrade: argus-beacon\r\n\r\n" + hello)); err != nil {
+		t.Fatal(err)
+	}
+	br := bufio.NewReader(conn)
+	res, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("status = %d, want 101", res.StatusCode)
+	}
+	line, err := br.ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ack map[string]any
+	if err := json.Unmarshal([]byte(line), &ack); err != nil || ack["type"] != "hello_ack" || ack["passive"] != false {
+		t.Fatalf("ack = %q, %v", line, err)
 	}
 }

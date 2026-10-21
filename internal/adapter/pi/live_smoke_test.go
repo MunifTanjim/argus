@@ -23,7 +23,7 @@ func TestLiveSmoke(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	conn, cmd, err := spawnRPC(ctx, t.TempDir(), "smoke-"+newSessionID(), "")
+	conn, cmd, err := spawnRPC(ctx, t.TempDir(), "smoke-"+newSessionID(), "", "")
 	if err != nil {
 		t.Fatalf("spawnRPC: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestLiveSmoke(t *testing.T) {
 }
 
 // TestLiveSupervisedSession drives the whole Tier 1 loop through the Go
-// supervisor against the real binary: spawn →
+// supervisor against the real binary: spawn (with staged gate extension) →
 // prompt → settled idle → transcript
 // shows the tool result → dismiss removes the card.
 func TestLiveSupervisedSession(t *testing.T) {
@@ -61,7 +61,7 @@ func TestLiveSupervisedSession(t *testing.T) {
 		t.Skipf("pi binary not available: %v", err)
 	}
 	reg := registry.New()
-	d := newDiscoverer(reg)
+	d := newDiscoverer(reg, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 

@@ -1,8 +1,10 @@
 package node
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"syscall"
@@ -79,6 +81,7 @@ func (d *Node) modHandler() http.Handler {
 	mux.HandleFunc("POST /{agent}/cancel", d.modRoute(d.handleModCancel))
 	mux.HandleFunc("POST /{agent}/poll", d.modRoute(d.handleModPoll))
 	mux.HandleFunc("POST /{agent}/ack", d.modRoute(d.handleModAck))
+	mux.HandleFunc("GET /{agent}/beacon", d.modRoute(d.handleModBeacon))
 	return mux
 }
 
@@ -114,6 +117,43 @@ func modBridge(w http.ResponseWriter, a adapter.Adapter) *modbridge.Bridge {
 	http.Error(w, "agent has no mod bridge", http.StatusNotFound)
 	return nil
 }
+
+// beaconUpgrade is the Upgrade protocol a beacon client asks for.
+const beaconUpgrade = "argus-beacon"
+
+// handleModBeacon takes the connection over from the HTTP server after a 101
+// and hands it to a's beacon until the client disconnects.
+func (d *Node) handleModBeacon(w http.ResponseWriter, r *http.Request, a adapter.Adapter) {
+	b, ok := a.(adapter.Beaconed)
+	if !ok {
+		http.Error(w, "agent has no beacon", http.StatusNotFound)
+		return
+	}
+	if !strings.EqualFold(r.Header.Get("Upgrade"), beaconUpgrade) {
+		w.Header().Set("Upgrade", beaconUpgrade)
+		http.Error(w, "upgrade required", http.StatusUpgradeRequired)
+		return
+	}
+	conn, rw, err := http.NewResponseController(w).Hijack()
+	if err != nil {
+		return
+	}
+	_ = conn.SetDeadline(time.Time{})
+	_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: " + beaconUpgrade + "\r\n\r\n")
+	if err := rw.Flush(); err != nil {
+		conn.Close()
+		return
+	}
+	b.ServeBeacon(bufferedConn{Conn: conn, r: rw.Reader})
+}
+
+// bufferedConn reads what the HTTP server buffered past the request first.
+type bufferedConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (c bufferedConn) Read(p []byte) (int, error) { return c.r.Read(p) }
 
 // handleModEvent applies a forwarded event as a hook would. A PermissionRequest
 // is parked and answered with the id the mod waits on, never held open.

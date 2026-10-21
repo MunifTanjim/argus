@@ -17,9 +17,11 @@ import (
 	"unicode"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/gittree"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
 // spawnProc starts the owned pi child; a var so tests can stub the process
@@ -44,7 +46,7 @@ type pendingUI struct {
 	inRun   bool // opened while a run was in progress
 }
 
-// card is the state a pi session's card shows.
+// card is the state a pi session's card shows, owned or foreign.
 type card struct {
 	mu        sync.Mutex
 	id        string // pi session id (AgentSessionID); /new changes it
@@ -136,13 +138,19 @@ type discoverer struct {
 	mu    sync.Mutex
 	procs map[string]*sessionProc // pi session id -> owned proc
 
+	// Beacon side (Tier 2): foreign sessions whose gate extension dialed in.
+	foreign map[string]*foreignSession
+	paneFor func(ctx context.Context, pid int) (session.TmuxServer, string)
+
 	seq atomic.Uint64
 }
 
-func newDiscoverer(reg *registry.Registry) *discoverer {
+func newDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) *discoverer {
 	return &discoverer{
-		reg:   reg,
-		procs: map[string]*sessionProc{},
+		reg:     reg,
+		procs:   map[string]*sessionProc{},
+		foreign: map[string]*foreignSession{},
+		paneFor: paneLookup(clients),
 	}
 }
 
@@ -158,11 +166,16 @@ func newSessionID() string {
 	return hex.EncodeToString(b[:])
 }
 
-func (d *discoverer) ScanOnce(_ context.Context) error { return nil }
+func (d *discoverer) ScanOnce(_ context.Context) error {
+	d.sweepForeign()
+	return nil
+}
 
-// running reports whether an owned pi process runs session id.
+// running reports whether a pi process runs session id, owned or foreign.
 func (d *discoverer) running(id string) bool {
-	return d.get(id) != nil
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.procs[id] != nil || d.foreign[id] != nil
 }
 
 func (d *discoverer) get(id string) *sessionProc {
@@ -175,10 +188,14 @@ func (d *discoverer) get(id string) *sessionProc {
 // session id. A non-empty prompt is sent after the process is tracked, so a
 // send failure still leaves a live, listed session.
 func (d *discoverer) spawnSession(ctx context.Context, cwd string, opts adapter.SpawnOptions) (string, error) {
+	gate, err := gateExtension()
+	if err != nil {
+		return "", err
+	}
 	id := newSessionID()
 	// The process outlives the request: a request's context ends with the
 	// client connection that sent it.
-	conn, cmd, err := spawnProc(context.WithoutCancel(ctx), cwd, id, opts.Model)
+	conn, cmd, err := spawnProc(context.WithoutCancel(ctx), cwd, id, gate, opts.Model)
 	if err != nil {
 		return "", err
 	}
@@ -326,6 +343,17 @@ func (d *discoverer) sendPrompt(ctx context.Context, id, text string) error {
 	if p := d.get(id); p != nil {
 		return d.sendPromptOwned(ctx, p, text)
 	}
+	if fs := d.lookupForeign(id); fs != nil {
+		if name, args := slashCommand(text); name == "/compact" {
+			return d.beaconSend(fs, map[string]any{"type": "intent_compact", "instructions": args})
+		}
+		fs.mu.Lock()
+		busy := fs.streaming
+		fs.mu.Unlock()
+		return d.beaconSend(fs, map[string]any{
+			"type": "intent_prompt", "text": text, "busy": busy,
+		})
+	}
 	return fmt.Errorf("pi: unknown session %s", id)
 }
 
@@ -372,29 +400,44 @@ func (d *discoverer) runShell(ctx context.Context, id, text string) (bool, error
 	}
 	p := d.get(id)
 	if p == nil {
+		if fs := d.lookupForeign(id); fs != nil {
+			err := d.stageForeign(ctx, fs, strings.TrimSpace(text), api.ErrShellNeedsPane)
+			return err == nil, err
+		}
 		return false, fmt.Errorf("pi: unknown session %s", id)
 	}
 	d.upsert(p, session.StatusWorking, nil, false)
 	return false, d.runCommand(ctx, p, "bash", map[string]any{"command": command, "excludeFromContext": exclude})
 }
 
-// runNew starts a new session in place of id.
+// runNew starts a new session in place of id. A foreign session runs /new only
+// from pi's editor, so it waits there for Enter in the session's pane.
 func (d *discoverer) runNew(ctx context.Context, id string) (bool, error) {
 	if p := d.get(id); p != nil {
 		return false, d.newSession(ctx, p)
 	}
+	if fs := d.lookupForeign(id); fs != nil {
+		err := d.stageForeign(ctx, fs, "/new", errNewNeedsPane)
+		return err == nil, err
+	}
 	return false, fmt.Errorf("pi: unknown session %s", id)
 }
 
-// queueFor returns the prompt queue of the session whose file is path.
+var errNewNeedsPane = errors.New("/new needs a tmux session")
+
+// queueFor returns the prompt queue of the session whose file is path. A
+// foreign session's queue holds only the prompts Argus sent.
 func (d *discoverer) queueFor(path string) []string {
 	if path == "" {
 		return nil
 	}
 	d.mu.Lock()
-	cards := make([]*card, 0, len(d.procs))
+	cards := make([]*card, 0, len(d.procs)+len(d.foreign))
 	for _, p := range d.procs {
 		cards = append(cards, &p.card)
+	}
+	for _, fs := range d.foreign {
+		cards = append(cards, &fs.card)
 	}
 	d.mu.Unlock()
 	for _, c := range cards {
@@ -408,8 +451,8 @@ func (d *discoverer) queueFor(path string) []string {
 	return nil
 }
 
-// rename sets the pi session name over RPC. The name is held at once so the
-// next card push keeps it.
+// rename sets the pi session name: over RPC for owned sessions, as an intent
+// for foreign ones. The name is held at once so the next card push keeps it.
 func (d *discoverer) rename(ctx context.Context, id, name string) error {
 	if p := d.get(id); p != nil {
 		if _, err := p.conn.call(ctx, d.nextID(), "set_session_name", map[string]any{"name": name}); err != nil {
@@ -418,6 +461,15 @@ func (d *discoverer) rename(ctx context.Context, id, name string) error {
 		p.mu.Lock()
 		p.name = name
 		p.mu.Unlock()
+		return nil
+	}
+	if fs := d.lookupForeign(id); fs != nil {
+		if err := d.beaconSend(fs, map[string]any{"type": "intent_rename", "name": name}); err != nil {
+			return err
+		}
+		fs.mu.Lock()
+		fs.name = name
+		fs.mu.Unlock()
 		return nil
 	}
 	return fmt.Errorf("pi: unknown session %s", id)
@@ -504,8 +556,11 @@ func (d *discoverer) dismiss(ctx context.Context, id string) error {
 	delete(d.procs, id)
 	d.mu.Unlock()
 	if p == nil {
+		// Foreign sessions untrack only: the user's own process keeps running.
 		// Unknown ids still emit Dead so a lost card is always cleared.
-		d.markDead(id)
+		if !d.forgetForeign(id, nil) {
+			d.markDead(id)
+		}
 		return nil
 	}
 	_ = p.conn.close() // orderly shutdown: pi disposes the runtime and exits
@@ -635,8 +690,9 @@ type uiRequest struct {
 	Timeout int      `json:"timeout"` // ms; pi answers the dialog itself once it passes
 }
 
-// uiInteraction interprets one extension dialog (extension_ui_request). It
-// returns the parked dialog and its Argus interaction.
+// uiInteraction interprets one extension dialog, shared by owned RPC sessions
+// (extension_ui_request) and foreign beacons (ui_request). It returns the
+// parked dialog and its Argus interaction.
 func uiInteraction(req uiRequest) (*pendingUI, *session.Interaction, bool) {
 	pend := &pendingUI{uiID: req.ID, method: req.Method, title: req.Title, message: req.Message, options: req.Options}
 	var ix *session.Interaction
