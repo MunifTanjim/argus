@@ -147,6 +147,9 @@ func (m model) handleSidebarToggle(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, boo
 	if m.viewer {
 		return m, nil, false
 	}
+	if m.topFull() == fullFrame {
+		return m, nil, true
+	}
 	switch {
 	case m.matches(msg, projectsKeys.ToggleSidebar):
 		return m.toggleTreeFocus(), nil, true
@@ -158,6 +161,9 @@ func (m model) handleSidebarToggle(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, boo
 
 // The live screen keeps the keys, so a toggle over it leaves the focus there.
 func (m model) toggleTreeFocus() model {
+	if m.topFull() == fullFrame {
+		return m
+	}
 	m.flash = ""
 	m.toggleSidebar()
 	if m.topScreen() < 0 {
@@ -167,6 +173,9 @@ func (m model) toggleTreeFocus() model {
 }
 
 func (m model) toggleFilesFocus() model {
+	if m.topFull() == fullFrame {
+		return m
+	}
 	m.flash = ""
 	m.toggleFiles()
 	if m.topScreen() < 0 && m.filesReachable() {
@@ -241,7 +250,9 @@ func (m model) repairFocus() model {
 	return m
 }
 
-func (m model) treeReachable() bool { return !m.viewer && m.sidebarVisible() }
+func (m model) treeReachable() bool {
+	return !m.viewer && m.sidebarVisible() && m.topFull() != fullFrame
+}
 
 func (m model) paneLeft() (tea.Model, tea.Cmd) {
 	switch m.focused {
