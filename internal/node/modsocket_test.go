@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -474,7 +475,7 @@ func TestModAckCompletesSend(t *testing.T) {
 	d := newNode(map[session.TmuxServer]*tmux.Client{})
 	b := d.adapterFor(claudecode.Agent).(adapter.ModBridged).ModBridge()
 	cmds := make(chan []modbridge.Command, 1)
-	go func() { cmds <- b.Wait(context.Background(), "s1", time.Minute) }()
+	go func() { cmds <- b.Wait(context.Background(), "s1", time.Minute, nil) }()
 	waitFor(t, func() bool { return b.Reachable("s1") })
 	sent := make(chan error, 1)
 	go func() {
@@ -511,7 +512,7 @@ func TestModAckReportsWhetherTheCommandRan(t *testing.T) {
 		{func(id string) string { return `{"id":"` + id + `"}` }, false},
 	} {
 		cmds := make(chan []modbridge.Command, 1)
-		go func() { cmds <- b.Wait(context.Background(), "s1", time.Minute) }()
+		go func() { cmds <- b.Wait(context.Background(), "s1", time.Minute, nil) }()
 		waitFor(t, func() bool { return b.Reachable("s1") })
 		type result struct {
 			ran bool
@@ -573,4 +574,44 @@ func (d *Node) modWaitsOpen(id string) int {
 		return p.open
 	}
 	return 0
+}
+
+func TestModPollRecordsKinds(t *testing.T) {
+	d, srv := modTestNode(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		modPost(t, ctx, srv.URL+"/claude/poll", map[string]any{"sessionId": "s1", "kinds": []string{"commands"}}, nil)
+	}()
+	defer func() { cancel(); <-done }()
+	bridge := d.adapterFor(claudecode.Agent).(adapter.ModBridged).ModBridge()
+	waitFor(t, func() bool { return bridge.Reachable("s1") })
+	if _, err := bridge.Send(ctx, "s1", modbridge.Command{Kind: modbridge.KindFill}); !errors.Is(err, modbridge.ErrUnsupported) {
+		t.Fatalf("fill err = %v, want ErrUnsupported: the poll listed only commands", err)
+	}
+}
+
+func TestModAckCarriesData(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	b := d.adapterFor(claudecode.Agent).(adapter.ModBridged).ModBridge()
+	cmds := make(chan []modbridge.Command, 1)
+	go func() { cmds <- b.Wait(context.Background(), "s1", time.Minute, []string{modbridge.KindCommands}) }()
+	waitFor(t, func() bool { return b.Reachable("s1") })
+	type result struct {
+		data json.RawMessage
+		err  error
+	}
+	got := make(chan result, 1)
+	go func() {
+		data, err := b.Request(context.Background(), "s1", modbridge.Command{Kind: modbridge.KindCommands})
+		got <- result{data, err}
+	}()
+	c := (<-cmds)[0]
+	const data = `[{"name":"compact","description":"d"}]`
+	d.modHandler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/claude/ack", strings.NewReader(`{"id":"`+c.ID+`","ran":true,"data":`+data+`}`)))
+	r := <-got
+	if r.err != nil || string(r.data) != data {
+		t.Fatalf("Request = (%s, %v), want (%s, nil)", r.data, r.err, data)
+	}
 }

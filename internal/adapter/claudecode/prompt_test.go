@@ -27,9 +27,9 @@ func newWiredAdapter(t *testing.T) (*ccAdapter, *registry.Registry) {
 func modPoll(a *ccAdapter, ctx context.Context, sessionID string) <-chan []modbridge.Command {
 	got := make(chan []modbridge.Command, 1)
 	go func() {
-		cmds := a.ModBridge().Wait(ctx, sessionID, time.Minute)
+		cmds := a.ModBridge().Wait(ctx, sessionID, time.Minute, nil)
 		for _, c := range cmds {
-			a.ModBridge().Ack(c.ID, "", true)
+			a.ModBridge().Ack(c.ID, "", true, nil)
 		}
 		got <- cmds
 	}()
@@ -101,7 +101,7 @@ func TestClaudeInputFollowsModConnection(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(context.Background())
 			done := make(chan struct{})
-			go func() { a.ModBridge().Wait(ctx, "s1", time.Minute); close(done) }()
+			go func() { a.ModBridge().Wait(ctx, "s1", time.Minute, nil); close(done) }()
 			waitUntil(t, func() bool { got, _ := reg.Get(s.ID); return got.Input == session.InputAPI })
 
 			cancel()
@@ -201,8 +201,8 @@ func TestFillPromptSendsASlashCommandAsAPrompt(t *testing.T) {
 func TestFillPromptRefusedByADialogIsBusy(t *testing.T) {
 	a, _ := newWiredAdapter(t)
 	go func() {
-		for _, c := range a.ModBridge().Wait(context.Background(), "s1", time.Minute) {
-			a.ModBridge().Ack(c.ID, modbridge.FailBusy, false)
+		for _, c := range a.ModBridge().Wait(context.Background(), "s1", time.Minute, nil) {
+			a.ModBridge().Ack(c.ID, modbridge.FailBusy, false, nil)
 		}
 	}()
 	waitUntil(t, func() bool { return a.ModBridge().Reachable("s1") })
@@ -215,8 +215,8 @@ func TestFillPromptRefusedByADialogIsBusy(t *testing.T) {
 func TestFillPromptOnlyAcceptedIsAnError(t *testing.T) {
 	a, _ := newWiredAdapter(t)
 	go func() {
-		for _, c := range a.ModBridge().Wait(context.Background(), "s1", time.Minute) {
-			a.ModBridge().Ack(c.ID, "", false)
+		for _, c := range a.ModBridge().Wait(context.Background(), "s1", time.Minute, nil) {
+			a.ModBridge().Ack(c.ID, "", false, nil)
 		}
 	}()
 	waitUntil(t, func() bool { return a.ModBridge().Reachable("s1") })
@@ -264,8 +264,8 @@ func TestSendShellInputIsBusyUnderAnInteractionOrDialog(t *testing.T) {
 		t.Fatalf("pending interaction: err = %v, want ErrSessionBusy", err)
 	}
 	go func() {
-		for _, c := range a.ModBridge().Wait(context.Background(), "s1", time.Minute) {
-			a.ModBridge().Ack(c.ID, modbridge.FailBusy, false)
+		for _, c := range a.ModBridge().Wait(context.Background(), "s1", time.Minute, nil) {
+			a.ModBridge().Ack(c.ID, modbridge.FailBusy, false, nil)
 		}
 	}()
 	waitUntil(t, func() bool { return a.ModBridge().Reachable("s1") })

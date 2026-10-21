@@ -4,8 +4,10 @@ package modbridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -13,11 +15,15 @@ import (
 
 // Command kinds the mod runs.
 const (
-	KindPrompt = "prompt" // a prompt, or a slash command when it starts with "/"
-	KindExit   = "exit"   // end the session
-	KindFill   = "fill"   // put text in Claude's input box in place of the draft
-	KindShell  = "shell"  // run "!" bash mode input in Claude's pane, keeping the draft
+	KindPrompt   = "prompt"   // a prompt, or a slash command when it starts with "/"
+	KindExit     = "exit"     // end the session
+	KindFill     = "fill"     // put text in Claude's input box in place of the draft
+	KindShell    = "shell"    // run "!" bash mode input in Claude's pane, keeping the draft
+	KindCommands = "commands" // list Claude's slash commands; the ack carries them
 )
+
+// legacyKinds are what a mod that lists no kinds on its poll runs.
+var legacyKinds = []string{KindPrompt, KindExit, KindFill, KindShell}
 
 // FailBusy is the failure the mod acks for a fill Claude's input box refused
 // because a dialog holds the keys.
@@ -41,6 +47,9 @@ var ErrNoAck = errors.New("claude did not confirm the command")
 // ErrBusy reports a command the mod refused with FailBusy.
 var ErrBusy = errors.New("claude's input is held by a dialog")
 
+// ErrUnsupported reports a command kind the session's mod does not run.
+var ErrUnsupported = errors.New("claude's mod does not run this command")
+
 // conn is one session's mod connection: an open poll, or the grace after one
 // closed, during which the mod is expected to re-poll.
 type conn struct {
@@ -48,6 +57,7 @@ type conn struct {
 	expiry *time.Timer   // armed between polls: the session is gone when it fires
 	armed  uint64        // counts expiry arms, so a stale expiry is ignored
 	opened chan struct{} // closed when a poll opens or the session expires; Send waits on it
+	kinds  []string      // command kinds the mod of the last poll runs
 }
 
 // Bridge tracks one mod connection per session id.
@@ -84,10 +94,11 @@ func (b *Bridge) Reachable(sessionID string) bool {
 }
 
 // Wait opens a poll for sessionID and returns the command handed to it, or none
-// when ctx ends or hold elapses. A newer poll for the session takes over its
-// commands; the older one still waits out its hold, so two processes sharing a
-// session id do not make each other re-poll in a tight loop.
-func (b *Bridge) Wait(ctx context.Context, sessionID string, hold time.Duration) []Command {
+// when ctx ends or hold elapses. kinds are the command kinds the polling mod
+// runs. A newer poll for the session takes over its commands; the older one
+// still waits out its hold, so two processes sharing a session id do not make
+// each other re-poll in a tight loop.
+func (b *Bridge) Wait(ctx context.Context, sessionID string, hold time.Duration, kinds []string) []Command {
 	p := make(chan Command, 1)
 	b.mu.Lock()
 	c := b.conns[sessionID]
@@ -97,6 +108,10 @@ func (b *Bridge) Wait(ctx context.Context, sessionID string, hold time.Duration)
 		b.conns[sessionID] = c
 	}
 	c.poll = p
+	c.kinds = kinds
+	if len(kinds) == 0 {
+		c.kinds = legacyKinds
+	}
 	if c.expiry != nil {
 		c.expiry.Stop()
 		c.expiry = nil
@@ -134,10 +149,11 @@ func (b *Bridge) Wait(ctx context.Context, sessionID string, hold time.Duration)
 }
 
 // ack is the mod's answer to one command: its failure, or whether it ran
-// rather than only being accepted.
+// rather than only being accepted, and any data it returned.
 type ack struct {
-	err error
-	ran bool
+	err  error
+	ran  bool
+	data json.RawMessage
 }
 
 // Send hands cmd to sessionID's open poll and waits for the mod's ack. Between
@@ -146,22 +162,38 @@ type ack struct {
 // ErrUnreachable when no poll comes, ErrNoAck when the mod never acks, and the
 // mod's own failure when running the command failed.
 func (b *Bridge) Send(ctx context.Context, sessionID string, cmd Command) (bool, error) {
+	a, err := b.deliver(ctx, sessionID, cmd)
+	return a.ran, err
+}
+
+// Request is Send for a command whose ack carries data, and returns that data.
+func (b *Bridge) Request(ctx context.Context, sessionID string, cmd Command) (json.RawMessage, error) {
+	a, err := b.deliver(ctx, sessionID, cmd)
+	return a.data, err
+}
+
+func (b *Bridge) deliver(ctx context.Context, sessionID string, cmd Command) (ack, error) {
 	for {
 		b.mu.Lock()
 		c := b.conns[sessionID]
 		if c == nil {
 			b.mu.Unlock()
-			return false, ErrUnreachable
+			return ack{}, ErrUnreachable
+		}
+		// Checked on every pass: a re-poll may come from an older mod.
+		if !slices.Contains(c.kinds, cmd.Kind) {
+			b.mu.Unlock()
+			return ack{}, ErrUnsupported
 		}
 		if p := c.poll; p != nil {
 			b.lastID++
 			cmd.ID = strconv.FormatUint(b.lastID, 10)
-			ack := make(chan ack, 1)
-			b.acks[cmd.ID] = ack
+			ch := make(chan ack, 1)
+			b.acks[cmd.ID] = ch
 			b.closeLocked(sessionID, c)
 			p <- cmd
 			b.mu.Unlock()
-			return b.awaitAck(ctx, cmd.ID, ack)
+			return b.awaitAck(ctx, cmd.ID, ch)
 		}
 		if c.opened == nil {
 			c.opened = make(chan struct{})
@@ -172,12 +204,12 @@ func (b *Bridge) Send(ctx context.Context, sessionID string, cmd Command) (bool,
 		select {
 		case <-opened:
 		case <-ctx.Done():
-			return false, ctx.Err()
+			return ack{}, ctx.Err()
 		}
 	}
 }
 
-func (b *Bridge) awaitAck(ctx context.Context, id string, ch chan ack) (bool, error) {
+func (b *Bridge) awaitAck(ctx context.Context, id string, ch chan ack) (ack, error) {
 	defer func() {
 		b.mu.Lock()
 		delete(b.acks, id)
@@ -187,18 +219,19 @@ func (b *Bridge) awaitAck(ctx context.Context, id string, ch chan ack) (bool, er
 	defer t.Stop()
 	select {
 	case a := <-ch:
-		return a.ran, a.err
+		return a, a.err
 	case <-t.C:
-		return false, ErrNoAck
+		return ack{}, ErrNoAck
 	case <-ctx.Done():
-		return false, ctx.Err()
+		return ack{}, ctx.Err()
 	}
 }
 
-// Ack completes the Send of command id. A non-empty failure is the mod's error
-// from running it; ran reports that it ran rather than only being accepted. An
-// unknown or already completed id is ignored.
-func (b *Bridge) Ack(id, failure string, ran bool) {
+// Ack completes the Send or Request of command id. A non-empty failure is the
+// mod's error from running it; ran reports that it ran rather than only being
+// accepted; data is what Request returns. An unknown or already completed id is
+// ignored.
+func (b *Bridge) Ack(id, failure string, ran bool, data json.RawMessage) {
 	b.mu.Lock()
 	ch := b.acks[id]
 	delete(b.acks, id)
@@ -214,7 +247,7 @@ func (b *Bridge) Ack(id, failure string, ran bool) {
 		ch <- ack{err: fmt.Errorf("claude: %s", failure)}
 		return
 	}
-	ch <- ack{ran: ran}
+	ch <- ack{ran: ran, data: data}
 }
 
 func (b *Bridge) closeLocked(sessionID string, c *conn) {
