@@ -50,6 +50,9 @@ func (d *discoverer) respond(ctx context.Context, sess session.Session, p api.Re
 	if proc := d.get(sess.AgentSessionID); proc != nil {
 		return d.respondOwned(proc, p)
 	}
+	if fs := d.lookupForeign(sess.AgentSessionID); fs != nil {
+		return d.respondForeign(fs, p)
+	}
 	return fmt.Errorf("pi: unknown session %s", sess.AgentSessionID)
 }
 
@@ -72,6 +75,33 @@ func (d *discoverer) respondOwned(proc *sessionProc, p api.RespondParams) error 
 	// wedge the session at its prompt. Later events correct the status.
 	d.dropOwnedPending(proc, pend.uiID)
 	return nil
+}
+
+// respondForeign answers a dialog the gate forwarded from pi.
+func (d *discoverer) respondForeign(fs *foreignSession, p api.RespondParams) error {
+	pend, err := fs.pickPending(p.RequestID)
+	if err != nil {
+		return err
+	}
+	body, err := buildUIResponse(pend, p)
+	if err != nil {
+		return err
+	}
+	body["type"] = "ui_response"
+	body["id"] = pend.uiID
+	if err := d.beaconSend(fs, body); err != nil {
+		return err
+	}
+	d.dropForeignPending(fs, pend.uiID)
+	return nil
+}
+
+// dropForeignPending removes an answered dialog and, once none is left,
+// settles the card on what pi is doing.
+func (d *discoverer) dropForeignPending(fs *foreignSession, uiID string) {
+	if fs.dropPending(uiID) {
+		d.foreignSettle(fs)
+	}
 }
 
 // answerText resolves a dialog's answer: the answer keyed by its question (the

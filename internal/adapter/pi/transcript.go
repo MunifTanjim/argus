@@ -14,7 +14,7 @@ import (
 // is unsupported: readSubagentView always reports absent.
 func readTranscriptView(path string, finished bool) (transcript.TranscriptView, error) {
 	if path == "" {
-		// pi creates the file only after the first message.
+		// Foreign sessions report no file until pi persists one.
 		return transcript.TranscriptView{}, nil
 	}
 	sf, err := readSessionFile(path)
@@ -60,8 +60,9 @@ func newStreamingTranscript(path string) *streamingTranscript {
 	return &streamingTranscript{path: path}
 }
 
-// Queue reports the prompts pi has queued for the session, live from RPC
-// queue updates.
+// Queue reports the prompts pi has queued for the session: live from RPC
+// queue updates, or for a foreign session, the prompts Argus sent that pi has
+// not taken yet.
 func (s *streamingTranscript) Queue() []transcript.QueuedPrompt {
 	if s.queue == nil {
 		return nil

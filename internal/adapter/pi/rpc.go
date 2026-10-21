@@ -162,15 +162,19 @@ func (c *rpcConn) close() error {
 // piBin is the pi executable name, a var so tests can stub it.
 var piBin = "pi"
 
-// spawnRPC starts `pi --mode rpc --session-id <id>` in cwd, returning the
-// connected rpcConn.
+// spawnRPC starts `pi --mode rpc --session-id <id>` in cwd with the gate
+// extension loaded and ARGUS_MANAGED set, returning the connected rpcConn.
 // model is a "provider/id" from listModels, or "" for pi's default. The caller
 // owns the process (reap via cmd.Wait after conn.close).
-func spawnRPC(ctx context.Context, cwd, sessionID, model string) (*rpcConn, *exec.Cmd, error) {
+func spawnRPC(ctx context.Context, cwd, sessionID, extensionPath, model string) (*rpcConn, *exec.Cmd, error) {
 	args := []string{"--mode", "rpc", "--session-id", sessionID}
+	if extensionPath != "" {
+		args = append(args, "--extension", extensionPath)
+	}
 	args = append(args, modelArgs(model)...)
 	cmd := exec.CommandContext(ctx, piBin, args...)
 	cmd.Dir = cwd
+	cmd.Env = append(cmd.Environ(), gateEnv+"=1")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, nil, fmt.Errorf("pi: stdin pipe: %w", err)
