@@ -9,6 +9,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/selfupgrade"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -116,7 +117,7 @@ func (m model) updateUpgrade(msg tea.Msg) (model, tea.Cmd) {
 			c.setFlash(msg.target.label + " does not support remote upgrade")
 		case msg.err != nil:
 			c.setFlash("upgrade check failed: " + msg.err.Error())
-		case msg.res.Latest == msg.res.Current:
+		case !selfupgrade.Newer(msg.res.Latest, msg.res.Current):
 			c.setFlash(msg.target.label + " is already on the latest version (" + msg.res.Current + ")")
 		default:
 			c.setFlash("")

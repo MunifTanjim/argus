@@ -35,8 +35,16 @@ func (s *Service) Register(srv *api.Server) {
 	srv.Handle(api.MethodServerRestart, s.handleRestart)
 }
 
-func (s *Service) handleCheck(ctx context.Context, _ json.RawMessage) (any, error) {
-	c, err := s.up.Check(ctx)
+func (s *Service) handleCheck(ctx context.Context, params json.RawMessage) (any, error) {
+	p, err := api.Decode[api.UpgradeParams](params)
+	if err != nil {
+		return nil, err
+	}
+	check := s.up.Check
+	if p.Fresh {
+		check = s.up.CheckFresh
+	}
+	c, err := check(ctx)
 	if err != nil {
 		return nil, err
 	}

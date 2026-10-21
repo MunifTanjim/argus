@@ -149,8 +149,8 @@ var errNoInPlaceRestart = errors.New("the running argus cannot restart itself; r
 func upgradeDaemon(ctx context.Context, cmd *cobra.Command, d daemonConn, steps upgradeSteps, prefix string) error {
 	if steps.download {
 		shell.StdErrLn(prefix + "Upgrading the running argus...")
-		var r api.UpgradeResult
-		err := d.client.CallContext(ctx, api.MethodServerUpgrade, nil, &r)
+		var c api.CheckUpgradeResult
+		err := d.client.CallContext(ctx, api.MethodServerCheckUpgrade, api.UpgradeParams{Fresh: true}, &c)
 		if api.IsMethodNotFound(err) {
 			if err := upgradeInProcessFn(ctx, cmd); err != nil {
 				return err
@@ -159,9 +159,19 @@ func upgradeDaemon(ctx context.Context, cmd *cobra.Command, d daemonConn, steps 
 			return nil
 		}
 		if err != nil {
+			return fail(cmd, fmt.Errorf("%supgrade check failed: %w", prefix, err))
+		}
+		// Daemons before the Newer check in Apply would swap a build made
+		// after the latest tag back to that tag.
+		if printVersions(prefix, c.Current, c.Latest) {
+			return nil
+		}
+		var r api.UpgradeResult
+		if err := d.client.CallContext(ctx, api.MethodServerUpgrade, nil, &r); err != nil {
 			return fail(cmd, fmt.Errorf("%supgrade failed: %w", prefix, err))
 		}
-		if printVersions(prefix, r.From, r.To) {
+		if r.To == r.From {
+			shell.StdErrLn(prefix + "Already on the latest version!")
 			return nil
 		}
 		printUpgraded(cmd, prefix, r.To)
@@ -179,7 +189,7 @@ func upgradeDaemon(ctx context.Context, cmd *cobra.Command, d daemonConn, steps 
 func printVersions(prefix, current, latest string) bool {
 	shell.StdErrF("%sCurrent version: %s\n", prefix, current)
 	shell.StdErrF("%sLatest version: %s\n", prefix, latest)
-	if current == latest {
+	if !selfupgrade.Newer(latest, current) {
 		shell.StdErrLn(prefix + "Already on the latest version!")
 		return true
 	}

@@ -14,15 +14,26 @@ final _decoration = RegExp(r'^v|(-\d+-g[0-9a-f]+)?(-dirty)?$');
 
 final _parsedMins = <String, Version>{};
 
+Version? _parse(String version) {
+  try {
+    return Version.parse(version.replaceAll(_decoration, ''));
+  } on FormatException {
+    return null;
+  }
+}
+
 /// Whether [version] meets [min]. Builds past a tag (`0.1.2-7-g17d66765`)
 /// count as that tag, unlike semver which ranks them below it. Versions that
 /// don't parse (`dev`, empty) pass: there is nothing to compare.
 bool isSupported(String version, String min) {
-  final Version v;
-  try {
-    v = Version.parse(version.replaceAll(_decoration, ''));
-  } on FormatException {
-    return true;
-  }
-  return v >= _parsedMins.putIfAbsent(min, () => Version.parse(min));
+  final v = _parse(version);
+  return v == null || v >= _parsedMins.putIfAbsent(min, () => Version.parse(min));
+}
+
+/// Whether [latest] is a newer release than [current], with the same build
+/// rules as [isSupported]. Versions that don't parse fall back to inequality.
+bool upgradeAvailable(String current, String latest) {
+  final l = _parse(latest), c = _parse(current);
+  if (l == null || c == null) return latest.isNotEmpty && latest != current;
+  return l > c;
 }

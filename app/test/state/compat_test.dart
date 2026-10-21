@@ -30,4 +30,19 @@ void main() {
     expect(isSupported('', '1.1.2'), isTrue);
     expect(isSupported('garbage', '1.1.2'), isTrue);
   });
+
+  test('upgrade is available only for a newer release', () {
+    expect(upgradeAvailable('0.1.3', '0.1.3'), isFalse);
+    expect(upgradeAvailable('0.1.3', '0.1.4'), isTrue);
+    expect(upgradeAvailable('0.1.4', '0.1.3'), isFalse);
+    expect(upgradeAvailable('0.1.3-14-g0cac2131', '0.1.3'), isFalse);
+    expect(upgradeAvailable('0.1.3-14-g0cac2131-dirty', '0.1.3'), isFalse);
+    expect(upgradeAvailable('0.1.3-14-g0cac2131', '0.1.4'), isTrue);
+    expect(upgradeAvailable('0.1.3', 'v0.1.3'), isFalse);
+  });
+
+  test('unparsable versions upgrade when they differ', () {
+    expect(upgradeAvailable('dev', '0.1.3'), isTrue);
+    expect(upgradeAvailable('0.1.3', ''), isFalse);
+  });
 }

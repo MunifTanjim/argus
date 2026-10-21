@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../transport/gateway_client.dart';
 import '../transport/jsonrpc.dart';
+import 'compat.dart';
 import 'gateway.dart';
 
 class UpgradeCheck {
@@ -9,7 +10,7 @@ class UpgradeCheck {
   final String current;
   final String latest;
 
-  bool get available => latest.isNotEmpty && latest != current;
+  bool get available => upgradeAvailable(current, latest);
 }
 
 /// The binary was swapped to [to], but the restart that runs it failed.
