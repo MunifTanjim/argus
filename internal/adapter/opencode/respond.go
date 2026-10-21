@@ -29,9 +29,9 @@ func (d *discoverer) respond(ctx context.Context, sess session.Session, p api.Re
 	if requestID == "" {
 		return fmt.Errorf("opencode: no pending permission for session %s", sess.AgentSessionID)
 	}
-	c, ok := d.dial()
-	if !ok {
-		return fmt.Errorf("opencode: service unavailable")
+	c, err := d.liveClient()
+	if err != nil {
+		return err
 	}
 	decision := mapResponse(p)
 	message := ""
@@ -48,9 +48,9 @@ func (d *discoverer) respond(ctx context.Context, sess session.Session, p api.Re
 }
 
 func (d *discoverer) replyForm(ctx context.Context, sess session.Session, p api.RespondParams, pf *pendingForm) error {
-	c, ok := d.dial()
-	if !ok {
-		return fmt.Errorf("opencode: service unavailable")
+	c, err := d.liveClient()
+	if err != nil {
+		return err
 	}
 	answer := map[string]any{}
 	for _, f := range pf.fields {

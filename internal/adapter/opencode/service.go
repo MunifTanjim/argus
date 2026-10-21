@@ -4,6 +4,7 @@
 package opencode
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -372,21 +373,9 @@ func (c *client) deleteSession(ctx context.Context, sessionID string) error {
 
 // switchModel sets the model used by the session's subsequent turns.
 func (c *client) switchModel(ctx context.Context, sessionID string, model ocModelRef) error {
-	payload, err := json.Marshal(map[string]any{
+	return c.send(ctx, http.MethodPost, "/api/session/"+sessionID+"/model", "switch model", map[string]any{
 		"model": map[string]string{"id": model.ID, "providerID": model.ProviderID},
 	})
-	if err != nil {
-		return err
-	}
-	resp, err := c.do(ctx, http.MethodPost, "/api/session/"+sessionID+"/model", strings.NewReader(string(payload)))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("switch model: %s", resp.Status)
-	}
-	return nil
 }
 
 // listModels returns the enabled models in server order. A model id is
@@ -428,71 +417,86 @@ func (c *client) readMessagesRaw(ctx context.Context, sessionID string) ([]json.
 }
 
 func (c *client) respondPermission(ctx context.Context, sessionID, requestID, decision, message string) error {
-	payload, err := json.Marshal(struct {
+	return c.send(ctx, http.MethodPost, "/api/session/"+sessionID+"/permission/"+requestID+"/reply", "respond permission", struct {
 		Decision string  `json:"decision"`
 		Message  *string `json:"message,omitempty"`
 	}{Decision: decision, Message: nilIfEmpty(message)})
+}
+
+type ocCommand struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type ocSkill struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+}
+
+// ocSkillMention marks where the prompt text names a skill. Offsets are UTF-16
+// code units, as the OpenCode TUI sends them.
+type ocSkillMention struct {
+	ID      string    `json:"id"`
+	Mention ocMention `json:"mention"`
+}
+
+type ocMention struct {
+	Start int    `json:"start"`
+	End   int    `json:"end"`
+	Text  string `json:"text"`
+}
+
+func locationQuery(dir string) string {
+	return url.Values{"location[directory]": {dir}}.Encode()
+}
+
+func (c *client) listCommands(ctx context.Context, dir string) ([]ocCommand, error) {
+	return listEnvelope[ocCommand](ctx, c, "/api/command", locationQuery(dir), "list commands")
+}
+
+func (c *client) listSkills(ctx context.Context, dir string) ([]ocSkill, error) {
+	return listEnvelope[ocSkill](ctx, c, "/api/skill", locationQuery(dir), "list skills")
+}
+
+// send treats a 200 or a 204 with no body as success.
+func (c *client) send(ctx context.Context, method, path, label string, body any) error {
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	resp, err := c.do(ctx, http.MethodPost, "/api/session/"+sessionID+"/permission/"+requestID+"/reply", strings.NewReader(string(payload)))
+	resp, err := c.do(ctx, method, path, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("respond permission: %s", resp.Status)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("%s: %s", label, resp.Status)
 	}
 	return nil
 }
 
-func (c *client) sendPrompt(ctx context.Context, sessionID, text string) error {
-	payload, err := json.Marshal(map[string]string{"text": text})
-	if err != nil {
-		return err
-	}
-	resp, err := c.do(ctx, http.MethodPost, "/api/session/"+sessionID+"/prompt", strings.NewReader(string(payload)))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("send prompt: %s", resp.Status)
-	}
-	return nil
+func (c *client) sendPrompt(ctx context.Context, sessionID, text string, skills []ocSkillMention) error {
+	return c.send(ctx, http.MethodPost, "/api/session/"+sessionID+"/prompt", "send prompt", struct {
+		Text   string           `json:"text"`
+		Skills []ocSkillMention `json:"skills,omitempty"`
+	}{text, skills})
 }
 
-// updateTitle PATCHes a session's title. A 204 with no body is success.
+func (c *client) runCommand(ctx context.Context, sessionID, name, args string) error {
+	return c.send(ctx, http.MethodPost, "/api/session/"+sessionID+"/command", "run command", map[string]string{"name": name, "text": args})
+}
+
+func (c *client) compact(ctx context.Context, sessionID string) error {
+	return c.send(ctx, http.MethodPost, "/api/session/"+sessionID+"/compact", "compact", struct{}{})
+}
+
+// updateTitle PATCHes a session's title.
 func (c *client) updateTitle(ctx context.Context, sessionID, title string) error {
-	payload, err := json.Marshal(map[string]string{"title": title})
-	if err != nil {
-		return err
-	}
-	resp, err := c.do(ctx, http.MethodPatch, "/api/session/"+sessionID, strings.NewReader(string(payload)))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("update title: %s", resp.Status)
-	}
-	return nil
+	return c.send(ctx, http.MethodPatch, "/api/session/"+sessionID, "update title", map[string]string{"title": title})
 }
 
 func (c *client) replyForm(ctx context.Context, sessionID, formID string, answer map[string]any) error {
-	payload, err := json.Marshal(map[string]any{"answer": answer})
-	if err != nil {
-		return err
-	}
-	resp, err := c.do(ctx, http.MethodPost, "/api/session/"+sessionID+"/form/"+formID+"/reply", strings.NewReader(string(payload)))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("reply form: %s", resp.Status)
-	}
-	return nil
+	return c.send(ctx, http.MethodPost, "/api/session/"+sessionID+"/form/"+formID+"/reply", "reply form", map[string]any{"answer": answer})
 }
 
 func nilIfEmpty(s string) *string {

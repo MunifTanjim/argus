@@ -318,14 +318,6 @@ func (d *discoverer) seedIdle(sessions []ocSession) {
 	}
 }
 
-func (d *discoverer) sendPrompt(ctx context.Context, sessionID, text string) error {
-	c, ok := d.dial()
-	if !ok {
-		return fmt.Errorf("opencode: service unavailable")
-	}
-	return c.sendPrompt(ctx, sessionID, text)
-}
-
 // startService runs `opencode service start`, which returns once the background
 // server is up and is a no-op when it already runs.
 var startService = func(ctx context.Context) error {
@@ -334,6 +326,13 @@ var startService = func(ctx context.Context) error {
 		return fmt.Errorf("opencode: start service: %w: %s", err, cmd.StdErr().String())
 	}
 	return nil
+}
+
+func (d *discoverer) liveClient() (*client, error) {
+	if c, ok := d.dial(); ok {
+		return c, nil
+	}
+	return nil, fmt.Errorf("opencode: service unavailable")
 }
 
 func (d *discoverer) awaitClient(ctx context.Context) (*client, error) {
@@ -406,7 +405,7 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd string, opts adapter.
 	// not find it. Registering first keeps it tracked even if the prompt fails.
 	d.upsert(id, session.StatusWorking, nil)
 	if opts.Prompt != "" {
-		if err := c.sendPrompt(ctx, id, opts.Prompt); err != nil {
+		if err := c.sendPrompt(ctx, id, opts.Prompt, nil); err != nil {
 			return "", err
 		}
 	}
