@@ -22,12 +22,15 @@ Version? _parse(String version) {
   }
 }
 
-/// Whether [version] meets [min]. Builds past a tag (`0.1.2-7-g17d66765`)
-/// count as that tag, unlike semver which ranks them below it. Versions that
-/// don't parse (`dev`, empty) pass: there is nothing to compare.
+/// Whether [version] meets [min]. Builds past a tag (`0.1.2-7-g17d66765`) and
+/// prereleases (`0.1.4-beta.1`) count as their release, unlike semver which
+/// ranks them below it. Versions that don't parse (`dev`, empty) pass: there
+/// is nothing to compare.
 bool isSupported(String version, String min) {
   final v = _parse(version);
-  return v == null || v >= _parsedMins.putIfAbsent(min, () => Version.parse(min));
+  if (v == null) return true;
+  final release = Version(v.major, v.minor, v.patch);
+  return release >= _parsedMins.putIfAbsent(min, () => Version.parse(min));
 }
 
 /// Whether [latest] is a newer release than [current], with the same build
