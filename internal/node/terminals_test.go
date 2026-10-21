@@ -30,9 +30,7 @@ func testSocketOf(t *testing.T, c *tmux.Client) string {
 }
 
 // terminalNode returns a node whose argus server is a throwaway tmux socket,
-// with HOME on a temp dir so cwds compare against "~". SHELL is plain sh: the
-// developer's shell config can run slow startup work in the empty HOME and
-// swallow typed input.
+// with HOME on a temp dir so cwds compare against "~".
 func terminalNode(t *testing.T) (*Node, *tmux.Client) {
 	t.Helper()
 	home, err := filepath.EvalSymlinks(t.TempDir())
@@ -40,7 +38,6 @@ func terminalNode(t *testing.T) (*Node, *tmux.Client) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
-	t.Setenv("SHELL", "/bin/sh")
 	c, socket := newTestClientSocket(t)
 	termSockets.Store(c, socket)
 	d := newNode(map[session.TmuxServer]*tmux.Client{session.TmuxServerArgus: c})
