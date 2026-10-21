@@ -7,6 +7,7 @@ package registry
 import (
 	"reflect"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -249,6 +250,7 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 			if id == "" {
 				id = AgentSessionKey(agent, f.AgentSessionID)
 			}
+			id = r.freeID(id)
 			s = &session.Session{
 				ID:     id,
 				Agent:  agent,
@@ -739,10 +741,13 @@ type HookUpdate struct {
 	Server         session.TmuxServer
 	PaneID         string // from $TMUX_PANE; primary correlation key
 	AgentSessionID string
-	Name           string
-	Cwd            string
-	Repo           string // git repo basename for Cwd, when known
-	TranscriptPath string
+	// PrevAgentSessionID is the agent session the process just left; its record
+	// follows the process to AgentSessionID.
+	PrevAgentSessionID string
+	Name               string
+	Cwd                string
+	Repo               string // git repo basename for Cwd, when known
+	TranscriptPath     string
 	// Frontend classifies the session's UI host. Never downgrades a pane-bearing
 	// session (see ApplyHook).
 	Frontend session.Frontend
@@ -771,8 +776,9 @@ type HookUpdate struct {
 	Cleared bool
 }
 
-// ApplyHook correlates a hook event to a session (by pane, else agent session id),
-// creating one if none matches. Returns the session and whether it still exists.
+// ApplyHook correlates a hook event to a session (by pane, else agent session id,
+// else previous agent session id), creating one if none matches. Returns the
+// session and whether it still exists.
 func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -793,6 +799,16 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 			s = r.sessions[id]
 		}
 	}
+	if s == nil && u.AgentSessionID != "" && u.PrevAgentSessionID != "" {
+		if id, ok := r.index.findByAgentSession(u.PrevAgentSessionID); ok {
+			s = r.sessions[id]
+		}
+	}
+	// The record now shows another session: the old one's name and transcript
+	// would otherwise stay, since empty fields below keep what is there.
+	if s != nil && u.AgentSessionID != "" && u.PrevAgentSessionID != "" && s.AgentSessionID == u.PrevAgentSessionID {
+		s.Name, s.TranscriptPath, s.Summary = "", "", nil
+	}
 
 	created := false
 	if s == nil {
@@ -807,6 +823,7 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 		if u.Input == session.InputAPI && u.AgentSessionID != "" {
 			id = AgentSessionKey(u.Agent, u.AgentSessionID)
 		}
+		id = r.freeID(id)
 		s = &session.Session{ID: id, Agent: u.Agent, Source: session.SourceHooked}
 		if u.PaneID != "" {
 			s.Tmux.Server = u.Server
@@ -903,6 +920,21 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	}
 	r.publish(evType, s)
 	return r.view(s), true
+}
+
+// freeID returns id, or id with a counter suffix when a record already holds
+// it: a record keeps its id across a session switch, so the agent session it
+// was named after can come back under a new record. Caller holds r.mu.
+func (r *Registry) freeID(id string) string {
+	if _, taken := r.sessions[id]; !taken {
+		return id
+	}
+	for n := 2; ; n++ {
+		next := id + "#" + strconv.Itoa(n)
+		if _, taken := r.sessions[next]; !taken {
+			return next
+		}
+	}
 }
 
 // mergeInteraction stops a low-information update (idle Notification, bare

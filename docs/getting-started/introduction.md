@@ -11,11 +11,11 @@ interrupt, or kill sessions without leaving the TUI.
 You can use Argus in a terminal on one machine, across several machines, or
 from your phone, which gets a push notification when a session needs you.
 
-Argus supports **Claude Code**, **Codex**, **Antigravity**, and **OpenCode**.
+Argus supports **Claude Code**, **Codex**, **Antigravity**, **OpenCode**, and **Pi**.
 
 ## Highlights
 
-- **Multi-agent:** Claude Code, Codex, Antigravity, and OpenCode in one session list.
+- **Multi-agent:** Claude Code, Codex, Antigravity, OpenCode, and Pi in one session list.
 - **Zero-setup discovery:** Finds agent sessions automatically. No per-session config.
 - **Don't use tmux?** `argus spawn` runs an agent inside tmux for you.
 - **Live status:** working, waiting, idle, or dead.

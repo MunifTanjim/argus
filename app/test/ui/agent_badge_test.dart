@@ -7,6 +7,7 @@ void main() {
     expect(agentLabel('claude'), 'Claude');
     expect(agentLabel('codex'), 'Codex');
     expect(agentLabel('antigravity'), 'Antigravity');
+    expect(agentLabel('pi'), 'Pi');
     expect(agentLabel('future'), 'future');
     expect(agentLabel(''), '');
   });

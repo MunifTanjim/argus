@@ -193,10 +193,21 @@ final Map<String, Map<String, ToolMeta>> toolRegistry = {
     'subagent': const ToolMeta('Subagent', ToolCategory.task),
     'question': const ToolMeta('Question', ToolCategory.other),
   },
+  'pi': {
+    // Pi's built-ins share opencode's lowercase names and input shapes;
+    // detail bodies are handled in tool_detail.dart by tool name.
+    'read': const ToolMeta('Read', ToolCategory.read),
+    'edit': const ToolMeta('Edit', ToolCategory.edit),
+    'write': const ToolMeta('Write', ToolCategory.write),
+    'bash': const ToolMeta('Bash', ToolCategory.bash),
+    'grep': const ToolMeta('Grep', ToolCategory.grep),
+    'find': const ToolMeta('Find', ToolCategory.glob),
+    'ls': const ToolMeta('Ls', ToolCategory.glob),
+  },
 };
 
 /// Search order when the agent is unknown.
-const _registryOrder = ['claude', 'codex', 'opencode', 'antigravity'];
+const _registryOrder = ['claude', 'codex', 'opencode', 'antigravity', 'pi'];
 
 /// Resolves [agent]'s entry for a tool. An unknown agent (null or empty) falls
 /// back to any agent's entry, in [_registryOrder]. MCP tools resolve for every

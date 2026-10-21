@@ -9,6 +9,8 @@ String agentLabel(String agent) {
       return 'Antigravity';
     case 'opencode':
       return 'OpenCode';
+    case 'pi':
+      return 'Pi';
     default:
       return agent;
   }
