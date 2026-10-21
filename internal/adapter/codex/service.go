@@ -142,6 +142,13 @@ func (d *discoverer) conn() *rpcConn {
 	return d.cur
 }
 
+func (d *discoverer) liveConn() (*rpcConn, error) {
+	if c := d.conn(); c != nil {
+		return c, nil
+	}
+	return nil, fmt.Errorf("codex: daemon unavailable")
+}
+
 func (d *discoverer) setConn(c *rpcConn) {
 	d.connMu.Lock()
 	d.cur = c
@@ -700,24 +707,36 @@ func (d *discoverer) awaitConn(ctx context.Context) (*rpcConn, error) {
 	return nil, fmt.Errorf("codex: daemon unavailable")
 }
 
-func startTurn(ctx context.Context, c *rpcConn, id, text string) error {
-	return c.call(ctx, "turn/start", map[string]any{"threadId": id, "input": []map[string]string{{"type": "text", "text": text}}}, nil)
+func startTurn(ctx context.Context, c *rpcConn, id string, input []map[string]any) error {
+	return c.call(ctx, "turn/start", map[string]any{"threadId": id, "input": input}, nil)
 }
 
-func (d *discoverer) sendPrompt(ctx context.Context, id, text string) error {
-	c := d.conn()
-	if c == nil {
-		return fmt.Errorf("codex: daemon unavailable")
+func textInput(text string) []map[string]any {
+	return []map[string]any{{"type": "text", "text": text}}
+}
+
+func (d *discoverer) sendPrompt(ctx context.Context, id string, input []map[string]any) error {
+	c, err := d.liveConn()
+	if err != nil {
+		return err
 	}
-	return startTurn(ctx, c, id, text)
+	return startTurn(ctx, c, id, input)
+}
+
+func (d *discoverer) compact(ctx context.Context, id string) error {
+	c, err := d.liveConn()
+	if err != nil {
+		return err
+	}
+	return c.call(ctx, "thread/compact/start", map[string]any{"threadId": id}, nil)
 }
 
 // renameSession renames a thread through thread/name/set. The daemon reports
 // the change back over thread/name/updated.
 func (d *discoverer) renameSession(ctx context.Context, id, name string) error {
-	c := d.conn()
-	if c == nil {
-		return fmt.Errorf("codex: daemon unavailable")
+	c, err := d.liveConn()
+	if err != nil {
+		return err
 	}
 	return c.call(ctx, "thread/name/set", map[string]any{"threadId": id, "name": name}, nil)
 }
@@ -798,7 +817,7 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd string, opts adapter.
 		return id, nil
 	}
 	d.upsert(id, session.StatusWorking, nil)
-	if err := startTurn(ctx, c, id, opts.Prompt); err != nil {
+	if err := startTurn(ctx, c, id, textInput(opts.Prompt)); err != nil {
 		// The thread stays idle and sends no status, so restore its card here.
 		d.refreshCard(id)
 		return "", err

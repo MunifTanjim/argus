@@ -251,7 +251,7 @@ func TestSendPromptStartsTurn(t *testing.T) {
 	st := &daemonState{loaded: []string{"t1"}, threads: map[string]map[string]any{"t1": threadJSON("t1", "idle")}}
 	d, f, reg := startDiscoverer(t, st)
 	waitSession(t, reg, "t1", func(session.Session) bool { return true })
-	if err := d.sendPrompt(context.Background(), "t1", "hello"); err != nil {
+	if err := d.sendPrompt(context.Background(), "t1", textInput("hello")); err != nil {
 		t.Fatal(err)
 	}
 	m := f.expect(t, "turn/start")
