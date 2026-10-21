@@ -917,3 +917,62 @@ func TestShellInputRouting(t *testing.T) {
 		})
 	}
 }
+
+type fakeCompleter struct {
+	adapter.Adapter
+	items      []api.PromptCompletion
+	gotTrigger string
+}
+
+func (f *fakeCompleter) CompletePrompt(_ context.Context, _ session.Session, trigger string) ([]api.PromptCompletion, error) {
+	f.gotTrigger = trigger
+	return f.items, nil
+}
+
+func promptComplete(t *testing.T, d *Node, id, trigger string) (api.PromptCompleteResult, error) {
+	t.Helper()
+	params, _ := json.Marshal(api.PromptCompleteParams{SessionID: id, Trigger: trigger})
+	res, err := d.handleSessionPromptComplete(context.Background(), params)
+	if err != nil {
+		return api.PromptCompleteResult{}, err
+	}
+	return res.(api.PromptCompleteResult), nil
+}
+
+func TestHandleSessionPromptCompleteReturnsAdapterItems(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	fc := &fakeCompleter{items: []api.PromptCompletion{{Name: "compact"}}}
+	d.adapters["fake"] = fc
+	s, _ := d.reg.ApplyHook(registry.HookUpdate{Agent: "fake", AgentSessionID: "f1", Status: session.StatusIdle})
+
+	res, err := promptComplete(t, d, s.ID, "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Items) != 1 || res.Items[0] != fc.items[0] || fc.gotTrigger != "/" {
+		t.Fatalf("items = %+v, trigger = %q", res.Items, fc.gotTrigger)
+	}
+}
+
+func TestHandleSessionPromptCompleteWithoutCompleterIsEmpty(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.adapters["plain"] = fakePlain{}
+	s, _ := d.reg.ApplyHook(registry.HookUpdate{Agent: "plain", AgentSessionID: "p1", Status: session.StatusIdle})
+
+	res, err := promptComplete(t, d, s.ID, "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Items == nil || len(res.Items) != 0 {
+		t.Fatalf("items = %#v, want empty non-nil", res.Items)
+	}
+}
+
+func TestHandleSessionPromptCompleteUnknownSession(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	_, err := promptComplete(t, d, "nope", "/")
+	var rpcErr *api.RPCError
+	if !errors.As(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest || rpcErr.Message != "unknown session nope" {
+		t.Fatalf("err = %v, want invalid request \"unknown session nope\"", err)
+	}
+}

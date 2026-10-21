@@ -121,3 +121,19 @@ func (agAdapter) Uninstall() error { return Uninstall() }
 func (agAdapter) SettingsPath() (string, error) { return SettingsPath() }
 
 func (agAdapter) DefaultHookEvents() []string { return DefaultHookEvents }
+
+var _ adapter.PromptCompleter = agAdapter{}
+
+var builtinCommands = []api.PromptCompletion{
+	{Name: "exit", Description: "Exit the CLI"},
+	{Name: "compact", Description: "Compact the conversation now"},
+	{Name: "clear", Description: "Clear conversation and start a new one"},
+	{Name: "new", Description: "Clear conversation and start a new one"},
+}
+
+func (agAdapter) CompletePrompt(_ context.Context, _ session.Session, trigger string) ([]api.PromptCompletion, error) {
+	if trigger != "/" {
+		return nil, nil
+	}
+	return builtinCommands, nil
+}

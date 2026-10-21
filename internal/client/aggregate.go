@@ -24,6 +24,7 @@ var sessionAddressed = map[string]bool{
 	api.MethodSessionCommitFiles:    true,
 	api.MethodSessionFocus:          true,
 	api.MethodSessionRename:         true,
+	api.MethodSessionPromptComplete: true,
 	api.MethodSessionTasks:          true,
 	api.MethodTranscriptSubscribe:   true,
 	api.MethodTerminalOpen:          true,
