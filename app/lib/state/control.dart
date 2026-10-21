@@ -146,6 +146,29 @@ class SessionService {
         );
       });
 
+  /// A node too old to know the method offers no completions.
+  Future<Result<List<PromptCompletion>>> completePrompt(
+          String sessionId, String trigger) =>
+      _guard((c) async {
+        try {
+          final r = await c.call('session.prompt.complete', {
+            'session_id': sessionId,
+            'trigger': trigger,
+          });
+          final list = (r as Map?)?['items'] as List? ?? const [];
+          return [
+            for (final i in list)
+              PromptCompletion(
+                name: (i as Map)['name'] as String? ?? '',
+                description: i['description'] as String? ?? '',
+              ),
+          ];
+        } on RpcError catch (e) {
+          if (e.isMethodNotFound) return const <PromptCompletion>[];
+          rethrow;
+        }
+      });
+
   Future<Result<void>> kill(String sessionId) =>
       _guard((c) => c.call('sessions.kill', {'session_id': sessionId}));
 

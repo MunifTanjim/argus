@@ -66,6 +66,14 @@ class DirCompletion {
   const DirCompletion({required this.home, required this.paths});
 }
 
+/// An agent command or skill offered after a prompt trigger. [name] has no
+/// trigger character.
+class PromptCompletion {
+  final String name;
+  final String description;
+  const PromptCompletion({required this.name, required this.description});
+}
+
 class ResumeOutcome {
   final String sessionId;
   const ResumeOutcome({required this.sessionId});

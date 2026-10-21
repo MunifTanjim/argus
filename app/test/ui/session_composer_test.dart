@@ -1,6 +1,8 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/core/result.dart';
@@ -8,8 +10,10 @@ import 'package:argus/data/session_repository.dart';
 import 'package:argus/models/entry.dart';
 import 'package:argus/models/enums.dart';
 import 'package:argus/models/session.dart';
+import 'package:argus/state/grouping.dart';
 import 'package:argus/state/sessions.dart';
 import 'package:argus/ui/interaction_panel.dart';
+import 'package:argus/ui/prompt_completion.dart';
 import 'package:argus/ui/session_composer.dart';
 import 'package:argus/ui/status_style.dart';
 import 'package:argus/ui/theme.dart';
@@ -36,6 +40,37 @@ class _Slow extends _Recording {
     return super.sendInput(sessionId, text);
   }
 }
+
+class _Completing extends _Recording {
+  _Completing(this.items);
+  List<PromptCompletion> items;
+  final calls = <List<String>>[];
+  @override
+  Future<Result<List<PromptCompletion>>> completePrompt(
+      String sessionId, String trigger) async {
+    calls.add([sessionId, trigger]);
+    return Result.ok(items);
+  }
+}
+
+class _GatedCompleting extends _Recording {
+  final calls = <List<String>>[];
+  final pending = <Completer<Result<List<PromptCompletion>>>>[];
+  @override
+  Future<Result<List<PromptCompletion>>> completePrompt(
+      String sessionId, String trigger) {
+    calls.add([sessionId, trigger]);
+    final c = Completer<Result<List<PromptCompletion>>>();
+    pending.add(c);
+    return c.future;
+  }
+}
+
+const _compact = PromptCompletion(
+    name: 'compact', description: 'Compact the conversation');
+
+String _field(WidgetTester t) =>
+    t.widget<TextField>(find.byType(TextField)).controller!.text;
 
 Session _s({
   String status = 'idle',
@@ -593,5 +628,161 @@ void main() {
     expect(find.text('c'), findsOneWidget);
     expect(find.text('d'), findsNothing);
     expect(find.text('+2 more'), findsOneWidget);
+  });
+
+  group('prompt menu', () {
+    testWidgets('a tapped row completes the prompt without sending',
+        (t) async {
+      final repo = _Completing([_compact]);
+      await _pump(t, _s(), repo);
+      await t.enterText(find.byType(TextField), '/');
+      await t.pumpAndSettle();
+      expect(repo.calls, [
+        ['n:%1', '/']
+      ]);
+      expect(find.text('Compact the conversation'), findsOneWidget);
+      await t.tap(find.text('compact'));
+      await t.pumpAndSettle();
+      expect(_field(t), '/compact ');
+      expect(find.text('Compact the conversation'), findsNothing);
+      expect(repo.inputs, isEmpty);
+    });
+
+    testWidgets('Enter selects the first row while the menu is open',
+        (t) async {
+      final repo = _Completing([
+        _compact,
+        const PromptCompletion(name: 'clear', description: ''),
+      ]);
+      await _pump(t, _s(), repo);
+      await t.enterText(find.byType(TextField), '/');
+      await t.pumpAndSettle();
+      await t.sendKeyEvent(LogicalKeyboardKey.enter);
+      await t.pumpAndSettle();
+      expect(_field(t), '/compact ');
+      expect(repo.inputs, isEmpty);
+    });
+
+    testWidgets('an empty result shows no menu and is fetched again',
+        (t) async {
+      final repo = _Completing([]);
+      await _pump(t, _s(), repo);
+      await t.enterText(find.byType(TextField), '/');
+      await t.pumpAndSettle();
+      expect(find.text('compact'), findsNothing);
+      await t.enterText(find.byType(TextField), '');
+      await t.pump();
+      repo.items = [_compact];
+      await t.enterText(find.byType(TextField), '/');
+      await t.pumpAndSettle();
+      expect(repo.calls, hasLength(2));
+      expect(find.text('compact'), findsOneWidget);
+    });
+
+    testWidgets('a send drops the cached items', (t) async {
+      final repo = _Completing([_compact]);
+      await _pump(t, _s(), repo);
+      await t.enterText(find.byType(TextField), '/');
+      await t.pumpAndSettle();
+      await t.enterText(find.byType(TextField), '');
+      await t.pump();
+      await t.enterText(find.byType(TextField), '/');
+      await t.pumpAndSettle();
+      expect(repo.calls, hasLength(1), reason: 'the items are cached');
+      await t.enterText(find.byType(TextField), 'hi');
+      await t.pump();
+      await t.tap(find.byTooltip('Send'));
+      await t.pumpAndSettle();
+      await t.enterText(find.byType(TextField), '/');
+      await t.pumpAndSettle();
+      expect(repo.calls, hasLength(2));
+    });
+
+    testWidgets('the menu hides while the field has no focus', (t) async {
+      final repo = _Completing([_compact]);
+      await _pump(t, _s(), repo);
+      await t.enterText(find.byType(TextField), '/');
+      await t.pumpAndSettle();
+      expect(find.text('compact'), findsOneWidget);
+      FocusManager.instance.primaryFocus!.unfocus();
+      await t.pumpAndSettle();
+      expect(find.text('compact'), findsNothing);
+      await t.tap(find.byType(TextField));
+      await t.pumpAndSettle();
+      expect(find.text('compact'), findsOneWidget);
+    });
+
+    testWidgets('a mouse click on a row completes the prompt', (t) async {
+      final repo = _Completing([_compact]);
+      await _pump(t, _s(), repo);
+      await t.enterText(find.byType(TextField), '/');
+      await t.pumpAndSettle();
+      final click = await t.startGesture(t.getCenter(find.text('compact')),
+          kind: PointerDeviceKind.mouse);
+      await t.pump();
+      await click.up();
+      await t.pumpAndSettle();
+      expect(_field(t), '/compact ');
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+    testWidgets('a fetch in flight during a send is not cached', (t) async {
+      final repo = _GatedCompleting();
+      await _pump(t, _s(), repo);
+      await t.enterText(find.byType(TextField), '/');
+      await t.pump();
+      expect(repo.calls, hasLength(1));
+      await t.tap(find.byTooltip('Send'));
+      await t.pump();
+      repo.pending.single.complete(const Result.ok([_compact]));
+      await t.pumpAndSettle();
+      expect(repo.inputs, [
+        ['n:%1', '/']
+      ]);
+      await t.enterText(find.byType(TextField), '/');
+      await t.pump();
+      expect(repo.calls, hasLength(2), reason: 'the stale fetch was cached');
+    });
+
+    testWidgets('the menu fits in the space above the field', (t) async {
+      final repo = _Completing([
+        for (var i = 0; i < 6; i++)
+          PromptCompletion(name: 'cmd$i', description: ''),
+      ]);
+      await t.pumpWidget(UncontrolledProviderScope(
+        container: ProviderContainer(
+            overrides: [sessionRepositoryProvider.overrideWithValue(repo)]),
+        child: MaterialApp(
+          home: Scaffold(
+            body: Padding(
+              padding: const EdgeInsets.only(top: 100),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: SessionComposer(session: _s()),
+              ),
+            ),
+          ),
+        ),
+      ));
+      await t.enterText(find.byType(TextField), '/');
+      await t.pumpAndSettle();
+      final menu = t.getRect(find.byType(PromptMenu));
+      final field = t.getRect(find.byType(TextField));
+      expect(menu.height, greaterThan(0));
+      expect(menu.top, greaterThanOrEqualTo(0));
+      expect(menu.bottom, lessThanOrEqualTo(field.top));
+    });
+
+    testWidgets('Enter with the menu closed neither selects nor sends',
+        (t) async {
+      final repo = _Completing([_compact]);
+      await _pump(t, _s(), repo);
+      await t.enterText(find.byType(TextField), 'hello');
+      await t.pumpAndSettle();
+      await t.sendKeyEvent(LogicalKeyboardKey.enter);
+      await t.pumpAndSettle();
+      expect(_field(t), 'hello');
+      expect(repo.inputs, isEmpty);
+      expect(repo.calls, isEmpty);
+    });
   });
 }
