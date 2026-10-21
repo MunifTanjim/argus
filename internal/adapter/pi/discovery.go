@@ -9,10 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os/exec"
+	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -24,11 +27,12 @@ import (
 	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
-// spawnProc starts the owned pi child; a var so tests can stub the process
-// while exercising the supervisor against a fake RPC peer.
-var spawnProc = spawnRPC
+// spawnProc starts an owned pi under its relay; a var so tests can run the
+// relay in process against a fake RPC peer.
+var spawnProc = spawnHosted
 
-// dismissKillAfter bounds graceful shutdown before SIGKILL.
+// dismissKillAfter is the relay's grace (hostKillAfter) before it kills pi;
+// dismiss waits a second past it for the relay to report the exit.
 var dismissKillAfter = 5 * time.Second
 
 // startExitWait bounds how long a spawn whose first call failed waits to see
@@ -119,24 +123,24 @@ func (c *card) dropPending(uiID string) bool {
 	return had && len(c.pending) == 0
 }
 
-// sessionProc is one Argus-owned `pi --mode rpc` child process.
+// sessionProc is one Argus-owned `pi --mode rpc` process, reached through
+// its relay.
 type sessionProc struct {
 	card
-	conn   *rpcConn
-	cmd    *exec.Cmd
-	exited chan struct{} // closed once the reaper's cmd.Wait returns
+	conn *rpcConn
 }
 
 // discoverer supervises owned pi RPC processes and mirrors them into the
-// registry. Liveness is the child process: a session exists while its pi
-// process runs. There is no shared daemon to poll (unlike Codex/OpenCode):
-// a reaper per process drops exited ones, and all other updates are
-// event-driven.
+// registry. Liveness is the relay connection: a session exists while its
+// relay is connected. There is no shared daemon to poll (unlike
+// Codex/OpenCode): a reaper per connection drops ended ones, and all other
+// updates are event-driven.
 type discoverer struct {
 	reg *registry.Registry
 
-	mu    sync.Mutex
-	procs map[string]*sessionProc // pi session id -> owned proc
+	mu           sync.Mutex
+	procs        map[string]*sessionProc // pi session id -> owned proc
+	reattachOnce sync.Once
 
 	// Beacon side (Tier 2): foreign sessions whose gate extension dialed in.
 	foreign map[string]*foreignSession
@@ -166,9 +170,115 @@ func newSessionID() string {
 	return hex.EncodeToString(b[:])
 }
 
-func (d *discoverer) ScanOnce(_ context.Context) error {
+func (d *discoverer) ScanOnce(ctx context.Context) error {
+	d.reattachFirst(ctx)
 	d.sweepForeign()
 	return nil
+}
+
+// reattachFirst runs the one reattach. It outlives the request that happens
+// to trigger it, since it never runs again, and a spawn waits for it so the
+// listing never picks up the spawn's own relay.
+func (d *discoverer) reattachFirst(ctx context.Context) {
+	d.reattachOnce.Do(func() { d.reattach(context.WithoutCancel(ctx)) })
+}
+
+// reattach restores the owned sessions whose relays outlived the previous
+// argusd. A socket that refuses the connection, or a file that is not a
+// socket, is left over from a relay that died. Other dial errors keep the
+// socket, since its relay can still be alive.
+func (d *discoverer) reattach(ctx context.Context) {
+	paths, _ := filepath.Glob(filepath.Join(hostDir(), "*.sock"))
+	dialer := net.Dialer{Timeout: time.Second}
+	for _, path := range paths {
+		c, err := dialer.DialContext(ctx, "unix", path)
+		if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENOTSOCK) {
+			os.Remove(path)
+		}
+		if err != nil {
+			continue
+		}
+		d.adopt(ctx, newRPCConn(c, c))
+	}
+}
+
+// adopt tracks a running pi from its relay. The relay replays open dialogs
+// before get_state answers, so events wait until the card has its id.
+func (d *discoverer) adopt(ctx context.Context, conn *rpcConn) {
+	p := &sessionProc{card: card{pending: map[string]*pendingUI{}}, conn: conn}
+	type event struct {
+		typ string
+		raw json.RawMessage
+	}
+	var (
+		gate  sync.Mutex
+		ready bool
+		held  []event
+	)
+	conn.start(func(typ string, raw json.RawMessage) {
+		gate.Lock()
+		defer gate.Unlock()
+		if !ready {
+			held = append(held, event{typ, raw})
+			return
+		}
+		d.procEvent(p, typ, raw)
+	})
+	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	data, err := conn.call(sctx, d.nextID(), "get_state", nil)
+	cancel()
+	var st rpcState
+	if err == nil {
+		err = json.Unmarshal(data, &st)
+	}
+	if err != nil || st.SessionID == "" {
+		conn.close()
+		return
+	}
+	conn.mu.Lock()
+	cwd := conn.hostCwd
+	conn.mu.Unlock()
+	p.id, p.cwd, p.repo, p.streaming = st.SessionID, cwd, gittree.RepoName(cwd), st.IsStreaming
+	p.foldState(st)
+	d.mu.Lock()
+	if d.procs[p.id] != nil {
+		d.mu.Unlock()
+		conn.close()
+		return
+	}
+	d.procs[p.id] = p
+	d.mu.Unlock()
+	go d.reap(p)
+
+	gate.Lock()
+	for _, e := range held {
+		d.procEvent(p, e.typ, e.raw)
+	}
+	ready = true
+	gate.Unlock()
+
+	p.mu.Lock()
+	asking := len(p.pending) > 0
+	p.mu.Unlock()
+	switch {
+	case asking:
+	case st.IsStreaming:
+		d.upsert(p, session.StatusWorking, nil, false)
+	default:
+		d.upsert(p, session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionIdle}, true)
+	}
+}
+
+// reap drops p once its relay connection ends, unless dismiss took it first.
+func (d *discoverer) reap(p *sessionProc) {
+	<-p.conn.done
+	p.conn.close()
+	d.mu.Lock()
+	still := d.procs[p.sessionID()] == p
+	d.mu.Unlock()
+	if still {
+		d.forget(p)
+	}
 }
 
 // running reports whether a pi process runs session id, owned or foreign.
@@ -188,6 +298,7 @@ func (d *discoverer) get(id string) *sessionProc {
 // session id. A non-empty prompt is sent after the process is tracked, so a
 // send failure still leaves a live, listed session.
 func (d *discoverer) spawnSession(ctx context.Context, cwd string, opts adapter.SpawnOptions) (string, error) {
+	d.reattachFirst(ctx)
 	gate, err := gateExtension()
 	if err != nil {
 		return "", err
@@ -195,43 +306,27 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd string, opts adapter.
 	id := newSessionID()
 	// The process outlives the request: a request's context ends with the
 	// client connection that sent it.
-	conn, cmd, err := spawnProc(context.WithoutCancel(ctx), cwd, id, gate, opts.Model)
+	conn, err := spawnProc(context.WithoutCancel(ctx), cwd, id, gate, opts.Model)
 	if err != nil {
 		return "", err
 	}
 	p := &sessionProc{
-		card:   card{id: id, cwd: cwd, repo: gittree.RepoName(cwd), pending: map[string]*pendingUI{}},
-		conn:   conn,
-		cmd:    cmd,
-		exited: make(chan struct{}),
+		card: card{id: id, cwd: cwd, repo: gittree.RepoName(cwd), pending: map[string]*pendingUI{}},
+		conn: conn,
 	}
 	conn.start(func(typ string, raw json.RawMessage) { d.procEvent(p, typ, raw) })
 	d.mu.Lock()
 	d.procs[id] = p
 	d.mu.Unlock()
-
-	// Reap: the only cmd.Wait. An unexpected exit marks the card dead.
-	go func() {
-		_ = cmd.Wait()
-		close(p.exited)
-		d.mu.Lock()
-		id := p.sessionID()
-		still := d.procs[id] == p
-		d.mu.Unlock()
-		if still {
-			d.forget(p)
-		}
-	}()
+	go d.reap(p)
 
 	// Hydrate identity: session file, name, and model. pi exits at start on a
 	// model it cannot resolve.
 	if _, err := d.loadState(ctx, p); err != nil {
 		select {
-		case <-p.exited:
-			if t, ok := cmd.Stderr.(*stderrTail); ok {
-				if why := t.lastLines(3); why != "" {
-					return "", fmt.Errorf("pi: exited at start: %s", why)
-				}
+		case <-conn.done:
+			if ex, ok := conn.exit(); ok && ex.Stderr != "" {
+				return "", fmt.Errorf("pi: exited at start: %s", ex.Stderr)
 			}
 			return "", fmt.Errorf("pi: exited at start: %w", err)
 		case <-time.After(startExitWait):
@@ -253,6 +348,7 @@ type rpcState struct {
 	SessionFile   string `json:"sessionFile"`
 	SessionName   string `json:"sessionName"`
 	ThinkingLevel string `json:"thinkingLevel"`
+	IsStreaming   bool   `json:"isStreaming"`
 	Model         *struct {
 		ID        string `json:"id"`
 		Reasoning bool   `json:"reasoning"`
@@ -294,17 +390,29 @@ func (d *discoverer) loadState(ctx context.Context, p *sessionProc) (bool, error
 		d.procs[st.SessionID] = p
 	}
 	d.mu.Unlock()
-	file, name, model, reasoning, level := p.file, p.name, p.model, p.reasoning, p.level
+	return p.foldStateLocked(st) || rekeyed, nil
+}
+
+func (c *card) foldState(st rpcState) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.foldStateLocked(st)
+}
+
+// foldStateLocked takes get_state's file, name, and model; c.mu must be held.
+// It reports whether any changed.
+func (c *card) foldStateLocked(st rpcState) bool {
+	file, name, model, reasoning, level := c.file, c.name, c.model, c.reasoning, c.level
 	if st.SessionFile != "" {
-		p.file = st.SessionFile
+		c.file = st.SessionFile
 	}
 	if st.SessionName != "" {
-		p.name = st.SessionName
+		c.name = st.SessionName
 	}
 	if st.Model != nil && st.Model.ID != "" {
-		p.model, p.reasoning, p.level = st.Model.ID, st.Model.Reasoning, st.ThinkingLevel
+		c.model, c.reasoning, c.level = st.Model.ID, st.Model.Reasoning, st.ThinkingLevel
 	}
-	return rekeyed || p.file != file || p.name != name || p.model != model || p.reasoning != reasoning || p.level != level, nil
+	return c.file != file || c.name != name || c.model != model || c.reasoning != reasoning || c.level != level
 }
 
 // inBackground runs fn past the request: pi answers some commands only once
@@ -563,20 +671,21 @@ func (d *discoverer) dismiss(ctx context.Context, id string) error {
 		}
 		return nil
 	}
-	_ = p.conn.close() // orderly shutdown: pi disposes the runtime and exits
-	ctx, cancel := context.WithTimeout(ctx, dismissKillAfter)
+	// The relay closes pi's stdin, which asks pi to dispose the runtime and
+	// exit, and kills pi if it has not exited in time.
+	_ = p.conn.stop()
+	ctx, cancel := context.WithTimeout(ctx, dismissKillAfter+time.Second)
 	defer cancel()
 	select {
-	case <-p.exited:
+	case <-p.conn.done:
 	case <-ctx.Done():
-		_ = p.cmd.Process.Kill()
-		<-p.exited
 	}
+	_ = p.conn.close()
 	d.markProcDead(p)
 	return nil
 }
 
-// forget drops a session whose process exited on its own.
+// forget drops a session whose relay connection ended on its own.
 func (d *discoverer) forget(p *sessionProc) {
 	d.mu.Lock()
 	delete(d.procs, p.sessionID())

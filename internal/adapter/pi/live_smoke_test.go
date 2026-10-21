@@ -23,14 +23,16 @@ func TestLiveSmoke(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	conn, cmd, err := spawnRPC(ctx, t.TempDir(), "smoke-"+newSessionID(), "", "")
+	useRealRelay(t)
+	conn, err := spawnHosted(ctx, t.TempDir(), "smoke-"+newSessionID(), "", "")
 	if err != nil {
-		t.Fatalf("spawnRPC: %v", err)
+		t.Fatalf("spawnHosted: %v", err)
 	}
 	conn.start(nil)
 	defer func() {
+		_ = conn.stop()
+		<-conn.done
 		_ = conn.close()
-		_ = cmd.Wait()
 	}()
 
 	data, err := conn.call(ctx, "s1", "get_state", nil)
@@ -60,6 +62,7 @@ func TestLiveSupervisedSession(t *testing.T) {
 	if _, err := exec.LookPath(piBin); err != nil {
 		t.Skipf("pi binary not available: %v", err)
 	}
+	useRealRelay(t)
 	reg := registry.New()
 	d := newDiscoverer(reg, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)

@@ -8,9 +8,13 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 )
@@ -26,9 +30,9 @@ type response struct {
 	Error   string          `json:"error"`
 }
 
-// rpcConn speaks pi's RPC protocol (strict JSONL over stdin/stdout) with one
-// pi --mode rpc child process. The zero value is unusable; build with
-// newRPCConn (tests) or spawnRPC (production), then start it.
+// rpcConn speaks pi's RPC protocol (strict JSONL) with one pi --mode rpc
+// process, through the relay that holds its stdio. The zero value is unusable;
+// build with dialHost or newRPCConn (tests), then start it.
 //
 // Framing: one JSON object per line terminated by LF. Reads split on the LF
 // byte only — never on Unicode line separators, which are valid inside JSON
@@ -44,6 +48,10 @@ type rpcConn struct {
 	mu      sync.Mutex
 	pending map[string]chan response
 
+	// hostCwd is the relay's cwd for pi, set from the first record.
+	hostCwd string
+	exited  *hostExit
+
 	done      chan struct{}
 	closeOnce sync.Once
 }
@@ -54,6 +62,23 @@ func newRPCConn(stdin io.WriteCloser, stdout io.Reader) *rpcConn {
 		stdout:  bufio.NewReader(stdout),
 		pending: map[string]chan response{},
 		done:    make(chan struct{}),
+	}
+}
+
+// dialHost connects to the relay at path, retrying until it listens or ctx
+// ends.
+func dialHost(ctx context.Context, path string) (*rpcConn, error) {
+	var d net.Dialer
+	for {
+		conn, err := d.DialContext(ctx, "unix", path)
+		if err == nil {
+			return newRPCConn(conn, conn), nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("pi: dial relay: %w", err)
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 }
 
@@ -124,6 +149,27 @@ func (c *rpcConn) readLoop() {
 		if json.Unmarshal(line, &probe) != nil {
 			continue
 		}
+		switch probe.Type {
+		case hostHelloType:
+			var h struct {
+				Cwd string `json:"cwd"`
+			}
+			_ = json.Unmarshal(line, &h)
+			c.mu.Lock()
+			c.hostCwd = h.Cwd
+			c.mu.Unlock()
+			continue
+		case hostExitType:
+			var ex struct {
+				Code   int    `json:"code"`
+				Stderr string `json:"stderr"`
+			}
+			_ = json.Unmarshal(line, &ex)
+			c.mu.Lock()
+			c.exited = &hostExit{Code: ex.Code, Stderr: ex.Stderr}
+			c.mu.Unlock()
+			continue
+		}
 		if probe.Type == "response" && probe.ID != "" {
 			var r response
 			if json.Unmarshal(line, &r) != nil {
@@ -151,43 +197,83 @@ func streamingDelta(line []byte) bool {
 		bytes.HasPrefix(line, []byte(`{"type":"tool_execution_update"`))
 }
 
-// close shuts the connection down orderly: closing stdin asks pi to dispose
-// the runtime and exit. It does not wait for the process (see supervisor).
+// close drops the connection; pi keeps running under its relay.
 func (c *rpcConn) close() error {
 	var err error
 	c.closeOnce.Do(func() { err = c.stdin.Close() })
 	return err
 }
 
+// stop asks the relay to end pi.
+func (c *rpcConn) stop() error {
+	return c.send(map[string]string{"type": hostStopType})
+}
+
+// exit reports how pi exited, once done is closed; false when the connection
+// ended without the relay saying.
+func (c *rpcConn) exit() (hostExit, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.exited == nil {
+		return hostExit{}, false
+	}
+	return *c.exited, true
+}
+
 // piBin is the pi executable name, a var so tests can stub it.
 var piBin = "pi"
 
-// spawnRPC starts `pi --mode rpc --session-id <id>` in cwd with the gate
-// extension loaded and ARGUS_MANAGED set, returning the connected rpcConn.
-// model is a "provider/id" from listModels, or "" for pi's default. The caller
-// owns the process (reap via cmd.Wait after conn.close).
-func spawnRPC(ctx context.Context, cwd, sessionID, extensionPath, model string) (*rpcConn, *exec.Cmd, error) {
-	args := []string{"--mode", "rpc", "--session-id", sessionID}
+// hostBin is the argus executable that runs the relay.
+var hostBin = os.Executable
+
+// hostDialLimit bounds how long a spawn waits for its relay to listen.
+var hostDialLimit = 5 * time.Second
+
+// spawnHosted starts `pi --mode rpc --session-id <id>` in cwd under a relay
+// (`argus pi-host`), with the gate extension loaded and ARGUS_MANAGED set, and
+// returns the connection to the relay. model is a "provider/id" from
+// listModels, or "" for pi's default. The relay runs in its own session so it
+// outlives argusd.
+func spawnHosted(ctx context.Context, cwd, sessionID, extensionPath, model string) (*rpcConn, error) {
+	bin, err := hostBin()
+	if err != nil {
+		return nil, fmt.Errorf("pi: relay: %w", err)
+	}
+	path := hostSocketPath(sessionID)
+	args := []string{"pi-host", "--socket", path, "--cwd", cwd, "--", piBin, "--mode", "rpc", "--session-id", sessionID}
 	if extensionPath != "" {
 		args = append(args, "--extension", extensionPath)
 	}
 	args = append(args, modelArgs(model)...)
-	cmd := exec.CommandContext(ctx, piBin, args...)
+	cmd := exec.Command(bin, args...)
 	cmd.Dir = cwd
 	cmd.Env = append(cmd.Environ(), gateEnv+"=1")
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, nil, fmt.Errorf("pi: stdin pipe: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, nil, fmt.Errorf("pi: stdout pipe: %w", err)
-	}
-	cmd.Stderr = &stderrTail{}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
-		return nil, nil, fmt.Errorf("pi: start: %w", err)
+		return nil, fmt.Errorf("pi: start relay: %w", err)
 	}
-	return newRPCConn(stdin, stdout), cmd, nil
+	ctx, cancel := context.WithTimeout(ctx, hostDialLimit)
+	defer cancel()
+	relayExited := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(relayExited)
+		cancel()
+	}()
+	conn, err := dialHost(ctx, path)
+	if err != nil {
+		select {
+		case <-relayExited:
+			return nil, fmt.Errorf("pi: relay exited (code %d)", cmd.ProcessState.ExitCode())
+		default:
+		}
+		// No card will track it, and the next argusd would bring it back. It
+		// never had a client, so nothing of the session is lost.
+		_ = cmd.Process.Kill()
+		os.Remove(path)
+		return nil, err
+	}
+	return conn, nil
 }
 
 // stderrTail keeps the end of pi's stderr (diagnostics, never protocol) to

@@ -3,6 +3,7 @@ package pi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"reflect"
 	"sync"
@@ -38,6 +39,10 @@ type fakePi struct {
 	gotUI   []map[string]any
 	prompts []map[string]any
 	calls   []map[string]any // other commands, answered with success
+	out     func(any) error  // writes one stdout record
+	eof     bool             // stdin ended with EOF, not a kill
+	kill    func()           // ends the fake as a dying process
+	lose    func()           // drops the relay's connections without an exit record
 }
 
 func (f *fakePi) run(stdin io.Reader, stdout io.WriteCloser) {
@@ -50,9 +55,17 @@ func (f *fakePi) run(stdin io.Reader, stdout io.WriteCloser) {
 		defer encMu.Unlock()
 		return raw.Encode(v)
 	}}
+	f.mu.Lock()
+	f.out = enc.Encode
+	f.mu.Unlock()
 	for {
 		var rec map[string]any
 		if err := dec.Decode(&rec); err != nil {
+			if errors.Is(err, io.EOF) {
+				f.mu.Lock()
+				f.eof = true
+				f.mu.Unlock()
+			}
 			return
 		}
 		switch rec["type"] {
@@ -140,6 +153,23 @@ func (f *fakePi) call(typ string) map[string]any {
 		}
 	}
 	return nil
+}
+
+// emit writes an unsolicited record, as pi does for events.
+func (f *fakePi) emit(v any) {
+	f.t.Helper()
+	f.mu.Lock()
+	out := f.out
+	f.mu.Unlock()
+	if err := out(v); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func (f *fakePi) sawEOF() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.eof
 }
 
 func (f *fakePi) uiResponses() []map[string]any {

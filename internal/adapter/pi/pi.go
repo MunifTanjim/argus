@@ -1,8 +1,9 @@
 // Package pi is the argus adapter for Pi (https://pi.dev), a minimal,
-// extensible coding-agent harness. Argus owns one `pi --mode rpc` child
-// process per session and drives it over JSONL on stdin/stdout; a bundled
-// gate extension (loaded with -e at spawn) adds no approvals; the dialogs of
-// pi's own extensions arrive as extension_ui_request records in RPC mode.
+// extensible coding-agent harness. Argus owns one `pi --mode rpc` process per
+// session, held by a relay (`argus pi-host`) that outlives argusd, and drives
+// it over JSONL through the relay's socket; a bundled gate extension (loaded
+// with -e at spawn) adds no approvals; the dialogs of pi's own extensions
+// arrive as extension_ui_request records in RPC mode.
 //
 // Transcripts and history read the session files under
 // ~/.pi/agent/sessions/--<cwd>--/<ts>_<id>.jsonl.
