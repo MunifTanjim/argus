@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -71,5 +72,58 @@ func TestManagedServerRestartsInPlace(t *testing.T) {
 	srv.stop(managedStopTimeout)
 	if err := srv.wait(); err != nil {
 		t.Fatalf("after a restart, EOF must still stop the server cleanly: %v", err)
+	}
+}
+
+func TestDetachedChildRestartRotatesLog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds argus twice")
+	}
+	sandboxChild(t)
+	t.Setenv("ARGUS_TEST_RUN_MAIN", "")
+	root := shortTempDir(t)
+	bin := filepath.Join(root, "argus")
+	buildArgus(t, bin, "1.0.0")
+	sock := filepath.Join(root, "s.sock")
+	logPath := filepath.Join(root, "n.log")
+
+	cmd := exec.Command(bin, "start", "--argus-managed", "--argus-log-file="+logPath, "--no-config", "--mode", "node", "--socket", sock)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	t.Cleanup(func() { stopDetached(t, cmd, done, sock) })
+
+	var before api.ServerInfo
+	waitFor(t, "the 1.0.0 child to serve", 20*time.Second, func() bool {
+		var err error
+		before, err = probeServerInfo(sock)
+		return err == nil
+	}, func() string { b, _ := os.ReadFile(logPath); return string(b) })
+
+	buildArgus(t, bin+".new", "2.0.0")
+	if err := os.Rename(bin+".new", bin); err != nil {
+		t.Fatal(err)
+	}
+	c, err := api.Dial(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Call(api.MethodServerRestart, nil, nil); err != nil {
+		t.Fatalf("server.restart: %v", err)
+	}
+	c.Close()
+	after, err := waitForRestart(context.Background(), sock, before.StartedAt, 30*time.Second)
+	if err != nil || after.Version != "2.0.0" {
+		t.Fatalf("after: %+v, %v", after, err)
+	}
+	prev, _ := os.ReadFile(logPath + ".1")
+	cur, _ := os.ReadFile(logPath)
+	if !strings.Contains(string(prev), "starting argus node") || !strings.Contains(string(prev), "1.0.0") {
+		t.Errorf("%s.1 = %q, want the 1.0.0 startup line", logPath, prev)
+	}
+	if !strings.Contains(string(cur), "starting argus node") || !strings.Contains(string(cur), "2.0.0") || strings.Contains(string(cur), "1.0.0") {
+		t.Errorf("%s = %q, want only the 2.0.0 startup line", logPath, cur)
 	}
 }
