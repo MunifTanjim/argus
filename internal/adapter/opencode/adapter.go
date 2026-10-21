@@ -115,7 +115,7 @@ func (a *ocAdapter) SendPrompt(ctx context.Context, sess session.Session, text s
 	if a.disc == nil {
 		return fmt.Errorf("opencode: no active discoverer")
 	}
-	return a.disc.sendPrompt(ctx, sess.AgentSessionID, text)
+	return a.disc.submit(ctx, sess, text)
 }
 
 func (a *ocAdapter) SpawnSession(ctx context.Context, cwd string, opts adapter.SpawnOptions) (string, error) {

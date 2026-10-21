@@ -215,7 +215,7 @@ func TestClientSendPrompt(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := newClient(serviceInfo{URL: srv.URL})
-	if err := c.sendPrompt(context.Background(), "ses_1", "hello"); err != nil {
+	if err := c.sendPrompt(context.Background(), "ses_1", "hello", nil); err != nil {
 		t.Fatalf("sendPrompt: %v", err)
 	}
 	if gotMethod != http.MethodPost || gotPath != "/api/session/ses_1/prompt" {
