@@ -13,9 +13,9 @@ type launchKind int
 
 const (
 	launchQuit           launchKind = iota // user backed out; spawn nothing, exit cleanly
-	launchSpawnIsolated                    // start an ephemeral isolated node
-	launchSpawnGateway                     // start an ephemeral gateway and a node connected to it
-	launchSpawnConnected                   // start an ephemeral connected node
+	launchSpawnIsolated                    // start a detached isolated node
+	launchSpawnGateway                     // start a detached gateway and a node connected to it
+	launchSpawnConnected                   // start a detached connected node
 	launchGateway                          // connect to the entered gateway URL + token
 )
 
@@ -193,11 +193,11 @@ func (m launcherModel) View() tea.View {
 	var b string
 	title := lipgloss.NewStyle().Bold(true).Render("Argus — no node running")
 	if m.state == stateMenu {
-		spawnLabel := "Spawn isolated node (ephemeral)"
+		spawnLabel := "Spawn isolated node"
 		if m.hasToken {
-			spawnLabel = "Spawn gateway node (ephemeral)"
+			spawnLabel = "Spawn gateway node"
 		}
-		items := []string{spawnLabel, "Spawn gateway connected node (ephemeral)", "Connect to gateway"}
+		items := []string{spawnLabel, "Spawn gateway connected node", "Connect to gateway"}
 		body := ""
 		for i, it := range items {
 			prefix := "  "

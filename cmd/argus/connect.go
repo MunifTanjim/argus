@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -109,7 +110,7 @@ func refuseRunning(socket string) error {
 }
 
 // connectLocalSpawn starts an isolated managed node and connects to its socket.
-func connectLocalSpawn(ctx context.Context, cfg *config.Config, spec spawnSpec) (tui.Client, *managedGroup, error) {
+func connectLocalSpawn(ctx context.Context, cfg *config.Config, spec spawnSpec) (tui.Client, error) {
 	return connectLocalSpawnWithGateway(ctx, cfg, spec, "", "", nil)
 }
 
@@ -117,62 +118,86 @@ func connectLocalSpawn(ctx context.Context, cfg *config.Config, spec spawnSpec) 
 // isolated node, and the TUI drives its socket. Set gatewayURL: the node uplinks
 // to that gateway, and the TUI drives the gateway to see the whole fleet.
 // genesisHash is the client's resolved trust root; nil means TOFU.
-func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, spec spawnSpec, gatewayURL, token string, genesisHash []byte) (tui.Client, *managedGroup, error) {
+func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, spec spawnSpec, gatewayURL, token string, genesisHash []byte) (tui.Client, error) {
 	if gatewayURL != "" {
 		wsURL, gatewayClient, err := resolveGatewayURL(gatewayURL, routeNode, nil)
 		if err != nil {
 			shell.StdErrF("argus: %v\n", err)
-			return nil, nil, err
+			return nil, err
 		}
 		// The node's uplink retries silently, so report a bad host or token now.
 		probe, err := api.DialWSConn(ctx, wsURL, token, gatewayClient)
 		if err != nil {
 			shell.StdErrF("argus: cannot reach gateway at %s: %v\n", gatewayURL, err)
-			return nil, nil, err
+			return nil, err
 		}
 		probe.Close()
 		spec.gatewayURL, spec.token = gatewayURL, token
 	}
-	return spawnAndConnect(ctx, cfg, []spawnSpec{spec}, gatewayURL, genesisHash)
+	st := launchState{Mode: launchModeIsolated}
+	if gatewayURL != "" {
+		st = launchState{Mode: launchModeConnected, GatewayURL: gatewayURL, Token: token}
+	}
+	return spawnAndConnect(ctx, cfg, []spawnSpec{spec}, st, genesisHash)
 }
 
 // connectLocalGateway starts a managed gateway (pairing and push, no tunnel)
 // and a managed node that uplinks to it, then points the TUI at the gateway
 // over loopback. It returns the gateway URL.
-func connectLocalGateway(ctx context.Context, cfg *config.Config, spec spawnSpec) (tui.Client, *managedGroup, string, error) {
+func connectLocalGateway(ctx context.Context, cfg *config.Config, spec spawnSpec) (tui.Client, string, error) {
 	addr, bound, err := resolveListenAddr(cfg.Gateway.ListenAddr)
 	if err != nil {
 		shell.StdErrF("argus: cannot bind gateway listener at %s: %v\n", cfg.Gateway.ListenAddr, err)
-		return nil, nil, "", err
+		return nil, "", err
 	}
-	pin, err := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
+	head, err := resolveTrustHead(cfg)
 	if err != nil {
-		err = fmt.Errorf("refusing to connect open: %w", err)
 		shell.StdErrF("argus: %v\n", err)
-		return nil, nil, "", err
+		return nil, "", err
 	}
 	url := "ws://" + loopbackDialAddr(bound)
 	gw := spec
 	gw.role, gw.listenAddr, gw.token = roleGateway, addr, cfg.Token
 	node := spec
 	node.gatewayURL, node.token = url, cfg.Token
-	c, g, err := spawnAndConnect(ctx, cfg, []spawnSpec{gw, node}, url, pin.Genesis)
-	return c, g, url, err
+	c, err := spawnAndConnect(ctx, cfg, []spawnSpec{gw, node}, launchState{Mode: launchModeGateway, GatewayURL: url, Token: cfg.Token}, head)
+	return c, url, err
 }
 
-func spawnAndConnect(ctx context.Context, cfg *config.Config, specs []spawnSpec, gatewayURL string, genesisHash []byte) (tui.Client, *managedGroup, error) {
-	g, err := startManagedGroup(specs, nil)
+// resolveTrustHead gives the trust log head a client pins, or nil when unpinned.
+func resolveTrustHead(cfg *config.Config) ([]byte, error) {
+	pin, err := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
+	if err != nil {
+		return nil, fmt.Errorf("refusing to connect open: %w", err)
+	}
+	return pin.Genesis, nil
+}
+
+// spawnAndConnect starts the servers detached, so that they outlive the TUI.
+// It saves st before it connects, so that a TUI killed meanwhile still leaves
+// the servers recorded.
+func spawnAndConnect(ctx context.Context, cfg *config.Config, specs []spawnSpec, st launchState, genesisHash []byte) (tui.Client, error) {
+	for i := range specs {
+		specs[i].logFile = serverLogPath(specs[i].socket, specs[i].role)
+	}
+	servers, err := startDetachedGroup(specs)
 	if err != nil {
 		shell.StdErrF("argus: %v\n", err)
-		return nil, nil, err
+		return nil, err
 	}
 	last := specs[len(specs)-1]
-	c, err := connect(ctx, cfg, gatewayURL, last.token, last.socket, genesisHash)
-	if err != nil {
-		g.stop(managedStopTimeout)
-		return nil, nil, err
+	if err = saveLaunchState(last.socket, st); err == nil {
+		var c tui.Client
+		if c, err = connect(ctx, cfg, st.GatewayURL, last.token, last.socket, genesisHash); err == nil {
+			return c, nil
+		}
+	} else {
+		shell.StdErrF("argus: %v\n", err)
 	}
-	return c, g, nil
+	if serr := errors.Join(stopSpawned(servers), removeLaunchState(last.socket)); serr != nil {
+		shell.StdErrF("argus: %v\n", serr)
+	}
+	return nil, err
 }
 
 // loopbackDialAddr returns a host:port for reaching a listener from this host: its

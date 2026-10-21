@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -266,6 +267,53 @@ func TestRunStartRefusesRunningNodeBeforeUplink(t *testing.T) {
 	}
 	if n := attempts.Load(); n != 0 {
 		t.Fatalf("gateway saw %d connection attempts, want 0", n)
+	}
+}
+
+func TestRunStartRemovesStaleLaunchState(t *testing.T) {
+	t.Cleanup(func() { config.LogLevel.Set(slog.LevelInfo) })
+	cfg := cfgWith("", "")
+	cfg.Socket = shortSocket(t)
+	cfg.Log.Level = "error"
+	// Fails after the running check, before the node starts.
+	cfg.Tunnel.Provider = "bogus"
+	if err := saveLaunchState(cfg.Socket, launchState{Mode: launchModeIsolated}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var runErr error
+	captureStderr(t, func() {
+		runErr = runStart(ctx, cancel, newStartCmd("test"), cfg, "test", false, os.Stderr)
+	})
+	if runErr == nil {
+		t.Fatal("runStart must fail on the bogus tunnel")
+	}
+	if st, err := loadLaunchState(cfg.Socket); st != nil || err != nil {
+		t.Fatalf("stale state file left behind: %v, %v", st, err)
+	}
+}
+
+func TestDetachedRunStartKeepsLaunchState(t *testing.T) {
+	t.Cleanup(func() { config.LogLevel.Set(slog.LevelInfo) })
+	cfg := cfgWith("", "")
+	cfg.Socket = shortSocket(t)
+	cfg.Log.Level = "error"
+	cfg.Tunnel.Provider = "bogus"
+	if err := saveLaunchState(cfg.Socket, launchState{Mode: launchModeIsolated}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newStartCmd("test")
+	if err := cmd.Flags().Set("argus-log-file", filepath.Join(filepath.Dir(cfg.Socket), "n.log")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	captureStderr(t, func() {
+		_ = runStart(ctx, cancel, cmd, cfg, "test", false, os.Stderr)
+	})
+	if st, err := loadLaunchState(cfg.Socket); st == nil || err != nil {
+		t.Fatalf("state file = %v, %v; a detached child must keep it", st, err)
 	}
 }
 

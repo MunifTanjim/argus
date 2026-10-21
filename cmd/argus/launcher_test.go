@@ -165,12 +165,12 @@ func TestWindowSizeSetsInputWidth(t *testing.T) {
 
 func TestLauncherMenuLabelReflectsToken(t *testing.T) {
 	withToken := newLauncherModel("secret").View().Content
-	if !strings.Contains(withToken, "Spawn gateway node (ephemeral)") {
+	if !strings.Contains(withToken, "Spawn gateway node") {
 		t.Fatalf("token set should offer a gateway spawn, got:\n%s", withToken)
 	}
 
 	noToken := newLauncherModel("").View().Content
-	if !strings.Contains(noToken, "Spawn isolated node (ephemeral)") {
+	if !strings.Contains(noToken, "Spawn isolated node") {
 		t.Fatalf("no token should offer an isolated spawn, got:\n%s", noToken)
 	}
 }

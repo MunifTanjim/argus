@@ -10,6 +10,7 @@ import (
 	"github.com/MunifTanjim/argus/cmd/argus/completion"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/shell"
 	"github.com/MunifTanjim/argus/internal/tui"
 )
@@ -36,18 +37,36 @@ func newRootCmd(version string) *cobra.Command {
 				return fail(cmd, err)
 			}
 
-			// A managed server spawned below stops when the TUI returns.
 			ctx, cancel := context.WithCancel(context.Background())
-			var srv *managedGroup
-			defer func() {
-				cancel()
-				srv.stop(managedStopTimeout)
-			}()
+			defer cancel()
 
 			running, perr := localNodeRunning(cfg.Socket)
 			if perr != nil {
 				shell.StdErrF("argus: cannot reach argusd at %s: %v\n", cfg.Socket, perr)
 				return errSilent
+			}
+			st, err := loadLaunchState(cfg.Socket)
+			if err != nil {
+				return fail(cmd, fmt.Errorf("%w; run 'argus stop' first", err))
+			}
+			var gatewayRunning bool
+			if st != nil && st.needsGateway() {
+				gwSocket := gatewaySocketPath(cfg.Socket)
+				if gatewayRunning, perr = localNodeRunning(gwSocket); perr != nil {
+					shell.StdErrF("argus: cannot reach the gateway at %s: %v\n", gwSocket, perr)
+					return errSilent
+				}
+			}
+			action := decideAttach(st, running, gatewayRunning)
+			if action == attachPartial {
+				shell.StdErrF("argus: some servers that the TUI started are not running; run 'argus stop' first\n")
+				return errSilent
+			}
+			if st != nil && action == attachNone {
+				if err := removeLaunchState(cfg.Socket); err != nil {
+					return fail(cmd, err)
+				}
+				st = nil
 			}
 
 			head, perr := clientHead(cfg)
@@ -59,15 +78,21 @@ func newRootCmd(version string) *cobra.Command {
 			var client tui.Client
 			var gatewayURL, gatewayToken string // empty URL: the TUI drives a local socket
 			switch {
+			case action == attachState:
+				var attachHead []byte
+				if gatewayURL, gatewayToken, attachHead, err = attachTarget(cfg, st, head); err != nil {
+					return fail(cmd, err)
+				}
+				client, err = connect(ctx, cfg, gatewayURL, gatewayToken, cfg.Socket, attachHead)
 			case cfg.Gateway.URL != "":
 				// The TUI drives the gateway to see the whole fleet. With no local node,
-				// spawn an ephemeral one enrolled on the same gateway so this machine joins
-				// too; otherwise the running node enrolls itself.
+				// start one enrolled on the same gateway so this machine joins too;
+				// otherwise the running node enrolls itself.
 				gatewayURL, gatewayToken = cfg.Gateway.URL, cfg.Token
 				if running {
 					client, err = connect(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket, head)
 				} else {
-					client, srv, err = connectLocalSpawnWithGateway(ctx, cfg, spec, cfg.Gateway.URL, cfg.Token, head)
+					client, err = connectLocalSpawnWithGateway(ctx, cfg, spec, cfg.Gateway.URL, cfg.Token, head)
 				}
 			case running:
 				client, err = connect(ctx, cfg, "", cfg.Token, cfg.Socket, nil)
@@ -80,13 +105,13 @@ func newRootCmd(version string) *cobra.Command {
 				case launchQuit:
 					return nil
 				case launchSpawnIsolated:
-					client, srv, err = connectLocalSpawn(ctx, cfg, spec)
+					client, err = connectLocalSpawn(ctx, cfg, spec)
 				case launchSpawnGateway:
-					client, srv, gatewayURL, err = connectLocalGateway(ctx, cfg, spec)
+					client, gatewayURL, err = connectLocalGateway(ctx, cfg, spec)
 					gatewayToken = cfg.Token
 				case launchSpawnConnected:
 					gatewayURL, gatewayToken = choice.gatewayURL, choice.token
-					client, srv, err = connectLocalSpawnWithGateway(ctx, cfg, spec, choice.gatewayURL, choice.token, head)
+					client, err = connectLocalSpawnWithGateway(ctx, cfg, spec, choice.gatewayURL, choice.token, head)
 				case launchGateway:
 					gatewayURL, gatewayToken = choice.gatewayURL, choice.token
 					client, err = connect(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket, head)
@@ -95,7 +120,24 @@ func newRootCmd(version string) *cobra.Command {
 			if err != nil {
 				return errSilent // connect/connectLocalSpawn already printed the diagnostic
 			}
-			if err := tui.Run(client, gatewayURL, srv.Logs(), srv.Exited(), cfg.TUI, newSettingsBackend(ctx, cfg, gatewayURL, gatewayToken, head)); err != nil {
+			if st == nil {
+				// A spawn above saved the state of what it started.
+				if st, err = loadLaunchState(cfg.Socket); err != nil {
+					client.Close()
+					return fail(cmd, err)
+				}
+			}
+
+			var logs *logbuf.Buffer
+			if st != nil {
+				logs = logbuf.New(1000)
+				go followLog(ctx, serverLogPath(cfg.Socket, roleNode), logs)
+				if st.needsGateway() {
+					go followLog(ctx, serverLogPath(cfg.Socket, roleGateway), logs)
+				}
+			}
+
+			if err := tui.Run(client, gatewayURL, logs, cfg.TUI, newSettingsBackend(ctx, cfg, gatewayURL, gatewayToken, head)); err != nil {
 				return fail(cmd, err)
 			}
 			return nil
