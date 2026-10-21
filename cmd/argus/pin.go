@@ -15,3 +15,15 @@ func nodePinFile() *trustpin.File {
 func clientPinFile() *trustpin.File {
 	return trustpin.New(config.GetStatePath("client-trustlog-genesis"))
 }
+
+// clientHead is the client pin a client connects with: nil with E2EE off.
+func clientHead(cfg *config.Config) ([]byte, error) {
+	if !cfg.E2EE.Enabled {
+		return nil, nil
+	}
+	pin, err := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
+	if err != nil {
+		return nil, err
+	}
+	return pin.Genesis, nil
+}

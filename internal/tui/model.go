@@ -53,8 +53,12 @@ func (r subRef) key() string {
 
 type model struct {
 	client        Client
-	swap          *swapClient // nil outside Run
-	gatewayURL    string      // empty: client drives a local socket
+	gatewayURL    string   // empty: client drives a local socket
+	settings      Settings // nil: the settings screen is unavailable
+	settingsSeq   int
+	reconnectErr  error // the last failed client rebuild; nil after one succeeds
+	rebuilding    bool
+	rebuildQueued bool // a rebuild waits for the running one to end
 	sessions      map[string]session.Session
 	order         []string       // session IDs, sorted for stable display
 	activeOnly    bool           // the session lists show only active and awaiting-input sessions

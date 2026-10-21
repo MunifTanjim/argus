@@ -121,6 +121,14 @@ func (m model) focusKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 		}
 		m.flash = "checking " + gatewayTarget.label + " for an upgrade"
 		return m, m.upgradeCheckCmd(gatewayTarget), true
+	case !m.viewer && m.matches(msg, settingsKeys.Open):
+		if m.settings == nil {
+			m.flash = "settings unavailable"
+			return m, nil, true
+		}
+		c := &ctx{m: &m}
+		cmd := openSettings(c)
+		return m, tea.Batch(cmd, m.apply(c)), true
 	case m.offered(projectsKeys.Help) && m.matches(msg, projectsKeys.Help):
 		if m.focused == leftSidebar || m.onRowPane() {
 			m.flash = ""
@@ -147,13 +155,10 @@ func (m model) handleSidebarToggle(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, boo
 	if m.viewer {
 		return m, nil, false
 	}
-	if m.topFull() == fullFrame {
-		return m, nil, true
-	}
 	switch {
-	case m.matches(msg, projectsKeys.ToggleSidebar):
+	case m.listedMatch(msg, projectsKeys.ToggleSidebar):
 		return m.toggleTreeFocus(), nil, true
-	case m.matches(msg, projectsKeys.ToggleFiles):
+	case m.listedMatch(msg, projectsKeys.ToggleFiles):
 		return m.toggleFilesFocus(), nil, true
 	}
 	return m, nil, false
@@ -244,7 +249,7 @@ func (m model) repairFocus() model {
 		m.focused = mainPane
 	case m.focused == rightSidebar && !m.filesReachable():
 		m.focused = mainPane
-	case m.focused == leftSidebar && !m.sidebarVisible():
+	case m.focused == leftSidebar && (!m.sidebarVisible() || m.topFull() == fullFrame):
 		m.focused = mainPane
 	}
 	return m
@@ -335,9 +340,15 @@ func (m model) focusCommands() []binding {
 	}
 	out = append(out, k.Palette, k.ToggleMouse, k.ToggleVerbose)
 	if !m.viewer {
-		out = append(out, upgradeKeys.Node, upgradeKeys.Gateway)
+		out = append(out, upgradeKeys.Node, upgradeKeys.Gateway, settingsKeys.Open)
 	}
-	return out
+	return slices.DeleteFunc(out, func(b binding) bool { return !screenHas(m.screen(), b.name) })
+}
+
+// listedMatch matches only the focus keys the section lists: a section can
+// leave out the ones that do nothing there.
+func (m model) listedMatch(msg tea.KeyPressMsg, b binding) bool {
+	return screenHas(m.screen(), b.name) && m.matches(msg, b)
 }
 
 // A pane command with no pane in its direction still uses the key.
@@ -349,18 +360,18 @@ func (m model) handlePaneKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 		cmd tea.Cmd
 	)
 	switch {
-	case m.matches(msg, pk.Left):
+	case m.listedMatch(msg, pk.Left):
 		mm, cmd = m.paneLeft()
-	case m.matches(msg, pk.Right):
+	case m.listedMatch(msg, pk.Right):
 		mm, cmd = m.paneRight()
-	case m.matches(msg, pk.Down):
+	case m.listedMatch(msg, pk.Down):
 		if m.focused == mainPane && m.dockShown() {
 			mm = m.focusContainer(sessionDock)
 		}
-	case m.matches(msg, pk.Up):
-	case m.matches(msg, pk.Next):
+	case m.listedMatch(msg, pk.Up):
+	case m.listedMatch(msg, pk.Next):
 		mm, cmd = m.cyclePane(1)
-	case m.matches(msg, pk.Prev):
+	case m.listedMatch(msg, pk.Prev):
 		mm, cmd = m.cyclePane(-1)
 	default:
 		return m, nil, false

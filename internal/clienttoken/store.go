@@ -209,3 +209,11 @@ func (s *Store) Remove(id string) error {
 	}
 	return nil
 }
+
+// Short abbreviates a token for display.
+func Short(tok string) string {
+	if len(tok) <= 12 {
+		return tok
+	}
+	return tok[:12] + "…"
+}

@@ -3,9 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -104,7 +102,7 @@ func TestPrintTUIRoleAuthorizedHidesSignHint(t *testing.T) {
 	}
 }
 
-func TestTUIRoleLinesMatchesPrintedBlock(t *testing.T) {
+func TestTUIRoleTextMatchesPrintedBlock(t *testing.T) {
 	tempStateDir(t)
 	st := api.LockStatusResult{Enabled: true, DeviceCount: 1, Devices: [][]byte{testGenesis(0x99)}}
 	kp, err := e2e.LoadOrCreateIdentity(config.GetStatePath("client-identity.json"))
@@ -113,14 +111,15 @@ func TestTUIRoleLinesMatchesPrintedBlock(t *testing.T) {
 	}
 	cfg := &config.Config{}
 
-	got, err := tuiRoleLines(context.Background(), cfg, configEndpoint(cfg), st)
-	if err != nil {
-		t.Fatalf("tuiRoleLines: %v", err)
+	cp := checkClientPin(context.Background(), cfg)
+	if cp.neterr != nil {
+		t.Fatalf("checkClientPin: %v", cp.neterr)
 	}
+	got := tuiRoleText(st, kp.Public, cp)
 	printed := captureStdout(t, func() { _ = printTUIRole(context.Background(), cfg, st) })
 
 	if got != printed {
-		t.Errorf("tuiRoleLines = %q, printTUIRole printed %q", got, printed)
+		t.Errorf("tuiRoleText = %q, printTUIRole printed %q", got, printed)
 	}
 	for _, want := range []string{"this tui", "authorized: no", lockSignHint(kp.Public)} {
 		if !strings.Contains(got, want) {
@@ -129,27 +128,28 @@ func TestTUIRoleLinesMatchesPrintedBlock(t *testing.T) {
 	}
 }
 
-func TestClientPinLineUsesTheGivenEndpoint(t *testing.T) {
+func TestSettingsBackendProbesTheTUIGateway(t *testing.T) {
 	tempStateDir(t)
 	entries, err := trustlog.ChainEntries(makeTestChainBytes(t))
 	if err != nil {
 		t.Fatalf("ChainEntries: %v", err)
 	}
-	srv := api.NewServer()
-	srv.Handle(api.MethodTrustLogSync, func(_ context.Context, _ json.RawMessage) (any, error) {
-		return api.TrustLogSyncResult{Entries: entries}, nil
+	gw := serveFakeGateway(t, map[string]api.HandlerFunc{
+		api.MethodTrustLogSync: returning(api.TrustLogSyncResult{Entries: entries}),
 	})
-	ts := httptest.NewServer(srv.WSHandler(func(string) bool { return true }))
-	t.Cleanup(ts.Close)
-	cfg := &config.Config{}
-	ep := gatewayEndpoint{URL: "ws://" + strings.TrimPrefix(ts.URL, "http://")}
+	cfg := &config.Config{Socket: shortSocket(t)}
+	configured := closedPortURL(t)
+	cfg.Gateway.URL = configured
 
-	line, err := clientPinLine(context.Background(), cfg, ep)
+	v, err := newSettingsBackend(context.Background(), cfg, gw, "", nil).LockStatus(context.Background())
 
 	if err != nil {
-		t.Fatalf("clientPinLine: %v", err)
+		t.Fatalf("LockStatus: %v", err)
 	}
-	if !strings.Contains(line, "locked out") {
-		t.Errorf("line must name the network root, got: %q", line)
+	if !strings.Contains(v.TUIText, "locked out") {
+		t.Errorf("TUIText must name the network root, got: %q", v.TUIText)
+	}
+	if cfg.Gateway.URL != configured {
+		t.Errorf("the backend must not change the caller's config, Gateway.URL = %q", cfg.Gateway.URL)
 	}
 }

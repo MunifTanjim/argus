@@ -88,6 +88,7 @@ func contractComponents(m model) []component {
 		newTranscript(),
 		screenComp{sessionID: "n1:s1"},
 		spawnComp{},
+		settingsComp{},
 		newDock(),
 	}
 }

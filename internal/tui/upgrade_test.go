@@ -54,8 +54,8 @@ func TestUpgradeNodeConfirmsThenUpgradesAndRestarts(t *testing.T) {
 	if p := c.paramsOf(api.MethodServerCheckUpgrade); len(p) != 1 || p[0].(api.ServerTargetParams).NodeID != "n1" {
 		t.Fatalf("checkUpgrade params %+v", p)
 	}
-	if _, ok := m.popups.front().(upgradeConfirm); !ok {
-		t.Fatalf("popup %T, want upgradeConfirm", m.popups.front())
+	if _, ok := m.popups.front().(confirmPopup); !ok {
+		t.Fatalf("popup %T, want confirmPopup", m.popups.front())
 	}
 	m, cmd := upd(m, enterKey)
 	for _, msg := range execCmd(cmd) {
@@ -160,8 +160,8 @@ func TestUpgradeNodeLocalSocketTargetsThisMachine(t *testing.T) {
 		if p := c.paramsOf(api.MethodServerCheckUpgrade); len(p) != 1 || p[0].(api.ServerTargetParams).NodeID != "" {
 			t.Fatalf("row %q: checkUpgrade params %+v", row, p)
 		}
-		if _, ok := m.popups.front().(upgradeConfirm); !ok {
-			t.Fatalf("row %q: popup %T, want upgradeConfirm", row, m.popups.front())
+		if _, ok := m.popups.front().(confirmPopup); !ok {
+			t.Fatalf("row %q: popup %T, want confirmPopup", row, m.popups.front())
 		}
 	}
 }
@@ -229,5 +229,25 @@ func TestUpgradeRestartLostReplyIsRestarting(t *testing.T) {
 	}
 	if want := "home upgraded to 1.1.0 · restarting"; m.flash != want {
 		t.Fatalf("flash %q, want %q", m.flash, want)
+	}
+}
+
+func TestUpgradeGatewayQuickTunnelPopupContent(t *testing.T) {
+	c := &upgradeClient{check: api.CheckUpgradeResult{Current: "1.0.0", Latest: "1.1.0"}}
+	m := upgradeModel(c)
+	m.gatewayURL = "wss://abc.trycloudflare.com"
+	m = runUpgradeCmd(t, m, "upgrade gateway")
+	p, ok := m.popups.front().(confirmPopup)
+	if !ok {
+		t.Fatalf("popup %T, want confirmPopup", m.popups.front())
+	}
+	if p.id() != "upgrade" {
+		t.Fatalf("id %q", p.id())
+	}
+	if p.title != "Upgrade the gateway from 1.0.0 to 1.1.0?" || p.action != "Upgrade and restart" {
+		t.Fatalf("title %q, action %q", p.title, p.action)
+	}
+	if !strings.Contains(p.detail, "quick tunnel") {
+		t.Fatalf("detail %q lacks the quick tunnel note", p.detail)
 	}
 }

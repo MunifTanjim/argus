@@ -14,6 +14,16 @@ import (
 // (trailing slash trimmed); the app appends the implicit /client route, mirroring the
 // TUI's hub-url resolver (resolveGatewayURL).
 func pairingURI(publicURL, token string) (string, error) {
+	wsURL, err := pairingURL(publicURL)
+	if err != nil {
+		return "", err
+	}
+	return pairingURIFor(wsURL, token), nil
+}
+
+// pairingURL is the url the pairing URI carries: publicURL as ws or wss, with the
+// trailing slash of its path trimmed.
+func pairingURL(publicURL string) (string, error) {
 	u, err := url.Parse(publicURL)
 	if err != nil {
 		return "", err
@@ -30,10 +40,14 @@ func pairingURI(publicURL, token string) (string, error) {
 		return "", fmt.Errorf("pairing: unsupported scheme %q", u.Scheme)
 	}
 	u.Path = strings.TrimRight(u.Path, "/")
+	return u.String(), nil
+}
+
+func pairingURIFor(wsURL, token string) string {
 	q := url.Values{}
-	q.Set("url", u.String())
+	q.Set("url", wsURL)
 	q.Set("token", token)
-	return "argus://pair?" + q.Encode(), nil
+	return "argus://pair?" + q.Encode()
 }
 
 // printPairingQR renders the pairing URI as a terminal QR plus the raw line (scan or

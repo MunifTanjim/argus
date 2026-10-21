@@ -172,3 +172,33 @@ func TestSwapClientEndsForwardingWhenTheInnerEventsClose(t *testing.T) {
 		t.Fatal("Events() still open after Close")
 	}
 }
+
+func TestSwapClientLatestInnerStateWinsOverThePendingConnected(t *testing.T) {
+	old, next := newSwapFakeClient(false), newSwapFakeClient(false)
+	s := newSwapClient(old)
+	defer s.Close()
+
+	s.swap(next)
+	next.states <- false
+	deadline := time.Now().Add(time.Second)
+	for len(next.states) > 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(next.states) > 0 {
+		t.Fatal("the forwarder did not take the inner state")
+	}
+
+	select {
+	case st := <-s.States():
+		if st {
+			t.Fatal("got the post-swap true, want the newer inner false")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no state after the swap")
+	}
+	select {
+	case st := <-s.States():
+		t.Fatalf("got a second state %v, want one", st)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
