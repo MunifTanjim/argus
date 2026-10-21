@@ -37,7 +37,7 @@ type Client interface {
 
 // Run connects the TUI and blocks until the user quits. gatewayURL is empty
 // when client drives a local socket. Non-nil logs (the managed server's
-// output) are tailed in the Logs tab.
+// output) are tailed in the Logs tab. Run closes client before it returns.
 func Run(client Client, gatewayURL string, logs *logbuf.Buffer, serverExit <-chan error, cfg config.TUIConfig) error {
 	// The client library logs warnings (e.g. a node timing out) via the standard
 	// logger; keep them off the alt-screen.
@@ -52,7 +52,10 @@ func Run(client Client, gatewayURL string, logs *logbuf.Buffer, serverExit <-cha
 	initIcons()
 	initStyles()
 
-	m := newModel(client, hasDark, logs).withKeymaps(cfg)
+	swap := newSwapClient(client)
+	defer swap.Close()
+	m := newModel(swap, hasDark, logs).withKeymaps(cfg)
+	m.swap = swap
 	m.gatewayURL = gatewayURL
 	m.statePath = config.GetStatePath("tui.json")
 	g, err := loadGroupBy(m.statePath)
@@ -67,12 +70,12 @@ func Run(client Client, gatewayURL string, logs *logbuf.Buffer, serverExit <-cha
 	m.left.tab = tab
 	m.mouse = cfg.Mouse == config.MouseOn
 	m.verboseTranscript = cfg.VerboseTranscript
-	go sendTermKeyLoop(client, m.termKeyCh) // single ordered sender for live-terminal input
+	go sendTermKeyLoop(swap, m.termKeyCh) // single ordered sender for live-terminal input
 	f := newInputFilter()
 	p := tea.NewProgram(m, tea.WithFilter(f.filter))
 	f.send = p.Send
 	go func() {
-		events, states := client.Events(), client.States()
+		events, states := swap.Events(), swap.States()
 		for {
 			select {
 			case ev, ok := <-events:
