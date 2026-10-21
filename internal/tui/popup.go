@@ -81,14 +81,18 @@ func (m model) popupFooter() string {
 	return asstStyle.Render(firstLine(m.flash))
 }
 
-// drawOverlays draws the hover and the popups over the frame.
+// drawOverlays draws the hover, the prompt menu, and the popups over the frame.
 func (m model) drawOverlays(frame string) string {
-	if (len(m.popups) == 0 && m.hovered == "") || m.width < 1 || m.height < 1 {
+	menu := m.promptMenuShown()
+	if (len(m.popups) == 0 && m.hovered == "" && !menu) || m.width < 1 || m.height < 1 {
 		return frame
 	}
 	scr := uv.NewScreenBuffer(m.width, m.height)
 	uv.NewStyledString(frame).Draw(scr, scr.Bounds())
 	m.drawHover(scr)
+	if menu {
+		m.drawPromptMenu(scr)
+	}
 	c := &ctx{m: &m}
 	for i, p := range m.popups {
 		pc := c

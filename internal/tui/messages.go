@@ -162,6 +162,16 @@ type hostTickMsg struct {
 	gen    int
 }
 
+// promptCompleteMsg is the agent's menu items for trigger; seq tells a
+// superseded fetch.
+type promptCompleteMsg struct {
+	id      string
+	trigger byte
+	seq     int
+	items   []api.PromptCompletion
+	err     error
+}
+
 // inputSentMsg reports a sent input; id and text let a failure restore the draft.
 type inputSentMsg struct {
 	err      error

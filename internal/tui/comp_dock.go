@@ -32,6 +32,8 @@ type dockComp struct {
 	key         string            // identity of the interaction the draft belongs to
 	session     string
 	drafts      map[string]string // unsent idle-reply drafts, keyed by session id
+	menu        promptMenu
+	completeSeq int // completion fetches; only the latest one's reply is used
 }
 
 func newDock() dockComp {
@@ -51,6 +53,11 @@ func (d dockComp) layer() layer              { return baseLayer }
 
 func (d dockComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
 	c.setFlash("")
+	if c.m.promptMenuShown() {
+		if d, cmd, ok := d.handleMenuKey(c, msg); ok {
+			return d, cmd, true
+		}
+	}
 	switch {
 	case d.noteEditing(c) && c.m.matches(msg, promptKeys.Back):
 		d.notes[d.tab].Reset()
@@ -113,6 +120,7 @@ func (d dockComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 	case c.m.composing():
 		d.reply, cmd = d.reply.Update(p)
 		d.sizeIdleReply(c)
+		cmd = tea.Batch(cmd, d.syncMenu(c))
 	case d.noteEditing(c):
 		d.notes[d.tab], cmd = d.notes[d.tab].Update(p)
 	case d.questionCustomActive(c):
@@ -262,6 +270,8 @@ func (m *model) sizeIdleReply() { m.dock.sizeIdleReply(&ctx{m: m}) }
 func (d dockComp) follow(c *ctx, id string) dockComp {
 	d.saveReplyDraft(d.session)
 	d.session = id
+	d.menu = promptMenu{}
+	d.completeSeq++
 	d.resetPromptState()
 	d.loadReplyDraft(c, id)
 	d.key = interactionKey(c.m.sessions[id].Interaction)

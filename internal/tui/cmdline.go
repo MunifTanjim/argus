@@ -107,29 +107,37 @@ type cmdMatch struct {
 	hits []int
 }
 
-type commandNames []binding
-
-func (s commandNames) String(i int) string { return s[i].name }
-func (s commandNames) Len() int            { return len(s) }
-
-// matchCommands fuzzy-matches set against typed, best match first, the way
-// crush filters its completions. Equal scores keep name order.
+// matchCommands fuzzy-matches set against typed, best match first. Equal
+// scores keep name order.
 func matchCommands(set []binding, typed string) []cmdMatch {
-	names := slices.SortedFunc(slices.Values(set), func(a, b binding) int { return strings.Compare(a.name, b.name) })
+	sorted := slices.SortedFunc(slices.Values(set), func(a, b binding) int { return strings.Compare(a.name, b.name) })
+	found := fuzzyFind(sorted, func(b binding) string { return b.name }, typed)
+	out := make([]cmdMatch, len(found))
+	for i, f := range found {
+		out[i] = cmdMatch{binding: sorted[f.Index], hits: f.MatchedIndexes}
+	}
+	return out
+}
+
+// fuzzyFind matches the names of items against typed the way crush filters its
+// completions, best match first; equal scores keep the order of items. An
+// empty typed matches every item.
+func fuzzyFind[T any](items []T, name func(T) string, typed string) fuzzy.Matches {
 	q := strings.ToLower(strings.TrimSpace(typed))
 	if q == "" {
-		out := make([]cmdMatch, len(names))
-		for i, b := range names {
-			out[i] = cmdMatch{binding: b}
+		out := make(fuzzy.Matches, len(items))
+		for i := range items {
+			out[i] = fuzzy.Match{Index: i}
 		}
 		return out
 	}
-	found := fuzzy.FindFrom(q, commandNames(names))
-	out := make([]cmdMatch, len(found))
-	for i, f := range found {
-		out[i] = cmdMatch{binding: names[f.Index], hits: f.MatchedIndexes}
-	}
-	return out
+	return fuzzy.FindFromIter(q, func(yield func(string) bool) {
+		for _, it := range items {
+			if !yield(name(it)) {
+				return
+			}
+		}
+	})
 }
 
 func cmdMatchStyle(base lipgloss.Style) lipgloss.Style { return base.Bold(true).Underline(true) }

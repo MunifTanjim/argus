@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"maps"
 	"slices"
 	"sort"
 	"time"
@@ -157,6 +158,10 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sessions[s.ID] = s
 		}
 		m.dock.pruneReplyDrafts(m.sessions)
+		maps.DeleteFunc(m.completions, func(id string, _ map[byte][]api.PromptCompletion) bool {
+			_, ok := m.sessions[id]
+			return !ok
+		})
 		m.syncRunning()
 		m.reorder()
 		return m, nil
@@ -242,6 +247,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateUpgrade(msg)
 	case terminalActionMsg:
 		return m.updateTerminals(msg)
+	case promptCompleteMsg:
+		return m.updatePromptComplete(msg)
 	case inputSentMsg:
 		if msg.err != nil {
 			m.flash = "send failed: " + msg.err.Error()
@@ -499,6 +506,7 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 	case registry.EventRemoved:
 		delete(m.sessions, ev.Session.ID)
 		delete(m.dock.drafts, ev.Session.ID)
+		delete(m.completions, ev.Session.ID)
 	}
 	m.syncPromptDraft() // reset a stale draft if the open session's prompt changed
 	m.syncRunning()

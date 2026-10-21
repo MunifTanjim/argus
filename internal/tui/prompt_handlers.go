@@ -35,16 +35,20 @@ func (d dockComp) handleIdleKey(c *ctx, msg tea.KeyPressMsg) (dockComp, tea.Cmd)
 		txt := strings.TrimSpace(d.reply.Value())
 		d.reply.SetValue("")
 		delete(d.drafts, id)
+		d.menu = promptMenu{}
 		c.focusOn(mainPane)
 		if txt == "" {
 			return d, nil
 		}
+		// A command can change what the agent offers.
+		delete(c.m.completions, id)
+		d.completeSeq++
 		return d, c.m.sendInputCmd(id, txt)
 	}
 	var cmd tea.Cmd
 	d.reply, cmd = d.reply.Update(msg)
 	d.sizeIdleReply(c)
-	return d, cmd
+	return d, tea.Batch(cmd, d.syncMenu(c))
 }
 
 // handleDecisionKey drives the permission/plan allow/deny choice and deny reason.
