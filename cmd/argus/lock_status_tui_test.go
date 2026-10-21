@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -11,6 +13,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/e2e"
+	"github.com/MunifTanjim/argus/internal/trustlog"
 )
 
 func captureStdout(t *testing.T, fn func()) string { return capture(t, &os.Stdout, fn) }
@@ -98,5 +101,55 @@ func TestPrintTUIRoleAuthorizedHidesSignHint(t *testing.T) {
 	}
 	if strings.Contains(out, "argus lock sign") {
 		t.Errorf("an authorized tui must not show a sign hint, got:\n%s", out)
+	}
+}
+
+func TestTUIRoleLinesMatchesPrintedBlock(t *testing.T) {
+	tempStateDir(t)
+	st := api.LockStatusResult{Enabled: true, DeviceCount: 1, Devices: [][]byte{testGenesis(0x99)}}
+	kp, err := e2e.LoadOrCreateIdentity(config.GetStatePath("client-identity.json"))
+	if err != nil {
+		t.Fatalf("client identity: %v", err)
+	}
+	cfg := &config.Config{}
+
+	got, err := tuiRoleLines(context.Background(), cfg, configEndpoint(cfg), st)
+	if err != nil {
+		t.Fatalf("tuiRoleLines: %v", err)
+	}
+	printed := captureStdout(t, func() { _ = printTUIRole(context.Background(), cfg, st) })
+
+	if got != printed {
+		t.Errorf("tuiRoleLines = %q, printTUIRole printed %q", got, printed)
+	}
+	for _, want := range []string{"this tui", "authorized: no", lockSignHint(kp.Public)} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output must contain %q, got:\n%s", want, got)
+		}
+	}
+}
+
+func TestClientPinLineUsesTheGivenEndpoint(t *testing.T) {
+	tempStateDir(t)
+	entries, err := trustlog.ChainEntries(makeTestChainBytes(t))
+	if err != nil {
+		t.Fatalf("ChainEntries: %v", err)
+	}
+	srv := api.NewServer()
+	srv.Handle(api.MethodTrustLogSync, func(_ context.Context, _ json.RawMessage) (any, error) {
+		return api.TrustLogSyncResult{Entries: entries}, nil
+	})
+	ts := httptest.NewServer(srv.WSHandler(func(string) bool { return true }))
+	t.Cleanup(ts.Close)
+	cfg := &config.Config{}
+	ep := gatewayEndpoint{URL: "ws://" + strings.TrimPrefix(ts.URL, "http://")}
+
+	line, err := clientPinLine(context.Background(), cfg, ep)
+
+	if err != nil {
+		t.Fatalf("clientPinLine: %v", err)
+	}
+	if !strings.Contains(line, "locked out") {
+		t.Errorf("line must name the network root, got: %q", line)
 	}
 }

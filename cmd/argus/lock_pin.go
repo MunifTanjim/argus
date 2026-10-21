@@ -98,8 +98,8 @@ func resolveGenesis(chains [][]byte) ([]byte, error) {
 	}
 }
 
-func pullChains(ctx context.Context, cfg *config.Config) ([][]byte, error) {
-	dial, err := gatewayDialer(cfg.Gateway.URL, cfg.Token, cfg.Socket)
+func pullChains(ctx context.Context, cfg *config.Config, ep gatewayEndpoint) ([][]byte, error) {
+	dial, err := gatewayDialer(ep.URL, ep.Token, cfg.Socket)
 	if err != nil {
 		return nil, err
 	}
@@ -116,8 +116,8 @@ func pullChains(ctx context.Context, cfg *config.Config) ([][]byte, error) {
 	return trustlog.AssembleChains(got.Entries), nil
 }
 
-func genesisFromNetwork(ctx context.Context, cfg *config.Config) ([]byte, error) {
-	chains, err := pullChains(ctx, cfg)
+func genesisFromNetwork(ctx context.Context, cfg *config.Config, ep gatewayEndpoint) ([]byte, error) {
+	chains, err := pullChains(ctx, cfg, ep)
 	if err != nil {
 		return nil, err
 	}
@@ -126,8 +126,8 @@ func genesisFromNetwork(ctx context.Context, cfg *config.Config) ([]byte, error)
 
 // Mirrors the detector, not resolveGenesis: detection trips on the FIRST chain that
 // decodes, so competing roots — an error when choosing a pin — still report a quarantine.
-func quarantiningGenesis(ctx context.Context, cfg *config.Config) ([]byte, error) {
-	chains, err := pullChains(ctx, cfg)
+func quarantiningGenesis(ctx context.Context, cfg *config.Config, ep gatewayEndpoint) ([]byte, error) {
+	chains, err := pullChains(ctx, cfg, ep)
 	if err != nil {
 		return nil, err
 	}
@@ -144,8 +144,8 @@ func quarantiningGenesis(ctx context.Context, cfg *config.Config) ([]byte, error
 // Unlike quarantiningGenesis it does not take the first chain that decodes: after a
 // relock the gateway still holds the dead root, and naming it sends the operator to pin
 // a genesis nobody is on.
-func supersedingGenesisFromNetwork(ctx context.Context, cfg *config.Config, own []byte) ([]byte, error) {
-	chains, err := pullChains(ctx, cfg)
+func supersedingGenesisFromNetwork(ctx context.Context, cfg *config.Config, ep gatewayEndpoint, own []byte) ([]byte, error) {
+	chains, err := pullChains(ctx, cfg, ep)
 	if err != nil {
 		return nil, err
 	}
@@ -156,43 +156,47 @@ func supersedingGenesisFromNetwork(ctx context.Context, cfg *config.Config, own 
 // accepted the genesis. The other order leaves node=X, client=Y on a rejected pin:
 // the client then resolves Y, never quarantines, and silently opens zero channels —
 // an empty dashboard with no error anywhere.
-func applyPin(ctx context.Context, cfg *config.Config, genesis []byte) error {
-	nodePinned, err := pinLocalNode(ctx, cfg, genesis)
+func applyPin(ctx context.Context, cfg *config.Config, genesis []byte) (out, notes string, err error) {
+	nodePinned, notes, err := pinLocalNode(ctx, cfg, genesis)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	// A chain from a superseded root can never ingest again; leaving it behind only
 	// produces a confusing error on the next sync (the cleanup unpinDevice does too).
 	if rerr := os.Remove(config.GetStatePath("client-trustlog-chain")); rerr != nil && !os.IsNotExist(rerr) {
-		return rerr
+		return "", notes, rerr
 	}
 	if err := clientPinFile().Save(genesis); err != nil {
-		return err
+		return "", notes, err
 	}
-	shell.StdOutF("pinned this device\n  genesis: %s\n  %s\n", trustpin.Encode(genesis), fingerprintOf(genesis))
+	out = fmt.Sprintf("pinned this device\n  genesis: %s\n  %s\n", trustpin.Encode(genesis), fingerprintOf(genesis))
 	if nodePinned {
-		shell.StdOutF("  local node pinned and enforcing\n")
+		out += "  local node pinned and enforcing\n"
 	}
-	return nil
+	return out, notes, nil
+}
+
+func printPinned(out, notes string) {
+	shell.StdErrF("%s", notes)
+	shell.StdOutF("%s", out)
 }
 
 // A node that REFUSES the genesis aborts the whole command — the two roles on one
 // machine must never end up on different trust roots. A node merely not running does
 // not: its persisted pin is checked instead and the operator is told to re-run.
-func pinLocalNode(ctx context.Context, cfg *config.Config, genesis []byte) (bool, error) {
-	_, err := callLocal[struct{}](ctx, cfg, api.MethodLockPin, api.LockPinParams{Genesis: genesis})
+func pinLocalNode(ctx context.Context, cfg *config.Config, genesis []byte) (pinned bool, note string, err error) {
+	_, err = callLocal[struct{}](ctx, cfg, api.MethodLockPin, api.LockPinParams{Genesis: genesis})
 	if err == nil {
-		return true, nil
+		return true, "", nil
 	}
 	var rpcErr *api.RPCError
 	if errors.As(err, &rpcErr) {
-		return false, fmt.Errorf("the local node refused this genesis: %s\n  nothing was written; this device is unchanged", rpcErr.Message)
+		return false, "", fmt.Errorf("the local node refused this genesis: %s\n  nothing was written; this device is unchanged", rpcErr.Message)
 	}
 	if perr := guardExistingPin(nodePinFile(), genesis); perr != nil {
-		return false, fmt.Errorf("the local node is unreachable (%v) and its saved pin disagrees:\n  %w", err, perr)
+		return false, "", fmt.Errorf("the local node is unreachable (%v) and its saved pin disagrees:\n  %w", err, perr)
 	}
-	shell.StdErrF("note: the local node is unreachable (%v)\n  pinning the client role only; run `argus lock pin` again once the node is up\n", err)
-	return false, nil
+	return false, fmt.Sprintf("note: the local node is unreachable (%v)\n  pinning the client role only; run `argus lock pin` again once the node is up\n", err), nil
 }
 
 // Both pin and unpin must consult lock.genesis: it outranks the pin file, and
@@ -262,7 +266,7 @@ func existingPinConflict(cur []byte) error {
 }
 
 func pinFromNetwork(ctx context.Context, cfg *config.Config, in io.Reader, out io.Writer) error {
-	genesis, err := genesisFromNetwork(ctx, cfg)
+	genesis, err := genesisFromNetwork(ctx, cfg, configEndpoint(cfg))
 	if err != nil {
 		return err
 	}
@@ -281,7 +285,9 @@ func pinFromNetwork(ctx context.Context, cfg *config.Config, in io.Reader, out i
 		shell.StdOutF("not pinned\n")
 		return nil
 	}
-	return applyPin(ctx, cfg, genesis)
+	pinned, notes, err := applyPin(ctx, cfg, genesis)
+	printPinned(pinned, notes)
+	return err
 }
 
 func newLockPinCmd() *cobra.Command {
@@ -307,7 +313,9 @@ func newLockPinCmd() *cobra.Command {
 				if perr := guardPin(cfg, genesis); perr != nil {
 					return fail(cmd, perr)
 				}
-				return applyPin(ctx, cfg, genesis)
+				out, notes, aerr := applyPin(ctx, cfg, genesis)
+				printPinned(out, notes)
+				return aerr
 			}
 
 			if perr := pinFromNetwork(ctx, cfg, os.Stdin, os.Stdout); perr != nil {
@@ -345,48 +353,82 @@ func unpinSummary(cfgGenesis []byte) string {
 // disagrees with lock.genesis refuses to start — so the file is cleared here, but only
 // when the config still pins this device. Without a config pin, clearing behind its
 // back would widen what it accepts on its next start.
-func unpinLocalNode(ctx context.Context, cfg *config.Config, cfgGenesis []byte) {
+func unpinLocalNode(ctx context.Context, cfg *config.Config, cfgGenesis []byte) []outPart {
 	_, err := callLocal[struct{}](ctx, cfg, api.MethodLockUnpin, nil)
 	if err == nil {
-		shell.StdOutF("  local node unpinned\n")
-		return
+		return []outPart{{text: "  local node unpinned\n"}}
 	}
 	var rpcErr *api.RPCError
 	if cfgGenesis == nil || errors.As(err, &rpcErr) {
-		shell.StdErrF("note: local node unpin failed (%v) — it still holds its pin and is still enforcing\n  run `argus lock unpin` again when the node is reachable\n", err)
-		return
+		return []outPart{{stderr: true, text: fmt.Sprintf("note: local node unpin failed (%v) — it still holds its pin and is still enforcing\n  run `argus lock unpin` again when the node is reachable\n", err)}}
 	}
 	if cerr := nodePinFile().Clear(); cerr != nil {
-		shell.StdErrF("note: local node unpin failed (%v) and its persisted pin could not be cleared (%v)\n", err, cerr)
-		return
+		return []outPart{{stderr: true, text: fmt.Sprintf("note: local node unpin failed (%v) and its persisted pin could not be cleared (%v)\n", err, cerr)}}
 	}
+	var parts []outPart
 	if rerr := os.Remove(config.GetStatePath("trustlog-chain")); rerr != nil && !os.IsNotExist(rerr) {
-		shell.StdErrF("note: the node's stored chain could not be removed (%v)\n", rerr)
+		parts = append(parts, outPart{stderr: true, text: fmt.Sprintf("note: the node's stored chain could not be removed (%v)\n", rerr)})
 	}
-	shell.StdOutF("  local node is not running; cleared its persisted pin\n")
+	return append(parts, outPart{text: "  local node is not running; cleared its persisted pin\n"})
+}
+
+// outPart is one piece of command output in print order, so a command can keep the
+// interleaving of stdout and stderr while callers that only want text use out and notes.
+type outPart struct {
+	stderr bool
+	text   string
+}
+
+func printParts(parts []outPart) {
+	for _, p := range parts {
+		if p.stderr {
+			shell.StdErrF("%s", p.text)
+		} else {
+			shell.StdOutF("%s", p.text)
+		}
+	}
+}
+
+func splitParts(parts []outPart) (out, notes string) {
+	for _, p := range parts {
+		if p.stderr {
+			notes += p.text
+		} else {
+			out += p.text
+		}
+	}
+	return out, notes
 }
 
 // Deliberately allowed on a config-pinned device: a pin file that disagrees with
 // lock.genesis is a hard startup failure whose error names this command as the way out.
 // Clearing resolves the conflict, leaves the device pinned to lock.genesis, and never
 // opens anything it was refusing.
-func unpinDevice(ctx context.Context, cfg *config.Config) error {
+func unpinDevice(ctx context.Context, cfg *config.Config) (out, notes string, err error) {
+	parts, err := unpinParts(ctx, cfg)
+	if err != nil {
+		return "", "", err
+	}
+	out, notes = splitParts(parts)
+	return out, notes, nil
+}
+
+func unpinParts(ctx context.Context, cfg *config.Config) ([]outPart, error) {
 	cfgGenesis, err := configPin(cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := clientPinFile().Clear(); err != nil {
-		return err
+		return nil, err
 	}
 	// A chain from the old genesis can never ingest again; leaving it behind
 	// only produces a confusing error on the next sync.
 	if rerr := os.Remove(config.GetStatePath("client-trustlog-chain")); rerr != nil && !os.IsNotExist(rerr) {
-		return rerr
+		return nil, rerr
 	}
-	shell.StdOutF("cleared this device's persisted pin\n")
-	unpinLocalNode(ctx, cfg, cfgGenesis)
-	shell.StdErrF("%s", unpinSummary(cfgGenesis))
-	return nil
+	parts := []outPart{{text: "cleared this device's persisted pin\n"}}
+	parts = append(parts, unpinLocalNode(ctx, cfg, cfgGenesis)...)
+	return append(parts, outPart{stderr: true, text: unpinSummary(cfgGenesis)}), nil
 }
 
 func newLockUnpinCmd() *cobra.Command {
@@ -404,9 +446,11 @@ func newLockUnpinCmd() *cobra.Command {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			if uerr := unpinDevice(ctx, cfg); uerr != nil {
+			parts, uerr := unpinParts(ctx, cfg)
+			if uerr != nil {
 				return fail(cmd, uerr)
 			}
+			printParts(parts)
 			return nil
 		},
 	}
