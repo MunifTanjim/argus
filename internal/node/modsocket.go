@@ -57,13 +57,15 @@ type modDecisionResult struct {
 }
 
 type modPoll struct {
-	SessionID string `json:"sessionId"`
+	SessionID string   `json:"sessionId"`
+	Kinds     []string `json:"kinds"`
 }
 
 type modAck struct {
-	ID    string `json:"id"`
-	Error string `json:"error,omitempty"`
-	Ran   bool   `json:"ran,omitempty"` // ran, not only accepted to run later
+	ID    string          `json:"id"`
+	Error string          `json:"error,omitempty"`
+	Ran   bool            `json:"ran,omitempty"` // ran, not only accepted to run later
+	Data  json.RawMessage `json:"data,omitempty"`
 }
 
 type modPollResult struct {
@@ -170,7 +172,7 @@ func (d *Node) handleModPoll(w http.ResponseWriter, r *http.Request, a adapter.A
 	if b == nil {
 		return
 	}
-	cmds := b.Wait(r.Context(), in.SessionID, modHold)
+	cmds := b.Wait(r.Context(), in.SessionID, modHold, in.Kinds)
 	if cmds == nil {
 		cmds = []modbridge.Command{}
 	}
@@ -189,7 +191,7 @@ func (d *Node) handleModAck(w http.ResponseWriter, r *http.Request, a adapter.Ad
 	if in.Error != "" {
 		d.log.Warn("mod command failed", "agent", a.Agent(), "id", in.ID, "err", in.Error)
 	}
-	b.Ack(in.ID, in.Error, in.Ran)
+	b.Ack(in.ID, in.Error, in.Ran, in.Data)
 	writeModJSON(w, struct{}{})
 }
 

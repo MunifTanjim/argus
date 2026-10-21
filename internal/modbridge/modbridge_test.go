@@ -2,7 +2,9 @@ package modbridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,9 +31,9 @@ func waitFor(t *testing.T, cond func() bool) {
 func openPoll(b *Bridge, ctx context.Context, id string, hold time.Duration) <-chan []Command {
 	out := make(chan []Command, 1)
 	go func() {
-		cmds := b.Wait(ctx, id, hold)
+		cmds := b.Wait(ctx, id, hold, nil)
 		for _, c := range cmds {
-			b.Ack(c.ID, "", true)
+			b.Ack(c.ID, "", true, nil)
 		}
 		out <- cmds
 	}()
@@ -71,7 +73,7 @@ func TestCommandIsDeliveredAtMostOnce(t *testing.T) {
 	}
 	<-first
 	// The next poll must not see the command again.
-	if cmds := b.Wait(context.Background(), "s1", 20*time.Millisecond); len(cmds) != 0 {
+	if cmds := b.Wait(context.Background(), "s1", 20*time.Millisecond, nil); len(cmds) != 0 {
 		t.Fatalf("second poll got %v, want none", cmds)
 	}
 }
@@ -79,8 +81,8 @@ func TestCommandIsDeliveredAtMostOnce(t *testing.T) {
 func TestSendFailsWithModError(t *testing.T) {
 	b := New(testGrace, testAckTimeout, nil)
 	go func() {
-		for _, c := range b.Wait(context.Background(), "s1", time.Minute) {
-			b.Ack(c.ID, "unknown command", false)
+		for _, c := range b.Wait(context.Background(), "s1", time.Minute, nil) {
+			b.Ack(c.ID, "unknown command", false, nil)
 		}
 	}()
 	waitFor(t, func() bool { return b.Reachable("s1") })
@@ -94,7 +96,7 @@ func TestSendFailsWithModError(t *testing.T) {
 func TestSendFailsWithoutAck(t *testing.T) {
 	b := New(testGrace, testAckTimeout, nil)
 	got := make(chan []Command, 1)
-	go func() { got <- b.Wait(context.Background(), "s1", time.Minute) }()
+	go func() { got <- b.Wait(context.Background(), "s1", time.Minute, nil) }()
 	waitFor(t, func() bool { return b.Reachable("s1") })
 	_, err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"})
 	if !errors.Is(err, ErrNoAck) {
@@ -108,10 +110,10 @@ func TestSendFailsWithoutAck(t *testing.T) {
 func TestLateAckIsIgnored(t *testing.T) {
 	b := New(testGrace, testAckTimeout, nil)
 	got := make(chan []Command, 1)
-	go func() { got <- b.Wait(context.Background(), "s1", time.Minute) }()
+	go func() { got <- b.Wait(context.Background(), "s1", time.Minute, nil) }()
 	waitFor(t, func() bool { return b.Reachable("s1") })
 	_, _ = b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"})
-	b.Ack((<-got)[0].ID, "", true)
+	b.Ack((<-got)[0].ID, "", true, nil)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if len(b.acks) != 0 {
@@ -122,7 +124,7 @@ func TestLateAckIsIgnored(t *testing.T) {
 // A Send waiting for a re-poll stops when the session expires, and leaves nothing behind.
 func TestExpiryReleasesWaitingSend(t *testing.T) {
 	b := New(testGrace, testAckTimeout, nil)
-	b.Wait(context.Background(), "s1", time.Millisecond)
+	b.Wait(context.Background(), "s1", time.Millisecond, nil)
 	if _, err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"}); !errors.Is(err, ErrUnreachable) {
 		t.Fatalf("err = %v, want ErrUnreachable", err)
 	}
@@ -135,7 +137,7 @@ func TestExpiryReleasesWaitingSend(t *testing.T) {
 
 func TestWaitAnswersEmptyAfterHold(t *testing.T) {
 	b := New(testGrace, testAckTimeout, nil)
-	if cmds := b.Wait(context.Background(), "s1", 10*time.Millisecond); cmds != nil {
+	if cmds := b.Wait(context.Background(), "s1", 10*time.Millisecond, nil); cmds != nil {
 		t.Fatalf("got %v, want nil", cmds)
 	}
 }
@@ -221,7 +223,7 @@ func TestSupersededPollWaitsOutItsHold(t *testing.T) {
 
 func TestSendWaitsForRepollWithinGrace(t *testing.T) {
 	b := New(testGrace, testAckTimeout, nil)
-	b.Wait(context.Background(), "s1", time.Millisecond) // closes; grace starts
+	b.Wait(context.Background(), "s1", time.Millisecond, nil) // closes; grace starts
 
 	sent := make(chan error, 1)
 	go func() {
@@ -241,7 +243,7 @@ func TestSendWaitsForRepollWithinGrace(t *testing.T) {
 
 func TestSendFailsWhenGraceRunsOut(t *testing.T) {
 	b := New(testGrace, testAckTimeout, nil)
-	b.Wait(context.Background(), "s1", time.Millisecond)
+	b.Wait(context.Background(), "s1", time.Millisecond, nil)
 	start := time.Now()
 	_, err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"})
 	if !errors.Is(err, ErrUnreachable) {
@@ -266,10 +268,10 @@ func TestReachabilityChangesAreReported(t *testing.T) {
 		defer mu.Unlock()
 		return len(changes)
 	}
-	b.Wait(context.Background(), "s1", time.Millisecond)
+	b.Wait(context.Background(), "s1", time.Millisecond, nil)
 	waitFor(t, func() bool { return count() == 2 })
 	// argusd back after an outage: the next poll makes the session reachable again.
-	b.Wait(context.Background(), "s1", time.Millisecond)
+	b.Wait(context.Background(), "s1", time.Millisecond, nil)
 	waitFor(t, func() bool { return count() == 4 })
 	mu.Lock()
 	defer mu.Unlock()
@@ -294,8 +296,8 @@ func TestAckBusyFailsTheSendWithErrBusy(t *testing.T) {
 	b := New(time.Second, time.Second, nil)
 	ctx := context.Background()
 	go func() {
-		for _, c := range b.Wait(ctx, "s1", time.Minute) {
-			b.Ack(c.ID, FailBusy, false)
+		for _, c := range b.Wait(ctx, "s1", time.Minute, nil) {
+			b.Ack(c.ID, FailBusy, false, nil)
 		}
 	}()
 	for !b.Reachable("s1") {
@@ -304,5 +306,94 @@ func TestAckBusyFailsTheSendWithErrBusy(t *testing.T) {
 	_, err := b.Send(ctx, "s1", Command{Kind: KindFill, Text: "steer"})
 	if !errors.Is(err, ErrBusy) {
 		t.Fatalf("err = %v, want ErrBusy", err)
+	}
+}
+
+func TestDeliverRefusesKindsThePollDidNotList(t *testing.T) {
+	b := New(testGrace, testAckTimeout, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { b.Wait(ctx, "s1", time.Minute, []string{KindPrompt, KindCommands}); close(done) }()
+	waitFor(t, func() bool { return b.Reachable("s1") })
+	if _, err := b.Send(context.Background(), "s1", Command{Kind: KindFill}); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("fill err = %v, want ErrUnsupported", err)
+	}
+	cancel()
+	<-done
+}
+
+func TestPollWithoutKindsRunsLegacyKinds(t *testing.T) {
+	b := New(testGrace, testAckTimeout, nil)
+	go func() {
+		for _, c := range b.Wait(context.Background(), "s1", time.Minute, nil) {
+			b.Ack(c.ID, "", true, nil)
+		}
+	}()
+	waitFor(t, func() bool { return b.Reachable("s1") })
+	if _, err := b.Request(context.Background(), "s1", Command{Kind: KindCommands}); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("commands err = %v, want ErrUnsupported", err)
+	}
+	if ran, err := b.Send(context.Background(), "s1", Command{Kind: KindPrompt, Text: "hi"}); err != nil || !ran {
+		t.Fatalf("prompt = (%v, %v), want (true, nil)", ran, err)
+	}
+}
+
+func TestRequestReturnsAckData(t *testing.T) {
+	b := New(testGrace, testAckTimeout, nil)
+	want := `[{"name":"x"}]`
+	go func() {
+		for _, c := range b.Wait(context.Background(), "s1", time.Minute, []string{KindCommands}) {
+			b.Ack(c.ID, "", true, json.RawMessage(want))
+		}
+	}()
+	waitFor(t, func() bool { return b.Reachable("s1") })
+	got, err := b.Request(context.Background(), "s1", Command{Kind: KindCommands})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("data = %s, want %s", got, want)
+	}
+}
+
+func TestRequestPropagatesFailure(t *testing.T) {
+	b := New(testGrace, testAckTimeout, nil)
+	go func() {
+		for _, c := range b.Wait(context.Background(), "s1", time.Minute, []string{KindCommands}) {
+			b.Ack(c.ID, "boom", false, nil)
+		}
+	}()
+	waitFor(t, func() bool { return b.Reachable("s1") })
+	_, err := b.Request(context.Background(), "s1", Command{Kind: KindCommands})
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("err = %v, want the mod's failure", err)
+	}
+}
+
+// A poll that lapsed into grace after listing commands must not hand the kind
+// to a re-poll that did not list it.
+func TestRequestRefusedByRepollWithoutKind(t *testing.T) {
+	b := New(testGrace, testAckTimeout, nil)
+	b.Wait(context.Background(), "s1", time.Millisecond, []string{KindCommands})
+
+	type result struct {
+		data json.RawMessage
+		err  error
+	}
+	got := make(chan result, 1)
+	go func() {
+		data, err := b.Request(context.Background(), "s1", Command{Kind: KindCommands})
+		got <- result{data, err}
+	}()
+	time.Sleep(10 * time.Millisecond)
+	polled := make(chan []Command, 1)
+	go func() { polled <- b.Wait(context.Background(), "s1", 50*time.Millisecond, nil) }()
+
+	r := <-got
+	if !errors.Is(r.err, ErrUnsupported) {
+		t.Fatalf("Request = (%s, %v), want ErrUnsupported", r.data, r.err)
+	}
+	if cmds := <-polled; len(cmds) != 0 {
+		t.Fatalf("nil-kinds poll got %v, want none", cmds)
 	}
 }

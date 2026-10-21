@@ -206,12 +206,53 @@ test('the poll runs prompts and slash commands', OPTIONS, async ($, on) => {
   await clock.settle()
   expect(prompts).toEqual([{ text: 'fix the bug' }])
   expect(commands).toEqual([{ command: 'compact', args: 'keep tests' }, { command: 'memory', args: 'more' }])
-  expect(polls.filter(s => s.path === '/claude/poll').map(s => s.body)).toEqual([{ sessionId: 's1' }, { sessionId: 's1' }])
+  expect(polls.filter(s => s.path === '/claude/poll').map(s => s.body.sessionId)).toEqual(['s1', 's1'])
   const acks = polls.filter(s => s.path === '/claude/ack').map(s => s.body)
   expect(acks.map(a => a.id)).toEqual(['1', '2', '3', '4'])
   expect(acks[0]).toEqual({ id: '1', ran: true })
   expect(acks[1]).toEqual({ id: '2', ran: true })
   expect(String(acks[2].error)).toContain('/tmp/app.log is not a slash command')
+})
+
+test('poll sends the kinds it runs', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const sent = argusd(on, () => new Error('hold'))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const poll = sent.find(s => s.path === '/claude/poll')
+  expect(poll?.body.kinds).toEqual(['prompt', 'exit', 'fill', 'shell', 'commands'])
+})
+
+test('commands kind acks the command list', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const queue = [{ commands: [{ id: '7', kind: 'commands', text: '' }] }]
+  const sent = argusd(on, s => (s.path === '/claude/poll' ? queue.shift() ?? new Error('hold') : {}))
+  on('command.list', () => ({ value: [{ name: 'compact', description: 'Free up context', source: 'builtin' }] }) as never)
+  const submitted: unknown[] = []
+  on('prompt.submit', ($, e) => (submitted.push(e.text), { text: e.text }) as never)
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(sent.filter(s => s.path === '/claude/ack').map(s => s.body)).toEqual([
+    { id: '7', ran: true, data: [{ name: 'compact', description: 'Free up context' }] },
+  ])
+  expect(submitted).toEqual([])
+})
+
+test('a failed command list is acked with its error', OPTIONS, async ($, on) => {
+  const { clock } = world(on)
+  const queue = [{ commands: [{ id: '7', kind: 'commands', text: '' }] }]
+  const sent = argusd(on, s => (s.path === '/claude/poll' ? queue.shift() ?? new Error('hold') : {}))
+  on('command.list', () => { throw new Error('no list') })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const acks = sent.filter(s => s.path === '/claude/ack').map(s => s.body)
+  expect(acks.length).toBe(1)
+  expect(acks[0].id).toBe('7')
+  expect(String(acks[0].error)).toContain('command.list')
+  expect(acks[0].ran).toBeUndefined()
 })
 
 test('a failed or dropped command is acked with its error', OPTIONS, async ($, on) => {

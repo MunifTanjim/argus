@@ -47,8 +47,8 @@ func TestRenameSessionAcceptedIsNotApplied(t *testing.T) {
 	a, _ := newWiredAdapter(t)
 	b := a.ModBridge()
 	go func() {
-		for _, c := range b.Wait(context.Background(), "s1", time.Minute) {
-			b.Ack(c.ID, "", false)
+		for _, c := range b.Wait(context.Background(), "s1", time.Minute, nil) {
+			b.Ack(c.ID, "", false, nil)
 		}
 	}()
 	waitUntil(t, func() bool { return b.Reachable("s1") })

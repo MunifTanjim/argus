@@ -22,7 +22,10 @@ const COMMAND_MAX = 200
 // The failure a fill acks when a dialog holds the keys (modbridge.FailBusy).
 const FAIL_BUSY = 'busy'
 
-export type Command = { id: string; kind: 'prompt' | 'exit' | 'fill' | 'shell'; text: string }
+// The command kinds run handles, sent on each poll so argusd sends no other.
+const KINDS = ['prompt', 'exit', 'fill', 'shell', 'commands'] as const
+
+export type Command = { id: string; kind: (typeof KINDS)[number]; text: string }
 
 type Env = { tmuxPane: string; tmux: string; autoMode: boolean }
 
@@ -468,7 +471,7 @@ function schedulePoll($: EngineInterface, delayMs: number, retryMs: number, gen:
   $.clock.after(delayMs, async () => {
     if (gen !== pollGen) return
     try {
-      const out = await post($, '/claude/poll', { sessionId: await $.session.id() })
+      const out = await post($, '/claude/poll', { sessionId: await $.session.id(), kinds: KINDS })
       const { commands } = JSON.parse(out) as { commands?: Command[] }
       if (failed) await resendState($)
       for (const c of commands ?? []) await run($, c)
@@ -485,14 +488,15 @@ function schedulePoll($: EngineInterface, delayMs: number, retryMs: number, gen:
 // left to finish.
 export async function run($: EngineInterface, c: Command): Promise<void> {
   if (c.kind === 'exit') return exit($, c)
+  if (c.kind === 'commands') return listCommands($, c)
   const window = c.kind === 'shell' ? SHELL_ACK_WINDOW_MS : ACK_WINDOW_MS
   const failure = await Promise.race([execute($, c), $.clock.sleep(window).then(() => PENDING)])
   if (failure === PENDING) {
     if (c.kind === 'fill') abandoned.add(c.id)
-    await post($, '/claude/ack', { id: c.id }).catch(() => '')
+    await ack($, { id: c.id })
     return
   }
-  await post($, '/claude/ack', failure === '' ? { id: c.id, ran: true } : { id: c.id, error: failure }).catch(() => '')
+  await ack($, failure === '' ? { id: c.id, ran: true } : { id: c.id, error: failure })
 }
 
 const PENDING = Symbol('pending')
@@ -501,10 +505,26 @@ const PENDING = Symbol('pending')
 // first, and ack before Claude exits and takes the ack with it.
 async function exit($: EngineInterface, c: Command): Promise<void> {
   if (turnId !== '') await $.turn.abort({ turnId }).catch(() => undefined)
-  await post($, '/claude/ack', { id: c.id }).catch(() => '')
+  await ack($, { id: c.id })
   await $.command.run({ command: 'exit' }).catch(err => {
     $.ui.log(`argus: exit failed: ${String(err)}`, { to: 'debug' })
   })
+}
+
+async function listCommands($: EngineInterface, c: Command): Promise<void> {
+  let body: Record<string, unknown>
+  try {
+    const data = (await $.command.list()).map(({ name, description }) => ({ name, description }))
+    body = { id: c.id, ran: true, data }
+  } catch (err) {
+    body = { id: c.id, error: String(err) }
+  }
+  await ack($, body)
+}
+
+// argusd fails the send in argus when no ack comes, so a failed ack is dropped.
+function ack($: EngineInterface, body: Record<string, unknown>): Promise<string> {
+  return post($, '/claude/ack', body).catch(() => '')
 }
 
 // Resolves with the command's failure, or '' once it ran. Claude takes no
