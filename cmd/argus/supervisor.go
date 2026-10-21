@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"slices"
@@ -20,11 +21,11 @@ func combinedMode(cfg *config.Config) bool { return runLocalNode(cfg) && serveGa
 // runSupervisor does the interactive tunnel setup here, because the children
 // have no terminal. It blocks until ctx is done or a child exits. The node
 // child reconciles the hooks, so the supervisor does not.
-func runSupervisor(ctx context.Context, cmd *cobra.Command, cfg *config.Config) error {
+func runSupervisor(ctx context.Context, cmd *cobra.Command, cfg *config.Config, logOut io.Writer) error {
 	if err := validateMode(cfg); err != nil {
 		return fail(cmd, err)
 	}
-	if err := setupLogger(cfg, false); err != nil {
+	if err := setupLogger(cfg, logOut, false); err != nil {
 		return fail(cmd, err)
 	}
 	tun, _, err := resolveTunnel(tunnelOpts(cfg, true))

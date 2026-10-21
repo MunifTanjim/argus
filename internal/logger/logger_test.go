@@ -72,3 +72,22 @@ func TestPrettyHandlerNoColorWritesNoEscapes(t *testing.T) {
 		t.Fatalf("output lacks the scope prefix: %q", buf.String())
 	}
 }
+
+func TestInitWriterWritesToWriterWithoutColor(t *testing.T) {
+	prevLogger, prevFormat, prevLevel := slog.Default(), config.LogFormat, config.LogLevel.Level()
+	t.Cleanup(func() {
+		slog.SetDefault(prevLogger)
+		config.LogFormat = prevFormat
+		config.LogLevel.Set(prevLevel)
+	})
+	config.LogLevel.Set(slog.LevelInfo)
+	config.LogFormat = "pretty"
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("CLICOLOR_FORCE", "")
+	var buf bytes.Buffer
+	InitWriter(&buf)
+	slog.Info("hello")
+	if !bytes.Contains(buf.Bytes(), []byte("hello")) || bytes.Contains(buf.Bytes(), []byte("\x1b[")) {
+		t.Fatalf("output = %q", buf.String())
+	}
+}

@@ -131,7 +131,7 @@ func TestStartStandaloneGatewayServes(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- runStart(ctx, cancel, newStartCmd("test"), cfg, "test", false) }()
+	go func() { done <- runStart(ctx, cancel, newStartCmd("test"), cfg, "test", false, os.Stderr) }()
 
 	// serveGateway starts its listener asynchronously; poll until /client accepts.
 	url := "ws://" + addr + "/client"
@@ -217,7 +217,7 @@ func TestStartStandaloneGatewayFailsFastOnTakenSocket(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := runStart(ctx, cancel, newStartCmd("test"), cfg, "test", false); err == nil {
+	if err := runStart(ctx, cancel, newStartCmd("test"), cfg, "test", false, os.Stderr); err == nil {
 		t.Fatal("runStart must fail when the gateway socket is taken")
 	}
 	ln, err := net.Listen("tcp", addr)
@@ -259,7 +259,7 @@ func TestRunStartRefusesRunningNodeBeforeUplink(t *testing.T) {
 	defer cancel()
 	var runErr error
 	out := captureStderr(t, func() {
-		runErr = runStart(ctx, cancel, newStartCmd("test"), cfg, "test", false)
+		runErr = runStart(ctx, cancel, newStartCmd("test"), cfg, "test", false, os.Stderr)
 	})
 	if runErr == nil || !strings.Contains(out, "run 'argus stop' first") {
 		t.Fatalf("runStart = %v, stderr %q, want the stop hint", runErr, out)
