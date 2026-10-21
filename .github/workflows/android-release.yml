@@ -1,0 +1,93 @@
+name: Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: Git ref (branch, tag, or SHA) to build. Defaults to the selected branch.
+        required: false
+        type: string
+        default: ""
+      track:
+        description: Google Play track
+        required: true
+        type: choice
+        options:
+          - beta
+          - internal
+          - alpha
+        default: beta
+      dry_run:
+        description: Build and sign only, skip the Google Play upload
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.git_ref }}
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Configure signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_GOOGLE_SERVICES_JSON: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON }}
+          PUSHPORT_APP_ID: ${{ secrets.PUSHPORT_APP_ID }}
+        run: |
+          for v in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD ANDROID_GOOGLE_SERVICES_JSON PUSHPORT_APP_ID; do
+            [ -n "${!v}" ] || { echo "$v is empty" >&2; exit 1; }
+          done
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
+          esc() { printf '%s' "$1" | sed 's/\\/\\\\/g'; }
+          {
+            echo "storeFile=upload-keystore.jks"
+            echo "storePassword=$(esc "$ANDROID_KEYSTORE_PASSWORD")"
+            echo "keyAlias=$(esc "$ANDROID_KEY_ALIAS")"
+            echo "keyPassword=$(esc "$ANDROID_KEY_PASSWORD")"
+          } > android/key.properties
+          printf '%s' "$ANDROID_GOOGLE_SERVICES_JSON" > android/app/google-services.json
+
+      - name: Build App Bundle
+        env:
+          PUSHPORT_APP_ID: ${{ secrets.PUSHPORT_APP_ID }}
+        run: flutter build appbundle --release --dart-define=PUSHPORT_APP_ID="$PUSHPORT_APP_ID"
+
+      - name: Upload to Google Play
+        if: ${{ !inputs.dry_run }}
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: dev.muniftanjim.argus
+          releaseFiles: app/build/app/outputs/bundle/release/app-release.aab
+          track: ${{ inputs.track }}
+          status: completed
