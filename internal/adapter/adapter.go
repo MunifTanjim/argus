@@ -11,6 +11,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/modbridge"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -271,4 +272,18 @@ type Adapter interface {
 	Uninstall() error
 	SettingsPath() (string, error)
 	DefaultHookEvents() []string
+}
+
+// CallerIdentity lets argus tell which session ran a command.
+type CallerIdentity interface {
+	// CallerEnv is the variable the agent sets to its own session id on every command it runs.
+	CallerEnv() string
+	// IsAgentProcess reports whether p is this agent's own process.
+	IsAgentProcess(p procwalk.Proc, env map[string]string) bool
+}
+
+// AgentProcessEnv is a CallerIdentity whose IsAgentProcess reads variables
+// besides CallerEnv.
+type AgentProcessEnv interface {
+	AgentProcessEnv() []string
 }

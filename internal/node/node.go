@@ -21,6 +21,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/forge"
 	"github.com/MunifTanjim/argus/internal/host"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -38,6 +39,7 @@ type Node struct {
 	// adapterList holds agent adapters in priority order; [0] is the default.
 	adapterList []adapter.Adapter
 	adapters    map[string]adapter.Adapter
+	procTable   func(context.Context) (procwalk.Table, error)
 	discs       []adapter.Discoverer
 	server      *api.Server
 	clients     map[session.TmuxServer]*tmux.Client
@@ -434,6 +436,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	d := &Node{
 		reg: reg, clients: clients, id: hostname, label: hostname,
 		adapterList:  adapterList,
+		procTable:    procwalk.Snapshot,
 		adapters:     adapterByAgent,
 		discs:        discs,
 		caps:         caps,

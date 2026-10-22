@@ -3,12 +3,14 @@ package claudecode
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
 	"github.com/MunifTanjim/argus/internal/adapter/hookdecision"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/modbridge"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -34,6 +36,15 @@ func (ccAdapter) Agent() string      { return Agent }
 func (ccAdapter) AgentName() string  { return "Claude" }
 func (ccAdapter) AgentColor() string { return "#fe8019" }
 func (ccAdapter) IsHeadless() bool   { return false }
+
+func (ccAdapter) CallerEnv() string         { return "CLAUDE_CODE_SESSION_ID" }
+func (ccAdapter) AgentProcessEnv() []string { return []string{claudePIDEnv} }
+
+const claudePIDEnv = "CLAUDE_PID"
+
+func (ccAdapter) IsAgentProcess(p procwalk.Proc, env map[string]string) bool {
+	return strconv.Itoa(p.PID) == env[claudePIDEnv]
+}
 
 // NewDiscoverer also wires the mod bridge: the node calls it once, so the bridge
 // and the input policy live on the node's adapter instance.
