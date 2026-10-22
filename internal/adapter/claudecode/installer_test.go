@@ -107,22 +107,36 @@ func TestInstallAddsMarketplaceAndInstallsMod(t *testing.T) {
 	if strings.Join(f.calls, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("calls:\n%s\nwant:\n%s", strings.Join(f.calls, "\n"), strings.Join(want, "\n"))
 	}
-	var manifest struct {
-		Version string `json:"version"`
+	for _, name := range []string{"argus"} {
+		var manifest struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		}
+		b, err := os.ReadFile(filepath.Join(dir, name, ".claude-plugin", "plugin.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = json.Unmarshal(b, &manifest)
+		if manifest.Name != name || manifest.Version != modVersion() {
+			t.Fatalf("%s manifest = %+v, want version %q", name, manifest, modVersion())
+		}
+		if _, err := os.Stat(filepath.Join(dir, name, "hooks", "register.test.ts")); !os.IsNotExist(err) {
+			t.Fatalf("%s: tests must not be installed with the mod", name)
+		}
 	}
-	b, err := os.ReadFile(filepath.Join(dir, "argus", ".claude-plugin", "plugin.json"))
+	var market struct {
+		Plugins []struct {
+			Name   string `json:"name"`
+			Source string `json:"source"`
+		} `json:"plugins"`
+	}
+	b, err := os.ReadFile(filepath.Join(dir, ".claude-plugin", "marketplace.json"))
 	if err != nil {
-		t.Fatal(err)
-	}
-	_ = json.Unmarshal(b, &manifest)
-	if manifest.Version != modVersion() {
-		t.Fatalf("written version = %q, want %q", manifest.Version, modVersion())
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".claude-plugin", "marketplace.json")); err != nil {
 		t.Fatalf("marketplace.json not written: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "argus", "hooks", "register.test.ts")); !os.IsNotExist(err) {
-		t.Fatal("tests must not be installed with the mod")
+	_ = json.Unmarshal(b, &market)
+	if len(market.Plugins) != 1 || market.Plugins[0].Source != "./argus" {
+		t.Fatalf("marketplace plugins = %+v", market.Plugins)
 	}
 }
 
@@ -321,7 +335,7 @@ const currentUserPlugin = `[{"id":"argus@argus","scope":"user","version":"%s"}]`
 
 func TestReconcileReappliesChangedSocket(t *testing.T) {
 	seedSettings(t, socketSettings("/tmp/argus-1/mod.sock"))
-	f := currentModFake(t, strings.Replace(currentUserPlugin, "%s", modVersion(), 1))
+	f := currentModFake(t, strings.ReplaceAll(currentUserPlugin, "%s", modVersion()))
 	changed, err := New().Reconcile(adapter.InstallOptions{Socket: "/tmp/argus-2/mod.sock"})
 	if err != nil || len(changed) == 0 {
 		t.Fatalf("Reconcile = %v, %v; want a change", changed, err)
@@ -337,7 +351,7 @@ func TestReconcileReappliesChangedSocket(t *testing.T) {
 
 func TestReconcileKeepsMatchingSocket(t *testing.T) {
 	seedSettings(t, socketSettings("/tmp/argus-1/mod.sock"))
-	f := currentModFake(t, strings.Replace(currentUserPlugin, "%s", modVersion(), 1))
+	f := currentModFake(t, strings.ReplaceAll(currentUserPlugin, "%s", modVersion()))
 	changed, err := New().Reconcile(adapter.InstallOptions{Socket: "/tmp/argus-1/mod.sock"})
 	if err != nil || len(changed) != 0 || len(f.calls) != 0 {
 		t.Fatalf("got %v, %v, calls %v; want nothing", changed, err, f.calls)
@@ -358,7 +372,7 @@ func TestReconcileReinstallsRemovedPlugin(t *testing.T) {
 
 func TestReconcileEmptySocketMakesNoCalls(t *testing.T) {
 	seedSettings(t, socketSettings("/tmp/argus-1/mod.sock"))
-	f := currentModFake(t, strings.Replace(currentUserPlugin, "%s", modVersion(), 1))
+	f := currentModFake(t, strings.ReplaceAll(currentUserPlugin, "%s", modVersion()))
 	changed, err := New().Reconcile(adapter.InstallOptions{})
 	if err != nil || len(changed) != 0 || len(f.calls) != 0 {
 		t.Fatalf("got %v, %v, calls %v; want nothing", changed, err, f.calls)
@@ -383,7 +397,7 @@ func TestReconcileUpdatesStaleMod(t *testing.T) {
 
 func TestReconcileLeavesCurrentModAlone(t *testing.T) {
 	seedSettings(t, `{}`)
-	f := &fakeClaude{version: "2.1.296", marketplaces: `[{"name":"argus"}]`, plugins: `[{"id":"argus@argus","scope":"user","version":"` + modVersion() + `"}]`}
+	f := &fakeClaude{version: "2.1.296", marketplaces: `[{"name":"argus"}]`, plugins: strings.ReplaceAll(currentUserPlugin, "%s", modVersion())}
 	installFake(t, f)
 	if err := os.MkdirAll(marketplaceDir(), 0o755); err != nil {
 		t.Fatal(err)
@@ -549,7 +563,7 @@ func TestReconcileLeavesSocketOfLiveNode(t *testing.T) {
 	}
 	t.Cleanup(func() { l.Close() })
 	seedSettings(t, socketSettings(live))
-	f := currentModFake(t, strings.Replace(currentUserPlugin, "%s", modVersion(), 1))
+	f := currentModFake(t, strings.ReplaceAll(currentUserPlugin, "%s", modVersion()))
 	changed, err := New().Reconcile(adapter.InstallOptions{Socket: "/tmp/argus-dev/mod.sock"})
 	if err != nil || len(changed) != 0 || len(f.calls) != 0 {
 		t.Fatalf("got %v, %v, calls %v; want the live node's socket kept", changed, err, f.calls)

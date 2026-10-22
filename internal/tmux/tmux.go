@@ -788,3 +788,27 @@ func (c *Client) KillServer(ctx context.Context) error {
 	}
 	return err
 }
+
+// LastClientActivity returns the latest key activity of the clients attached to
+// the session that holds paneID. It is the zero time when no client is attached
+// or no server runs.
+func (c *Client) LastClientActivity(ctx context.Context, paneID string) (time.Time, error) {
+	out, err := c.run(ctx, "list-clients", "-t", paneID, "-F", "#{client_activity}")
+	if err != nil {
+		if noServer(err) {
+			return time.Time{}, nil
+		}
+		return time.Time{}, err
+	}
+	var last time.Time
+	for _, f := range strings.Fields(out) {
+		sec, err := strconv.ParseInt(f, 10, 64)
+		if err != nil {
+			continue
+		}
+		if t := time.Unix(sec, 0); t.After(last) {
+			last = t
+		}
+	}
+	return last, nil
+}

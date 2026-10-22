@@ -65,3 +65,21 @@ type Link struct {
 	// link was made.
 	ChildSessionID string `json:"child_session_id,omitempty"`
 }
+
+// Method names for the owner's message view. Message IDs are the node ID, ":m-", and 16 hex characters.
+const (
+	MethodMessageList    = "message.list"    // request: no params; result: MessagesListResult
+	MethodMessageSend    = "message.send"    // request: OwnerSendParams; result: OrchSendResult
+	MethodMessageChanged = "message.changed" // notification: empty params; clients refetch message.list
+)
+
+type OwnerSendParams struct {
+	SessionID string `json:"session_id,omitempty"` // bare local id; required unless ReplyTo is set
+	Text      string `json:"text"`
+	ReplyTo   string `json:"reply_to,omitempty"`
+}
+
+type MessagesListResult struct {
+	Messages []Message `json:"messages"`
+	Links    []Link    `json:"links"`
+}

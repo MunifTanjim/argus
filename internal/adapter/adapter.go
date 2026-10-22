@@ -11,6 +11,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/modbridge"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -92,6 +93,12 @@ type PaneController interface {
 // Discoverer scans for live sessions and reconciles them into the registry.
 type Discoverer interface {
 	ScanOnce(ctx context.Context) error
+}
+
+// Settler is a Discoverer that registers sessions in the background. Settled is
+// closed once its first sync has finished or failed.
+type Settler interface {
+	Settled() <-chan struct{}
 }
 
 // StreamingTranscript incrementally folds a transcript file. Not safe for concurrent use.
@@ -190,8 +197,15 @@ type Spawner interface {
 // SpawnOptions are the per-spawn choices an adapter turns into a launch. An empty
 // field means the agent's own default: the adapter adds nothing for it.
 type SpawnOptions struct {
-	Prompt string
-	Model  string // a ModelLister id
+	Prompt    string
+	Model     string // a ModelLister id
+	SessionID string // agent session id to start under; used only by a SessionIDPresetter
+}
+
+// SessionIDPresetter is an adapter whose SpawnCommand starts the session under
+// SpawnOptions.SessionID, so the agent session id is known before it registers.
+type SessionIDPresetter interface {
+	PresetsSessionID() bool
 }
 
 // ModelLister is an adapter that offers a model choice at spawn. The ids it
@@ -275,4 +289,29 @@ type Adapter interface {
 	Uninstall() error
 	SettingsPath() (string, error)
 	DefaultHookEvents() []string
+}
+
+// CallerIdentity lets argus tell which session ran a command.
+type CallerIdentity interface {
+	// CallerEnv is the variable the agent sets to its own session id on every command it runs.
+	CallerEnv() string
+	// IsAgentProcess reports whether p is this agent's own process.
+	IsAgentProcess(p procwalk.Proc, env map[string]string) bool
+}
+
+// AgentProcessEnv is a CallerIdentity whose IsAgentProcess reads variables
+// besides CallerEnv.
+type AgentProcessEnv interface {
+	AgentProcessEnv() []string
+}
+
+// RootSessionResolver maps a subagent's own session id to the session argus shows.
+type RootSessionResolver interface {
+	RootSession(ctx context.Context, agentSessionID string) (string, error)
+}
+
+// DraftReader reports whether a captured pane shows text a person is typing in
+// the agent's prompt, so argus does not submit over it.
+type DraftReader interface {
+	HasDraft(screen string) bool
 }

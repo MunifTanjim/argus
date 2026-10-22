@@ -36,6 +36,14 @@ const (
 //go:embed all:mod
 var modFS embed.FS
 
+// modPlugin is one plugin of argus's marketplace, embedded under root.
+type modPlugin struct{ name, id, root string }
+
+// modPlugins are installed together under one version.
+var modPlugins = []modPlugin{
+	{pluginName, pluginID, "mod"},
+}
+
 // Replaced by tests.
 var (
 	marketplaceDir = func() string { return config.GetDataPath("claude-marketplace") }
@@ -55,14 +63,14 @@ func installable(name string) bool {
 	return !strings.HasSuffix(name, ".test.ts") && !strings.HasPrefix(name, ".claude-plugin/types/")
 }
 
-// walkInstallable calls fn with each installable embedded file, by its path
-// within the mod.
-func walkInstallable(fn func(rel string, b []byte) error) error {
-	return fs.WalkDir(modFS, "mod", func(p string, d fs.DirEntry, err error) error {
+// walkInstallable calls fn with each installable embedded file under root, by
+// its path within the plugin.
+func walkInstallable(root string, fn func(rel string, b []byte) error) error {
+	return fs.WalkDir(modFS, root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		rel := strings.TrimPrefix(p, "mod/")
+		rel := strings.TrimPrefix(p, root+"/")
 		if !installable(rel) {
 			return nil
 		}
@@ -74,25 +82,46 @@ func walkInstallable(fn func(rel string, b []byte) error) error {
 	})
 }
 
-// modVersion identifies the embedded mod by its content, so any change to it
-// reinstalls without a manual version bump.
+// modVersion identifies the embedded plugins by their content, so any change
+// to them reinstalls without a manual version bump.
 var modVersion = sync.OnceValue(func() string {
 	h := sha256.New()
-	_ = walkInstallable(func(rel string, b []byte) error {
-		fmt.Fprintf(h, "%s\x00%d\x00", rel, len(b))
-		h.Write(b)
-		return nil
-	})
+	for _, p := range modPlugins {
+		_ = walkInstallable(p.root, func(rel string, b []byte) error {
+			fmt.Fprintf(h, "%s/%s\x00%d\x00", p.name, rel, len(b))
+			h.Write(b)
+			return nil
+		})
+	}
 	return hex.EncodeToString(h.Sum(nil))[:12]
 })
 
-// writeMarketplace lays the embedded mod out as a one-plugin local marketplace.
+// writeMarketplace lays the embedded plugins out as a local marketplace.
 func writeMarketplace(dir string) error {
-	pluginDir := filepath.Join(dir, pluginName)
+	entries := make([]map[string]string, 0, len(modPlugins))
+	for _, p := range modPlugins {
+		if err := writePlugin(filepath.Join(dir, p.name), p.root); err != nil {
+			return err
+		}
+		entries = append(entries, map[string]string{"name": p.name, "source": "./" + p.name})
+	}
+	manifest, _ := json.MarshalIndent(map[string]any{
+		"name":    marketplaceName,
+		"owner":   map[string]string{"name": "argus"},
+		"plugins": entries,
+	}, "", "  ")
+	mdir := filepath.Join(dir, ".claude-plugin")
+	if err := os.MkdirAll(mdir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(mdir, "marketplace.json"), manifest, 0o644)
+}
+
+func writePlugin(pluginDir, root string) error {
 	if err := os.RemoveAll(pluginDir); err != nil {
 		return err
 	}
-	err := walkInstallable(func(rel string, b []byte) error {
+	return walkInstallable(root, func(rel string, b []byte) error {
 		if rel == ".claude-plugin/plugin.json" {
 			var err error
 			if b, err = withVersion(b, modVersion()); err != nil {
@@ -105,19 +134,6 @@ func writeMarketplace(dir string) error {
 		}
 		return os.WriteFile(dst, b, 0o644)
 	})
-	if err != nil {
-		return err
-	}
-	manifest, _ := json.MarshalIndent(map[string]any{
-		"name":    marketplaceName,
-		"owner":   map[string]string{"name": "argus"},
-		"plugins": []map[string]string{{"name": pluginName, "source": "./" + pluginName}},
-	}, "", "  ")
-	mdir := filepath.Join(dir, ".claude-plugin")
-	if err := os.MkdirAll(mdir, 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(mdir, "marketplace.json"), manifest, 0o644)
 }
 
 func withVersion(manifest []byte, version string) ([]byte, error) {
@@ -183,11 +199,24 @@ func findMarketplace(ctx context.Context) (path string, found bool, err error) {
 	return "", false, nil
 }
 
-// installedVersion returns the user-scope mod's version; ok is false when absent.
-func installedVersion(ctx context.Context) (version string, ok bool, err error) {
+// installedVersions maps each user-scope plugin of argus's to its version; a
+// plugin that is absent has no key.
+type installedVersions map[string]string
+
+// current reports whether every plugin is installed at the embedded version.
+func (v installedVersions) current() bool {
+	for _, p := range modPlugins {
+		if v[p.id] != modVersion() {
+			return false
+		}
+	}
+	return true
+}
+
+func installedPlugins(ctx context.Context) (installedVersions, error) {
 	out, err := runClaude(ctx, "", "plugin", "list", "--json")
 	if err != nil {
-		return "", false, err
+		return nil, err
 	}
 	var list []struct {
 		ID      string `json:"id"`
@@ -195,14 +224,15 @@ func installedVersion(ctx context.Context) (version string, ok bool, err error) 
 		Scope   string `json:"scope"`
 	}
 	if err := json.Unmarshal(out, &list); err != nil {
-		return "", false, fmt.Errorf("parse plugin list: %w", err)
+		return nil, fmt.Errorf("parse plugin list: %w", err)
 	}
+	v := installedVersions{}
 	for _, p := range list {
-		if p.ID == pluginID && p.Scope == "user" {
-			return p.Version, true, nil
+		if p.Scope == "user" && p.ID == pluginID {
+			v[p.ID] = p.Version
 		}
 	}
-	return "", false, nil
+	return v, nil
 }
 
 // errNoModSocket refuses a fresh install that would leave the mod unable to reach argusd.
@@ -222,16 +252,17 @@ func installMod(ctx context.Context, opts adapter.InstallOptions) error {
 		_, err = refreshLegacyHooks(opts.ArgusBin, err)
 		return err
 	}
-	version, installed, err := installedVersion(ctx)
+	versions, err := installedPlugins(ctx)
 	if err != nil {
 		return err
 	}
-	return applyMod(ctx, opts.Socket, version, installed)
+	return applyMod(ctx, opts.Socket, versions)
 }
 
-// applyMod is installMod once claude is checked, given the installed mod's
-// version (installed false when absent).
-func applyMod(ctx context.Context, socket, version string, installed bool) error {
+// applyMod is installMod once claude is checked, given the installed plugins'
+// versions.
+func applyMod(ctx context.Context, socket string, versions installedVersions) error {
+	_, installed := versions[pluginID]
 	if socket == "" && !installed {
 		// Checked before anything is removed, so the old hooks stay.
 		return errNoModSocket
@@ -247,8 +278,8 @@ func applyMod(ctx context.Context, socket, version string, installed bool) error
 	switch {
 	case found && path != dir:
 		return fmt.Errorf("another Claude Code marketplace is named %q (%s); remove it with `claude plugin marketplace remove %s`, then run `argus hooks install`", marketplaceName, path, marketplaceName)
-	case found && installed && version == modVersion():
-		// The installed mod is current, so a marketplace update changes nothing.
+	case found && versions.current():
+		// The installed plugins are current, so a marketplace update changes nothing.
 	case found:
 		_, err = runClaude(ctx, "", "plugin", "marketplace", "update", marketplaceName)
 	default:
@@ -257,14 +288,19 @@ func applyMod(ctx context.Context, socket, version string, installed bool) error
 	if err != nil {
 		return err
 	}
-	switch {
-	case !installed:
-		_, err = runClaude(ctx, "", "plugin", "install", pluginID, "--config", "socket="+socket)
-	case version != modVersion():
-		_, err = runClaude(ctx, "", "plugin", "update", pluginID)
-	}
-	if err != nil {
-		return err
+	for _, p := range modPlugins {
+		version, ok := versions[p.id]
+		switch {
+		case !ok && p.id == pluginID:
+			_, err = runClaude(ctx, "", "plugin", "install", p.id, "--config", "socket="+socket)
+		case !ok:
+			_, err = runClaude(ctx, "", "plugin", "install", p.id)
+		case version != modVersion():
+			_, err = runClaude(ctx, "", "plugin", "update", p.id)
+		}
+		if err != nil {
+			return err
+		}
 	}
 	if installed {
 		if _, err := reapplySocket(ctx, socket); err != nil {
@@ -362,20 +398,20 @@ func reconcileMod(ctx context.Context, opts adapter.InstallOptions) ([]string, e
 	if err := checkClaude(ctx); err != nil {
 		return refreshLegacyHooks(opts.ArgusBin, err)
 	}
-	version, installed, err := installedVersion(ctx)
+	versions, err := installedPlugins(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if !installed {
+	if _, installed := versions[pluginID]; !installed {
 		// A live socket left in settings by a removed mod does not own it.
 		socket = opts.Socket
-	} else if !legacy && version == modVersion() {
+	} else if !legacy && versions.current() {
 		if moved, err := reapplySocket(ctx, socket); err != nil || !moved {
 			return nil, err
 		}
 		return []string{"argus mod socket " + socket}, nil
 	}
-	if err := applyMod(ctx, socket, version, installed); err != nil {
+	if err := applyMod(ctx, socket, versions); err != nil {
 		return nil, err
 	}
 	return []string{"argus mod " + modVersion()}, nil
@@ -432,10 +468,15 @@ func uninstallMod(ctx context.Context) error {
 		// Keep the marketplace: Claude would load a plugin whose source is gone.
 		return errors.New("claude is not on PATH, so the argus plugin cannot be removed from Claude Code")
 	}
-	if _, installed, err := installedVersion(ctx); err != nil {
+	versions, err := installedPlugins(ctx)
+	if err != nil {
 		return err
-	} else if installed {
-		if _, err := runClaude(ctx, "", "plugin", "uninstall", pluginID); err != nil {
+	}
+	for _, p := range modPlugins {
+		if _, ok := versions[p.id]; !ok {
+			continue
+		}
+		if _, err := runClaude(ctx, "", "plugin", "uninstall", p.id); err != nil {
 			return err
 		}
 	}

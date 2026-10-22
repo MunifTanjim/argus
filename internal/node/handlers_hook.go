@@ -49,6 +49,21 @@ func (d *Node) applyHook(ctx context.Context, a adapter.Adapter, ev adapter.Hook
 	return s, alive
 }
 
+// canRespond reports whether handleSessionRespond has a path that answers s:
+// the parked request its interaction names, or the adapter's Responder.
+func (d *Node) canRespond(s session.Session) bool {
+	if s.Interaction != nil {
+		d.pendingMu.Lock()
+		pd := d.pending[s.Interaction.RequestID]
+		d.pendingMu.Unlock()
+		if pd != nil && pd.sessionID == s.ID {
+			return true
+		}
+	}
+	_, ok := d.adapterFor(s.Agent).(adapter.Responder)
+	return ok
+}
+
 // handleSessionRespond resolves a parked PermissionRequest with the hook
 // decision JSON: the one p.RequestID names, else the one the session shows.
 // When none is parked, falls back to the adapter's Responder capability for

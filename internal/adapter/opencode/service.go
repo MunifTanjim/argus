@@ -64,6 +64,7 @@ type ocCursor struct {
 
 type ocSession struct {
 	ID        string     `json:"id"`
+	ParentID  string     `json:"parentID,omitempty"`
 	ProjectID string     `json:"projectID"`
 	Agent     string     `json:"agent"`
 	Title     string     `json:"title"`

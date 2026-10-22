@@ -119,6 +119,7 @@ func withOrigin(s session.Session, nodeID, label string) session.Session {
 	if s.WorkspaceID != "" {
 		s.WorkspaceID = session.CompositeID(nodeID, s.WorkspaceID)
 	}
+	s.Parent = s.Parent.Composite(nodeID)
 	s.NodeID = nodeID
 	s.NodeLabel = label
 	s.Offline = false
