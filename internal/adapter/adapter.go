@@ -95,6 +95,12 @@ type Discoverer interface {
 	ScanOnce(ctx context.Context) error
 }
 
+// Settler is a Discoverer that registers sessions in the background. Settled is
+// closed once its first sync has finished or failed.
+type Settler interface {
+	Settled() <-chan struct{}
+}
+
 // StreamingTranscript incrementally folds a transcript file. Not safe for concurrent use.
 type StreamingTranscript interface {
 	Refresh() ([]transcript.Entry, error)
@@ -191,8 +197,15 @@ type Spawner interface {
 // SpawnOptions are the per-spawn choices an adapter turns into a launch. An empty
 // field means the agent's own default: the adapter adds nothing for it.
 type SpawnOptions struct {
-	Prompt string
-	Model  string // a ModelLister id
+	Prompt    string
+	Model     string // a ModelLister id
+	SessionID string // agent session id to start under; used only by a SessionIDPresetter
+}
+
+// SessionIDPresetter is an adapter whose SpawnCommand starts the session under
+// SpawnOptions.SessionID, so the agent session id is known before it registers.
+type SessionIDPresetter interface {
+	PresetsSessionID() bool
 }
 
 // ModelLister is an adapter that offers a model choice at spawn. The ids it
@@ -286,4 +299,9 @@ type CallerIdentity interface {
 // besides CallerEnv.
 type AgentProcessEnv interface {
 	AgentProcessEnv() []string
+}
+
+// RootSessionResolver maps a subagent's own session id to the session argus shows.
+type RootSessionResolver interface {
+	RootSession(ctx context.Context, agentSessionID string) (string, error)
 }

@@ -26,12 +26,28 @@ func (d *Node) resolveCaller(ctx context.Context, c api.CallerInfo) (session.Ses
 			if id == "" {
 				return session.Session{}, fmt.Errorf("%s process found but %s is not set", a.Agent(), ci.CallerEnv())
 			}
-			s, found := d.reg.FindByAgentSession(a.Agent(), id)
-			if !found {
-				return session.Session{}, fmt.Errorf("%w: %s session %s", api.ErrNoCaller, a.Agent(), id)
-			}
-			return s, nil
+			return d.findAgentSession(ctx, a, id)
 		}
 	}
 	return session.Session{}, api.ErrNoCaller
+}
+
+// findAgentSession finds the session of a's agent session id, falling back to
+// the root session of a subagent id.
+func (d *Node) findAgentSession(ctx context.Context, a adapter.Adapter, id string) (session.Session, error) {
+	if s, found := d.reg.FindByAgentSession(a.Agent(), id); found {
+		return s, nil
+	}
+	r, ok := a.(adapter.RootSessionResolver)
+	if !ok {
+		return session.Session{}, fmt.Errorf("%w: %s session %s", api.ErrNoCaller, a.Agent(), id)
+	}
+	root, err := r.RootSession(ctx, id)
+	if err != nil {
+		return session.Session{}, fmt.Errorf("%w: %s session %s: %w", api.ErrNoCaller, a.Agent(), id, err)
+	}
+	if s, found := d.reg.FindByAgentSession(a.Agent(), root); found {
+		return s, nil
+	}
+	return session.Session{}, fmt.Errorf("%w: %s session %s", api.ErrNoCaller, a.Agent(), id)
 }

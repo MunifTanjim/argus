@@ -737,3 +737,30 @@ func TestAwaitConnStartsPumpBeforeFirstScan(t *testing.T) {
 		t.Fatalf("awaitConn: %v", err)
 	}
 }
+
+func TestSettledAfterLoadedThreadsRegister(t *testing.T) {
+	st := &daemonState{loaded: []string{"t1"}, threads: map[string]map[string]any{"t1": threadJSON("t1", "idle")}}
+	d, _, reg := startDiscoverer(t, st)
+	select {
+	case <-d.Settled():
+	case <-time.After(3 * time.Second):
+		t.Fatal("never settled")
+	}
+	if _, ok := reg.FindByAgentSession(Agent, "t1"); !ok {
+		t.Fatal("settled before the loaded thread registered")
+	}
+}
+
+func TestSettledWhenDaemonDown(t *testing.T) {
+	d := newDiscoverer(registry.New(), nil)
+	d.sockPath = func() (string, error) { return filepath.Join(t.TempDir(), "missing.sock"), nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	d.ctx = ctx
+	d.startPump()
+	select {
+	case <-d.Settled():
+	case <-time.After(3 * time.Second):
+		t.Fatal("never settled")
+	}
+}

@@ -57,7 +57,9 @@ type discoverer struct {
 	ctx      context.Context
 	retry    time.Duration
 
-	pumpOnce sync.Once
+	pumpOnce   sync.Once
+	settleOnce sync.Once
+	settled    chan struct{}
 
 	// reconcileMu serializes pane scans so an older result cannot overwrite a newer one.
 	reconcileMu sync.Mutex
@@ -92,6 +94,7 @@ func newDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.
 		sockPath: daemonSocketPath,
 		ctx:      context.Background(),
 		retry:    3 * time.Second,
+		settled:  make(chan struct{}),
 		threads:  map[string]*threadEntry{},
 		parentOf: map[string]string{},
 		subs:     map[string]bool{},
@@ -137,6 +140,12 @@ func (d *discoverer) ScanOnce(ctx context.Context) error {
 	return nil
 }
 
+var _ adapter.Settler = (*discoverer)(nil)
+
+func (d *discoverer) Settled() <-chan struct{} { return d.settled }
+
+func (d *discoverer) markSettled() { d.settleOnce.Do(func() { close(d.settled) }) }
+
 func (d *discoverer) conn() *rpcConn {
 	d.connMu.Lock()
 	defer d.connMu.Unlock()
@@ -171,6 +180,7 @@ func (d *discoverer) runPump(ctx context.Context) {
 	last := ""
 	for ctx.Err() == nil {
 		err := d.runConn(ctx)
+		d.markSettled()
 		// Log each distinct failure once, not every retry. A missing daemon logs at
 		// debug. A dropped connection always logs: it had connected.
 		if err != nil && ctx.Err() == nil {
@@ -224,6 +234,7 @@ func (d *discoverer) runConn(ctx context.Context) error {
 	if err := d.syncLoaded(ctx, c); err != nil {
 		return err
 	}
+	d.markSettled()
 	for {
 		m, ok := c.next(ctx)
 		if !ok {

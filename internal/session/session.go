@@ -255,6 +255,9 @@ type Session struct {
 
 	// Parent is the session that spawned this one through argus, when known.
 	Parent *ParentRef `json:"parent,omitempty"`
+	// ClearedFrom is the agent session id this session continued from through
+	// /clear; it is reset when AgentSessionID changes for any other reason.
+	ClearedFrom string `json:"-"`
 
 	// Origin fields — populated only when surfaced through a gateway.
 	NodeID    string `json:"node_id,omitempty"`    // originating node (also composite ID prefix)

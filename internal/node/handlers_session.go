@@ -54,10 +54,11 @@ func (d *Node) withCaps(s session.Session) session.Session {
 }
 
 func (d *Node) parentRef(s session.Session) *session.ParentRef {
-	if d.mesh == nil {
+	key := partyKey(s)
+	if d.mesh == nil || key == "" {
 		return nil
 	}
-	link, ok, err := d.mesh.Link(context.Background(), partyKey(s))
+	link, ok, err := d.mesh.Link(context.Background(), key)
 	if err != nil {
 		d.log.Debug("mesh: link lookup failed", "session", s.ID, "err", err)
 		return nil
@@ -374,14 +375,14 @@ func (d *Node) handleSessionKey(ctx context.Context, params json.RawMessage) (an
 
 // resolveSpawnCommand: an explicit p.Command wins; otherwise the agent's adapter
 // owns construction (adapterFor falls back to the first adapter for unknown agents).
-func (d *Node) resolveSpawnCommand(p api.SpawnParams) (command string, args []string) {
+func (d *Node) resolveSpawnCommand(p api.SpawnParams, presetID string) (command string, args []string) {
 	if p.Command != "" {
 		if p.Prompt != "" {
 			args = []string{p.Prompt}
 		}
 		return p.Command, args
 	}
-	return d.adapterFor(p.Agent).SpawnCommand(adapter.SpawnOptions{Prompt: p.Prompt, Model: p.Model})
+	return d.adapterFor(p.Agent).SpawnCommand(adapter.SpawnOptions{Prompt: p.Prompt, Model: p.Model, SessionID: presetID})
 }
 
 func (d *Node) handleAgentModelList(ctx context.Context, params json.RawMessage) (any, error) {
@@ -467,20 +468,29 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 	if err != nil {
 		return nil, err
 	}
+	res, err := d.spawn(ctx, p, "")
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// spawn starts a session; presetID is the agent session id for an adapter.SessionIDPresetter.
+func (d *Node) spawn(ctx context.Context, p api.SpawnParams, presetID string) (api.SpawnResult, error) {
 	home, _ := os.UserHomeDir()
 	p.Cwd = expandHome(p.Cwd, home)
 	// Checked for every agent; tmux would silently fall back to $HOME.
 	if err := d.cwdError("cannot spawn", p.Cwd); err != nil {
-		return nil, err
+		return api.SpawnResult{}, err
 	}
 	a := d.adapterFor(p.Agent)
 	// Never drop a model choice silently: reject what cannot apply it.
 	if p.Model != "" {
 		if p.Command != "" {
-			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "cannot choose a model with an explicit command"}
+			return api.SpawnResult{}, &api.RPCError{Code: api.CodeInvalidRequest, Message: "cannot choose a model with an explicit command"}
 		}
 		if _, ok := a.(adapter.ModelLister); !ok {
-			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: a.AgentName() + " has no model choice"}
+			return api.SpawnResult{}, &api.RPCError{Code: api.CodeInvalidRequest, Message: a.AgentName() + " has no model choice"}
 		}
 	}
 	// A Spawner agent (headless, e.g. opencode) has no pane process: create the
@@ -489,7 +499,7 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 	if sp, ok := a.(adapter.Spawner); ok {
 		id, err := sp.SpawnSession(ctx, p.Cwd, adapter.SpawnOptions{Prompt: p.Prompt, Model: p.Model})
 		if err != nil {
-			return nil, &api.RPCError{
+			return api.SpawnResult{}, &api.RPCError{
 				Code:    api.CodeInvalidRequest,
 				Message: "cannot spawn " + a.AgentName() + " session: " + err.Error(),
 			}
@@ -497,22 +507,22 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 		return api.SpawnResult{SessionID: registry.AgentSessionKey(p.Agent, id)}, nil
 	}
 	if !d.caps.SpawnSession {
-		return nil, &api.RPCError{
+		return api.SpawnResult{}, &api.RPCError{
 			Code:    api.CodeInvalidRequest,
 			Message: "spawn unavailable: tmux not found on node " + d.label,
 		}
 	}
-	command, args := d.resolveSpawnCommand(p)
+	command, args := d.resolveSpawnCommand(p, presetID)
 	// Fail loudly rather than opening a tmux pane that dies "command not found".
 	if _, err := exec.LookPath(command); err != nil {
-		return nil, &api.RPCError{
+		return api.SpawnResult{}, &api.RPCError{
 			Code:    api.CodeInvalidRequest,
 			Message: fmt.Sprintf("cannot spawn: %q is not installed on node %s", command, d.label),
 		}
 	}
 	paneID, err := d.launchPane(ctx, p.Name, command, args, p.Cwd)
 	if err != nil {
-		return nil, err
+		return api.SpawnResult{}, err
 	}
 	// Discovery registers the session, but only once the agent process is visible in
 	// ps — which can lag the pane's creation. Retry with backoff so the session shows

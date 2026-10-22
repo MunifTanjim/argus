@@ -23,6 +23,14 @@ func TestSpawnCommandModel(t *testing.T) {
 	}
 }
 
+func TestSpawnCommandPresetSessionID(t *testing.T) {
+	var a ccAdapter
+	_, args := a.SpawnCommand(adapter.SpawnOptions{Prompt: "fix it", SessionID: "0b1c"})
+	if !slices.Equal(args, []string{"--session-id", "0b1c", "fix it"}) {
+		t.Fatalf("got %q", args)
+	}
+}
+
 func TestListModelsClaudeAliases(t *testing.T) {
 	got, err := ccAdapter{}.ListModels(context.Background())
 	want := []api.ModelInfo{

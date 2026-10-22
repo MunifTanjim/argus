@@ -11,8 +11,10 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/mesh"
+	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
+	"github.com/google/uuid"
 )
 
 var errMeshDisabled = errors.New("agent sessions are disabled on this node")
@@ -120,9 +122,11 @@ func (d *Node) handleAgentShow(ctx context.Context, params json.RawMessage) (any
 	if err != nil {
 		return nil, err
 	}
-	queued, err := d.mesh.Queued(ctx, partyKey(s))
-	if err != nil {
-		return nil, err
+	queued := []api.Message{}
+	if key := partyKey(s); key != "" {
+		if queued, err = d.mesh.Queued(ctx, key); err != nil {
+			return nil, err
+		}
 	}
 	return api.AgentShowResult{Session: d.composite(s), Queued: queued}, nil
 }
@@ -172,6 +176,9 @@ func (d *Node) handleAgentSpawn(ctx context.Context, params json.RawMessage) (an
 		return nil, fmt.Errorf("%s does not support agent sessions", p.Agent)
 	}
 	parent := d.party(caller)
+	if parent.Key == "" {
+		return nil, notReady(d.compositeID(caller))
+	}
 
 	var task api.Message
 	prompt := p.Prompt
@@ -183,33 +190,33 @@ func (d *Node) handleAgentSpawn(ctx context.Context, params json.RawMessage) (an
 		prompt = mesh.Render(task, sessionLabel(caller), d.compositeID(caller))
 	}
 
-	spawnParams, err := json.Marshal(api.SpawnParams{
+	a := d.adapterFor(p.Agent)
+	var presetID string
+	if ps, ok := a.(adapter.SessionIDPresetter); ok && ps.PresetsSessionID() {
+		presetID = uuid.NewString()
+	}
+	_, headless := a.(adapter.Spawner)
+	if !headless && presetID == "" {
+		return nil, fmt.Errorf("%s cannot be linked to its parent at spawn", p.Agent)
+	}
+	spawned, err := d.spawnFn(ctx, api.SpawnParams{
 		Agent: p.Agent, Cwd: p.Cwd, Name: p.Name, Model: p.Model, Prompt: prompt,
-	})
+	}, presetID)
 	if err != nil {
 		return nil, err
 	}
-	out, err := d.handleSessionSpawn(ctx, spawnParams)
-	if err != nil {
-		return nil, err
-	}
-	spawned, ok := out.(api.SpawnResult)
-	if !ok {
-		return nil, fmt.Errorf("unexpected spawn result %T", out)
+	childKey := spawned.SessionID
+	if !headless {
+		childKey = registry.AgentSessionKey(a.Agent(), presetID)
 	}
 
-	child := api.Party{Node: d.id, Key: spawned.SessionID}
+	child := api.Party{Node: d.id, Key: childKey}
 	if err := d.mesh.PutLink(ctx, api.Link{Child: child, Parent: parent, TaskID: task.ID}); err != nil {
 		return nil, err
 	}
 	if task.ID != "" {
 		task.To = child
 		if _, err := d.mesh.Insert(ctx, task); err != nil {
-			return nil, err
-		}
-	}
-	if s, live := d.reg.Get(spawned.SessionID); live && partyKey(s) != child.Key {
-		if err := d.mesh.Rekey(ctx, child.Key, partyKey(s)); err != nil {
 			return nil, err
 		}
 	}
@@ -236,16 +243,23 @@ func (d *Node) send(ctx context.Context, caller session.Session, targetID, text 
 	if err != nil {
 		return api.AgentSendResult{}, err
 	}
-	return d.sendText(ctx, d.party(caller), target, targetID, text)
+	return d.sendText(ctx, d.party(caller), d.compositeID(caller), target, targetID, text)
 }
 
-// sendText queues text to target.
-func (d *Node) sendText(ctx context.Context, from api.Party, target session.Session, targetID, text string) (api.AgentSendResult, error) {
+// sendText queues text to target; fromID names the sender in a not-ready error.
+func (d *Node) sendText(ctx context.Context, from api.Party, fromID string, target session.Session, targetID, text string) (api.AgentSendResult, error) {
 	if !d.orchestrated(target.Agent) {
 		return api.AgentSendResult{}, fmt.Errorf("%s does not support agent messages", targetID)
 	}
+	to := d.party(target)
+	if to.Key == "" {
+		return api.AgentSendResult{}, notReady(targetID)
+	}
+	if from.Key == "" {
+		return api.AgentSendResult{}, notReady(fromID)
+	}
 	m, err := d.mesh.Insert(ctx, api.Message{
-		Kind: api.MessageText, From: from, To: d.party(target),
+		Kind: api.MessageText, From: from, To: to,
 		Body: text, State: api.MessageQueued,
 	})
 	if err != nil {
@@ -442,7 +456,7 @@ func (d *Node) kill(ctx context.Context, caller session.Session, targetID string
 	}
 	key := partyKey(caller)
 	by := "self"
-	if key != partyKey(target) {
+	if key == "" || key != partyKey(target) {
 		link, ok, err := d.mesh.Link(ctx, partyKey(target))
 		if err != nil {
 			return err

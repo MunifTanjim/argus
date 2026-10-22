@@ -337,5 +337,6 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 		Model:              model,
 		Subagents:          subagents,
 		Shells:             shells,
+		Cleared:            event == "SessionStart" && p.Source == "clear",
 	})
 }

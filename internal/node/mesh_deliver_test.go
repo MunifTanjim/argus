@@ -110,6 +110,22 @@ func TestSendToNonAgentSessionFails(t *testing.T) {
 	}
 }
 
+func TestSendToSessionWithoutAgentIDFails(t *testing.T) {
+	d, _ := deliverNode(t)
+	a := apiSession(d, "a", session.StatusIdle, nil)
+	hookSession(d, "%3", "")
+	want := "default:%3 is not ready yet: its agent session id is unknown"
+	if _, err := d.send(t.Context(), a, "default:%3", "hi"); err == nil || err.Error() != want {
+		t.Fatalf("agent send err = %v", err)
+	}
+	if _, err := ownerSend(t, d, api.OwnerSendParams{SessionID: "default:%3", Text: "hi"}); err == nil || err.Error() != want {
+		t.Fatalf("owner send err = %v", err)
+	}
+	if msgs, err := d.mesh.List(t.Context(), 10); err != nil || len(msgs) != 0 {
+		t.Fatalf("messages = %+v err=%v", msgs, err)
+	}
+}
+
 func TestReplyMarksOriginalAndQueuesBack(t *testing.T) {
 	d, _ := deliverNode(t)
 	a := apiSession(d, "a", session.StatusIdle, nil)
@@ -254,6 +270,27 @@ func TestDeliveryFailureLeavesQueued(t *testing.T) {
 	}
 }
 
+func TestDeliveryFailureWaitsBeforeRetry(t *testing.T) {
+	d, fp := deliverNode(t)
+	tries := 0
+	d.adapters["opencode"] = hookPrompter{meshPrompter{fp}, errors.New("boom"), func() { tries++ }}
+	a := apiSession(d, "a", session.StatusIdle, nil)
+	b := apiSession(d, "b", session.StatusIdle, nil)
+	if _, err := d.send(t.Context(), a, b.ID, "x"); err != nil {
+		t.Fatal(err)
+	}
+	d.meshPass(t.Context())
+	d.meshPass(t.Context())
+	if tries != 1 {
+		t.Fatalf("tries = %d, want 1 inside the hold", tries)
+	}
+	d.meshHeld["opencode:b"] = time.Now()
+	d.meshPass(t.Context())
+	if tries != 2 {
+		t.Fatalf("tries = %d, want a retry after the hold", tries)
+	}
+}
+
 func TestReplyDuringDeliveryStaysReplied(t *testing.T) {
 	d, fp := deliverNode(t)
 	a := apiSession(d, "a", session.StatusIdle, nil)
@@ -290,5 +327,40 @@ func TestHandleAgentSendMeshDisabled(t *testing.T) {
 	params, _ := json.Marshal(api.AgentSendParams{SessionID: "x", Text: "y"})
 	if _, err := d.handleAgentSend(t.Context(), params); !errors.Is(err, errMeshDisabled) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestQueuedMessagesFailForRecipientGoneWhileNodeDown(t *testing.T) {
+	d, fp := deliverNode(t)
+	a := apiSession(d, "a", session.StatusIdle, nil)
+	if _, err := d.mesh.Insert(t.Context(), api.Message{
+		ID: "m-00000001", Kind: api.MessageText, From: d.party(a),
+		To: api.Party{Node: "home", Key: "opencode:b"}, Body: "q", State: api.MessageQueued,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	d.meshPass(t.Context())
+	if st := msgState(t, d, "m-00000001"); st != api.MessageQueued {
+		t.Fatalf("failed before discovery settled: %s", st)
+	}
+	close(d.meshSettled)
+	d.meshPass(t.Context())
+	if fp.called || msgState(t, d, "m-00000001") != api.MessageFailed {
+		t.Fatalf("called=%v state=%s", fp.called, msgState(t, d, "m-00000001"))
+	}
+}
+
+func TestQueuedMessagesStayForRecipientLiveAfterRestart(t *testing.T) {
+	d, _ := deliverNode(t)
+	a := apiSession(d, "a", session.StatusIdle, nil)
+	b := apiSession(d, "b", session.StatusWorking, nil)
+	res, err := d.send(t.Context(), a, b.ID, "q")
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(d.meshSettled)
+	d.meshPass(t.Context())
+	if st := msgState(t, d, res.MessageID); st != api.MessageQueued {
+		t.Fatalf("state = %s, want queued", st)
 	}
 }
