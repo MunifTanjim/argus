@@ -441,3 +441,11 @@ func TestMCPPortValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPPortFromEnv(t *testing.T) {
+	isolateConfigDir(t)
+	t.Setenv("ARGUS_MCP_PORT", "0")
+	if got := load(t, "").MCP.Port; got != 0 {
+		t.Fatalf("mcp.port from env = %d, want 0", got)
+	}
+}

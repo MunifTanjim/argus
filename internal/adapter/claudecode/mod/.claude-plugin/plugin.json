@@ -8,6 +8,17 @@
       "type": "string",
       "title": "argusd mod socket",
       "description": "Path of argusd's mod socket."
+    },
+    "mcp_url": {
+      "type": "string",
+      "title": "argusd MCP URL",
+      "description": "URL of argusd's MCP endpoint for Claude Code."
+    },
+    "mcp_token": {
+      "type": "string",
+      "title": "argusd MCP token",
+      "description": "Bearer token for argusd's MCP endpoint.",
+      "sensitive": true
     }
   }
 }

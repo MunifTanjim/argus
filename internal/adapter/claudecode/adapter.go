@@ -170,16 +170,46 @@ func (ccAdapter) PrepareTextInput(ctx context.Context, pc adapter.PaneController
 	return PrepareTextInput(ctx, pc, paneID)
 }
 
+// Install and Reconcile add the allow rule for the mod's MCP tools once the mod
+// is in place, or remove it with MCP off unless another node owns the mod; a new
+// rule applies to the next Claude session.
 func (ccAdapter) Install(opts adapter.InstallOptions) error {
 	ctx, cancel := context.WithTimeout(context.Background(), claudeTimeout)
 	defer cancel()
-	return installMod(ctx, opts)
+	foreign := modOwnedElsewhere(opts.Socket, configuredSocket())
+	if err := installMod(ctx, opts); err != nil || foreign && opts.MCPOff {
+		return err
+	}
+	_, err := syncMCPAllowRule(opts)
+	return err
 }
 
 func (ccAdapter) Reconcile(opts adapter.InstallOptions) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), claudeTimeout)
 	defer cancel()
-	return reconcileMod(ctx, opts)
+	configured := configuredSocket()
+	foreign := modOwnedElsewhere(opts.Socket, configured)
+	changed, err := reconcileMod(ctx, opts, configured, foreign)
+	if err != nil || foreign && opts.MCPOff {
+		return changed, err
+	}
+	allowed, err := syncMCPAllowRule(opts)
+	if allowed {
+		changed = append(changed, "permissions.allow "+mcpAllowRule)
+	}
+	return changed, err
+}
+
+// syncMCPAllowRule reports whether it added the rule.
+func syncMCPAllowRule(opts adapter.InstallOptions) (added bool, err error) {
+	switch {
+	case opts.MCPOff:
+		_, err = disallowMCPTools()
+		return false, err
+	case opts.MCPURL != "":
+		return allowMCPTools()
+	}
+	return false, nil
 }
 
 func (ccAdapter) Uninstall() error {

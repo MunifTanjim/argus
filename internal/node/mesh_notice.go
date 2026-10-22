@@ -77,7 +77,8 @@ func renderPromptNotice(id string, child session.Session, childID string, i *ses
 			fmt.Fprintf(&b, "Input: %s\n", i.ToolInput)
 		}
 	}
-	fmt.Fprintf(&b, "Answer: argus session respond %s allow|deny [--reason \"<text>\"]\n", id)
+	fmt.Fprintf(&b, "Answer with the argus `respond` tool (notice_id %s), or:\n", id)
+	fmt.Fprintf(&b, "        argus session respond %s allow|deny [--reason \"<text>\"]\n", id)
 	fmt.Fprintf(&b, "        argus session respond %s --option <value>\n", id)
 	fmt.Fprintf(&b, "        argus session respond %s --answer \"<question>=<option label>\"", id)
 	return b.String()

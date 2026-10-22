@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +23,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/forge"
 	"github.com/MunifTanjim/argus/internal/host"
+	"github.com/MunifTanjim/argus/internal/mcphttp"
 	"github.com/MunifTanjim/argus/internal/mesh"
 	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/projectreg"
@@ -36,7 +39,9 @@ import (
 
 // Node holds the wired-up core.
 type Node struct {
-	reg *registry.Registry
+	reg         *registry.Registry
+	mcpListener net.Listener
+	mcpToken    string
 	// adapterList holds agent adapters in priority order; [0] is the default.
 	adapterList []adapter.Adapter
 	adapters    map[string]adapter.Adapter
@@ -522,6 +527,17 @@ func (d *Node) streamRegistry(n api.Notifier) func() {
 	}
 }
 
+// ListenMCP binds the local MCP listener on 127.0.0.1:port; Run serves it.
+// Call before Run.
+func (d *Node) ListenMCP(port int, token string) error {
+	l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		return err
+	}
+	d.mcpListener, d.mcpToken = l, token
+	return nil
+}
+
 // Run scans once at startup and serves the API on the unix socket until ctx is
 // cancelled. The socket (and a stale leftover) are managed automatically.
 func (d *Node) Run(ctx context.Context, socketPath string) error {
@@ -562,6 +578,10 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 		}
 	}()
 
+	if d.mcpListener != nil {
+		defer d.serveMCP()()
+	}
+
 	// Sweep orphaned mirror sessions left by unclean disconnects before any
 	// scan so stale sessions don't surface as live ones.
 	d.reapMirrors(context.Background())
@@ -578,4 +598,19 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	}
 
 	return d.server.ServeContext(ctx, l)
+}
+
+// mcpIdleTimeout closes keep-alive connections that agent runtimes leave open.
+const mcpIdleTimeout = 2 * time.Minute
+
+// serveMCP serves the bound MCP listener. The returned func stops the server.
+func (d *Node) serveMCP() func() {
+	srv := &http.Server{
+		Handler:           mcphttp.NewHandler(d.mcpToken, d.version, mcpBackend{d}),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       mcpIdleTimeout,
+	}
+	go func() { _ = srv.Serve(d.mcpListener) }()
+	d.log.Info("serving mcp", "addr", d.mcpListener.Addr().String())
+	return func() { _ = srv.Close() }
 }

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "argus": {
+      "type": "http",
+      "url": "${user_config.mcp_url}",
+      "headers": { "Authorization": "Bearer ${user_config.mcp_token}" }
+    }
+  }
+}
