@@ -137,7 +137,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		d.SetWakelockPath(config.GetStatePath("wakelock.json"))
 		d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
 		d.SetLogger(logger.Scoped("node").L)
-		if err := enableProjectRegistry(d, cfg, logger.Scoped("node").L); err != nil {
+		if err := enableNodeDB(d, cfg, logger.Scoped("node").L); err != nil {
 			return fail(cmd, err)
 		}
 		if err := setWorkspaceTemplates(d, cfg); err != nil {

@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -22,7 +23,7 @@ const (
 // SetMeshStore with nil disables agentctl and messages. Call before Run.
 func (d *Node) SetMeshStore(s *mesh.Store) {
 	d.mesh = s
-	d.meshKeys = map[string]string{}
+	d.meshCleared = map[string]bool{}
 	d.meshPrev = map[string]session.Status{}
 	d.meshWorked = map[string]bool{}
 	d.meshLive = map[string]bool{}
@@ -31,11 +32,17 @@ func (d *Node) SetMeshStore(s *mesh.Store) {
 	d.meshKickCh = make(chan struct{}, 1)
 }
 
+// partyKey is "" until the agent session id is known: a pane id is only a
+// delivery address and never names a party.
 func partyKey(s session.Session) string {
-	if s.AgentSessionID != "" {
-		return registry.AgentSessionKey(s.Agent, s.AgentSessionID)
+	if s.AgentSessionID == "" {
+		return ""
 	}
-	return s.ID
+	return registry.AgentSessionKey(s.Agent, s.AgentSessionID)
+}
+
+func notReady(id string) error {
+	return fmt.Errorf("%s is not ready yet: its agent session id is unknown", id)
 }
 
 func (d *Node) party(s session.Session) api.Party {
@@ -43,12 +50,14 @@ func (d *Node) party(s session.Session) api.Party {
 }
 
 func (d *Node) sessionForKey(key string) (session.Session, bool) {
-	if agent, id, ok := strings.Cut(key, ":"); ok {
-		if _, held := d.adapters[agent]; held {
-			return d.reg.FindByAgentSession(agent, id)
-		}
+	agent, id, ok := strings.Cut(key, ":")
+	if !ok {
+		return session.Session{}, false
 	}
-	return d.reg.Get(key)
+	if _, held := d.adapters[agent]; !held {
+		return session.Session{}, false
+	}
+	return d.reg.FindByAgentSession(agent, id)
 }
 
 func (d *Node) meshKick() {
@@ -65,11 +74,24 @@ func (d *Node) meshEnded(ctx context.Context, s session.Session, by string) {
 		return
 	}
 	key := partyKey(s)
+	if key == "" {
+		return
+	}
+	// The kill is irreversible, so its bookkeeping must survive a disconnecting caller.
+	ctx = context.WithoutCancel(ctx)
 	if err := d.mesh.SetEndedBy(ctx, key, by); err != nil {
 		d.log.Warn("mesh: record ended-by failed", "key", key, "err", err)
 	}
 	if _, err := d.mesh.FailQueued(ctx, key); err != nil {
 		d.log.Warn("mesh: fail queued failed", "key", key, "err", err)
+	}
+	open, err := d.mesh.OpenNotices(ctx, key)
+	if err != nil {
+		d.log.Warn("mesh: list notices failed", "subject", key, "err", err)
+	}
+	for _, n := range open {
+		d.withdrawNotice(ctx, n, fmt.Sprintf("%s (%s) was killed by %s; its prompt %s is closed.",
+			sessionLabel(s), d.compositeID(s), by, n.ID))
 	}
 	d.meshChanged()
 }
@@ -159,28 +181,28 @@ func (d *Node) meshFailGone(ctx context.Context, snap []session.Session) {
 	d.meshLive = live
 }
 
+// meshRekey moves a /clear predecessor's links and messages to its successor.
 func (d *Node) meshRekey(ctx context.Context, snap []session.Session) {
+	applied := d.meshCleared
+	d.meshCleared = make(map[string]bool, len(applied))
 	for _, s := range snap {
-		key := partyKey(s)
-		old, seen := d.meshKeys[s.ID]
-		switch {
-		case seen && old != key:
-			d.rekey(ctx, s.ID, old, key)
-		case !seen && s.AgentSessionID != "":
-			d.rekey(ctx, s.ID, s.ID, key)
-		case !seen:
-			d.meshKeys[s.ID] = key
+		to := partyKey(s)
+		if s.ClearedFrom == "" || to == "" {
+			continue
 		}
+		from := registry.AgentSessionKey(s.Agent, s.ClearedFrom)
+		pair := from + " " + to
+		if applied[pair] {
+			d.meshCleared[pair] = true
+			continue
+		}
+		if err := d.mesh.Rekey(ctx, from, to); err != nil {
+			d.log.Warn("mesh: rekey failed", "from", from, "to", to, "err", err)
+			continue
+		}
+		d.meshCleared[pair] = true
+		d.meshChanged()
 	}
-}
-
-func (d *Node) rekey(ctx context.Context, sessionID, oldKey, newKey string) {
-	if err := d.mesh.Rekey(ctx, oldKey, newKey); err != nil {
-		d.log.Warn("mesh: rekey failed", "from", oldKey, "to", newKey, "err", err)
-		return
-	}
-	d.meshKeys[sessionID] = newKey
-	d.meshChanged()
 }
 
 // meshDeliver sends each recipient its next queued message. A recipient that

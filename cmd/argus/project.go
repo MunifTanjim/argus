@@ -2,34 +2,45 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/db"
+	"github.com/MunifTanjim/argus/internal/mesh"
 	"github.com/MunifTanjim/argus/internal/node"
 	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/shell"
 )
 
-// enableProjectRegistry leaves the registry off on a database failure, so it
-// never blocks the node from serving sessions.
-func enableProjectRegistry(d *node.Node, cfg *config.Config, log *slog.Logger) error {
+// enableNodeDB leaves the project registry and agent messaging off on a
+// database failure, so it never blocks the node from serving sessions.
+func enableNodeDB(d *node.Node, cfg *config.Config, log *slog.Logger) error {
 	sqlDB, err := db.Open(config.GetDataPath("argus.db"))
 	if err != nil {
 		if log != nil {
-			log.Warn("project registry disabled", "err", err)
+			log.Warn("project registry and agent messaging disabled", "err", err)
 		}
 		return nil
 	}
+	if err := enableProjectRegistry(d, cfg, sqlDB, log); err != nil {
+		sqlDB.Close()
+		return err
+	}
+	d.SetMeshStore(mesh.NewStore(sqlDB, time.Now))
+	return nil
+}
+
+func enableProjectRegistry(d *node.Node, cfg *config.Config, sqlDB *sql.DB, log *slog.Logger) error {
 	reg := projectreg.New(sqlDB)
 	if err := reg.SetAutoAdoptDirs(cfg.Workspace.AutoAdoptDirs); err != nil {
-		sqlDB.Close()
 		return fmt.Errorf("workspace.auto-adopt-dirs: %w", err)
 	}
 	if err := reg.RekeyPlainProjects(context.Background()); err != nil && log != nil {

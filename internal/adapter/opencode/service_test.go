@@ -2,10 +2,12 @@ package opencode
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -300,5 +302,46 @@ func TestListModelsFallsBackToProviderIDs(t *testing.T) {
 	want := []api.ModelInfo{{ID: "opencode/m", Name: "M · opencode"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("models = %+v, want %+v", got, want)
+	}
+}
+
+func TestOcSessionParentField(t *testing.T) {
+	var env struct {
+		Data ocSession `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(`{"data":{"id":"ses_child","parentID":"ses_root","agent":"general"}}`), &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Data.ParentID != "ses_root" {
+		t.Fatalf("parent = %q", env.Data.ParentID)
+	}
+}
+
+func TestRootSession(t *testing.T) {
+	parents := map[string]string{"ses_c": "ses_b", "ses_b": "ses_a", "ses_a": "", "ses_loop": "ses_loop"}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/session/")
+		p, ok := parents[id]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": ocSession{ID: id, ParentID: p}})
+	}))
+	defer srv.Close()
+	withServiceInfo(t, srv.URL)
+
+	a := &ocAdapter{}
+	for in, want := range map[string]string{"ses_c": "ses_a", "ses_a": "ses_a"} {
+		got, err := a.RootSession(t.Context(), in)
+		if err != nil || got != want {
+			t.Fatalf("RootSession(%s) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	if _, err := a.RootSession(t.Context(), "ses_loop"); err == nil {
+		t.Fatal("expected error for cyclic parents")
+	}
+	if _, err := a.RootSession(t.Context(), "ses_missing"); err == nil {
+		t.Fatal("expected error for unknown session")
 	}
 }

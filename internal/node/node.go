@@ -105,8 +105,10 @@ type Node struct {
 	focusedFn       func(ctx context.Context, c *tmux.Client, paneID string) (bool, error) // seam for tests; defaults to (*tmux.Client).IsFocused
 	restoreMirrorFn func(c *tmux.Client, m *mirrorState)                                   // seam for tests; defaults to (*Node).restoreMirror
 
-	mesh          *mesh.Store       // nil = agentctl and messages disabled
-	meshKeys      map[string]string // session id -> last party key
+	spawnFn func(ctx context.Context, p api.SpawnParams, presetID string) (api.SpawnResult, error) // seam for tests; defaults to (*Node).spawn
+
+	mesh          *mesh.Store     // nil = agentctl and messages disabled
+	meshCleared   map[string]bool // "<from> <to>" /clear rekeys already applied
 	meshPrev      map[string]session.Status
 	meshWorked    map[string]bool      // session id -> reported working since the last pass
 	meshLive      map[string]bool      // party keys live at the last pass
@@ -472,6 +474,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 		return c.IsFocused(ctx, paneID)
 	}
 	d.restoreMirrorFn = d.restoreMirror
+	d.spawnFn = d.spawn
 
 	srv := api.NewServer()
 	d.registerHandlers(srv)

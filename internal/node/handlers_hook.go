@@ -49,9 +49,6 @@ func (d *Node) applyHook(ctx context.Context, a adapter.Adapter, ev adapter.Hook
 	return s, alive
 }
 
-// handleSessionRespond resolves the session's parked PermissionRequest with the
-// hook decision JSON. When no hook is parked, falls back to the adapter's
-// Responder capability for HTTP-service agents (e.g. opencode).
 // canRespond reports whether handleSessionRespond has a path that answers s.
 func (d *Node) canRespond(s session.Session) bool {
 	d.pendingMu.Lock()
@@ -64,6 +61,9 @@ func (d *Node) canRespond(s session.Session) bool {
 	return ok
 }
 
+// handleSessionRespond resolves the session's parked PermissionRequest with the
+// hook decision JSON. When no hook is parked, falls back to the adapter's
+// Responder capability for HTTP-service agents (e.g. opencode).
 func (d *Node) handleSessionRespond(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.RespondParams](params)
 	if err != nil {

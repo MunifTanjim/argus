@@ -33,47 +33,92 @@ func hookSession(d *Node, pane, agentID string) {
 	})
 }
 
-func TestMeshBindsPaneKeyToAgentKey(t *testing.T) {
-	d, store := meshNode(t)
-	ctx := context.Background()
-	hookSession(d, "%3", "")
-	snap := d.reg.Snapshot()
-	if len(snap) != 1 {
-		t.Fatalf("sessions = %d", len(snap))
-	}
-	id := snap[0].ID
-	if _, err := store.Insert(ctx, api.Message{
-		Kind: api.MessageText, From: api.Party{Node: d.id, Key: api.PartyOwner},
-		To: api.Party{Node: d.id, Key: id}, Body: "hi", State: api.MessageQueued,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	d.meshPass(ctx)
-	hookSession(d, "%3", "c1")
-	d.meshPass(ctx)
-	if _, ok, _ := store.NextQueued(ctx, "claude:c1"); !ok {
-		t.Fatal("message not rebound to claude:c1")
-	}
+func clearSession(d *Node, pane, agentID string) {
+	d.reg.ApplyHook(registry.HookUpdate{
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: pane,
+		AgentSessionID: agentID, Status: session.StatusIdle, Cleared: true,
+	})
 }
 
-func TestMeshRekeysOnAgentSessionChange(t *testing.T) {
-	d, store := meshNode(t)
-	ctx := context.Background()
-	hookSession(d, "%3", "c1")
-	if err := store.PutLink(ctx, api.Link{
-		Child:  api.Party{Node: d.id, Key: "claude:c1"},
+func linkAndQueue(t *testing.T, d *Node, store *mesh.Store, child string) {
+	t.Helper()
+	if err := store.PutLink(t.Context(), api.Link{
+		Child:  api.Party{Node: d.id, Key: child},
 		Parent: api.Party{Node: d.id, Key: "claude:p1"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	d.meshPass(ctx)
-	hookSession(d, "%3", "c2")
-	d.meshPass(ctx)
-	if _, ok, _ := store.Link(ctx, "claude:c2"); !ok {
-		t.Fatal("link not rekeyed to claude:c2")
+	if _, err := store.Insert(t.Context(), api.Message{
+		ID: "m-00000001", Kind: api.MessageText, From: api.Party{Node: d.id, Key: api.PartyOwner},
+		To: api.Party{Node: d.id, Key: child}, Body: "hi", State: api.MessageQueued,
+	}); err != nil {
+		t.Fatal(err)
 	}
+}
+
+func assertParty(t *testing.T, store *mesh.Store, key string) {
+	t.Helper()
+	if _, ok, err := store.Link(t.Context(), key); err != nil || !ok {
+		t.Fatalf("link not under %s: ok=%v err=%v", key, ok, err)
+	}
+	m, ok, err := store.Get(t.Context(), "m-00000001")
+	if err != nil || !ok || m.To.Key != key {
+		t.Fatalf("message = %+v ok=%v err=%v, want it under %s", m, ok, err, key)
+	}
+}
+
+func TestMeshRekeysOnClear(t *testing.T) {
+	d, store := meshNode(t)
+	ctx := context.Background()
+	hookSession(d, "%3", "c1")
+	linkAndQueue(t, d, store, "claude:c1")
+	d.meshPass(ctx)
+	clearSession(d, "%3", "c2")
+	d.meshPass(ctx)
+	assertParty(t, store, "claude:c2")
 	if _, ok, _ := store.Link(ctx, "claude:c1"); ok {
 		t.Fatal("old link key still present")
+	}
+}
+
+func TestMeshPaneReuseKeepsOldParty(t *testing.T) {
+	cases := map[string]func(d *Node){
+		"same record":  func(*Node) {},
+		"registry gap": func(d *Node) { d.reg.ReconcileSessions("claude", nil) },
+	}
+	for name, between := range cases {
+		t.Run(name, func(t *testing.T) {
+			d, store := meshNode(t)
+			ctx := context.Background()
+			hookSession(d, "%3", "c1")
+			linkAndQueue(t, d, store, "claude:c1")
+			d.meshPass(ctx)
+			between(d)
+			d.meshPass(ctx)
+			hookSession(d, "%3", "c2")
+			d.meshPass(ctx)
+			assertParty(t, store, "claude:c1")
+			s, _ := d.reg.FindByAgentSession("claude", "c2")
+			if p := d.withCaps(s).Parent; p != nil {
+				t.Fatalf("new conversation inherited parent %+v", p)
+			}
+		})
+	}
+}
+
+func TestMeshSessionWithoutAgentIDHasNoParty(t *testing.T) {
+	d, store := meshNode(t)
+	ctx := context.Background()
+	hookSession(d, "%3", "")
+	s := d.reg.Snapshot()[0]
+	linkAndQueue(t, d, store, s.ID)
+	d.meshPass(ctx)
+	hookSession(d, "%3", "c1")
+	d.meshPass(ctx)
+	assertParty(t, store, s.ID)
+	s, _ = d.reg.FindByAgentSession("claude", "c1")
+	if p := d.withCaps(s).Parent; p != nil {
+		t.Fatalf("pane-keyed link bound to the session: %+v", p)
 	}
 }
 
@@ -105,31 +150,5 @@ func TestRemoteDispatchRejectsAgentctl(t *testing.T) {
 	rpcErr, ok := err.(*api.RPCError)
 	if !ok || rpcErr.Code != api.CodeMethodNotFound {
 		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestMeshRekeysAcrossRegistryGap(t *testing.T) {
-	d, store := meshNode(t)
-	ctx := context.Background()
-	hookSession(d, "%3", "c1")
-	if err := store.PutLink(ctx, api.Link{
-		Child:  api.Party{Node: d.id, Key: "claude:c1"},
-		Parent: api.Party{Node: d.id, Key: "claude:p1"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	d.meshPass(ctx)
-	d.reg.ReconcileSessions("claude", nil)
-	if len(d.reg.Snapshot()) != 0 {
-		t.Fatal("session still in registry")
-	}
-	d.meshPass(ctx)
-	hookSession(d, "%3", "c2")
-	d.meshPass(ctx)
-	if _, ok, _ := store.Link(ctx, "claude:c2"); !ok {
-		t.Fatal("link not rekeyed to claude:c2")
-	}
-	if _, ok, _ := store.Link(ctx, "claude:c1"); ok {
-		t.Fatal("old link key still present")
 	}
 }

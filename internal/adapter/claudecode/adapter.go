@@ -54,8 +54,13 @@ func (a *ccAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.Tm
 	return NewDiscoverer(reg, clients)
 }
 
+func (ccAdapter) PresetsSessionID() bool { return true }
+
 func (ccAdapter) SpawnCommand(opts adapter.SpawnOptions) (string, []string) {
 	var args []string
+	if opts.SessionID != "" {
+		args = append(args, "--session-id", opts.SessionID)
+	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}

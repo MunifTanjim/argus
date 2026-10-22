@@ -369,3 +369,42 @@ func TestApplyHookTranscriptSwapResetsSummaryAndClaudeIndex(t *testing.T) {
 		t.Errorf("new claude id should resolve to the record: %q %v", id, ok)
 	}
 }
+
+func TestApplyHookClearedRecordsContinuation(t *testing.T) {
+	r := New()
+	hook := func(id string, cleared bool) session.Session {
+		s, _ := r.ApplyHook(HookUpdate{
+			Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
+			AgentSessionID: id, Status: session.StatusIdle, Cleared: cleared,
+		})
+		return s
+	}
+	hook("c0", false)
+	if got := hook("c1", true); got.ClearedFrom != "c0" {
+		t.Fatalf("cleared from = %q, want c0", got.ClearedFrom)
+	}
+	if got := hook("c1", false); got.ClearedFrom != "c0" {
+		t.Fatalf("a later hook on the same id dropped the continuation: %q", got.ClearedFrom)
+	}
+	if got := hook("c2", false); got.ClearedFrom != "" {
+		t.Fatalf("an id change without /clear kept cleared from = %q", got.ClearedFrom)
+	}
+}
+
+func TestApplyHookClearedAfterScanSawNewID(t *testing.T) {
+	r := New()
+	r.ApplyHook(HookUpdate{
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
+		AgentSessionID: "c0", Status: session.StatusIdle,
+	})
+	r.ReconcileSessions("claude", []DiscoveredSession{{
+		HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", AgentSessionID: "c1",
+	}})
+	got, _ := r.ApplyHook(HookUpdate{
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
+		AgentSessionID: "c1", Status: session.StatusIdle, Cleared: true,
+	})
+	if got.ClearedFrom != "c0" {
+		t.Fatalf("cleared from = %q, want c0", got.ClearedFrom)
+	}
+}

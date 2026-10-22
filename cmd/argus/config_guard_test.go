@@ -42,6 +42,14 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"no-restart":       true, // `upgrade` only: per-invocation step selection
 		"no-download":      true, // `upgrade` only: per-invocation step selection
 		"beta":             true, // `upgrade` only: per-invocation channel selection
+		"cwd":              true, // `session spawn` only: per-invocation working directory
+		"name":             true, // `session spawn` only: per-invocation session name
+		"model":            true, // `session spawn` only: per-invocation model
+		"prompt":           true, // `session spawn` only: per-invocation first prompt
+		"reason":           true, // `session respond` only: per-invocation answer detail
+		"option":           true, // `session respond` only: per-invocation answer
+		"answer":           true, // `session respond` only: per-invocation answer
+		"last":             true, // `session transcript` only: per-invocation entry count
 	}
 
 	seen := map[string]bool{}

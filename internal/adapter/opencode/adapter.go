@@ -3,6 +3,7 @@ package opencode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
@@ -37,6 +38,26 @@ func (ocAdapter) CallerEnv() string { return "OPENCODE_SESSION_ID" }
 
 func (ocAdapter) IsAgentProcess(p procwalk.Proc, env map[string]string) bool {
 	return p.Name() == "opencode"
+}
+
+const maxParentDepth = 10
+
+func (ocAdapter) RootSession(ctx context.Context, id string) (string, error) {
+	c, ok := serviceClient()
+	if !ok {
+		return "", errors.New("opencode service not running")
+	}
+	for range maxParentDepth {
+		s, err := c.getSession(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		if s.ParentID == "" {
+			return id, nil
+		}
+		id = s.ParentID
+	}
+	return "", fmt.Errorf("session %s: parent chain exceeds %d steps", id, maxParentDepth)
 }
 
 func (a *ocAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {

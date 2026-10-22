@@ -318,13 +318,13 @@ func TestSetupErrWithoutExitCode(t *testing.T) {
 	}
 }
 
-func TestEnableProjectRegistryRejectsRelativeAutoAdoptDir(t *testing.T) {
+func TestEnableNodeDBRejectsRelativeAutoAdoptDir(t *testing.T) {
 	orig := config.DataDir
 	config.DataDir = t.TempDir()
 	t.Cleanup(func() { config.DataDir = orig })
 
 	cfg := &config.Config{Workspace: config.WorkspaceConfig{AutoAdoptDirs: []string{"Dev"}}}
-	err := enableProjectRegistry(node.New(), cfg, nil)
+	err := enableNodeDB(node.New(), cfg, nil)
 	if err == nil || !strings.Contains(err.Error(), "workspace.auto-adopt-dirs") {
 		t.Fatalf("err = %v, want one naming workspace.auto-adopt-dirs", err)
 	}

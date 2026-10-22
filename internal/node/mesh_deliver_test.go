@@ -110,6 +110,22 @@ func TestSendToNonAgentSessionFails(t *testing.T) {
 	}
 }
 
+func TestSendToSessionWithoutAgentIDFails(t *testing.T) {
+	d, _ := deliverNode(t)
+	a := apiSession(d, "a", session.StatusIdle, nil)
+	hookSession(d, "%3", "")
+	want := "default:%3 is not ready yet: its agent session id is unknown"
+	if _, err := d.send(t.Context(), a, "default:%3", "hi"); err == nil || err.Error() != want {
+		t.Fatalf("agent send err = %v", err)
+	}
+	if _, err := ownerSend(t, d, api.OwnerSendParams{SessionID: "default:%3", Text: "hi"}); err == nil || err.Error() != want {
+		t.Fatalf("owner send err = %v", err)
+	}
+	if msgs, err := d.mesh.List(t.Context(), 10); err != nil || len(msgs) != 0 {
+		t.Fatalf("messages = %+v err=%v", msgs, err)
+	}
+}
+
 func TestReplyMarksOriginalAndQueuesBack(t *testing.T) {
 	d, _ := deliverNode(t)
 	a := apiSession(d, "a", session.StatusIdle, nil)

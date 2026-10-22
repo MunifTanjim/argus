@@ -131,24 +131,59 @@ func TestQueuedRecipientsDistinct(t *testing.T) {
 func TestRekeyMovesMessagesAndLinks(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
-	s.Insert(ctx, queued("argus:%3"))
-	if err := s.PutLink(ctx, api.Link{
-		Child:  api.Party{Node: "n1", Key: "argus:%3"},
-		Parent: api.Party{Node: "n1", Key: "claude:p"},
-	}); err != nil {
+	insert := func(m api.Message) api.Message {
+		t.Helper()
+		got, err := s.Insert(ctx, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	toOld := insert(queued("claude:old"))
+	fromOld := queued("claude:p")
+	fromOld.From = api.Party{Node: "n1", Key: "claude:old"}
+	fromOld = insert(fromOld)
+	notice := queued("claude:p")
+	notice.Kind = api.MessagePromptNotice
+	notice.From = api.Party{Node: "n1", Key: api.PartyArgus}
+	notice.Subject = "claude:old"
+	notice = insert(notice)
+	for _, l := range []api.Link{
+		{Child: api.Party{Node: "n1", Key: "claude:old"}, Parent: api.Party{Node: "n1", Key: "claude:p"}},
+		{Child: api.Party{Node: "n1", Key: "claude:w"}, Parent: api.Party{Node: "n1", Key: "claude:old"}},
+	} {
+		if err := s.PutLink(ctx, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Rekey(ctx, "claude:old", "claude:new"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Rekey(ctx, "argus:%3", "claude:c"); err != nil {
-		t.Fatal(err)
+	get := func(id string) api.Message {
+		t.Helper()
+		m, ok, err := s.Get(ctx, id)
+		if err != nil || !ok {
+			t.Fatalf("get %s: ok=%v err=%v", id, ok, err)
+		}
+		return m
 	}
-	if _, ok, _ := s.NextQueued(ctx, "claude:c"); !ok {
-		t.Fatal("message not moved")
+	if m := get(toOld.ID); m.To.Key != "claude:new" {
+		t.Fatalf("recipient not moved: %+v", m.To)
 	}
-	if l, ok, _ := s.Link(ctx, "claude:c"); !ok || l.Parent.Key != "claude:p" {
-		t.Fatalf("link not moved: %+v ok=%v", l, ok)
+	if m := get(fromOld.ID); m.From.Key != "claude:new" {
+		t.Fatalf("sender not moved: %+v", m.From)
 	}
-	if _, ok, _ := s.Link(ctx, "argus:%3"); ok {
+	if m := get(notice.ID); m.Subject != "claude:new" {
+		t.Fatalf("subject not moved: %q", m.Subject)
+	}
+	if l, ok, _ := s.Link(ctx, "claude:new"); !ok || l.Parent.Key != "claude:p" {
+		t.Fatalf("child link not moved: %+v ok=%v", l, ok)
+	}
+	if _, ok, _ := s.Link(ctx, "claude:old"); ok {
 		t.Fatal("old link remains")
+	}
+	if l, ok, _ := s.Link(ctx, "claude:w"); !ok || l.Parent.Key != "claude:new" {
+		t.Fatalf("parent key not moved: %+v ok=%v", l, ok)
 	}
 }
 
@@ -173,15 +208,22 @@ func TestUnrepliedTaskClearsOnReply(t *testing.T) {
 func TestExpireDeletesOld(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
-	s.Insert(ctx, queued("claude:a"))
-	s.Insert(ctx, queued("claude:b"))
-	n, err := s.Expire(ctx, time.Now().Add(time.Hour))
+	for _, to := range []string{"claude:a", "claude:b"} {
+		if _, err := s.Insert(ctx, queued(to)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fresh, err := s.Insert(ctx, queued("claude:c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := s.Expire(ctx, fresh.CreatedAt)
 	if err != nil || n != 2 {
 		t.Fatalf("Expire = %d, %v", n, err)
 	}
-	list, _ := s.List(ctx, 10)
-	if len(list) != 0 {
-		t.Fatalf("list = %d", len(list))
+	list, err := s.List(ctx, 10)
+	if err != nil || len(list) != 1 || list[0].ID != fresh.ID {
+		t.Fatalf("list = %+v err=%v", list, err)
 	}
 }
 

@@ -105,6 +105,9 @@ func (d *Node) meshNotices(ctx context.Context, snap []session.Session) {
 	for _, s := range snap {
 		d.meshPrev[s.ID] = s.Status
 		key := partyKey(s)
+		if key == "" {
+			continue
+		}
 		link, ok := byChild[key]
 		if !ok || link.Parent.Key == key {
 			continue
@@ -132,7 +135,8 @@ func (d *Node) promptNotices(ctx context.Context, s session.Session, link api.Li
 			covered = true
 			continue
 		}
-		d.withdrawNotice(ctx, n, s, link)
+		d.withdrawNotice(ctx, n, fmt.Sprintf("The prompt %s of %s (%s) was answered outside argus.",
+			n.ID, sessionLabel(s), d.compositeID(s)))
 	}
 	if cur == "" || covered || cur == seen {
 		return cur
@@ -151,7 +155,8 @@ func (d *Node) promptNotices(ctx context.Context, s session.Session, link api.Li
 	return cur
 }
 
-func (d *Node) withdrawNotice(ctx context.Context, n api.Message, s session.Session, link api.Link) {
+// withdrawNotice tells the parent with closed when it already saw the notice.
+func (d *Node) withdrawNotice(ctx context.Context, n api.Message, closed string) {
 	ok, err := d.mesh.Transition(ctx, n.ID, n.State, api.MessageWithdrawn)
 	if err != nil {
 		d.log.Warn("mesh: withdraw notice failed", "id", n.ID, "err", err)
@@ -164,10 +169,9 @@ func (d *Node) withdrawNotice(ctx context.Context, n api.Message, s session.Sess
 	if n.State != api.MessageDelivered {
 		return
 	}
-	body := fmt.Sprintf("The prompt %s of %s (%s) was answered outside argus.", n.ID, sessionLabel(s), d.compositeID(s))
 	if _, err := d.mesh.Insert(ctx, api.Message{
-		Kind: api.MessageAnsweredNotice, From: api.Party{Node: d.id, Key: api.PartyArgus}, To: link.Parent,
-		Subject: n.Subject, Body: body, State: api.MessageQueued,
+		Kind: api.MessageAnsweredNotice, From: api.Party{Node: d.id, Key: api.PartyArgus}, To: n.To,
+		Subject: n.Subject, Body: closed, State: api.MessageQueued,
 	}); err != nil {
 		d.log.Warn("mesh: insert answered notice failed", "id", n.ID, "err", err)
 	}

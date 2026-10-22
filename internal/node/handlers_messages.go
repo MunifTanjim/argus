@@ -41,7 +41,7 @@ func (d *Node) handleMessagesSend(ctx context.Context, params json.RawMessage) (
 		if !ok {
 			return nil, fmt.Errorf("unknown session: %s", p.SessionID)
 		}
-		return d.sendText(ctx, owner, target, p.SessionID, p.Text)
+		return d.sendText(ctx, owner, "", target, p.SessionID, p.Text)
 	}
 	orig, err := d.message(ctx, p.ReplyTo)
 	if err != nil {
