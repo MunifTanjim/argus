@@ -87,6 +87,25 @@ func TestNextQueuedOldestFirst(t *testing.T) {
 	}
 }
 
+func TestQueuedListsAllOldestFirst(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	m1, _ := s.Insert(ctx, queued("claude:a"))
+	m2, _ := s.Insert(ctx, queued("claude:a"))
+	m3, _ := s.Insert(ctx, queued("claude:a"))
+	s.Insert(ctx, queued("claude:b"))
+	if err := s.SetState(ctx, m2.ID, api.MessageDelivered); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Queued(ctx, "claude:a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ID != m1.ID || got[1].ID != m3.ID {
+		t.Fatalf("Queued = %+v", got)
+	}
+}
+
 func TestQueuedRecipientsDistinct(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
@@ -194,6 +213,31 @@ func TestBodyKeepsNewlines(t *testing.T) {
 		t.Fatalf("body = %q", got.Body)
 	}
 }
+
+func TestTransitionOnlyFromExpectedState(t *testing.T) {
+	st, _ := newTestStore(t)
+	ctx := context.Background()
+	m, err := st.Insert(ctx, queued("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetState(ctx, m.ID, api.MessageReplied); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := st.Transition(ctx, m.ID, api.MessageQueued, api.MessageDelivered)
+	if err != nil || ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	got, _, _ := st.Get(ctx, m.ID)
+	if got.State != api.MessageReplied {
+		t.Fatalf("state = %s", got.State)
+	}
+	m2, _ := st.Insert(ctx, queued("a"))
+	if ok, err := st.Transition(ctx, m2.ID, api.MessageQueued, api.MessageDelivered); err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+}
+
 func TestLinkCacheFollowsWrites(t *testing.T) {
 	s, sqlDB := newTestStore(t)
 	ctx := context.Background()

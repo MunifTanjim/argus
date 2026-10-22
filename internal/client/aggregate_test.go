@@ -8,6 +8,17 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
+func TestWithOriginCompositesParentSessionID(t *testing.T) {
+	parent := &session.ParentRef{Node: "n1", Key: "claude:p", SessionID: "argus:%1"}
+	got := withOrigin(session.Session{ID: "local1", Parent: parent}, "n1", "n1-box")
+	if want := session.CompositeID("n1", "argus:%1"); got.Parent.SessionID != want {
+		t.Errorf("Parent.SessionID = %q, want %q", got.Parent.SessionID, want)
+	}
+	if parent.SessionID != "argus:%1" {
+		t.Error("withOrigin changed the caller's ParentRef")
+	}
+}
+
 func TestWithOriginStampsCompositeAndNode(t *testing.T) {
 	s := session.Session{ID: "local1", Offline: true}
 	got := withOrigin(s, "n1", "n1-box")

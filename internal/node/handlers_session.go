@@ -49,7 +49,29 @@ func (d *Node) withCaps(s session.Session) session.Session {
 	s.CanOpenTerminal = d.canOpenTerminal(s)
 	q, ok := d.adapterFor(s.Agent).(adapter.PromptQueuer)
 	s.CanPrompt = s.TakesPrompt(ok && q.QueuesPrompts(s))
+	s.Parent = d.parentRef(s)
 	return s
+}
+
+func (d *Node) parentRef(s session.Session) *session.ParentRef {
+	if d.mesh == nil {
+		return nil
+	}
+	link, ok, err := d.mesh.Link(context.Background(), partyKey(s))
+	if err != nil {
+		d.log.Debug("mesh: link lookup failed", "session", s.ID, "err", err)
+		return nil
+	}
+	if !ok {
+		return nil
+	}
+	ref := &session.ParentRef{Node: link.Parent.Node, Key: link.Parent.Key}
+	if p, live := d.sessionForKey(link.Parent.Key); live {
+		ref.SessionID = p.ID
+	} else {
+		ref.Gone = true
+	}
+	return ref
 }
 
 // canOpenTerminal reports whether argus can show a terminal for this live session
@@ -147,10 +169,7 @@ func (d *Node) handleTranscriptView(_ context.Context, params json.RawMessage) (
 	if !ok {
 		return nil, fmt.Errorf("unknown session: %s", p.SessionID)
 	}
-	if s.TranscriptPath == "" {
-		return transcript.TranscriptView{}, nil
-	}
-	return d.adapterFor(s.Agent).ReadTranscriptView(s.TranscriptPath)
+	return d.transcriptView(s)
 }
 
 // handleSessionToolDetail returns one tool entry's full input/result by tool_use
@@ -211,6 +230,10 @@ func (d *Node) handleSessionInput(ctx context.Context, params json.RawMessage) (
 	if !ok {
 		return nil, fmt.Errorf("unknown session: %s", p.SessionID)
 	}
+	return d.sendInput(ctx, s, p)
+}
+
+func (d *Node) sendInput(ctx context.Context, s session.Session, p api.InputParams) (any, error) {
 	switch s.Input {
 	case session.InputAPI:
 		return d.sendPromptInput(ctx, s, p)
@@ -219,6 +242,11 @@ func (d *Node) handleSessionInput(ctx context.Context, params json.RawMessage) (
 	default:
 		return nil, fmt.Errorf("%s: %w", s.ID, api.ErrNoTerminalControl)
 	}
+}
+
+func (d *Node) deliverPrompt(ctx context.Context, s session.Session, text string) error {
+	_, err := d.sendInput(ctx, s, api.InputParams{SessionID: s.ID, Text: text, Submit: true, Prepare: true})
+	return err
 }
 
 // sendPaneInput sends text (and optionally Enter) to a session's pane, after
