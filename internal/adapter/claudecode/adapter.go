@@ -18,10 +18,11 @@ import (
 )
 
 type ccAdapter struct {
-	bridge *modbridge.Bridge
+	bridge   *modbridge.Bridge
+	toolUses *toolUseMap
 }
 
-func New() adapter.Adapter { return &ccAdapter{} }
+func New() adapter.Adapter { return &ccAdapter{toolUses: &toolUseMap{}} }
 
 var _ adapter.Adapter = (*ccAdapter)(nil)
 var _ adapter.TaskSource = (*ccAdapter)(nil)
@@ -31,6 +32,7 @@ var _ adapter.Dismisser = (*ccAdapter)(nil)
 var _ adapter.ModelLister = (*ccAdapter)(nil)
 var _ adapter.PromptQueuer = (*ccAdapter)(nil)
 var _ adapter.PaneFiller = (*ccAdapter)(nil)
+var _ adapter.MCPIdentity = (*ccAdapter)(nil)
 
 func (ccAdapter) Agent() string      { return Agent }
 func (ccAdapter) AgentName() string  { return "Claude" }
@@ -85,8 +87,12 @@ func (ccAdapter) ResumeCommand(agentSessionID string) (string, []string, bool) {
 	return "claude", []string{"--resume", agentSessionID}, true
 }
 
-func (ccAdapter) ProcessHook(reg *registry.Registry, ev adapter.HookEvent) (session.Session, bool) {
-	return ProcessHook(reg, ev)
+func (a ccAdapter) ProcessHook(reg *registry.Registry, ev adapter.HookEvent) (session.Session, bool) {
+	p := decodeHook(ev)
+	if eventOf(ev, p) == "PreToolUse" {
+		a.toolUses.record(p)
+	}
+	return processHook(reg, ev, p)
 }
 
 func (ccAdapter) EventName(ev adapter.HookEvent) string { return EventName(ev) }

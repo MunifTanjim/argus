@@ -35,6 +35,9 @@ func (ocAdapter) AgentColor() string { return "#d3869b" }
 func (ocAdapter) IsHeadless() bool   { return true }
 
 func (ocAdapter) CallerEnv() string { return "OPENCODE_SESSION_ID" }
+func (ocAdapter) MCPSessionID(meta map[string]json.RawMessage) (string, error) {
+	return adapter.MetaSessionID(meta, "ai.opencode/sessionID")
+}
 
 func (ocAdapter) IsAgentProcess(p procwalk.Proc, env map[string]string) bool {
 	return p.Name() == "opencode"

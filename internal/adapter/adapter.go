@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -298,4 +299,27 @@ type AgentProcessEnv interface {
 // RootSessionResolver maps a subagent's own session id to the session argus shows.
 type RootSessionResolver interface {
 	RootSession(ctx context.Context, agentSessionID string) (string, error)
+}
+
+// MCPIdentity reads the calling session's agent session id from an MCP tools/call _meta.
+type MCPIdentity interface {
+	MCPSessionID(meta map[string]json.RawMessage) (string, error)
+}
+
+// MetaSessionID returns the session id stored under key, or an error wrapping
+// api.ErrNoCaller.
+func MetaSessionID(meta map[string]json.RawMessage, key string) (string, error) {
+	if id, ok := MetaString(meta, key); ok {
+		return id, nil
+	}
+	return "", fmt.Errorf("%w: the call carries no %s", api.ErrNoCaller, key)
+}
+
+// MetaString returns the non-empty JSON string stored under key.
+func MetaString(meta map[string]json.RawMessage, key string) (string, bool) {
+	var v string
+	if err := json.Unmarshal(meta[key], &v); err != nil || v == "" {
+		return "", false
+	}
+	return v, true
 }

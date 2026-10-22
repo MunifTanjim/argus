@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -89,11 +90,15 @@ func (d *Node) handleAgentWhoami(ctx context.Context, params json.RawMessage) (a
 }
 
 func (d *Node) handleAgentList(context.Context, json.RawMessage) (any, error) {
+	return d.list(), nil
+}
+
+func (d *Node) list() []session.Session {
 	snap := d.reg.Snapshot()
 	for i := range snap {
 		snap[i] = d.composite(snap[i])
 	}
-	return snap, nil
+	return snap
 }
 
 // meshCall decodes an agentctl request that needs the mesh, resolving the
@@ -118,14 +123,18 @@ func (d *Node) handleAgentShow(ctx context.Context, params json.RawMessage) (any
 	if err != nil {
 		return nil, err
 	}
-	s, err := d.localTarget(p.SessionID)
+	return d.show(ctx, p.SessionID)
+}
+
+func (d *Node) show(ctx context.Context, id string) (api.AgentShowResult, error) {
+	s, err := d.localTarget(id)
 	if err != nil {
-		return nil, err
+		return api.AgentShowResult{}, err
 	}
 	queued := []api.Message{}
 	if key := partyKey(s); key != "" {
 		if queued, err = d.mesh.Queued(ctx, key); err != nil {
-			return nil, err
+			return api.AgentShowResult{}, err
 		}
 	}
 	return api.AgentShowResult{Session: d.composite(s), Queued: queued}, nil
@@ -136,13 +145,17 @@ func (d *Node) handleAgentOutput(_ context.Context, params json.RawMessage) (any
 	if err != nil {
 		return nil, err
 	}
-	s, err := d.localTarget(p.SessionID)
+	return d.output(p.SessionID)
+}
+
+func (d *Node) output(id string) (api.AgentOutputResult, error) {
+	s, err := d.localTarget(id)
 	if err != nil {
-		return nil, err
+		return api.AgentOutputResult{}, err
 	}
 	view, err := d.transcriptView(s)
 	if err != nil {
-		return nil, err
+		return api.AgentOutputResult{}, err
 	}
 	return api.AgentOutputResult{Text: lastAssistantText(view.Entries)}, nil
 }
@@ -152,17 +165,21 @@ func (d *Node) handleAgentTranscript(_ context.Context, params json.RawMessage) 
 	if err != nil {
 		return nil, err
 	}
-	s, err := d.localTarget(p.SessionID)
+	return d.transcript(p.SessionID, p.Last)
+}
+
+func (d *Node) transcript(id string, last int) (api.AgentTranscriptResult, error) {
+	s, err := d.localTarget(id)
 	if err != nil {
-		return nil, err
+		return api.AgentTranscriptResult{}, err
 	}
 	view, err := d.transcriptView(s)
 	if err != nil {
-		return nil, err
+		return api.AgentTranscriptResult{}, err
 	}
 	entries := view.Entries
-	if p.Last > 0 && p.Last < len(entries) {
-		entries = entries[len(entries)-p.Last:]
+	if last > 0 && last < len(entries) {
+		entries = entries[len(entries)-last:]
 	}
 	return api.AgentTranscriptResult{Entries: entries}, nil
 }
@@ -172,12 +189,19 @@ func (d *Node) handleAgentSpawn(ctx context.Context, params json.RawMessage) (an
 	if err != nil {
 		return nil, err
 	}
+	return d.spawnFor(ctx, caller, p)
+}
+
+func (d *Node) spawnFor(ctx context.Context, caller session.Session, p api.AgentSpawnParams) (api.AgentSpawnResult, error) {
+	if !filepath.IsAbs(p.Cwd) {
+		return api.AgentSpawnResult{}, errors.New("cwd must be an absolute directory path")
+	}
 	if !d.orchestrated(p.Agent) {
-		return nil, fmt.Errorf("%s does not support agent sessions", p.Agent)
+		return api.AgentSpawnResult{}, fmt.Errorf("%s does not support agent sessions", p.Agent)
 	}
 	parent := d.party(caller)
 	if parent.Key == "" {
-		return nil, notReady(d.compositeID(caller))
+		return api.AgentSpawnResult{}, notReady(d.compositeID(caller))
 	}
 
 	var task api.Message
@@ -197,13 +221,13 @@ func (d *Node) handleAgentSpawn(ctx context.Context, params json.RawMessage) (an
 	}
 	_, headless := a.(adapter.Spawner)
 	if !headless && presetID == "" {
-		return nil, fmt.Errorf("%s cannot be linked to its parent at spawn", p.Agent)
+		return api.AgentSpawnResult{}, fmt.Errorf("%s cannot be linked to its parent at spawn", p.Agent)
 	}
 	spawned, err := d.spawnFn(ctx, api.SpawnParams{
 		Agent: p.Agent, Cwd: p.Cwd, Name: p.Name, Model: p.Model, Prompt: prompt,
 	}, presetID)
 	if err != nil {
-		return nil, err
+		return api.AgentSpawnResult{}, err
 	}
 	childKey := spawned.SessionID
 	if !headless {
@@ -212,12 +236,12 @@ func (d *Node) handleAgentSpawn(ctx context.Context, params json.RawMessage) (an
 
 	child := api.Party{Node: d.id, Key: childKey}
 	if err := d.mesh.PutLink(ctx, api.Link{Child: child, Parent: parent, TaskID: task.ID}); err != nil {
-		return nil, err
+		return api.AgentSpawnResult{}, err
 	}
 	if task.ID != "" {
 		task.To = child
 		if _, err := d.mesh.Insert(ctx, task); err != nil {
-			return nil, err
+			return api.AgentSpawnResult{}, err
 		}
 	}
 	d.meshChanged()

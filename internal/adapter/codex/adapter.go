@@ -35,6 +35,9 @@ func (cxAdapter) AgentColor() string { return "#b8bb26" } // green
 func (cxAdapter) IsHeadless() bool   { return true }
 
 func (cxAdapter) CallerEnv() string { return "CODEX_THREAD_ID" }
+func (cxAdapter) MCPSessionID(meta map[string]json.RawMessage) (string, error) {
+	return adapter.MetaSessionID(meta, "sessionId")
+}
 
 func (cxAdapter) IsAgentProcess(p procwalk.Proc, env map[string]string) bool {
 	return p.Name() == "codex"

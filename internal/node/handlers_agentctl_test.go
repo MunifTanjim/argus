@@ -196,6 +196,17 @@ func TestAgentSpawnNeedsCaller(t *testing.T) {
 	}
 }
 
+func TestAgentSpawnRequiresAbsoluteCwd(t *testing.T) {
+	d, fs, caller := spawnNode(t, true)
+	params, _ := json.Marshal(api.AgentSpawnParams{Caller: caller, Agent: "fake", Cwd: "rel/dir"})
+	if _, err := d.handleAgentSpawn(t.Context(), params); err == nil || !strings.Contains(err.Error(), "cwd") {
+		t.Fatalf("err = %v", err)
+	}
+	if fs.gotCwd != "" {
+		t.Fatal("spawner was called")
+	}
+}
+
 func TestAgentSpawnFailureLeavesNoLink(t *testing.T) {
 	d, fs, caller := spawnNode(t, true)
 	fs.err = errors.New("boom")
