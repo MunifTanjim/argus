@@ -99,13 +99,13 @@ func refuseRunning(socket string) error {
 		return err
 	}
 	if running {
-		return fmt.Errorf("argus is already running at %s", socket)
+		return fmt.Errorf("argus is already running at %s; run 'argus stop' first", socket)
 	}
 	return nil
 }
 
 // connectLocalSpawn starts an isolated managed node and connects to its socket.
-func connectLocalSpawn(ctx context.Context, cfg *config.Config, spec spawnSpec) (tui.Client, *managedGroup, error) {
+func connectLocalSpawn(ctx context.Context, cfg *config.Config, spec spawnSpec) (tui.Client, []string, error) {
 	return connectLocalSpawnWithGateway(ctx, cfg, spec, "", "", nil)
 }
 
@@ -113,7 +113,7 @@ func connectLocalSpawn(ctx context.Context, cfg *config.Config, spec spawnSpec) 
 // isolated node, and the TUI drives its socket. Set gatewayURL: the node uplinks
 // to that gateway, and the TUI drives the gateway to see the whole fleet.
 // genesisHash is the client's resolved trust root; nil means TOFU.
-func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, spec spawnSpec, gatewayURL, token string, genesisHash []byte) (tui.Client, *managedGroup, error) {
+func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, spec spawnSpec, gatewayURL, token string, genesisHash []byte) (tui.Client, []string, error) {
 	if gatewayURL != "" {
 		wsURL, gatewayClient, err := resolveGatewayURL(gatewayURL, routeNode, nil)
 		if err != nil {
@@ -135,15 +135,14 @@ func connectLocalSpawnWithGateway(ctx context.Context, cfg *config.Config, spec 
 // connectLocalGateway starts a managed gateway (pairing and push, no tunnel)
 // and a managed node that uplinks to it, then points the TUI at the gateway
 // over loopback. It returns the gateway URL.
-func connectLocalGateway(ctx context.Context, cfg *config.Config, spec spawnSpec) (tui.Client, *managedGroup, string, error) {
+func connectLocalGateway(ctx context.Context, cfg *config.Config, spec spawnSpec) (tui.Client, []string, string, error) {
 	addr, bound, err := resolveListenAddr(cfg.Gateway.ListenAddr)
 	if err != nil {
 		shell.StdErrF("argus: cannot bind gateway listener at %s: %v\n", cfg.Gateway.ListenAddr, err)
 		return nil, nil, "", err
 	}
-	pin, err := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
+	head, err := resolveTrustHead(cfg)
 	if err != nil {
-		err = fmt.Errorf("refusing to connect open: %w", err)
 		shell.StdErrF("argus: %v\n", err)
 		return nil, nil, "", err
 	}
@@ -152,12 +151,26 @@ func connectLocalGateway(ctx context.Context, cfg *config.Config, spec spawnSpec
 	gw.role, gw.listenAddr, gw.token = roleGateway, addr, cfg.Token
 	node := spec
 	node.gatewayURL, node.token = url, cfg.Token
-	c, g, err := spawnAndConnect(ctx, cfg, []spawnSpec{gw, node}, url, pin.Genesis)
-	return c, g, url, err
+	c, logs, err := spawnAndConnect(ctx, cfg, []spawnSpec{gw, node}, url, head)
+	return c, logs, url, err
 }
 
-func spawnAndConnect(ctx context.Context, cfg *config.Config, specs []spawnSpec, gatewayURL string, genesisHash []byte) (tui.Client, *managedGroup, error) {
-	g, err := startManagedGroup(specs, nil)
+// resolveTrustHead gives the trust log head a client pins, or nil when unpinned.
+func resolveTrustHead(cfg *config.Config) ([]byte, error) {
+	pin, err := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
+	if err != nil {
+		return nil, fmt.Errorf("refusing to connect open: %w", err)
+	}
+	return pin.Genesis, nil
+}
+
+// spawnAndConnect starts the servers detached, so that they outlive the TUI,
+// and returns their log paths.
+func spawnAndConnect(ctx context.Context, cfg *config.Config, specs []spawnSpec, gatewayURL string, genesisHash []byte) (tui.Client, []string, error) {
+	for i := range specs {
+		specs[i].logFile = serverLogPath(specs[i].socket, specs[i].role)
+	}
+	servers, err := startDetachedGroup(specs)
 	if err != nil {
 		shell.StdErrF("argus: %v\n", err)
 		return nil, nil, err
@@ -165,10 +178,16 @@ func spawnAndConnect(ctx context.Context, cfg *config.Config, specs []spawnSpec,
 	last := specs[len(specs)-1]
 	c, err := connect(ctx, cfg, gatewayURL, last.token, last.socket, genesisHash)
 	if err != nil {
-		g.stop(managedStopTimeout)
+		if serr := stopSpawned(servers); serr != nil {
+			shell.StdErrF("argus: %v\n", serr)
+		}
 		return nil, nil, err
 	}
-	return c, g, nil
+	logs := make([]string, len(specs))
+	for i, spec := range specs {
+		logs[i] = spec.logFile
+	}
+	return c, logs, nil
 }
 
 // loopbackDialAddr returns a host:port for reaching a listener from this host: its

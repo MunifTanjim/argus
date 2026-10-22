@@ -16,11 +16,12 @@ func TestConnectLocalGatewayServesFleet(t *testing.T) {
 	cfg.Token = "secret"
 	cfg.Gateway.ListenAddr = "127.0.0.1:0"
 
-	c, srv, _, err := connectLocalGateway(context.Background(), cfg, testSpec(t))
+	spec := testSpec(t)
+	c, _, _, err := connectLocalGateway(context.Background(), cfg, spec)
 	if err != nil {
 		t.Fatalf("connectLocalGateway: %v", err)
 	}
-	defer srv.stop(managedStopTimeout)
+	t.Cleanup(func() { stopSockets(t, spec.socket, gatewaySocketPath(spec.socket)) })
 	defer c.Close()
 	waitForNodes(t, c)
 }

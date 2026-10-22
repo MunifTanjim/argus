@@ -3,15 +3,14 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"github.com/MunifTanjim/argus/cmd/argus/completion"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/logbuf"
 	"github.com/MunifTanjim/argus/internal/shell"
-	"github.com/MunifTanjim/argus/internal/trustpin"
 	"github.com/MunifTanjim/argus/internal/tui"
 )
 
@@ -37,42 +36,71 @@ func newRootCmd(version string) *cobra.Command {
 				return fail(cmd, err)
 			}
 
-			// A managed server spawned below stops when the TUI returns.
 			ctx, cancel := context.WithCancel(context.Background())
-			var srv *managedGroup
-			defer func() {
-				cancel()
-				srv.stop(managedStopTimeout)
-			}()
+			defer cancel()
 
 			running, perr := localNodeRunning(cfg.Socket)
 			if perr != nil {
 				shell.StdErrF("argus: cannot reach argusd at %s: %v\n", cfg.Socket, perr)
 				return errSilent
 			}
+			gwSocket := gatewaySocketPath(cfg.Socket)
+			gatewayRunning, perr := localNodeRunning(gwSocket)
+			if perr != nil {
+				shell.StdErrF("argus: cannot reach the gateway at %s: %v\n", gwSocket, perr)
+				return errSilent
+			}
+
+			st, err := loadLaunchState(cfg.Socket)
+			if err != nil {
+				return fail(cmd, err)
+			}
+			action, stale := decideAttach(st, running, gatewayRunning)
+			if action == attachPartial {
+				shell.StdErrF("argus: some servers that the TUI started are not running; run 'argus stop' first\n")
+				return errSilent
+			}
+			if stale {
+				if err := removeLaunchState(cfg.Socket); err != nil {
+					return fail(cmd, err)
+				}
+				st = nil
+			}
 
 			var head []byte
 			if cfg.E2EE.Enabled {
-				pin, perr := trustpin.Resolve(cfg.Lock.Genesis, clientPinFile())
-				if perr != nil {
-					return fail(cmd, fmt.Errorf("refusing to connect open: %w", perr))
+				if head, err = resolveTrustHead(cfg); err != nil {
+					return fail(cmd, err)
 				}
-				head = pin.Genesis
 			}
 
 			spec := tuiSpec(cmd, cfg)
 			var client tui.Client
 			var gatewayURL string // empty: the TUI drives a local socket
+			var spawned *launchState
 			switch {
+			case action == attachState:
+				gatewayURL = st.GatewayURL
+				attachHead := head
+				switch st.Mode {
+				case launchModeIsolated:
+					attachHead = nil
+				case launchModeGateway:
+					if attachHead, err = resolveTrustHead(cfg); err != nil {
+						return fail(cmd, err)
+					}
+				}
+				client, err = connect(ctx, cfg, st.GatewayURL, st.Token, cfg.Socket, attachHead)
 			case cfg.Gateway.URL != "":
 				// The TUI drives the gateway to see the whole fleet. With no local node,
-				// spawn an ephemeral one enrolled on the same gateway so this machine joins
-				// too; otherwise the running node enrolls itself.
+				// start one enrolled on the same gateway so this machine joins too;
+				// otherwise the running node enrolls itself.
 				gatewayURL = cfg.Gateway.URL
 				if running {
 					client, err = connect(ctx, cfg, cfg.Gateway.URL, cfg.Token, cfg.Socket, head)
 				} else {
-					client, srv, err = connectLocalSpawnWithGateway(ctx, cfg, spec, cfg.Gateway.URL, cfg.Token, head)
+					client, _, err = connectLocalSpawnWithGateway(ctx, cfg, spec, cfg.Gateway.URL, cfg.Token, head)
+					spawned = &launchState{Mode: launchModeConnected, GatewayURL: cfg.Gateway.URL, Token: cfg.Token}
 				}
 			case running:
 				client, err = connect(ctx, cfg, "", cfg.Token, cfg.Socket, nil)
@@ -85,12 +113,15 @@ func newRootCmd(version string) *cobra.Command {
 				case launchQuit:
 					return nil
 				case launchSpawnIsolated:
-					client, srv, err = connectLocalSpawn(ctx, cfg, spec)
+					client, _, err = connectLocalSpawn(ctx, cfg, spec)
+					spawned = &launchState{Mode: launchModeIsolated}
 				case launchSpawnGateway:
-					client, srv, gatewayURL, err = connectLocalGateway(ctx, cfg, spec)
+					client, _, gatewayURL, err = connectLocalGateway(ctx, cfg, spec)
+					spawned = &launchState{Mode: launchModeGateway, GatewayURL: gatewayURL, Token: cfg.Token}
 				case launchSpawnConnected:
 					gatewayURL = choice.gatewayURL
-					client, srv, err = connectLocalSpawnWithGateway(ctx, cfg, spec, choice.gatewayURL, choice.token, head)
+					client, _, err = connectLocalSpawnWithGateway(ctx, cfg, spec, choice.gatewayURL, choice.token, head)
+					spawned = &launchState{Mode: launchModeConnected, GatewayURL: choice.gatewayURL, Token: choice.token}
 				case launchGateway:
 					gatewayURL = choice.gatewayURL
 					client, err = connect(ctx, cfg, choice.gatewayURL, choice.token, cfg.Socket, head)
@@ -101,7 +132,23 @@ func newRootCmd(version string) *cobra.Command {
 			}
 			defer client.Close()
 
-			if err := tui.Run(client, gatewayURL, srv.Logs(), srv.Exited(), cfg.TUI); err != nil {
+			if spawned != nil {
+				if err := saveLaunchState(cfg.Socket, *spawned); err != nil {
+					return fail(cmd, err)
+				}
+				st = spawned
+			}
+
+			var logs *logbuf.Buffer
+			if st != nil {
+				logs = logbuf.New(1000)
+				go followLog(ctx, serverLogPath(cfg.Socket, roleNode), logs)
+				if st.needsGateway() {
+					go followLog(ctx, serverLogPath(cfg.Socket, roleGateway), logs)
+				}
+			}
+
+			if err := tui.Run(client, gatewayURL, logs, cfg.TUI); err != nil {
 				return fail(cmd, err)
 			}
 			return nil
@@ -120,7 +167,7 @@ func newRootCmd(version string) *cobra.Command {
 
 	addClientFlags(cmd.Flags())
 
-	cmd.AddCommand(newStartCmd(version), newSpawnCmd(), newHooksCmd(), newHookCmd(), newPingCmd(), newPairCmd(), newUnpairCmd(), newFocusCmd(), newUpgradeCmd(), newConfigCmd(), newViewCmd(), newLockCmd(), newProjectCmd(), newWorkspaceCmd(), newPushPortCmd(pushPortAppID, pushPortBaseURL))
+	cmd.AddCommand(newStartCmd(version), newSpawnCmd(), newHooksCmd(), newHookCmd(), newPingCmd(), newPairCmd(), newUnpairCmd(), newFocusCmd(), newUpgradeCmd(), newStopCmd(), newConfigCmd(), newViewCmd(), newLockCmd(), newProjectCmd(), newWorkspaceCmd(), newPushPortCmd(pushPortAppID, pushPortBaseURL))
 
 	cmd.InitDefaultCompletionCmd()
 	if subcmd, _, _ := cmd.Find([]string{"completion"}); subcmd != nil && subcmd.Name() == "completion" {

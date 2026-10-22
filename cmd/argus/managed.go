@@ -2,11 +2,15 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -16,6 +20,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 
+	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 )
 
@@ -45,6 +50,7 @@ type spawnSpec struct {
 	configArgs []string
 	extraArgs  []string // last, so that they win over the defaults in args
 	extraEnv   []string // for values that ps must not show
+	logFile    string
 }
 
 // args sets every topology key explicitly, so a mode, token, gateway URL, or
@@ -60,6 +66,9 @@ func (s spawnSpec) args() []string {
 	if s.token == "" {
 		a = append(a, "--token=")
 	}
+	if s.logFile != "" {
+		a = append(a, "--argus-log-file="+s.logFile)
+	}
 	return append(a, s.extraArgs...)
 }
 
@@ -68,6 +77,20 @@ func (s spawnSpec) readySocket() string {
 		return gatewaySocketPath(s.socket)
 	}
 	return s.socket
+}
+
+// serverLogPath keys the file by the node socket, so that servers on other
+// sockets do not share a log.
+func serverLogPath(nodeSocket string, role spawnRole) string {
+	if abs, err := filepath.Abs(nodeSocket); err == nil {
+		nodeSocket = abs
+	}
+	suffix := "-node.log"
+	if role == roleGateway {
+		suffix = "-gateway.log"
+	}
+	sum := sha256.Sum256([]byte(nodeSocket))
+	return filepath.Join(config.StateDir, "logs", hex.EncodeToString(sum[:4])+suffix)
 }
 
 // probeReady covers a gateway's TCP port too, because the gateway binds it
@@ -211,19 +234,33 @@ func (s *managedServer) wait() error {
 }
 
 func (s *managedServer) waitReady(spec spawnSpec) error {
+	err := waitReady(spec.probeReady, s.done)
+	if errors.Is(err, errExitedEarly) {
+		return s.exitError()
+	}
+	if err != nil {
+		return fmt.Errorf("%w:\n%s", err, s.logTail())
+	}
+	return nil
+}
+
+var errExitedEarly = errors.New("server exited before it was ready")
+
+// waitReady returns errExitedEarly once done is closed.
+func waitReady(probe func() error, done <-chan struct{}) error {
 	deadline := time.Now().Add(managedReadyTimeout)
 	for {
-		err := spec.probeReady()
+		err := probe()
 		if err == nil {
 			return nil
 		}
 		select {
-		case <-s.done:
-			return s.exitError()
+		case <-done:
+			return errExitedEarly
 		default:
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("server did not start: %w:\n%s", err, s.logTail())
+			return fmt.Errorf("server did not start: %w", err)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
@@ -293,19 +330,14 @@ func (s *managedServer) stop(timeout time.Duration) {
 // order, so that a node stops before the gateway it uplinks to.
 type managedGroup struct {
 	servers  []*managedServer
-	logs     *logbuf.Buffer
 	exited   chan error
 	stopping atomic.Bool
 }
 
 // startManagedGroup starts each spec once the one before it is ready. out gets
-// every line. If out is nil, the group keeps the lines for Logs instead.
+// every line.
 func startManagedGroup(specs []spawnSpec, out io.Writer) (*managedGroup, error) {
 	g := &managedGroup{exited: make(chan error, 1)}
-	if out == nil {
-		g.logs = logbuf.New(1000)
-		out = g.logs
-	}
 	for _, spec := range specs {
 		s, err := startManagedReady(spec, out)
 		if err != nil {
@@ -329,13 +361,6 @@ func (g *managedGroup) watch(s *managedServer) {
 	}
 }
 
-func (g *managedGroup) Logs() *logbuf.Buffer {
-	if g == nil {
-		return nil
-	}
-	return g.logs
-}
-
 // Exited receives the first unexpected exit. A restart in place keeps the PID,
 // and stop is not an exit.
 func (g *managedGroup) Exited() <-chan error {
@@ -353,4 +378,124 @@ func (g *managedGroup) stop(timeout time.Duration) {
 	for i := len(g.servers) - 1; i >= 0; i-- {
 		g.servers[i].stop(timeout)
 	}
+}
+
+// detachedServer runs in its own session, so that it outlives the TUI.
+type detachedServer struct {
+	spec spawnSpec
+	cmd  *exec.Cmd
+	done chan struct{} // closed when the process exits while the TUI runs
+	err  error         // valid once done is closed
+}
+
+func startDetached(spec spawnSpec) (*detachedServer, error) {
+	bin, err := managedBin()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(bin, spec.args()...)
+	cmd.Env = spec.env(os.Environ())
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	s := &detachedServer{spec: spec, cmd: cmd, done: make(chan struct{})}
+	go func() {
+		s.err = cmd.Wait()
+		close(s.done)
+	}()
+	return s, nil
+}
+
+// startDetachedReady refuses a socket that another argus serves, because
+// waitReady cannot tell that server from the child.
+func startDetachedReady(spec spawnSpec) (*detachedServer, error) {
+	if err := refuseRunning(spec.readySocket()); err != nil {
+		return nil, err
+	}
+	prevLog, _ := os.Stat(spec.logFile)
+	s, err := startDetached(spec)
+	if err != nil {
+		return nil, err
+	}
+	err = waitReady(spec.probeReady, s.done)
+	if err == nil {
+		return s, nil
+	}
+	_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
+	<-s.done
+	if errors.Is(err, errExitedEarly) {
+		status := "exit status 0"
+		if s.err != nil {
+			status = s.err.Error()
+		}
+		err = fmt.Errorf("server exited (%s) before it was ready", status)
+	}
+	msg := fmt.Sprintf("%v; see %s", err, spec.logFile)
+	// Without a rotation, the file holds an earlier run's lines.
+	if curLog, serr := os.Stat(spec.logFile); serr == nil && (prevLog == nil || !os.SameFile(prevLog, curLog)) {
+		if tail := logFileTail(spec.logFile, managedLogTail); tail != "" {
+			msg += ":\n" + tail
+		}
+	}
+	return nil, errors.New(msg)
+}
+
+// startDetachedGroup starts each spec once the one before it is ready.
+func startDetachedGroup(specs []spawnSpec) ([]*detachedServer, error) {
+	var servers []*detachedServer
+	for _, spec := range specs {
+		s, err := startDetachedReady(spec)
+		if err != nil {
+			return nil, errors.Join(err, stopSpawned(servers))
+		}
+		servers = append(servers, s)
+	}
+	return servers, nil
+}
+
+// stopSpawned stops the servers in reverse order, so that a node stops before
+// the gateway it uplinks to.
+func stopSpawned(servers []*detachedServer) error {
+	var errs []error
+	for i := len(servers) - 1; i >= 0; i-- {
+		errs = append(errs, servers[i].stop())
+	}
+	return errors.Join(errs...)
+}
+
+// stop falls back to killing the process group when server.stop fails.
+func (s *detachedServer) stop() error {
+	socket := s.spec.readySocket()
+	c, err := dialDaemon(socket)
+	if err == nil && c == nil {
+		return nil
+	}
+	if err == nil {
+		err = stopDaemon(daemonConn{socket: socket, client: c})
+		c.Close()
+		if err == nil {
+			return nil
+		}
+	}
+	select {
+	case <-s.done:
+		return err
+	default:
+	}
+	_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
+	<-s.done
+	return fmt.Errorf("killed the server at %s: %w", socket, err)
+}
+
+func logFileTail(path string, n int) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return ansi.Strip(strings.Join(lines, "\n"))
 }

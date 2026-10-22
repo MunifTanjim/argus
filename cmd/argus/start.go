@@ -27,6 +27,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/gateway"
+	"github.com/MunifTanjim/argus/internal/logfile"
 	"github.com/MunifTanjim/argus/internal/logger"
 	applog "github.com/MunifTanjim/argus/internal/logger/log"
 	"github.com/MunifTanjim/argus/internal/node"
@@ -99,14 +100,25 @@ func validateMode(cfg *config.Config) error {
 
 // runStart is split from the cobra RunE so tests can drive the node/gateway wiring
 // with a cancellable context instead of a real signal.
-func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, cfg *config.Config, version string, managed bool) error {
+func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, cfg *config.Config, version string, managed bool, logOut io.Writer) error {
 	if err := validateMode(cfg); err != nil {
 		return fail(cmd, err)
 	}
-	if err := setupLogger(cfg, managed); err != nil {
+	if err := setupLogger(cfg, logOut, managed); err != nil {
 		return fail(cmd, err)
 	}
 	local := runLocalNode(cfg)
+	if local {
+		if err := refuseRunning(cfg.Socket); err != nil {
+			return fail(cmd, err)
+		}
+		// The TUI records the servers it starts; any state file left now is stale.
+		if logPath, _ := cmd.Flags().GetString("argus-log-file"); logPath == "" {
+			if err := removeLaunchState(cfg.Socket); err != nil {
+				return fail(cmd, err)
+			}
+		}
+	}
 	onTTY := isatty.IsTerminal(os.Stdin.Fd())
 	if local {
 		logger.Scoped("node").Info("starting argus node", "version", version)
@@ -133,6 +145,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		d = node.New()
 		d.SetIdentity(cfg.Node.ID, cfg.Node.Label)
 		d.SetVersion(version)
+		d.SetStop(stop)
 		d.SetSelfUpgrade(upgrades)
 		d.SetWakelockPath(config.GetStatePath("wakelock.json"))
 		d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
@@ -225,7 +238,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 	if local {
 		err = d.Run(ctx, cfg.Socket) // blocks until the signal cancels ctx
 	} else {
-		err = serveGatewaySocket(ctx, gwSock, version, upgrades)
+		err = serveGatewaySocket(ctx, gwSock, version, upgrades, stop)
 	}
 
 	if httpSrv != nil {
@@ -254,14 +267,17 @@ func gatewaySocketPath(nodeSocket string) string {
 
 // serveGatewaySocket lets `argus upgrade` reach a gateway. It blocks until ctx
 // is done.
-func serveGatewaySocket(ctx context.Context, l net.Listener, version string, upgrades *selfupgrade.Service) error {
+func serveGatewaySocket(ctx context.Context, l net.Listener, version string, upgrades *selfupgrade.Service, stop func()) error {
 	srv := api.NewServer()
 	srv.Handle(api.MethodServerInfo, func(context.Context, json.RawMessage) (any, error) {
 		return api.ServerInfo{Version: version, StartedAt: api.StartedAtRFC3339()}, nil
 	})
 	upgrades.Register(srv)
+	api.HandleStop(srv, stop)
 	return srv.ServeContext(ctx, l)
 }
+
+const serverLogMaxSize = 10 << 20
 
 // newStartCmd builds `argus start`: runs the local node (discovery + tmux control + the
 // unix-socket API), and optionally serves as a gateway (no --gateway + token set) or
@@ -274,6 +290,20 @@ func newStartCmd(version string) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Logging through the log file, not fd 2, keeps rotation sizes exact.
+			var logOut io.Writer = os.Stderr
+			logPath, _ := cmd.Flags().GetString("argus-log-file")
+			if logPath != "" {
+				lf, err := logfile.Open(logPath, serverLogMaxSize)
+				if err != nil {
+					return fail(cmd, err)
+				}
+				defer lf.Close()
+				if err := lf.RedirectStd(); err != nil {
+					return fail(cmd, err)
+				}
+				logOut = lf
+			}
 			cfg, err := resolveConfig(cmd)
 			if err != nil {
 				return fail(cmd, err)
@@ -282,12 +312,12 @@ func newStartCmd(version string) *cobra.Command {
 			defer stop()
 			managed, _ := cmd.Flags().GetBool("argus-managed")
 			if managed {
-				setupManagedChild(os.Stdin, stop)
+				setupManagedChild(os.Stdin, stop, logPath == "")
 			}
 			if combinedMode(cfg) {
-				return runSupervisor(ctx, cmd, cfg)
+				return runSupervisor(ctx, cmd, cfg, logOut)
 			}
-			return runStart(ctx, stop, cmd, cfg, version, managed)
+			return runStart(ctx, stop, cmd, cfg, version, managed, logOut)
 		},
 	}
 
@@ -318,6 +348,8 @@ func newStartCmd(version string) *cobra.Command {
 
 	f.Bool("argus-managed", false, "")
 	_ = f.MarkHidden("argus-managed")
+	f.String("argus-log-file", "", "")
+	_ = f.MarkHidden("argus-log-file")
 
 	_ = cmd.RegisterFlagCompletionFunc("tunnel", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return tunnelFlagCompletions(), cobra.ShellCompDirectiveNoFileComp
@@ -360,16 +392,16 @@ func tokenAuth(want string) func(string) bool {
 	return func(got string) bool { return got == want }
 }
 
-// setupLogger resolves log level/format from config and installs the global logger
-// before anything logs. A managed server's parent sets CLICOLOR_FORCE for our
+// setupLogger resolves log level/format from config and installs the global logger,
+// writing to w, before anything logs. A managed server's parent sets CLICOLOR_FORCE for our
 // log output only, so tmux and setup scripts must not inherit it; startEnv
 // keeps it for a restart.
-func setupLogger(cfg *config.Config, managed bool) error {
+func setupLogger(cfg *config.Config, w io.Writer, managed bool) error {
 	if err := applyLogLevel(cfg); err != nil {
 		return err
 	}
 	config.LogFormat = cfg.Log.Format
-	logger.Init()
+	logger.InitWriter(w)
 	if managed {
 		_ = os.Unsetenv("CLICOLOR_FORCE")
 	}
@@ -570,9 +602,12 @@ func setupBlindPush(hsrv *gateway.Server, log *slog.Logger) {
 // setupManagedChild runs before anything starts a process. Processes we start
 // (tmux, setup scripts) must not inherit the token. The TUI reads our output; once
 // it is gone, a log write must fail, not kill us before shutdown. Notify, not
-// Ignore, so that children get the default SIGPIPE back on exec.
-func setupManagedChild(parent io.Reader, stop context.CancelFunc) {
+// Ignore, so that children get the default SIGPIPE back on exec. A detached
+// child has no parent to watch: its stdin is /dev/null, which reads EOF at once.
+func setupManagedChild(parent io.Reader, stop context.CancelFunc, watch bool) {
 	_ = os.Unsetenv("ARGUS_TOKEN")
 	signal.Notify(make(chan os.Signal, 1), syscall.SIGPIPE)
-	go watchParent(parent, stop)
+	if watch {
+		go watchParent(parent, stop)
+	}
 }
