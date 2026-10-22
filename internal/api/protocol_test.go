@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
@@ -131,5 +132,48 @@ func TestTerminalDataJSONWireUnchanged(t *testing.T) {
 	}
 	if string(in.Data) != "hi" {
 		t.Fatalf("data = %q, want hi", in.Data)
+	}
+}
+
+func TestOrchMethodsArePrefixed(t *testing.T) {
+	methods := []string{
+		MethodOrchSessionCurrent, MethodOrchSessionList, MethodOrchSessionGet, MethodOrchSessionSpawn, MethodOrchMessageSend,
+		MethodOrchMessageReply, MethodOrchInteractionRespond, MethodOrchSessionOutput, MethodOrchSessionTranscript, MethodOrchSessionKill,
+		MethodOrchSessionRename,
+	}
+	for _, m := range methods {
+		if !strings.HasPrefix(m, "orch.") {
+			t.Errorf("%q lacks the orch. prefix", m)
+		}
+	}
+	// Client channels block orch.*, and the owner methods must stay reachable.
+	for _, m := range []string{MethodMessageList, MethodMessageSend, MethodMessageChanged} {
+		if strings.HasPrefix(m, "orch.") {
+			t.Errorf("%q must not have the orch. prefix", m)
+		}
+	}
+}
+
+func TestSessionParentJSON(t *testing.T) {
+	s := session.Session{Parent: &session.ParentRef{Node: "home", Key: "claude:p", Gone: true}}
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `"parent":{"node":"home","key":"claude:p","gone":true}`; !strings.Contains(string(b), want) {
+		t.Fatalf("session json = %s, want it to contain %s", b, want)
+	}
+}
+
+func TestMessageJSONOmitsEmptyActors(t *testing.T) {
+	b, _ := json.Marshal(Message{ID: "a:m-00000001", Kind: MessageText})
+	for _, k := range []string{`"child"`, `"answered_by"`} {
+		if strings.Contains(string(b), k) {
+			t.Fatalf("%s present in %s", k, b)
+		}
+	}
+	b, _ = json.Marshal(Message{Child: &Actor{Node: "a", Key: "codex:1"}, AnsweredBy: &Actor{Node: "b", Key: "codex:2"}})
+	if !strings.Contains(string(b), `"child":{"node":"a","key":"codex:1"}`) || !strings.Contains(string(b), `"answered_by":{"node":"b","key":"codex:2"}`) {
+		t.Fatalf("actors not objects: %s", b)
 	}
 }

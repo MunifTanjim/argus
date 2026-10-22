@@ -159,3 +159,42 @@ func TestHandleSessionRenameSurfacesAgentErrors(t *testing.T) {
 		t.Errorf("registry name = %q, want Old (no optimistic update on failure)", got.Name)
 	}
 }
+
+func callAgentRename(d *Node, id, name string) (api.SessionRenameResult, error) {
+	params, _ := json.Marshal(api.OrchRenameParams{SessionID: id, Name: name})
+	raw, err := d.handleOrchSessionRename(context.Background(), params)
+	if err != nil {
+		return api.SessionRenameResult{}, err
+	}
+	return raw.(api.SessionRenameResult), nil
+}
+
+// Any session may be renamed, and no caller identity is needed, so a plain
+// shell can rename too.
+func TestAgentRenameRenamesAnySession(t *testing.T) {
+	fr := &fakeRenamer{}
+	d, s := renameTestNode(t, "opencode", fr)
+	res, err := callAgentRename(d, s.ID, "  New name  ")
+	if err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if res.Name != "New name" || !res.Applied || fr.names["ses_1"] != "New name" {
+		t.Errorf("result = %+v, agent saw %q", res, fr.names["ses_1"])
+	}
+	if got, _ := d.reg.Get(s.ID); got.Name != "New name" {
+		t.Errorf("registry name = %q", got.Name)
+	}
+}
+
+func TestAgentRenameRejectsBadInput(t *testing.T) {
+	d, s := renameTestNode(t, "opencode", &fakeRenamer{})
+	for _, tc := range []struct{ id, name, want string }{
+		{s.ID, "  ", "name"},
+		{s.ID, "a\nb", "control characters"},
+		{"nope", "x", "unknown session"},
+	} {
+		if _, err := callAgentRename(d, tc.id, tc.name); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("rename(%q, %q) err = %v, want %q", tc.id, tc.name, err, tc.want)
+		}
+	}
+}

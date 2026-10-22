@@ -49,7 +49,30 @@ func (d *Node) withCaps(s session.Session) session.Session {
 	s.CanOpenTerminal = d.canOpenTerminal(s)
 	q, ok := d.adapterFor(s.Agent).(adapter.PromptQueuer)
 	s.CanPrompt = s.TakesPrompt(ok && q.QueuesPrompts(s))
+	s.Parent = d.parentRef(s)
 	return s
+}
+
+func (d *Node) parentRef(s session.Session) *session.ParentRef {
+	key := actorKey(s)
+	if d.orch == nil || key == "" {
+		return nil
+	}
+	link, ok, err := d.orch.Link(context.Background(), api.Actor{Node: d.id, Key: key})
+	if err != nil {
+		d.log.Debug("orch: link lookup failed", "session", s.ID, "err", err)
+		return nil
+	}
+	if !ok {
+		return nil
+	}
+	ref := &session.ParentRef{Node: link.Parent.Node, Key: link.Parent.Key}
+	if p, live := d.sessionForKey(link.Parent.Key); live {
+		ref.SessionID = p.ID
+	} else {
+		ref.Gone = true
+	}
+	return ref
 }
 
 // canOpenTerminal reports whether argus can show a terminal for this live session
@@ -157,10 +180,7 @@ func (d *Node) handleTranscriptView(_ context.Context, params json.RawMessage) (
 	if !ok {
 		return nil, fmt.Errorf("unknown session: %s", p.SessionID)
 	}
-	if s.TranscriptPath == "" {
-		return transcript.TranscriptView{}, nil
-	}
-	return d.adapterFor(s.Agent).ReadTranscriptView(s.TranscriptPath)
+	return d.transcriptView(s)
 }
 
 // handleSessionToolDetail returns one tool entry's full input/result by tool_use
@@ -221,6 +241,10 @@ func (d *Node) handleSessionInput(ctx context.Context, params json.RawMessage) (
 	if !ok {
 		return nil, fmt.Errorf("unknown session: %s", p.SessionID)
 	}
+	return d.sendInput(ctx, s, p)
+}
+
+func (d *Node) sendInput(ctx context.Context, s session.Session, p api.InputParams) (any, error) {
 	switch s.Input {
 	case session.InputAPI:
 		return d.sendPromptInput(ctx, s, p)
@@ -229,6 +253,11 @@ func (d *Node) handleSessionInput(ctx context.Context, params json.RawMessage) (
 	default:
 		return nil, fmt.Errorf("%s: %w", s.ID, api.ErrNoTerminalControl)
 	}
+}
+
+func (d *Node) deliverPrompt(ctx context.Context, s session.Session, text string) error {
+	_, err := d.sendInput(ctx, s, api.InputParams{SessionID: s.ID, Text: text, Submit: true, Prepare: true})
+	return err
 }
 
 // sendPaneInput sends text (and optionally Enter) to a session's pane, after
@@ -356,14 +385,14 @@ func (d *Node) handleSessionKey(ctx context.Context, params json.RawMessage) (an
 
 // resolveSpawnCommand: an explicit p.Command wins; otherwise the agent's adapter
 // owns construction (adapterFor falls back to the first adapter for unknown agents).
-func (d *Node) resolveSpawnCommand(p api.SpawnParams) (command string, args []string) {
+func (d *Node) resolveSpawnCommand(p api.SpawnParams, presetID string) (command string, args []string) {
 	if p.Command != "" {
 		if p.Prompt != "" {
 			args = []string{p.Prompt}
 		}
 		return p.Command, args
 	}
-	return d.adapterFor(p.Agent).SpawnCommand(adapter.SpawnOptions{Prompt: p.Prompt, Model: p.Model})
+	return d.adapterFor(p.Agent).SpawnCommand(adapter.SpawnOptions{Prompt: p.Prompt, Model: p.Model, SessionID: presetID})
 }
 
 func (d *Node) handleAgentModelList(ctx context.Context, params json.RawMessage) (any, error) {
@@ -449,20 +478,29 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 	if err != nil {
 		return nil, err
 	}
+	res, err := d.spawn(ctx, p, "")
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// spawn starts a session; presetID is the agent session id for an adapter.SessionIDPresetter.
+func (d *Node) spawn(ctx context.Context, p api.SpawnParams, presetID string) (api.SpawnResult, error) {
 	home, _ := os.UserHomeDir()
 	p.Cwd = expandHome(p.Cwd, home)
 	// Checked for every agent; tmux would silently fall back to $HOME.
 	if err := d.cwdError("cannot spawn", p.Cwd); err != nil {
-		return nil, err
+		return api.SpawnResult{}, err
 	}
 	a := d.adapterFor(p.Agent)
 	// Never drop a model choice silently: reject what cannot apply it.
 	if p.Model != "" {
 		if p.Command != "" {
-			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "cannot choose a model with an explicit command"}
+			return api.SpawnResult{}, &api.RPCError{Code: api.CodeInvalidRequest, Message: "cannot choose a model with an explicit command"}
 		}
 		if _, ok := a.(adapter.ModelLister); !ok {
-			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: a.AgentName() + " has no model choice"}
+			return api.SpawnResult{}, &api.RPCError{Code: api.CodeInvalidRequest, Message: a.AgentName() + " has no model choice"}
 		}
 	}
 	// A Spawner agent (headless, e.g. opencode) has no pane process: create the
@@ -471,7 +509,7 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 	if sp, ok := a.(adapter.Spawner); ok {
 		id, err := sp.SpawnSession(ctx, p.Cwd, adapter.SpawnOptions{Prompt: p.Prompt, Model: p.Model})
 		if err != nil {
-			return nil, &api.RPCError{
+			return api.SpawnResult{}, &api.RPCError{
 				Code:    api.CodeInvalidRequest,
 				Message: "cannot spawn " + a.AgentName() + " session: " + err.Error(),
 			}
@@ -479,22 +517,22 @@ func (d *Node) handleSessionSpawn(ctx context.Context, params json.RawMessage) (
 		return api.SpawnResult{SessionID: registry.AgentSessionKey(p.Agent, id)}, nil
 	}
 	if !d.caps.SpawnSession {
-		return nil, &api.RPCError{
+		return api.SpawnResult{}, &api.RPCError{
 			Code:    api.CodeInvalidRequest,
 			Message: "spawn unavailable: tmux not found on node " + d.label,
 		}
 	}
-	command, args := d.resolveSpawnCommand(p)
+	command, args := d.resolveSpawnCommand(p, presetID)
 	// Fail loudly rather than opening a tmux pane that dies "command not found".
 	if _, err := exec.LookPath(command); err != nil {
-		return nil, &api.RPCError{
+		return api.SpawnResult{}, &api.RPCError{
 			Code:    api.CodeInvalidRequest,
 			Message: fmt.Sprintf("cannot spawn: %q is not installed on node %s", command, d.label),
 		}
 	}
 	paneID, err := d.launchPane(ctx, p.Name, command, args, p.Cwd)
 	if err != nil {
-		return nil, err
+		return api.SpawnResult{}, err
 	}
 	// Discovery registers the session, but only once the agent process is visible in
 	// ps — which can lag the pane's creation. Retry with backoff so the session shows
@@ -742,6 +780,11 @@ func (d *Node) handleSessionKill(ctx context.Context, params json.RawMessage) (a
 	if !ok {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session " + p.SessionID}
 	}
+	_, err = d.killTree(ctx, s, "owner")
+	return nil, err
+}
+
+func (d *Node) killSession(ctx context.Context, s session.Session) error {
 	// A headless agent's pane is a disposable viewer, not the session's process:
 	// killing it alone leaves the session in the list. Remove the session, tearing
 	// down the adopted viewer pane too when one is present.
@@ -752,21 +795,23 @@ func (d *Node) handleSessionKill(ctx context.Context, params json.RawMessage) (a
 			}
 		}
 		d.clearResuming(s.ID)
-		return d.dismissSession(ctx, s)
+		_, err := d.dismissSession(ctx, s)
+		return err
 	}
 	if !s.Controllable() {
-		return d.dismissSession(ctx, s)
+		_, err := d.dismissSession(ctx, s)
+		return err
 	}
 	c, err := d.clientFor(s)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if err := c.KillPane(ctx, s.Tmux.PaneID); err != nil {
-		return nil, err
+		return err
 	}
 	d.clearResuming(s.ID)
 	go d.scan(context.Background())
-	return nil, nil
+	return nil
 }
 
 // handleSessionRename renames a session through its agent; it needs no tmux
@@ -776,27 +821,36 @@ func (d *Node) handleSessionRename(ctx context.Context, params json.RawMessage) 
 	if err != nil {
 		return nil, err
 	}
-	name := strings.TrimSpace(p.Name)
-	if p.SessionID == "" || name == "" {
+	if p.SessionID == "" {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "session_id and name are required"}
-	}
-	if strings.ContainsFunc(name, unicode.IsControl) {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "name must not contain control characters"}
 	}
 	s, ok := d.reg.Get(p.SessionID)
 	if !ok {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session " + p.SessionID}
 	}
+	return d.renameSession(ctx, s, p.Name)
+}
+
+// renameSession names s through its agent; the registry follows once the agent
+// has applied it.
+func (d *Node) renameSession(ctx context.Context, s session.Session, name string) (api.SessionRenameResult, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return api.SessionRenameResult{}, &api.RPCError{Code: api.CodeInvalidRequest, Message: "session_id and name are required"}
+	}
+	if strings.ContainsFunc(name, unicode.IsControl) {
+		return api.SessionRenameResult{}, &api.RPCError{Code: api.CodeInvalidRequest, Message: "name must not contain control characters"}
+	}
 	r, ok := d.adapterFor(s.Agent).(adapter.Renamer)
 	if !ok {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "rename unsupported for " + s.Agent + " sessions"}
+		return api.SessionRenameResult{}, &api.RPCError{Code: api.CodeInvalidRequest, Message: "rename unsupported for " + s.Agent + " sessions"}
 	}
 	applied, err := r.RenameSession(ctx, s, name)
 	if err != nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
+		return api.SessionRenameResult{}, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 	}
 	if applied {
-		d.reg.RenameSession(p.SessionID, name)
+		d.reg.RenameSession(s.ID, name)
 	}
 	return api.SessionRenameResult{Name: name, Applied: applied}, nil
 }

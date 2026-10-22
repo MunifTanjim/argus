@@ -3,10 +3,12 @@ package opencode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -31,6 +33,32 @@ func (ocAdapter) Agent() string      { return Agent }
 func (ocAdapter) AgentName() string  { return "OpenCode" }
 func (ocAdapter) AgentColor() string { return "#d3869b" }
 func (ocAdapter) IsHeadless() bool   { return true }
+
+func (ocAdapter) CallerEnv() string { return "OPENCODE_SESSION_ID" }
+
+func (ocAdapter) IsAgentProcess(p procwalk.Proc, env map[string]string) bool {
+	return p.Runs("opencode")
+}
+
+const maxParentDepth = 10
+
+func (ocAdapter) RootSession(ctx context.Context, id string) (string, error) {
+	c, ok := serviceClient()
+	if !ok {
+		return "", errors.New("opencode service not running")
+	}
+	for range maxParentDepth {
+		s, err := c.getSession(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		if s.ParentID == "" {
+			return id, nil
+		}
+		id = s.ParentID
+	}
+	return "", fmt.Errorf("session %s: parent chain exceeds %d steps", id, maxParentDepth)
+}
 
 func (a *ocAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
 	a.disc = newDiscoverer(reg, clients)

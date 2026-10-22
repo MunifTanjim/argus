@@ -101,3 +101,29 @@ func equal(a, b []string) bool {
 	}
 	return true
 }
+func TestHasDraftReadsInputLine(t *testing.T) {
+	rule := "────────────────────────────────"
+	cases := map[string]struct {
+		screen string
+		want   bool
+	}{
+		"empty":       {rule + "\n❯ \n" + rule + "\n  ? for shortcuts", false},
+		"draft":       {rule + "\n❯ fix the tests\n" + rule, true},
+		"placeholder": {rule + "\n❯ Try \"write a test for main.go\"\n" + rule, false},
+		"old box":     {"╭──────╮\n│ > hello │\n╰──────╯", true},
+		"old empty":   {"╭──────╮\n│ >       │\n╰──────╯", false},
+		"no prompt":   {"some output\nmore output", false},
+	}
+	for name, tc := range cases {
+		if got := (ccAdapter{}).HasDraft(tc.screen); got != tc.want {
+			t.Errorf("%s: HasDraft = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+func TestHasDraftNeedsTheInputBox(t *testing.T) {
+	screen := "> an old prompt echoed in the transcript\nthe agent's answer"
+	if (ccAdapter{}).HasDraft(screen) {
+		t.Fatal("an echoed prompt line outside the input box counted as a draft")
+	}
+}

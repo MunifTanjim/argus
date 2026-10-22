@@ -21,6 +21,8 @@ import (
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/forge"
 	"github.com/MunifTanjim/argus/internal/host"
+	"github.com/MunifTanjim/argus/internal/orch"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -38,6 +40,7 @@ type Node struct {
 	// adapterList holds agent adapters in priority order; [0] is the default.
 	adapterList []adapter.Adapter
 	adapters    map[string]adapter.Adapter
+	procTable   func(context.Context) (procwalk.Table, error)
 	discs       []adapter.Discoverer
 	server      *api.Server
 	clients     map[session.TmuxServer]*tmux.Client
@@ -102,7 +105,31 @@ type Node struct {
 	focusedFn       func(ctx context.Context, c *tmux.Client, paneID string) (bool, error) // seam for tests; defaults to (*tmux.Client).IsFocused
 	restoreMirrorFn func(c *tmux.Client, m *mirrorState)                                   // seam for tests; defaults to (*Node).restoreMirror
 
-	instanceID string // tells mods this node process from a restarted one
+	instanceID string                                                                                 // tells mods this node process from a restarted one
+	spawnFn    func(ctx context.Context, p api.SpawnParams, presetID string) (api.SpawnResult, error) // seam for tests; defaults to (*Node).spawn
+
+	orch          *orch.Store     // nil = orch.* and message.* disabled
+	orchCleared   map[string]bool // "<from> <to>" /clear rekeys already applied
+	orchPrev      map[string]session.Status
+	orchWorked    map[string]bool      // session id -> reported working since the last pass
+	orchLive      map[string]bool      // actor keys live at the last pass
+	orchGone      map[string]time.Time // actor key -> when it was first seen gone
+	orchGoneGrace time.Duration
+	orchSettled   chan struct{} // closed once startup discovery has settled
+	orchSettleOne *sync.Once    // closes orchSettled
+	orchSeeded    bool
+	orchHeld      map[string]time.Time // actor key -> when its delivery hold ends
+	// deliverFn types a delivery into a session; tests replace it.
+	deliverFn func(ctx context.Context, s session.Session, text string) error
+	// paneProbe reports a pane session's last client activity and its screen;
+	// tests replace it.
+	paneProbe     func(ctx context.Context, s session.Session) (time.Time, string, error)
+	orchSigs      map[string]string            // session id -> last pending interaction sig
+	orchParents   map[string]session.ParentRef // session id -> parent last published
+	orchKickCh    chan struct{}
+	orchExpiredAt time.Time
+	orchRequests  requestLocks
+	ownerSinks    atomic.Pointer[[]push.Sink] // Immediate then Delayed sinks, set by StartPush
 
 	pendingMu sync.Mutex
 	pending   map[string]*pendingDecision // request id -> parked PermissionRequest
@@ -237,6 +264,9 @@ func (d *Node) SetPushDeliverer(dv push.Deliverer) { d.pushDeliverer.Store(&dv) 
 func (d *Node) SetIdentity(id, label string) {
 	if id != "" {
 		d.id = id
+		if d.orch != nil {
+			d.orch.SetNodeID(id)
+		}
 	}
 	if label != "" {
 		d.label = label
@@ -295,11 +325,11 @@ func (d *Node) reevaluateTrustChannels() {
 	}
 }
 
-// remoteDispatch rejects lock.* and server.stop (local-admin only) and dispatches the rest.
+// remoteDispatch rejects lock.*, orch.* and server.stop (local-only) and dispatches the rest.
 func (d *Node) remoteDispatch() api.DispatchFunc {
 	full := d.server.DispatchFunc()
 	return func(ctx context.Context, method string, params json.RawMessage) (any, error) {
-		if strings.HasPrefix(method, "lock.") || method == api.MethodServerStop {
+		if strings.HasPrefix(method, "lock.") || strings.HasPrefix(method, "orch.") || method == api.MethodServerStop {
 			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
 		}
 		return full(ctx, method, params)
@@ -441,6 +471,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	d := &Node{
 		reg: reg, clients: clients, id: hostname, label: hostname,
 		adapterList:  adapterList,
+		procTable:    procwalk.Snapshot,
 		adapters:     adapterByAgent,
 		discs:        discs,
 		caps:         caps,
@@ -465,6 +496,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 		return c.IsFocused(ctx, paneID)
 	}
 	d.restoreMirrorFn = d.restoreMirror
+	d.spawnFn = d.spawn
 
 	srv := api.NewServer()
 	d.registerHandlers(srv)
@@ -557,11 +589,20 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	d.reapMirrors(context.Background())
 
 	// Subsequent scans are on demand (client refresh, hook events, spawn/kill).
-	go d.scan(ctx)
+	go func() {
+		d.scan(ctx)
+		if d.orch != nil {
+			d.orchSettle(ctx)
+		}
+	}()
 
 	// Detach any live terminal whose session ends, so a viewer never lands on the
 	// bare shell the agent leaves behind.
 	go d.watchSessionExits(ctx)
+
+	if d.orch != nil {
+		go d.orchLoop(ctx)
+	}
 
 	return d.server.ServeContext(ctx, l)
 }

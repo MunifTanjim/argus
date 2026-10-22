@@ -260,3 +260,17 @@ func TestClearPendingDecision(t *testing.T) {
 	default:
 	}
 }
+
+func TestFindByAgentSessionChecksAgent(t *testing.T) {
+	r := New()
+	r.ApplyHook(HookUpdate{
+		Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%0",
+		AgentSessionID: "s1", Status: session.StatusIdle,
+	})
+	if s, ok := r.FindByAgentSession("claude", "s1"); !ok || s.AgentSessionID != "s1" {
+		t.Fatalf("FindByAgentSession(claude, s1) = %+v, %v", s, ok)
+	}
+	if _, ok := r.FindByAgentSession("codex", "s1"); ok {
+		t.Fatal("codex must not match a claude session")
+	}
+}
