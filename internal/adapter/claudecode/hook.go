@@ -21,6 +21,7 @@ type hookPayload struct {
 	HookEventName    string          `json:"hook_event_name"`
 	ToolName         string          `json:"tool_name"`
 	ToolInput        json.RawMessage `json:"tool_input"`
+	ToolUseID        string          `json:"tool_use_id"`
 	NotificationType string          `json:"notification_type"`
 	Message          string          `json:"message"`
 	// Reason is SessionEnd's end cause. "clear" is special: /clear ends in place
@@ -134,8 +135,19 @@ func EventName(ev HookEvent) string {
 	if ev.Event != "" {
 		return ev.Event
 	}
+	return decodeHook(ev).HookEventName
+}
+
+func decodeHook(ev HookEvent) hookPayload {
 	var p hookPayload
 	_ = json.Unmarshal(ev.Payload, &p)
+	return p
+}
+
+func eventOf(ev HookEvent, p hookPayload) string {
+	if ev.Event != "" {
+		return ev.Event
+	}
 	return p.HookEventName
 }
 
@@ -243,13 +255,11 @@ func serverFromSocket(socketBasename string) session.TmuxServer {
 // ProcessHook parses a hook event and applies it to the registry, returning the
 // resulting session and whether it still exists.
 func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
-	var p hookPayload
-	_ = json.Unmarshal(ev.Payload, &p)
+	return processHook(reg, ev, decodeHook(ev))
+}
 
-	event := ev.Event
-	if event == "" {
-		event = p.HookEventName
-	}
+func processHook(reg *registry.Registry, ev HookEvent, p hookPayload) (session.Session, bool) {
+	event := eventOf(ev, p)
 	status, _ := statusFor(event) // empty status leaves it unchanged
 
 	// A pending interaction forces awaiting-input; no interaction clears the field

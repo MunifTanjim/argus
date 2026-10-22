@@ -467,3 +467,22 @@ func TestRespondFailureRestoresDeliveredState(t *testing.T) {
 		t.Fatalf("notice = %+v", got)
 	}
 }
+
+func TestSplitAnswersAtTheQuestion(t *testing.T) {
+	ix := &session.Interaction{Kind: session.InteractionQuestion, Questions: []session.QuestionSpec{
+		{Question: "Set x=1?"}, {Question: "Other"},
+	}}
+	cases := map[string]map[string]any{
+		"last =":  {"Set x=1?=a": "b"},
+		"first =": {"Set x": "1?=a=b"},
+		"exact":   {"Set x=1?": "a=b"},
+	}
+	for name, given := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := splitAnswers(given, ix)
+			if len(got) != 1 || got["Set x=1?"] != "a=b" {
+				t.Fatalf("got %v", got)
+			}
+		})
+	}
+}

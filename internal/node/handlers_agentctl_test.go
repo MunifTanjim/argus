@@ -6,9 +6,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/db"
+	"github.com/MunifTanjim/argus/internal/mesh"
 	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -196,6 +199,17 @@ func TestAgentSpawnNeedsCaller(t *testing.T) {
 	}
 }
 
+func TestAgentSpawnRequiresAbsoluteCwd(t *testing.T) {
+	d, fs, caller := spawnNode(t, true)
+	params, _ := json.Marshal(api.AgentSpawnParams{Caller: caller, Agent: "fake", Cwd: "rel/dir"})
+	if _, err := d.handleAgentSpawn(t.Context(), params); err == nil || !strings.Contains(err.Error(), "cwd") {
+		t.Fatalf("err = %v", err)
+	}
+	if fs.gotCwd != "" {
+		t.Fatal("spawner was called")
+	}
+}
+
 func TestAgentSpawnFailureLeavesNoLink(t *testing.T) {
 	d, fs, caller := spawnNode(t, true)
 	fs.err = errors.New("boom")
@@ -206,6 +220,38 @@ func TestAgentSpawnFailureLeavesNoLink(t *testing.T) {
 	links, err := d.mesh.Links(t.Context())
 	if err != nil || len(links) != 0 {
 		t.Fatalf("links = %+v err=%v", links, err)
+	}
+}
+
+type dismissSpawner struct {
+	*fakeSpawner
+	dismissed []string
+}
+
+func (f *dismissSpawner) Dismiss(_ context.Context, s session.Session) error {
+	f.dismissed = append(f.dismissed, s.AgentSessionID)
+	return nil
+}
+
+func TestAgentSpawnKillsChildWhenLinkFails(t *testing.T) {
+	d, fs, caller := spawnNode(t, true)
+	ds := &dismissSpawner{fakeSpawner: fs}
+	d.adapters["fake"] = ds
+	sqlDB, err := db.Open(t.TempDir() + "/broken.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sqlDB.Close() })
+	if _, err := sqlDB.Exec("CREATE TRIGGER no_link BEFORE INSERT ON mesh_link BEGIN SELECT RAISE(ABORT, 'boom'); END"); err != nil {
+		t.Fatal(err)
+	}
+	d.mesh = mesh.NewStore(sqlDB, time.Now)
+	params, _ := json.Marshal(api.AgentSpawnParams{Caller: caller, Agent: "fake", Cwd: t.TempDir(), Prompt: "x"})
+	if _, err := d.handleAgentSpawn(t.Context(), params); err == nil {
+		t.Fatal("expected error")
+	}
+	if len(ds.dismissed) != 1 || ds.dismissed[0] != "ses_x" {
+		t.Fatalf("dismissed = %v, want the spawned child", ds.dismissed)
 	}
 }
 

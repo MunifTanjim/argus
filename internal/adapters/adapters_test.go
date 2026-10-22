@@ -25,9 +25,15 @@ func TestOrchestratedAgentsImplementIdentity(t *testing.T) {
 		if _, ok := a.(adapter.CallerIdentity); !ok {
 			t.Errorf("%s does not implement CallerIdentity", agent)
 		}
+		if _, ok := a.(adapter.MCPIdentity); !ok {
+			t.Errorf("%s does not implement MCPIdentity", agent)
+		}
 	}
 	a := ByAgent("antigravity")
 	if _, ok := a.(adapter.CallerIdentity); ok {
 		t.Error("antigravity implements CallerIdentity")
+	}
+	if _, ok := a.(adapter.MCPIdentity); ok {
+		t.Error("antigravity implements MCPIdentity")
 	}
 }
