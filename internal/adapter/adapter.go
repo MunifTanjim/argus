@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -24,7 +25,13 @@ import (
 type InstallOptions struct {
 	ArgusBin string // binary the hooks invoke (hook-based agents)
 	Socket   string // argusd mod socket (Claude Code)
+	MCPURL   string // node MCP base URL; see MCPEndpoint
+	MCPToken string // bearer token for MCPURL
+	MCPOff   bool   // MCP is configured off: remove argus's MCP entries
 }
+
+// MCPEndpoint is the agent's own endpoint under MCPURL.
+func (o InstallOptions) MCPEndpoint(agent string) string { return o.MCPURL + "/" + agent }
 
 // ErrAgentNotInstalled reports that an agent's CLI is not available, so there is
 // nothing to install into.
@@ -61,6 +68,11 @@ func WithinDir(dir, p string) bool {
 		return false
 	}
 	return true
+}
+
+func DirExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.IsDir()
 }
 
 // HookMethod is the JSON-RPC method every argus hook invocation calls.

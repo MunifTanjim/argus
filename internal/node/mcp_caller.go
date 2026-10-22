@@ -25,19 +25,5 @@ func (d *Node) resolveMCPCaller(ctx context.Context, agent string, meta map[stri
 	if err != nil {
 		return session.Session{}, fmt.Errorf("%s: %w", agent, err)
 	}
-	if s, found := d.reg.FindByAgentSession(agent, id); found {
-		return s, nil
-	}
-	r, ok := a.(adapter.RootSessionResolver)
-	if !ok {
-		return session.Session{}, fmt.Errorf("%w: %s session %s", api.ErrNoCaller, agent, id)
-	}
-	root, err := r.RootSession(ctx, id)
-	if err != nil {
-		return session.Session{}, fmt.Errorf("%w: %s session %s: %v", api.ErrNoCaller, agent, id, err)
-	}
-	if s, found := d.reg.FindByAgentSession(agent, root); found {
-		return s, nil
-	}
-	return session.Session{}, fmt.Errorf("%w: %s session %s", api.ErrNoCaller, agent, id)
+	return d.findAgentSession(ctx, a, id)
 }

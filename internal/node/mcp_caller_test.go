@@ -92,8 +92,10 @@ func (r rootingAdapter) RootSession(_ context.Context, id string) (string, error
 	if root, ok := r.roots[id]; ok {
 		return root, nil
 	}
-	return "", errors.New("no such session")
+	return "", errNoSuchSession
 }
+
+var errNoSuchSession = errors.New("no such session")
 
 func TestResolveMCPCallerRootFallback(t *testing.T) {
 	d := mcpNode()
@@ -107,7 +109,7 @@ func TestResolveMCPCallerRootFallback(t *testing.T) {
 		t.Fatalf("got %s", s.AgentSessionID)
 	}
 	_, err = d.resolveMCPCaller(t.Context(), "codex", rawMeta(map[string]string{"sessionId": "orphan"}))
-	if !errors.Is(err, api.ErrNoCaller) {
+	if !errors.Is(err, api.ErrNoCaller) || !errors.Is(err, errNoSuchSession) {
 		t.Fatalf("err = %v", err)
 	}
 }

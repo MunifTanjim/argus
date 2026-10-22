@@ -1,6 +1,7 @@
 package mcphttp
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -32,8 +33,11 @@ type Backend interface {
 }
 
 // NewHandler serves JSON-RPC over POST /mcp/{agent}, guarded by a bearer token.
-func NewHandler(token string, b Backend) http.Handler {
-	s := &server{token: []byte(token), backend: b}
+func NewHandler(token, version string, b Backend) http.Handler {
+	if version == "" {
+		version = "0"
+	}
+	s := &server{token: []byte(token), version: version, backend: b}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mcp/{agent}", s.serve)
 	return mux
@@ -41,12 +45,13 @@ func NewHandler(token string, b Backend) http.Handler {
 
 type server struct {
 	token   []byte
+	version string
 	backend Backend
 }
 
 func (s *server) authorized(r *http.Request) bool {
 	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	return ok && subtle.ConstantTimeCompare([]byte(got), s.token) == 1
+	return ok && len(s.token) > 0 && subtle.ConstantTimeCompare([]byte(got), s.token) == 1
 }
 
 func (s *server) serve(w http.ResponseWriter, r *http.Request) {
@@ -70,12 +75,17 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+	if b := bytes.TrimLeft(body, " \t\r\n"); len(b) > 0 && b[0] == '[' {
+		writeJSON(w, response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &api.RPCError{Code: api.CodeInvalidRequest, Message: "batch requests are not supported"}})
+		return
+	}
 	var req request
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeJSON(w, response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &api.RPCError{Code: api.CodeParseError, Message: "parse error"}})
 		return
 	}
-	if len(req.ID) == 0 {
+	// A notification, or the client's response to a server request.
+	if len(req.ID) == 0 || req.Method == "" {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
@@ -97,7 +107,7 @@ func (s *server) dispatch(ctx context.Context, agent string, req request) respon
 		resp.Result = map[string]any{
 			"protocolVersion": p.ProtocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": "argus"},
+			"serverInfo":      map[string]any{"name": "argus", "version": s.version},
 		}
 	case "ping":
 		resp.Result = map[string]any{}

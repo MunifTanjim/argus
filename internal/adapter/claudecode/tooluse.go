@@ -13,8 +13,9 @@ import (
 
 const (
 	// mcpToolPrefix starts the name Claude gives every argus mod MCP tool.
-	mcpToolPrefix   = "mcp__plugin_argus_argus__"
-	toolUseTTL      = 10 * time.Minute
+	mcpToolPrefix = "mcp__plugin_argus_argus__"
+	// Outlasts a permission prompt left open for a while; entries are single-use.
+	toolUseTTL      = 24 * time.Hour
 	toolUseSweepGap = time.Minute
 	toolUseMeta     = "claudecode/toolUseId"
 )

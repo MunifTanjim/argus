@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/mcphttp"
@@ -243,7 +244,8 @@ func checkArgs(args json.RawMessage, t mcpTool) error {
 		}
 	}
 	for _, k := range t.required {
-		if v, ok := m[k]; !ok || string(v) == "null" || string(v) == `""` {
+		var str string
+		if v, ok := m[k]; !ok || string(v) == "null" || json.Unmarshal(v, &str) == nil && strings.TrimSpace(str) == "" {
 			return fmt.Errorf("missing required argument: %s", k)
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -98,5 +99,26 @@ func TestLoadOrCreateTokenAcceptsTrailingNewline(t *testing.T) {
 	got, err := LoadOrCreateToken(path)
 	if err != nil || got != want {
 		t.Fatalf("token=%q err=%v", got, err)
+	}
+}
+
+func TestLoadOrCreateTokenConcurrentCallersAgree(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp.token")
+	const n = 16
+	tokens := make([]string, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tokens[i], errs[i] = LoadOrCreateToken(path)
+		}()
+	}
+	wg.Wait()
+	for i := range n {
+		if errs[i] != nil || tokens[i] != tokens[0] {
+			t.Fatalf("caller %d: token=%q err=%v, want %q", i, tokens[i], errs[i], tokens[0])
+		}
 	}
 }

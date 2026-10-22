@@ -468,6 +468,17 @@ func TestRespondFailureRestoresDeliveredState(t *testing.T) {
 	}
 }
 
+func TestPromptNoticeMentionsRespondTool(t *testing.T) {
+	d, _, _ := noticeNode(t)
+	parentSession(d, session.StatusWorking)
+	apiSession(d, "c", session.StatusAwaitingInput, permission("go test ./..."))
+	d.meshPass(t.Context())
+	n := onlyNotice(t, d)
+	if want := "Answer with the argus `respond` tool (notice_id " + n.ID + ")"; !strings.Contains(n.Body, want) {
+		t.Fatalf("body = %q", n.Body)
+	}
+}
+
 func TestSplitAnswersAtTheQuestion(t *testing.T) {
 	ix := &session.Interaction{Kind: session.InteractionQuestion, Questions: []session.QuestionSpec{
 		{Question: "Set x=1?"}, {Question: "Other"},

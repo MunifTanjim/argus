@@ -50,6 +50,13 @@ a full path when `argus` is not on the `PATH` of Antigravity, for example when
 it starts from a desktop launcher. Argus updates the hooks the next time it
 starts. The Claude Code plugin does not use this setting.
 
+## Agent tools
+
+`mcp.port` (default `7734`) is the local port where the node serves the
+[agent tools](/getting-started/installation#agent-tools). Set it to `0` to turn
+the tools off. Argus then removes its entries from the agent configs. If the
+port is in use, the node runs without the tools and logs an error.
+
 ## Projects & Workspaces
 
 For the project and workspace settings, see

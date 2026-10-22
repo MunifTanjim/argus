@@ -10,7 +10,7 @@ import (
 
 func TestRenderText(t *testing.T) {
 	m := api.Message{ID: "m-00000001", Kind: api.MessageText, Body: "hi\nthere"}
-	want := "[argus message m-00000001 from worker-api (home:argus:%5)]\nhi\nthere\nReply: argus session reply m-00000001 \"<answer>\""
+	want := "[argus message m-00000001 from worker-api (home:argus:%5)]\nhi\nthere\nReply with the argus `reply` tool (message_id m-00000001), or: argus session reply m-00000001 \"<answer>\""
 	if got := mesh.Render(m, "worker-api", "home:argus:%5"); got != want {
 		t.Fatalf("got %q", got)
 	}
@@ -18,7 +18,7 @@ func TestRenderText(t *testing.T) {
 
 func TestRenderTask(t *testing.T) {
 	m := api.Message{ID: "m-00000001", Kind: api.MessageTask, Body: "do it"}
-	want := "[argus message m-00000001 from worker-api (home:argus:%5)]\ndo it\nWhen the task is done, report the result: argus session reply m-00000001 \"<result>\""
+	want := "[argus message m-00000001 from worker-api (home:argus:%5)]\ndo it\nWhen the task is done, report the result with the argus `reply` tool (message_id m-00000001), or: argus session reply m-00000001 \"<result>\""
 	if got := mesh.Render(m, "worker-api", "home:argus:%5"); got != want {
 		t.Fatalf("got %q", got)
 	}
