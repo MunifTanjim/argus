@@ -185,6 +185,32 @@ func TestExpireDeletesOld(t *testing.T) {
 	}
 }
 
+func TestExpireLinksKeepsLiveAndFresh(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	parent := api.Party{Node: "n", Key: "claude:p"}
+	for _, child := range []string{"claude:old", "claude:live", "claude:fresh"} {
+		if err := s.PutLink(ctx, api.Link{Child: api.Party{Node: "n", Key: child}, Parent: parent}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := s.Link(ctx, "claude:old"); err != nil {
+		t.Fatal(err)
+	}
+	cutoff := time.Unix(1_700_000_000, 0).Add(3 * time.Millisecond)
+	n, err := s.ExpireLinks(ctx, cutoff, func(key string) bool { return key == "claude:live" })
+	if err != nil || n != 1 {
+		t.Fatalf("ExpireLinks = %d, %v", n, err)
+	}
+	if _, ok, _ := s.Link(ctx, "claude:old"); ok {
+		t.Fatal("expired link still cached")
+	}
+	links, err := s.Links(ctx)
+	if err != nil || len(links) != 2 || links[0].Child.Key != "claude:live" || links[1].Child.Key != "claude:fresh" {
+		t.Fatalf("links = %+v err=%v", links, err)
+	}
+}
+
 func TestFailQueuedOnlyQueued(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
@@ -235,6 +261,43 @@ func TestTransitionOnlyFromExpectedState(t *testing.T) {
 	m2, _ := st.Insert(ctx, queued("a"))
 	if ok, err := st.Transition(ctx, m2.ID, api.MessageQueued, api.MessageDelivered); err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+}
+
+func TestClaimNoticeOnlyOpenPromptNotice(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	n := queued("claude:p")
+	n.Kind = api.MessagePromptNotice
+	notice, _ := s.Insert(ctx, n)
+	text, _ := s.Insert(ctx, queued("claude:p"))
+
+	if _, ok, err := s.ClaimNotice(ctx, text.ID, "claude:p"); err != nil || ok {
+		t.Fatalf("claimed a text message: ok=%v err=%v", ok, err)
+	}
+	if _, err := s.Transition(ctx, notice.ID, api.MessageQueued, api.MessageDelivered); err != nil {
+		t.Fatal(err)
+	}
+	if prev, ok, err := s.ClaimNotice(ctx, notice.ID, "claude:p"); err != nil || !ok || prev != api.MessageDelivered {
+		t.Fatalf("claim: prev=%s ok=%v err=%v", prev, ok, err)
+	}
+	got, _, _ := s.Get(ctx, notice.ID)
+	if got.State != api.MessageReplied || got.AnsweredBy != "claude:p" {
+		t.Fatalf("got %+v", got)
+	}
+	if _, ok, _ := s.ClaimNotice(ctx, notice.ID, "claude:q"); ok {
+		t.Fatal("claimed twice")
+	}
+
+	if ok, _ := s.ReleaseNotice(ctx, notice.ID, "claude:q", api.MessageQueued); ok {
+		t.Fatal("released by another party")
+	}
+	if ok, err := s.ReleaseNotice(ctx, notice.ID, "claude:p", api.MessageDelivered); err != nil || !ok {
+		t.Fatalf("release: ok=%v err=%v", ok, err)
+	}
+	got, _, _ = s.Get(ctx, notice.ID)
+	if got.State != api.MessageDelivered || got.AnsweredBy != "" {
+		t.Fatalf("got %+v", got)
 	}
 }
 

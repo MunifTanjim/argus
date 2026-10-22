@@ -27,6 +27,7 @@ func (d *Node) SetMeshStore(s *mesh.Store) {
 	d.meshWorked = map[string]bool{}
 	d.meshLive = map[string]bool{}
 	d.meshHeld = map[string]time.Time{}
+	d.meshSigs = map[string]string{}
 	d.meshKickCh = make(chan struct{}, 1)
 }
 
@@ -58,6 +59,20 @@ func (d *Node) meshKick() {
 }
 
 func (d *Node) meshChanged() { d.notifyConns(api.MethodMessagesChanged) }
+
+func (d *Node) meshEnded(ctx context.Context, s session.Session, by string) {
+	if d.mesh == nil {
+		return
+	}
+	key := partyKey(s)
+	if err := d.mesh.SetEndedBy(ctx, key, by); err != nil {
+		d.log.Warn("mesh: record ended-by failed", "key", key, "err", err)
+	}
+	if _, err := d.mesh.FailQueued(ctx, key); err != nil {
+		d.log.Warn("mesh: fail queued failed", "key", key, "err", err)
+	}
+	d.meshChanged()
+}
 
 func (d *Node) meshLoop(ctx context.Context) {
 	events, cancel := d.reg.Subscribe()
@@ -102,12 +117,17 @@ func (d *Node) meshPass(ctx context.Context) {
 	snap := d.reg.Snapshot()
 	d.meshRekey(ctx, snap)
 	d.meshFailGone(ctx, snap)
+	d.meshNotices(ctx, snap)
 	d.meshDeliver(ctx, snap)
 	d.meshWorked = map[string]bool{}
 	if time.Since(d.meshExpiredAt) >= meshExpireEvery {
 		d.meshExpiredAt = time.Now()
-		if _, err := d.mesh.Expire(ctx, time.Now().Add(-meshRetention)); err != nil {
+		cutoff := time.Now().Add(-meshRetention)
+		if _, err := d.mesh.Expire(ctx, cutoff); err != nil {
 			d.log.Warn("mesh: expire failed", "err", err)
+		}
+		if _, err := d.mesh.ExpireLinks(ctx, cutoff, func(key string) bool { return d.meshLive[key] }); err != nil {
+			d.log.Warn("mesh: expire links failed", "err", err)
 		}
 	}
 }
@@ -216,9 +236,5 @@ func (d *Node) senderLabel(key string) (label, sessionID string) {
 	if !live {
 		return key, ""
 	}
-	label = s.Name
-	if label == "" {
-		label = s.Agent
-	}
-	return label, d.compositeID(s)
+	return sessionLabel(s), d.compositeID(s)
 }

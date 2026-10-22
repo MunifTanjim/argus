@@ -31,10 +31,20 @@ UPDATE mesh_message
 SET state = sqlc.arg(to_state), updated_at = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id) AND state = sqlc.arg(from_state);
 
+-- name: ClaimMeshNotice :execrows
+UPDATE mesh_message
+SET state = 'replied', answered_by = sqlc.arg(answered_by), updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(id) AND kind = 'prompt_notice' AND state = sqlc.arg(from_state);
+
+-- name: ReleaseMeshNotice :execrows
+UPDATE mesh_message
+SET state = sqlc.arg(to_state), answered_by = '', updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(id) AND state = 'replied' AND answered_by = sqlc.arg(answered_by);
+
 -- name: FailQueuedMeshMessages :execrows
 UPDATE mesh_message
 SET state = 'failed', updated_at = sqlc.arg(updated_at)
-WHERE recipient_key = sqlc.arg(recipient_key) AND state = 'queued';
+WHERE recipient_key = sqlc.arg(recipient_key) AND state = 'queued' AND sender_key != 'argus';
 
 -- name: OpenMeshNotices :many
 SELECT * FROM mesh_message
@@ -86,3 +96,6 @@ SELECT * FROM mesh_link ORDER BY created_at, child_key;
 
 -- name: SetMeshLinkEndedBy :exec
 UPDATE mesh_link SET ended_by = ? WHERE child_key = ?;
+
+-- name: DeleteMeshLink :exec
+DELETE FROM mesh_link WHERE child_key = ?;

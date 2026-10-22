@@ -140,6 +140,8 @@ func (d *Node) StartPush(ctx context.Context, delay time.Duration) {
 		disp := push.NewDispatcher(d.pushStore, push.NewRelaySender(currentDeliverer{d}), d.log)
 		sinks.Delayed = []push.Sink{nodeIDStampSink{nodeID: nodeID, inner: disp}}
 	}
+	owner := append(append([]push.Sink{}, sinks.Immediate...), sinks.Delayed...)
+	d.ownerSinks.Store(&owner)
 	push.Watch(ctx, events, sinks, d.log)
 }
 
