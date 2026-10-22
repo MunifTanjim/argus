@@ -8,6 +8,40 @@ import (
 	"time"
 )
 
+type OrchLink struct {
+	ChildNode      string
+	ChildKey       string
+	ParentNode     string
+	ParentKey      string
+	TaskID         string
+	EndedBy        string
+	RequestID      string
+	RequestHash    string
+	CreatedAt      int64
+	ChildSessionID string
+}
+
+type OrchMessage struct {
+	ID             string
+	Kind           string
+	FromNode       string
+	FromKey        string
+	ToNode         string
+	ToKey          string
+	Body           string
+	ReplyTo        string
+	ChildNode      string
+	ChildKey       string
+	Interaction    string
+	State          string
+	AnsweredByNode string
+	AnsweredByKey  string
+	RequestID      string
+	RequestHash    string
+	CreatedAt      int64
+	UpdatedAt      int64
+}
+
 type Project struct {
 	ID         string
 	Name       string
