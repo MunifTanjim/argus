@@ -60,3 +60,21 @@ type Link struct {
 	TaskID  string `json:"task_id,omitempty"`
 	EndedBy string `json:"ended_by,omitempty"` // "owner" | "parent" | "self"
 }
+
+// Method names for the owner's message view. Message IDs are "m-" plus 8 hex characters.
+const (
+	MethodMessagesList    = "messages.list"    // request: no params; result: MessagesListResult
+	MethodMessagesSend    = "messages.send"    // request: OwnerSendParams; result: AgentSendResult
+	MethodMessagesChanged = "messages.changed" // notification: empty params; clients refetch messages.list
+)
+
+type OwnerSendParams struct {
+	SessionID string `json:"session_id,omitempty"` // bare local id; required unless ReplyTo is set
+	Text      string `json:"text"`
+	ReplyTo   string `json:"reply_to,omitempty"`
+}
+
+type MessagesListResult struct {
+	Messages []Message `json:"messages"`
+	Links    []Link    `json:"links"`
+}

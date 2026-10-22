@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
@@ -114,5 +115,28 @@ func TestNodeCapabilitiesKeepUnknownKeys(t *testing.T) {
 	}
 	if got, want := string(b), `{"future_cap":{"level":2},"host_wakelock":true,"spawn_session":true,"terminal":false}`; got != want {
 		t.Fatalf("got %s, want %s", got, want)
+	}
+}
+
+func TestAgentctlMethodsArePrefixed(t *testing.T) {
+	methods := []string{
+		MethodAgentWhoami, MethodAgentList, MethodAgentShow, MethodAgentSpawn, MethodAgentSend,
+		MethodAgentReply, MethodAgentRespond, MethodAgentOutput, MethodAgentTranscript, MethodAgentKill,
+	}
+	for _, m := range methods {
+		if !strings.HasPrefix(m, "agentctl.") {
+			t.Errorf("%q lacks the agentctl. prefix", m)
+		}
+	}
+}
+
+func TestSessionParentJSON(t *testing.T) {
+	s := session.Session{Parent: &session.ParentRef{Node: "home", Key: "claude:p", Gone: true}}
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `"parent":{"node":"home","key":"claude:p","gone":true}`; !strings.Contains(string(b), want) {
+		t.Fatalf("session json = %s, want it to contain %s", b, want)
 	}
 }

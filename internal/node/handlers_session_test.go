@@ -15,6 +15,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -55,6 +56,8 @@ type fakePlain struct{ adapter.Adapter }
 func (fakePlain) Agent() string     { return "plain" }
 func (fakePlain) AgentName() string { return "Plain" }
 
+func (fakeSpawner) CallerEnv() string                                    { return "" }
+func (fakeSpawner) IsAgentProcess(procwalk.Proc, map[string]string) bool { return false }
 func (fakeSpawner) IsHeadless() bool                                     { return true }
 func (fakeSpawner) Agent() string                                        { return "fake" }
 func (fakeSpawner) AgentName() string                                    { return "Fake" }

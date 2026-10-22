@@ -13,6 +13,11 @@ WHERE recipient_key = ? AND state = 'queued'
 ORDER BY created_at, id
 LIMIT 1;
 
+-- name: QueuedMeshMessages :many
+SELECT * FROM mesh_message
+WHERE recipient_key = ? AND state = 'queued'
+ORDER BY created_at, id;
+
 -- name: QueuedMeshRecipients :many
 SELECT DISTINCT recipient_key FROM mesh_message WHERE state = 'queued';
 
@@ -20,6 +25,11 @@ SELECT DISTINCT recipient_key FROM mesh_message WHERE state = 'queued';
 UPDATE mesh_message
 SET state = sqlc.arg(state), answered_by = sqlc.arg(answered_by), updated_at = sqlc.arg(updated_at)
 WHERE id = sqlc.arg(id);
+
+-- name: TransitionMeshMessageState :execrows
+UPDATE mesh_message
+SET state = sqlc.arg(to_state), updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(id) AND state = sqlc.arg(from_state);
 
 -- name: FailQueuedMeshMessages :execrows
 UPDATE mesh_message

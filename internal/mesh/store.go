@@ -88,6 +88,12 @@ func (s *Store) NextQueued(ctx context.Context, recipientKey string) (api.Messag
 	return one(row, err)
 }
 
+// Queued returns every queued message for recipientKey, oldest first.
+func (s *Store) Queued(ctx context.Context, recipientKey string) ([]api.Message, error) {
+	rows, err := s.q.QueuedMeshMessages(ctx, recipientKey)
+	return many(rows, err)
+}
+
 func (s *Store) QueuedRecipients(ctx context.Context) ([]string, error) {
 	return s.q.QueuedMeshRecipients(ctx)
 }
@@ -99,6 +105,18 @@ func (s *Store) SetState(ctx context.Context, id string, st api.MessageState) er
 		UpdatedAt:  s.now().UnixNano(),
 		ID:         id,
 	})
+}
+
+// Transition moves a message from one state to another and reports whether it
+// was in the from state.
+func (s *Store) Transition(ctx context.Context, id string, from, to api.MessageState) (bool, error) {
+	n, err := s.q.TransitionMeshMessageState(ctx, gen.TransitionMeshMessageStateParams{
+		ToState:   string(to),
+		FromState: string(from),
+		UpdatedAt: s.now().UnixNano(),
+		ID:        id,
+	})
+	return n > 0, err
 }
 
 // FailQueued marks every queued message for recipientKey failed and returns how many.

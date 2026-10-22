@@ -21,6 +21,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/forge"
 	"github.com/MunifTanjim/argus/internal/host"
+	"github.com/MunifTanjim/argus/internal/mesh"
 	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/push"
@@ -103,6 +104,15 @@ type Node struct {
 	revealFn        func(ctx context.Context, c *tmux.Client, paneID string) error         // seam for tests; defaults to (*tmux.Client).Reveal
 	focusedFn       func(ctx context.Context, c *tmux.Client, paneID string) (bool, error) // seam for tests; defaults to (*tmux.Client).IsFocused
 	restoreMirrorFn func(c *tmux.Client, m *mirrorState)                                   // seam for tests; defaults to (*Node).restoreMirror
+
+	mesh          *mesh.Store       // nil = agentctl and messages disabled
+	meshKeys      map[string]string // session id -> last party key
+	meshPrev      map[string]session.Status
+	meshWorked    map[string]bool      // session id -> reported working since the last pass
+	meshLive      map[string]bool      // party keys live at the last pass
+	meshHeld      map[string]time.Time // party key -> when its delivery hold ends
+	meshKickCh    chan struct{}
+	meshExpiredAt time.Time
 
 	pendingMu sync.Mutex
 	pending   map[string]*pendingDecision // session id -> parked PermissionRequest
@@ -291,11 +301,11 @@ func (d *Node) reevaluateTrustChannels() {
 	}
 }
 
-// remoteDispatch rejects lock.* methods (local-admin only) and dispatches the rest.
+// remoteDispatch rejects lock.* and agentctl.* methods (local-only) and dispatches the rest.
 func (d *Node) remoteDispatch() api.DispatchFunc {
 	full := d.server.DispatchFunc()
 	return func(ctx context.Context, method string, params json.RawMessage) (any, error) {
-		if strings.HasPrefix(method, "lock.") {
+		if strings.HasPrefix(method, "lock.") || strings.HasPrefix(method, "agentctl.") {
 			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
 		}
 		return full(ctx, method, params)
@@ -557,6 +567,10 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	// Detach any live terminal whose session ends, so a viewer never lands on the
 	// bare shell the agent leaves behind.
 	go d.watchSessionExits(ctx)
+
+	if d.mesh != nil {
+		go d.meshLoop(ctx)
+	}
 
 	return d.server.ServeContext(ctx, l)
 }

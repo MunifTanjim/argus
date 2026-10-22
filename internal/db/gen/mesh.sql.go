@@ -313,6 +313,50 @@ func (q *Queries) PutMeshLink(ctx context.Context, arg PutMeshLinkParams) error 
 	return err
 }
 
+const queuedMeshMessages = `-- name: QueuedMeshMessages :many
+SELECT id, kind, sender_node, sender_key, recipient_node, recipient_key, body, reply_to, subject_key, interaction, state, answered_by, created_at, updated_at FROM mesh_message
+WHERE recipient_key = ? AND state = 'queued'
+ORDER BY created_at, id
+`
+
+func (q *Queries) QueuedMeshMessages(ctx context.Context, recipientKey string) ([]MeshMessage, error) {
+	rows, err := q.db.QueryContext(ctx, queuedMeshMessages, recipientKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MeshMessage{}
+	for rows.Next() {
+		var i MeshMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.SenderNode,
+			&i.SenderKey,
+			&i.RecipientNode,
+			&i.RecipientKey,
+			&i.Body,
+			&i.ReplyTo,
+			&i.SubjectKey,
+			&i.Interaction,
+			&i.State,
+			&i.AnsweredBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const queuedMeshRecipients = `-- name: QueuedMeshRecipients :many
 SELECT DISTINCT recipient_key FROM mesh_message WHERE state = 'queued'
 `
@@ -445,6 +489,32 @@ func (q *Queries) SetMeshMessageState(ctx context.Context, arg SetMeshMessageSta
 		arg.ID,
 	)
 	return err
+}
+
+const transitionMeshMessageState = `-- name: TransitionMeshMessageState :execrows
+UPDATE mesh_message
+SET state = ?1, updated_at = ?2
+WHERE id = ?3 AND state = ?4
+`
+
+type TransitionMeshMessageStateParams struct {
+	ToState   string
+	UpdatedAt int64
+	ID        string
+	FromState string
+}
+
+func (q *Queries) TransitionMeshMessageState(ctx context.Context, arg TransitionMeshMessageStateParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, transitionMeshMessageState,
+		arg.ToState,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.FromState,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const unrepliedMeshTask = `-- name: UnrepliedMeshTask :one
