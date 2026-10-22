@@ -111,8 +111,10 @@ type Node struct {
 	meshWorked    map[string]bool      // session id -> reported working since the last pass
 	meshLive      map[string]bool      // party keys live at the last pass
 	meshHeld      map[string]time.Time // party key -> when its delivery hold ends
+	meshSigs      map[string]string    // session id -> last pending interaction sig
 	meshKickCh    chan struct{}
 	meshExpiredAt time.Time
+	ownerSinks    atomic.Pointer[[]push.Sink] // Immediate then Delayed sinks, set by StartPush
 
 	pendingMu sync.Mutex
 	pending   map[string]*pendingDecision // session id -> parked PermissionRequest

@@ -234,6 +234,95 @@ func TestAgentSpawnRekeysChildRegisteredBeforeLink(t *testing.T) {
 	}
 }
 
+func killNode(t *testing.T) (*Node, *fakeDismisser, api.CallerInfo) {
+	t.Helper()
+	d, _, caller := spawnNode(t, true)
+	fd := &fakeDismisser{}
+	d.adapters["claude"] = fd
+	d.addAgentSession("claude", "p2")
+	if err := d.mesh.PutLink(t.Context(), api.Link{
+		Child:  api.Party{Node: "home", Key: "claude:p2"},
+		Parent: api.Party{Node: "home", Key: "claude:p1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.mesh.Insert(t.Context(), api.Message{
+		ID: "m-00000001", Kind: api.MessageText, From: api.Party{Node: "home", Key: api.PartyOwner},
+		To: api.Party{Node: "home", Key: "claude:p2"}, Body: "hi", State: api.MessageQueued,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return d, fd, caller
+}
+
+func assertEnded(t *testing.T, d *Node, by string) {
+	t.Helper()
+	link, ok, err := d.mesh.Link(t.Context(), "claude:p2")
+	if err != nil || !ok || link.EndedBy != by {
+		t.Fatalf("link = %+v ok=%v err=%v", link, ok, err)
+	}
+	m, ok, err := d.mesh.Get(t.Context(), "m-00000001")
+	if err != nil || !ok || m.State != api.MessageFailed {
+		t.Fatalf("message = %+v ok=%v err=%v", m, ok, err)
+	}
+}
+
+func TestAgentKillByParent(t *testing.T) {
+	d, fd, caller := killNode(t)
+	params, _ := json.Marshal(api.AgentTargetParams{Caller: caller, SessionID: "home:default:%p2"})
+	if _, err := d.handleAgentKill(t.Context(), params); err != nil {
+		t.Fatal(err)
+	}
+	if !fd.called {
+		t.Fatal("dismiss not called")
+	}
+	assertEnded(t, d, "parent")
+}
+
+func TestAgentKillBySelf(t *testing.T) {
+	d, fd, caller := killNode(t)
+	table := procwalk.Table{
+		1:   {PID: 1, PPID: 0, Args: "/sbin/launchd"},
+		200: {PID: 200, PPID: 1, Args: "/usr/local/bin/claude"},
+		220: {PID: 220, PPID: 200, Args: "argus session kill"},
+	}
+	d.procTable = func(context.Context) (procwalk.Table, error) { return table, nil }
+	caller = api.CallerInfo{PID: 220, Env: map[string]string{"CLAUDE_PID": "200", "CLAUDE_CODE_SESSION_ID": "p2"}}
+	params, _ := json.Marshal(api.AgentTargetParams{Caller: caller, SessionID: "home:default:%p2"})
+	if _, err := d.handleAgentKill(t.Context(), params); err != nil {
+		t.Fatal(err)
+	}
+	if !fd.called {
+		t.Fatal("dismiss not called")
+	}
+	assertEnded(t, d, "self")
+}
+
+func TestAgentKillByOtherFails(t *testing.T) {
+	d, fd, caller := killNode(t)
+	d.addAgentSession("claude", "p3")
+	params, _ := json.Marshal(api.AgentTargetParams{Caller: caller, SessionID: "home:default:%p3"})
+	_, err := d.handleAgentKill(t.Context(), params)
+	if err == nil || !strings.Contains(err.Error(), "only the parent of home:default:%p3") {
+		t.Fatalf("err = %v", err)
+	}
+	if fd.called {
+		t.Fatal("dismiss called")
+	}
+}
+
+func TestOwnerKillFailsQueued(t *testing.T) {
+	d, fd, _ := killNode(t)
+	params, _ := json.Marshal(api.SessionRef{SessionID: "default:%p2"})
+	if _, err := d.handleSessionKill(t.Context(), params); err != nil {
+		t.Fatal(err)
+	}
+	if !fd.called {
+		t.Fatal("dismiss not called")
+	}
+	assertEnded(t, d, "owner")
+}
+
 func TestAgentSpawnRejectsUnorchestratedAgent(t *testing.T) {
 	d, _, caller := spawnNode(t, true)
 	params, _ := json.Marshal(api.AgentSpawnParams{Caller: caller, Agent: "antigravity", Cwd: t.TempDir(), Prompt: "go"})

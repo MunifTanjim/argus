@@ -18,7 +18,7 @@ func Render(m api.Message, senderLabel, senderSessionID string) string {
 	b.WriteString(m.Body)
 	b.WriteString("\n")
 	switch m.Kind {
-	case api.MessagePromptNotice, api.MessageTurnNotice:
+	case api.MessagePromptNotice, api.MessageTurnNotice, api.MessageAnsweredNotice:
 	case api.MessageTask:
 		fmt.Fprintf(&b, "When the task is done, report the result: argus session reply %s \"<result>\"", m.ID)
 	default:

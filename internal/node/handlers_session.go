@@ -760,6 +760,14 @@ func (d *Node) handleSessionKill(ctx context.Context, params json.RawMessage) (a
 	if !ok {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session " + p.SessionID}
 	}
+	if err := d.killSession(ctx, s); err != nil {
+		return nil, err
+	}
+	d.meshEnded(ctx, s, "owner")
+	return nil, nil
+}
+
+func (d *Node) killSession(ctx context.Context, s session.Session) error {
 	// A headless agent's pane is a disposable viewer, not the session's process:
 	// killing it alone leaves the session in the list. Remove the session, tearing
 	// down the adopted viewer pane too when one is present.
@@ -770,21 +778,23 @@ func (d *Node) handleSessionKill(ctx context.Context, params json.RawMessage) (a
 			}
 		}
 		d.clearResuming(s.ID)
-		return d.dismissSession(ctx, s)
+		_, err := d.dismissSession(ctx, s)
+		return err
 	}
 	if !s.Controllable() {
-		return d.dismissSession(ctx, s)
+		_, err := d.dismissSession(ctx, s)
+		return err
 	}
 	c, err := d.clientFor(s)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if err := c.KillPane(ctx, s.Tmux.PaneID); err != nil {
-		return nil, err
+		return err
 	}
 	d.clearResuming(s.ID)
 	go d.scan(context.Background())
-	return nil, nil
+	return nil
 }
 
 // handleSessionRename renames a session through its agent; it needs no tmux

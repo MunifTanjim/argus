@@ -31,3 +31,11 @@ func TestRenderOwner(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestRenderAnsweredNoticeHasNoReplyFooter(t *testing.T) {
+	m := api.Message{ID: "m-00000001", Kind: api.MessageAnsweredNotice, Body: "The prompt m-00000002 was answered outside argus."}
+	want := "[argus message m-00000001 from argus]\nThe prompt m-00000002 was answered outside argus."
+	if got := mesh.Render(m, "argus", ""); got != want {
+		t.Fatalf("got %q", got)
+	}
+}

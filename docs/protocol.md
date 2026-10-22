@@ -562,8 +562,8 @@ Local session ids have these forms:
 
 The client makes these ids composite:
 
-- `id` and `workspace_id` of each session, in `sessions.list`,
-  `sessions.refresh`, and `session.event`
+- `id`, `workspace_id`, and `parent.session_id` of each session, in
+  `sessions.list`, `sessions.refresh`, and `session.event`
 - `id` of each project and workspace in `project.list`
 - `session_id` in the results of `sessions.spawn` and `sessions.resume`
 - `workspace_id` in the result of `workspace.create`
@@ -1316,6 +1316,57 @@ ExportBundleParams {
 }
 ```
 
+### Messages
+
+Agent sessions send messages to each other through the agent tools. The owner
+reads these messages and sends messages of their own. All methods in this table
+are served by the node, on the unix socket and on relay channels.
+
+| Method             | Kind         | Params            | Result                                   |
+| ------------------ | ------------ | ----------------- | ---------------------------------------- |
+| `messages.list`    | request      | none              | `{ messages: Message[], links: Link[] }` |
+| `messages.send`    | request      | `OwnerSendParams` | `{ message_id }`                         |
+| `messages.changed` | notification | none              | —                                        |
+
+```ts
+OwnerSendParams {
+  session_id?: string   // local id of the recipient; required without reply_to
+  text:        string
+  reply_to?:   string   // id of a message to the owner
+}
+
+Message {
+  id:           string            // "m-" and 8 hex characters
+  kind:         "text" | "task" | "reply" | "prompt_notice" | "turn_notice" | "answered_notice"
+  from, to:     Party
+  body:         string
+  reply_to?:    string
+  subject?:     string            // notices: the party key of the child
+  interaction?: Interaction       // prompt notices
+  state:        "queued" | "delivered" | "replied" | "withdrawn" | "failed"
+  answered_by?: string            // prompt notices: the party key that answered
+  created_at, updated_at: string  // RFC 3339
+}
+
+Link {
+  child, parent: Party
+  task_id?:      string
+  ended_by?:     "owner" | "parent" | "self"
+}
+
+Party {
+  node: string
+  key:  string   // "<agent>:<agent_session_id>", "owner", or "argus"
+}
+```
+
+`messages.list` returns the 500 newest messages. The node sends
+`messages.changed` after any change to the messages or links. A client then
+calls `messages.list` again.
+
+`messages.send` fails if the recipient is not running, or if the sender of
+`reply_to` is not running. A queued message fails when its recipient ends.
+
 ### Transcripts and history
 
 | Method                       | Kind         | Params                                                      | Result                |
@@ -1677,8 +1728,16 @@ Session {
   interaction?:       Interaction     // present only while the session waits for input
   subagents?:         RunningSubagent[] // its subagents running now
   shells?:            RunningShell[]  // its background shells running now
+  parent?:            ParentRef       // the session that started this one through the agent tools
   node_id?, node_label?: string       // added by the client
   offline?:           boolean         // added by the client
+}
+
+ParentRef {
+  node:        string
+  key:         string                 // the party key of the parent
+  session_id?: string                 // the running session with key, if there is one
+  gone?:       boolean                // the parent is not running
 }
 
 RunningSubagent {

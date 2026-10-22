@@ -119,6 +119,38 @@ func (s *Store) Transition(ctx context.Context, id string, from, to api.MessageS
 	return n > 0, err
 }
 
+// ClaimNotice marks an open prompt notice replied by the party key by and
+// returns the state it was in, or false when it was not open.
+func (s *Store) ClaimNotice(ctx context.Context, id, by string) (api.MessageState, bool, error) {
+	// queued first: delivery only moves a notice forward to delivered.
+	for _, from := range []api.MessageState{api.MessageQueued, api.MessageDelivered} {
+		n, err := s.q.ClaimMeshNotice(ctx, gen.ClaimMeshNoticeParams{
+			AnsweredBy: by,
+			UpdatedAt:  s.now().UnixNano(),
+			ID:         id,
+			FromState:  string(from),
+		})
+		if err != nil {
+			return "", false, err
+		}
+		if n > 0 {
+			return from, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+// ReleaseNotice undoes ClaimNotice by the party key by, moving the notice to st.
+func (s *Store) ReleaseNotice(ctx context.Context, id, by string, st api.MessageState) (bool, error) {
+	n, err := s.q.ReleaseMeshNotice(ctx, gen.ReleaseMeshNoticeParams{
+		ToState:    string(st),
+		UpdatedAt:  s.now().UnixNano(),
+		ID:         id,
+		AnsweredBy: by,
+	})
+	return n > 0, err
+}
+
 // FailQueued marks every queued message for recipientKey failed and returns how many.
 func (s *Store) FailQueued(ctx context.Context, recipientKey string) (int64, error) {
 	return s.q.FailQueuedMeshMessages(ctx, gen.FailQueuedMeshMessagesParams{
@@ -200,6 +232,29 @@ func (s *Store) Rekey(ctx context.Context, oldKey, newKey string) error {
 // Expire deletes messages created before the cutoff and returns how many.
 func (s *Store) Expire(ctx context.Context, before time.Time) (int64, error) {
 	return s.q.ExpireMeshMessages(ctx, before.UnixNano())
+}
+
+// ExpireLinks deletes the links created before the cutoff whose child is not
+// live, and returns how many.
+func (s *Store) ExpireLinks(ctx context.Context, before time.Time, live func(childKey string) bool) (int, error) {
+	s.linksMu.Lock()
+	defer s.linksMu.Unlock()
+	rows, err := s.q.ListMeshLinks(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range rows {
+		if r.CreatedAt >= before.UnixNano() || live(r.ChildKey) {
+			continue
+		}
+		if err := s.q.DeleteMeshLink(ctx, r.ChildKey); err != nil {
+			return n, err
+		}
+		delete(s.links, r.ChildKey)
+		n++
+	}
+	return n, nil
 }
 
 // PutLink inserts or replaces the link for l.Child.Key, keeping its original creation time.

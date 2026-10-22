@@ -9,6 +9,41 @@ import (
 	"context"
 )
 
+const claimMeshNotice = `-- name: ClaimMeshNotice :execrows
+UPDATE mesh_message
+SET state = 'replied', answered_by = ?1, updated_at = ?2
+WHERE id = ?3 AND kind = 'prompt_notice' AND state = ?4
+`
+
+type ClaimMeshNoticeParams struct {
+	AnsweredBy string
+	UpdatedAt  int64
+	ID         string
+	FromState  string
+}
+
+func (q *Queries) ClaimMeshNotice(ctx context.Context, arg ClaimMeshNoticeParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, claimMeshNotice,
+		arg.AnsweredBy,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.FromState,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteMeshLink = `-- name: DeleteMeshLink :exec
+DELETE FROM mesh_link WHERE child_key = ?
+`
+
+func (q *Queries) DeleteMeshLink(ctx context.Context, childKey string) error {
+	_, err := q.db.ExecContext(ctx, deleteMeshLink, childKey)
+	return err
+}
+
 const expireMeshMessages = `-- name: ExpireMeshMessages :execrows
 DELETE FROM mesh_message WHERE created_at < ?
 `
@@ -452,6 +487,32 @@ type RekeyMeshSubjectParams struct {
 func (q *Queries) RekeyMeshSubject(ctx context.Context, arg RekeyMeshSubjectParams) error {
 	_, err := q.db.ExecContext(ctx, rekeyMeshSubject, arg.NewKey, arg.OldKey)
 	return err
+}
+
+const releaseMeshNotice = `-- name: ReleaseMeshNotice :execrows
+UPDATE mesh_message
+SET state = ?1, answered_by = '', updated_at = ?2
+WHERE id = ?3 AND state = 'replied' AND answered_by = ?4
+`
+
+type ReleaseMeshNoticeParams struct {
+	ToState    string
+	UpdatedAt  int64
+	ID         string
+	AnsweredBy string
+}
+
+func (q *Queries) ReleaseMeshNotice(ctx context.Context, arg ReleaseMeshNoticeParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, releaseMeshNotice,
+		arg.ToState,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.AnsweredBy,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setMeshLinkEndedBy = `-- name: SetMeshLinkEndedBy :exec
