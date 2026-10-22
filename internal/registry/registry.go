@@ -104,6 +104,21 @@ func AgentSessionKey(agent, agentSessionID string) string {
 	return agent + ":" + agentSessionID
 }
 
+// FindByAgentSession returns the session of agent whose agent session id is agentSessionID.
+func (r *Registry) FindByAgentSession(agent, agentSessionID string) (session.Session, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id, ok := r.index.findByAgentSession(agentSessionID)
+	if !ok {
+		return session.Session{}, false
+	}
+	s, ok := r.sessions[id]
+	if !ok || s.Agent != agent {
+		return session.Session{}, false
+	}
+	return *s, true
+}
+
 // Get returns a copy of the session with the given ID and whether it exists.
 func (r *Registry) Get(id string) (session.Session, bool) {
 	r.mu.Lock()

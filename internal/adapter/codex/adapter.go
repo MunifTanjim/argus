@@ -7,6 +7,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -32,6 +33,12 @@ func (cxAdapter) Agent() string      { return Agent }
 func (cxAdapter) AgentName() string  { return "Codex" }
 func (cxAdapter) AgentColor() string { return "#b8bb26" } // green
 func (cxAdapter) IsHeadless() bool   { return true }
+
+func (cxAdapter) CallerEnv() string { return "CODEX_THREAD_ID" }
+
+func (cxAdapter) IsAgentProcess(p procwalk.Proc, env map[string]string) bool {
+	return p.Name() == "codex"
+}
 
 func (a *cxAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
 	a.disc = newDiscoverer(reg, clients)

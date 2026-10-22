@@ -7,6 +7,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -31,6 +32,12 @@ func (ocAdapter) Agent() string      { return Agent }
 func (ocAdapter) AgentName() string  { return "OpenCode" }
 func (ocAdapter) AgentColor() string { return "#d3869b" }
 func (ocAdapter) IsHeadless() bool   { return true }
+
+func (ocAdapter) CallerEnv() string { return "OPENCODE_SESSION_ID" }
+
+func (ocAdapter) IsAgentProcess(p procwalk.Proc, env map[string]string) bool {
+	return p.Name() == "opencode"
+}
 
 func (a *ocAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
 	a.disc = newDiscoverer(reg, clients)
