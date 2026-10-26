@@ -37,6 +37,8 @@ merges the results itself.
 A client that uses the gateway path must implement these parts:
 
 1. Line framing over a WebSocket byte stream. See [Framing](#framing).
+   A client that wants CBOR terminal frames also implements
+   [CBOR frames](#cbor-frames) and the `cbor` capability.
 2. JSON-RPC 2.0 requests, responses, and notifications in both directions.
 3. The roster: the `node.event` stream from the gateway.
 4. One relay channel per online node. See [Relay channels](#relay-channels).
@@ -54,6 +56,9 @@ The protocol has no version number and no version negotiation. The `version`
 field in `server.info` and `node.identify` is the Argus build version.
 
 A client can compare it with a minimum version that the client supports.
+
+Optional features use capability flags, not versions. See
+[CBOR frames](#cbor-frames).
 
 ## Wire format
 
@@ -96,18 +101,29 @@ The Flutter app accepts only `ws://` and `wss://` URLs without a path.
 
 ### Framing
 
-Every frame is one JSON object on one line, followed by `\n`. The maximum line
-length is 16 MiB. A receiver skips empty lines. If a line is longer than
-16 MiB, the receiver closes the connection.
+The byte stream of a connection mixes two kinds of frame: JSON lines and CBOR
+frames.
 
-On a WebSocket, treat the text messages as one byte stream. A WebSocket
-message does not always hold exactly one frame. For example, a large frame can
-arrive as one message, and its `\n` can arrive in the next message. A client
-must buffer the input and split it on `\n`.
+A JSON frame is one JSON object on one line, followed by `\n`. A JSON line
+never starts with a `0x00` byte. A receiver skips empty lines.
+
+A CBOR frame is a `0x00` byte, a `uint32` length in big-endian order, and then
+that many bytes of CBOR. See [CBOR frames](#cbor-frames).
+
+The maximum size is 16 MiB for a JSON line and for the CBOR bytes of a CBOR
+frame. If a frame is larger, the receiver closes the connection.
+
+On a WebSocket, JSON lines travel in text messages. CBOR frames travel in
+binary messages, one frame per message. A receiver treats all messages, text
+and binary, as one byte stream. A WebSocket message does not always hold
+exactly one frame. For example, a large JSON frame can arrive as one message,
+and its `\n` can arrive in the next message. A client must buffer the input
+and split it into frames.
 
 If a line is not valid JSON, the receiver sends back an error response with
 code `-32700`, message `"parse error"`, and no `id`. Then it continues with
-the next line.
+the next frame. A CBOR frame with a valid length but a payload that does not
+decode gets the same reply.
 
 ### Envelope
 
@@ -116,10 +132,10 @@ The envelope is JSON-RPC 2.0 with two extra fields, `route` and `body`:
 ```ts
 {
   jsonrpc: "2.0"
-  id?:     number        // requests and responses
+  id?:     number        // requests and responses (unsigned integer in CBOR)
   method?: string        // requests and notifications
   route?:  RouteHeader   // relay frames only
-  body?:   string        // relay frames only (base64)
+  body?:   string        // relay frames only (base64; a byte string in CBOR)
   params?: any           // direct frames only
   result?: any           // direct frames only
   error?:  { code: number, message: string }
@@ -139,6 +155,55 @@ A relay frame never reaches the normal dispatch path. It carries its payload
 in `body`, not in `params` or `result`. See [Relay channels](#relay-channels).
 
 Both sides of a connection can send requests and notifications.
+
+### CBOR frames
+
+A CBOR frame carries the same envelope as a JSON frame. The fields and their
+meaning do not change: `jsonrpc`, `id`, `method`, `route`, `body`, `params`,
+`result`, and `error`. The keys are strings.
+
+- `id` is an unsigned integer.
+- `body` is a CBOR byte string, not base64.
+- Byte data inside `params` is a CBOR byte string. For terminals, this is
+  `data`.
+- Indefinite-length items are not accepted.
+
+A sealed body uses the encoding of the frame that carries it. In a CBOR relay
+frame, `body` is `seal(CBOR(params))`. The sealed value of a CBOR response is a
+CBOR map with exactly one of `result` or `error`. The gateway sees the same
+cleartext fields as for a JSON relay frame. `e2e.handshake` always uses JSON.
+
+Only these methods use CBOR frames: `terminal.output` and `terminal.input`.
+`terminal.input` is still a request. Its response has `result: null` or an
+error. A receiver accepts JSON and CBOR frames for these methods at any time.
+All other methods use JSON.
+
+#### The `cbor` capability
+
+Each side declares that it can receive CBOR frames:
+
+| Declared by | Where                                                                  |
+| ----------- | ---------------------------------------------------------------------- |
+| gateway     | `capabilities: { cbor: boolean }` in its `server.info` result (optional) |
+| gateway     | `node.identify` params to the node, on the uplink                      |
+| client      | `node.identify` params to the node, on each relay channel or unix-socket connection |
+| node        | `capabilities.cbor` in its `IdentifyResult` and its `server.info`      |
+
+`node.identify` takes params `{ capabilities: { cbor: boolean } }`. If the
+request has no params, or the params have no `capabilities` object, the
+previous declaration stays. The node ignores malformed params.
+
+The sending rules:
+
+- A client can send CBOR on a channel when the node reported `cbor` in its
+  identify result. Through a gateway, the gateway must also have reported
+  `cbor` in its `server.info`.
+- A node can send CBOR on a channel or connection when the client declared
+  `cbor` there. Through a gateway, the gateway must also have declared `cbor`
+  on the uplink.
+- A side can always send JSON. All frames before `node.identify` completes are
+  JSON.
+- A response uses the encoding of its request.
 
 ### Request ids
 
@@ -345,7 +410,8 @@ that side of the channel. It drops other relay frames without a reply.
 ### Frame shapes
 
 A relay frame keeps `id` and `method` in cleartext. The payload goes in `body`
-as a JSON string with standard base64 (with padding).
+as a JSON string with standard base64 (with padding). In a CBOR frame, `body`
+is a byte string and the sealed payload is CBOR.
 
 | Frame        | Cleartext fields        | `body` holds                                      |
 | ------------ | ----------------------- | ------------------------------------------------- |
@@ -766,8 +832,12 @@ support (today, Claude Code), and never at subscribe time.
 The terminal shows only the pane of the session. The first output is a full
 redraw of the screen. There is no separate snapshot.
 
-- `data` is standard base64 in both directions. One output chunk holds at
-  most 32 KiB. A chunk can end inside a UTF-8 sequence.
+- `data` is standard base64 in JSON frames and a byte string in CBOR frames,
+  in both directions. See [CBOR frames](#cbor-frames).
+- One output chunk holds at most 32 KiB. A chunk can end inside a UTF-8
+  sequence. A chunk can combine several reads of the terminal output. The
+  first output after a quiet period goes out at once. After that, the node
+  sends output at most every 8 ms, or sooner when a chunk reaches 32 KiB.
 - The terminal size also changes the size of the real tmux window of the
   agent.
 - The default size is 80×24. The maximum is 1000 in each direction. The node
@@ -1063,14 +1133,14 @@ Keys in text form use a prefix and 64 hex characters: `sigpub:`, `devpub:`,
 
 In the tables, **Served by** shows which component handles the method. The
 type notation uses `?` for a field that can be absent. Byte arrays (`bytes`)
-are standard base64 strings in JSON.
+are standard base64 strings in JSON and byte strings in CBOR.
 
 ### Connection and nodes
 
 | Method                | Kind               | Served by        | Params                  | Result                                |
 | --------------------- | ------------------ | ---------------- | ----------------------- | ------------------------------------- |
 | `ping`                | request            | all              | none                    | `null`                                |
-| `node.identify`       | request            | node             | none                    | `IdentifyResult`                      |
+| `node.identify`       | request            | node             | `{ capabilities?: { cbor: boolean } }` | `IdentifyResult` |
 | `server.info`         | request            | gateway, node    | none                    | `ServerInfo`                          |
 | `server.checkUpgrade` | request            | gateway, node    | `{ node_id?: string }`  | `{ current: string, latest: string }` |
 | `server.upgrade`      | request            | gateway, node    | `{ node_id?: string }`  | `{ from: string, to: string }`        |
@@ -1098,6 +1168,7 @@ Capabilities {
   spawn_session: boolean   // the node can spawn sessions (tmux present)
   terminal:      boolean   // the node can run persistent terminals
   host_wakelock: boolean   // the node serves host.setWakelock
+  cbor:          boolean   // the side accepts CBOR frames
 }
 
 ServerInfo {
@@ -1105,6 +1176,7 @@ ServerInfo {
   started_at?:        string   // RFC3339; server.restart changes it
   nodes:              { id, label, version, capabilities }[]
   pushPortConfigured: boolean
+  capabilities?:      { cbor: boolean }   // the gateway's own
 }
 
 NodeDescriptor {
