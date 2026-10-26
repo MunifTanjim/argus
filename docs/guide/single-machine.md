@@ -11,12 +11,14 @@ TUI talks to the node, so you don't use the node directly.
 
 A local node runs in one of two ways:
 
-- **Ephemeral:** if no node is running, `argus` offers to spawn one. The node is
-  tied to that TUI and exits when you quit. With `--gateway`, `argus` spawns a
-  node that connects to that gateway, and does not ask.
+- **Started by the TUI:** if no node is running, `argus` offers to spawn one.
+  The node continues after you quit the TUI, the next `argus` attaches to it,
+  and `argus stop` stops it. With `--gateway`, `argus` spawns a node that
+  connects to that gateway, and does not ask.
 
   ```sh
-  argus          # open the TUI (can spawn an ephemeral node if none is running)
+  argus          # open the TUI (can spawn a node if none is running)
+  argus stop     # stop the node that the TUI started
   ```
 
 - **Persistent:** `argus start` runs a node in the foreground. It keeps running

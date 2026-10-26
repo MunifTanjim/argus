@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -45,18 +46,21 @@ func waitForNodes(t *testing.T, c tui.Client) {
 func TestConnectLocalSpawn(t *testing.T) {
 	sandboxChild(t)
 	spec := testSpec(t)
-	c, srv, err := connectLocalSpawn(context.Background(), &config.Config{}, spec)
+	c, logs, err := connectLocalSpawn(context.Background(), &config.Config{}, spec)
 	if err != nil {
 		t.Fatalf("connectLocalSpawn should start a node: %v", err)
 	}
+	t.Cleanup(func() { stopSockets(t, spec.socket) })
+	defer c.Close()
 	var out []any
 	if err := c.Call(api.MethodSessionsRefresh, nil, &out); err != nil {
 		t.Fatalf("managed node should answer: %v", err)
 	}
-	c.Close()
-	srv.stop(managedStopTimeout)
-	if _, err := api.Dial(spec.socket); err == nil {
-		t.Fatal("managed node still serves after stop")
+	if want := []string{serverLogPath(spec.socket, roleNode)}; !slices.Equal(logs, want) {
+		t.Fatalf("logs = %q, want %q", logs, want)
+	}
+	if b, _ := os.ReadFile(logs[0]); !strings.Contains(string(b), "starting argus node") {
+		t.Fatalf("log = %q", b)
 	}
 }
 
@@ -68,11 +72,12 @@ func TestConnectLocalSpawnWithGatewayEnrolls(t *testing.T) {
 	ts := httptest.NewServer(hsrv.Handler())
 	defer ts.Close()
 
-	c, srv, err := connectLocalSpawnWithGateway(context.Background(), &config.Config{}, testSpec(t), wsURL(ts.URL), "", nil)
+	spec := testSpec(t)
+	c, _, err := connectLocalSpawnWithGateway(context.Background(), &config.Config{}, spec, wsURL(ts.URL), "", nil)
 	if err != nil {
 		t.Fatalf("connectLocalSpawnWithGateway: %v", err)
 	}
-	defer srv.stop(managedStopTimeout)
+	t.Cleanup(func() { stopSockets(t, spec.socket) })
 	defer c.Close()
 	waitForNodes(t, c)
 }
@@ -104,20 +109,23 @@ func TestConnectLocalGatewayRunsTwoProcesses(t *testing.T) {
 	cfg.Gateway.ListenAddr = "127.0.0.1:0"
 	cfg.Token = "tok"
 	spec := testSpec(t)
-	c, g, _, err := connectLocalGateway(context.Background(), cfg, spec)
+	c, logs, _, err := connectLocalGateway(context.Background(), cfg, spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer g.stop(managedStopTimeout)
+	t.Cleanup(func() { stopSockets(t, spec.socket, gatewaySocketPath(spec.socket)) })
 	defer c.Close()
-	if len(g.servers) != 2 {
-		t.Fatalf("want 2 managed servers, got %d", len(g.servers))
-	}
-	if g.servers[0].cmd.Process.Pid == g.servers[1].cmd.Process.Pid {
-		t.Fatal("the gateway and the node share a process")
+	want := []string{serverLogPath(spec.socket, roleGateway), serverLogPath(spec.socket, roleNode)}
+	if !slices.Equal(logs, want) {
+		t.Fatalf("logs = %q, want %q", logs, want)
 	}
 	if _, err := probeServerInfo(gatewaySocketPath(spec.socket)); err != nil {
 		t.Fatalf("gateway socket: %v", err)
 	}
 	waitForNodes(t, c)
+	for i, line := range []string{"gateway listening", "starting argus node"} {
+		if b, _ := os.ReadFile(logs[i]); !strings.Contains(string(b), line) {
+			t.Errorf("%s = %q, want %q", logs[i], b, line)
+		}
+	}
 }

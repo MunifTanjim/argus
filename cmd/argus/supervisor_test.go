@@ -2,10 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"net"
+	"os"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/MunifTanjim/argus/internal/config"
 )
 
 func TestCombinedMode(t *testing.T) {
@@ -99,5 +104,64 @@ func TestWaitSupervisedTreatsExitDuringShutdownAsClean(t *testing.T) {
 		if err := waitSupervised(ctx, g); err != nil {
 			t.Fatalf("waitSupervised = %v, want nil once ctx is done", err)
 		}
+	}
+}
+
+func TestWaitSupervisedTreatsCleanChildExitAsStop(t *testing.T) {
+	g := &managedGroup{exited: make(chan error, 1)}
+	g.exited <- nil
+	if err := waitSupervised(context.Background(), g); err != nil {
+		t.Fatalf("waitSupervised = %v, want nil for a clean child exit", err)
+	}
+}
+
+func TestWaitSupervisedReportsFailedChildExit(t *testing.T) {
+	g := &managedGroup{exited: make(chan error, 1)}
+	g.exited <- errors.New("exit status 1")
+	err := waitSupervised(context.Background(), g)
+	if err == nil || !strings.Contains(err.Error(), "a managed server exited") {
+		t.Fatalf("waitSupervised = %v, want a managed server exited error", err)
+	}
+}
+
+func TestRunSupervisorRefusesRunningNodeBeforeTunnel(t *testing.T) {
+	t.Cleanup(func() { config.LogLevel.Set(slog.LevelInfo) })
+	cfg := cfgWithMode("", "", "tok")
+	cfg.Socket = shortSocket(t)
+	cfg.Log.Level = "error"
+	cfg.Tunnel.Provider = "bogus"
+	l, err := net.Listen("unix", cfg.Socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	var runErr error
+	out := captureStderr(t, func() {
+		runErr = runSupervisor(context.Background(), newStartCmd("test"), cfg, os.Stderr)
+	})
+	if runErr == nil || !strings.Contains(out, "run 'argus stop' first") {
+		t.Fatalf("runSupervisor = %v, stderr %q, want the stop hint", runErr, out)
+	}
+}
+
+func TestRunSupervisorRemovesStaleLaunchState(t *testing.T) {
+	t.Cleanup(func() { config.LogLevel.Set(slog.LevelInfo) })
+	cfg := cfgWithMode("", "", "tok")
+	cfg.Socket = shortSocket(t)
+	cfg.Log.Level = "error"
+	// Fails after the running checks, before any child starts.
+	cfg.Tunnel.Provider = "bogus"
+	if err := saveLaunchState(cfg.Socket, launchState{Mode: launchModeGateway}); err != nil {
+		t.Fatal(err)
+	}
+	var runErr error
+	captureStderr(t, func() {
+		runErr = runSupervisor(context.Background(), newStartCmd("test"), cfg, os.Stderr)
+	})
+	if runErr == nil {
+		t.Fatal("runSupervisor must fail on the bogus tunnel")
+	}
+	if st, err := loadLaunchState(cfg.Socket); st != nil || err != nil {
+		t.Fatalf("stale state file left behind: %v, %v", st, err)
 	}
 }

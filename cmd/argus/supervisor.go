@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"slices"
@@ -20,11 +21,20 @@ func combinedMode(cfg *config.Config) bool { return runLocalNode(cfg) && serveGa
 // runSupervisor does the interactive tunnel setup here, because the children
 // have no terminal. It blocks until ctx is done or a child exits. The node
 // child reconciles the hooks, so the supervisor does not.
-func runSupervisor(ctx context.Context, cmd *cobra.Command, cfg *config.Config) error {
+func runSupervisor(ctx context.Context, cmd *cobra.Command, cfg *config.Config, logOut io.Writer) error {
 	if err := validateMode(cfg); err != nil {
 		return fail(cmd, err)
 	}
-	if err := setupLogger(cfg, false); err != nil {
+	if err := setupLogger(cfg, logOut, false); err != nil {
+		return fail(cmd, err)
+	}
+	if err := refuseRunning(cfg.Socket); err != nil {
+		return fail(cmd, err)
+	}
+	if err := refuseRunning(gatewaySocketPath(cfg.Socket)); err != nil {
+		return fail(cmd, err)
+	}
+	if err := removeLaunchState(cfg.Socket); err != nil {
 		return fail(cmd, err)
 	}
 	tun, _, err := resolveTunnel(tunnelOpts(cfg, true))
@@ -32,9 +42,6 @@ func runSupervisor(ctx context.Context, cmd *cobra.Command, cfg *config.Config) 
 		return fail(cmd, err)
 	}
 	if err := prepareTunnel(ctx, tun, isatty.IsTerminal(os.Stdin.Fd())); err != nil {
-		return fail(cmd, err)
-	}
-	if err := refuseRunning(gatewaySocketPath(cfg.Socket)); err != nil {
 		return fail(cmd, err)
 	}
 	addr, bound, err := resolveListenAddr(cfg.Gateway.ListenAddr)
@@ -53,18 +60,16 @@ func runSupervisor(ctx context.Context, cmd *cobra.Command, cfg *config.Config) 
 }
 
 // waitSupervised treats a child exit after ctx is done as part of the
-// shutdown: under systemd the children get the stop signal too.
+// shutdown: under systemd the children get the stop signal too. A clean exit
+// is a server.stop, so the supervisor stops the other child and exits cleanly.
 func waitSupervised(ctx context.Context, g *managedGroup) error {
 	defer g.stop(managedStopTimeout)
 	select {
 	case <-ctx.Done():
 		return nil
 	case err := <-g.Exited():
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || err == nil {
 			return nil
-		}
-		if err == nil {
-			err = fmt.Errorf("exit status 0")
 		}
 		return fmt.Errorf("a managed server exited: %w", err)
 	}

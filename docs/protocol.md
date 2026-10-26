@@ -67,7 +67,7 @@ transport that serves the `lock.*` methods.
 
 A gateway also listens on `argus-gateway.sock`, in the same directory as the
 node socket. This socket serves only `server.info` (with no `nodes`),
-`server.checkUpgrade`, `server.upgrade`, and `server.restart`.
+`server.checkUpgrade`, `server.upgrade`, `server.restart`, and `server.stop`.
 
 **WebSocket.** The gateway serves plain HTTP on `:8443` by default
 (`--listen-addr`). It has two WebSocket routes and no other HTTP routes:
@@ -1075,6 +1075,7 @@ are standard base64 strings in JSON.
 | `server.checkUpgrade` | request            | gateway, node    | `{ node_id?: string }`  | `{ current: string, latest: string }` |
 | `server.upgrade`      | request            | gateway, node    | `{ node_id?: string }`  | `{ from: string, to: string }`        |
 | `server.restart`      | request            | gateway, node    | `{ node_id?: string }`  | `null`                                |
+| `server.stop`         | request            | gateway, node    | none                    | `null`                                |
 | `nodes.list`          | request            | gateway          | none                    | `{ nodes: NodeDescriptor[] }`         |
 | `node.event`          | notification       | gateway → client | `NodeEvent`             | —                                     |
 | `relay.open`          | request            | gateway          | `{ node_id: string }`   | `{ chan_id: string }`                 |
@@ -1137,6 +1138,11 @@ arguments and the same PID. The shutdown can close the connection before the
 reply arrives, so only an error reply means that the restart failed. The new
 process reports a new `started_at`. A target that does not support these
 methods replies `-32601`.
+
+`server.stop` replies first, then shuts the server down. A node accepts it
+only on its unix socket, and a gateway accepts it only on
+`argus-gateway.sock`. Relay channels and the gateway WebSocket routes reply
+`-32601`.
 
 `server.upgrade` and `server.restart` fail with
 `an upgrade or restart is already in progress` while another one runs.

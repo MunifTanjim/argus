@@ -5,7 +5,12 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -127,7 +132,7 @@ func TestStartStandaloneGatewayServes(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- runStart(ctx, cancel, newStartCmd("test"), cfg, "test", false) }()
+	go func() { done <- runStart(ctx, cancel, newStartCmd("test"), cfg, "test", false, os.Stderr) }()
 
 	// serveGateway starts its listener asynchronously; poll until /client accepts.
 	url := "ws://" + addr + "/client"
@@ -213,7 +218,7 @@ func TestStartStandaloneGatewayFailsFastOnTakenSocket(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := runStart(ctx, cancel, newStartCmd("test"), cfg, "test", false); err == nil {
+	if err := runStart(ctx, cancel, newStartCmd("test"), cfg, "test", false, os.Stderr); err == nil {
 		t.Fatal("runStart must fail when the gateway socket is taken")
 	}
 	ln, err := net.Listen("tcp", addr)
@@ -221,6 +226,95 @@ func TestStartStandaloneGatewayFailsFastOnTakenSocket(t *testing.T) {
 		t.Fatalf("gateway TCP listener was started: %v", err)
 	}
 	ln.Close()
+}
+
+func TestRefuseRunningHintsStop(t *testing.T) {
+	sock := shortSocket(t)
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	err = refuseRunning(sock)
+	if err == nil || !strings.Contains(err.Error(), "run 'argus stop' first") {
+		t.Fatalf("refuseRunning = %v, want the stop hint", err)
+	}
+}
+
+func TestRunStartRefusesRunningNodeBeforeUplink(t *testing.T) {
+	t.Cleanup(func() { config.LogLevel.Set(slog.LevelInfo) })
+	var attempts atomic.Int32
+	ws := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { attempts.Add(1) }))
+	defer ws.Close()
+
+	cfg := cfgWith("ws"+strings.TrimPrefix(ws.URL, "http"), "")
+	cfg.Socket = shortSocket(t)
+	cfg.Log.Level = "error"
+	l, err := net.Listen("unix", cfg.Socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var runErr error
+	out := captureStderr(t, func() {
+		runErr = runStart(ctx, cancel, newStartCmd("test"), cfg, "test", false, os.Stderr)
+	})
+	if runErr == nil || !strings.Contains(out, "run 'argus stop' first") {
+		t.Fatalf("runStart = %v, stderr %q, want the stop hint", runErr, out)
+	}
+	if n := attempts.Load(); n != 0 {
+		t.Fatalf("gateway saw %d connection attempts, want 0", n)
+	}
+}
+
+func TestRunStartRemovesStaleLaunchState(t *testing.T) {
+	t.Cleanup(func() { config.LogLevel.Set(slog.LevelInfo) })
+	cfg := cfgWith("", "")
+	cfg.Socket = shortSocket(t)
+	cfg.Log.Level = "error"
+	// Fails after the running check, before the node starts.
+	cfg.Tunnel.Provider = "bogus"
+	if err := saveLaunchState(cfg.Socket, launchState{Mode: launchModeIsolated}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var runErr error
+	captureStderr(t, func() {
+		runErr = runStart(ctx, cancel, newStartCmd("test"), cfg, "test", false, os.Stderr)
+	})
+	if runErr == nil {
+		t.Fatal("runStart must fail on the bogus tunnel")
+	}
+	if st, err := loadLaunchState(cfg.Socket); st != nil || err != nil {
+		t.Fatalf("stale state file left behind: %v, %v", st, err)
+	}
+}
+
+func TestDetachedRunStartKeepsLaunchState(t *testing.T) {
+	t.Cleanup(func() { config.LogLevel.Set(slog.LevelInfo) })
+	cfg := cfgWith("", "")
+	cfg.Socket = shortSocket(t)
+	cfg.Log.Level = "error"
+	cfg.Tunnel.Provider = "bogus"
+	if err := saveLaunchState(cfg.Socket, launchState{Mode: launchModeIsolated}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newStartCmd("test")
+	if err := cmd.Flags().Set("argus-log-file", filepath.Join(filepath.Dir(cfg.Socket), "n.log")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	captureStderr(t, func() {
+		_ = runStart(ctx, cancel, cmd, cfg, "test", false, os.Stderr)
+	})
+	if st, err := loadLaunchState(cfg.Socket); st == nil || err != nil {
+		t.Fatalf("state file = %v, %v; a detached child must keep it", st, err)
+	}
 }
 
 func TestArgusManagedFlagIsHidden(t *testing.T) {

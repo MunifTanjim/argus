@@ -233,9 +233,6 @@ func (m model) frameTitle() string {
 	if m.reconnecting {
 		parts = append(parts, dimStyle.Render("reconnecting…"))
 	}
-	if m.serverExited != "" {
-		parts = append(parts, StyleErrorBold.Render("⚠ server exited"))
-	}
 	if m.quarantined() {
 		parts = append(parts, StyleErrorBold.Render("⚠ QUARANTINED")+dimStyle.Render(" · argus lock pin"))
 	}
