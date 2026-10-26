@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/transport/jsonrpc.dart';
+import 'package:cbor/simple.dart';
 
 void main() {
   test('encodeRequest emits newline-terminated json-rpc 2.0', () {
@@ -35,5 +37,31 @@ void main() {
     expect(m.isResponse, isTrue);
     expect(m.error!.code, -32601);
     expect(m.error!.message, 'no method');
+  });
+
+  test('cborToDart keys maps by string and keeps byte strings as bytes', () {
+    final v = cborToDart(
+      cbor.decode(
+        cbor.encode({
+          1: 'one',
+          'b': Uint8List.fromList([0, 255]),
+          'l': [1, 2],
+        }),
+      ),
+    );
+    expect(v, isA<Map<String, dynamic>>());
+    final m = v as Map<String, dynamic>;
+    expect(m['1'], 'one');
+    expect(m['b'], isA<Uint8List>());
+    expect(m['b'], [0, 255]);
+    expect(m['l'], isNot(isA<Uint8List>()));
+    expect(m['l'], [1, 2]);
+  });
+
+  test('encodeRequest writes bytes as base64', () {
+    final m = jsonDecode(
+      encodeRequest('1', 'x', {'d': Uint8List.fromList([3])}).trim(),
+    ) as Map<String, dynamic>;
+    expect((m['params'] as Map)['d'], base64.encode([3]));
   });
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/transport/connection.dart';
@@ -12,6 +13,8 @@ class FakeLink implements RpcLink {
 
   @override
   Stream<RpcMessage> get incoming => _ctrl.stream;
+  @override
+  void sendBytes(Uint8List frame) {}
   @override
   void send(String frame) => sent.add(frame);
   @override
@@ -31,6 +34,8 @@ class PongLink implements RpcLink {
 
   @override
   Stream<RpcMessage> get incoming => _ctrl.stream;
+  @override
+  void sendBytes(Uint8List frame) {}
   @override
   void send(String frame) {
     final m = jsonDecode(frame) as Map<String, dynamic>;
@@ -65,7 +70,7 @@ void main() {
           attempts++;
           throw _Fatal('host key changed — possible MITM');
         },
-        clientFactory: (incoming, send) =>
+        clientFactory: (incoming, send, sendBytes) =>
             RpcClient(incoming: incoming, sendFrame: send),
         baseBackoff: const Duration(milliseconds: 5),
         maxBackoff: const Duration(milliseconds: 20),
@@ -85,7 +90,7 @@ void main() {
     var resynced = false;
     final mgr = ConnectionManager(
       connect: () async => link,
-      clientFactory: (incoming, send) =>
+      clientFactory: (incoming, send, sendBytes) =>
           RpcClient(incoming: incoming, sendFrame: send),
       onConnected: (c) async => resynced = true,
       baseBackoff: const Duration(milliseconds: 5),
@@ -111,7 +116,7 @@ void main() {
         links.add(l);
         return l;
       },
-      clientFactory: (incoming, send) =>
+      clientFactory: (incoming, send, sendBytes) =>
           RpcClient(incoming: incoming, sendFrame: send),
       baseBackoff: const Duration(milliseconds: 5),
       maxBackoff: const Duration(milliseconds: 20),
@@ -129,7 +134,7 @@ void main() {
   test('stop prevents further reconnects', () async {
     final mgr = ConnectionManager(
       connect: () async => FakeLink(),
-      clientFactory: (incoming, send) =>
+      clientFactory: (incoming, send, sendBytes) =>
           RpcClient(incoming: incoming, sendFrame: send),
       baseBackoff: const Duration(milliseconds: 5),
       maxBackoff: const Duration(milliseconds: 20),
@@ -150,7 +155,7 @@ void main() {
         }
         return FakeLink();
       },
-      clientFactory: (incoming, send) =>
+      clientFactory: (incoming, send, sendBytes) =>
           RpcClient(incoming: incoming, sendFrame: send),
       dialTimeout: const Duration(milliseconds: 20),
       baseBackoff: const Duration(milliseconds: 5),
@@ -167,7 +172,7 @@ void main() {
     var attempt = 0;
     final mgr = ConnectionManager(
       connect: () async => FakeLink(),
-      clientFactory: (incoming, send) =>
+      clientFactory: (incoming, send, sendBytes) =>
           RpcClient(incoming: incoming, sendFrame: send),
       onConnected: (c) async {
         attempt++;
@@ -191,7 +196,7 @@ void main() {
         attempts++;
         return FakeLink(); // never answers ping
       },
-      clientFactory: (incoming, send) =>
+      clientFactory: (incoming, send, sendBytes) =>
           RpcClient(incoming: incoming, sendFrame: send),
       keepaliveInterval: const Duration(milliseconds: 20),
       keepaliveTimeout: const Duration(milliseconds: 20),
@@ -211,7 +216,7 @@ void main() {
         attempts++;
         return PongLink();
       },
-      clientFactory: (incoming, send) =>
+      clientFactory: (incoming, send, sendBytes) =>
           RpcClient(incoming: incoming, sendFrame: send),
       keepaliveInterval: const Duration(milliseconds: 20),
       keepaliveTimeout: const Duration(milliseconds: 20),
@@ -233,7 +238,7 @@ void main() {
         links.add(l);
         return l;
       },
-      clientFactory: (incoming, send) =>
+      clientFactory: (incoming, send, sendBytes) =>
           RpcClient(incoming: incoming, sendFrame: send),
       baseBackoff: const Duration(milliseconds: 5),
       maxBackoff: const Duration(milliseconds: 20),

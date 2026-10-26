@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'gateway_client.dart';
 import 'jsonrpc.dart';
@@ -8,6 +9,9 @@ abstract class RpcLink {
   /// (data bridge + link-loss watcher).
   Stream<RpcMessage> get incoming;
   void send(String frame);
+
+  /// Sends an already-framed CBOR frame (see `frameCbor`).
+  void sendBytes(Uint8List frame);
   Future<void> close();
 }
 
@@ -36,6 +40,7 @@ class ConnectionManager {
   final FutureOr<GatewayClient> Function(
     Stream<RpcMessage>,
     void Function(String),
+    void Function(Uint8List),
   )
   clientFactory;
   final Future<void> Function(GatewayClient)? onConnected;
@@ -142,7 +147,7 @@ class ConnectionManager {
         },
       );
       final client = await Future.value(
-        clientFactory(bridge.stream, link.send),
+        clientFactory(bridge.stream, link.send, link.sendBytes),
       );
       _client = client;
       if (onConnected != null) await onConnected!(client).timeout(dialTimeout);

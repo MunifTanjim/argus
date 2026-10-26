@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/enums.dart';
 import 'package:argus/transport/jsonrpc.dart';
@@ -56,6 +57,17 @@ void main() {
         '{"jsonrpc":"2.0","method":"terminal.output","params":{"term_id":"${a.termId}","data":"$data"}}')));
     await Future<void>.delayed(Duration.zero);
     expect(got.single, utf8.encode('hi'));
+  });
+
+  test('terminal.output with byte data reaches onData as is', () async {
+    final got = <List<int>>[];
+    final a = start(onData: got.add);
+    incoming.add(RpcMessage(method: 'terminal.output', params: {
+      'term_id': a.termId,
+      'data': Uint8List.fromList([0, 255]),
+    }));
+    await Future<void>.delayed(Duration.zero);
+    expect(got.single, [0, 255]);
   });
 
   test('terminal.output for another term is ignored', () async {

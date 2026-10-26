@@ -46,6 +46,8 @@ class SshWebSocketRpcLink implements RpcLink {
   @override
   void send(String frame) => _inner.send(frame);
   @override
+  void sendBytes(Uint8List frame) => _inner.sendBytes(frame);
+  @override
   Future<void> close() async {
     await _inner.close();
     await _closeTunnel();

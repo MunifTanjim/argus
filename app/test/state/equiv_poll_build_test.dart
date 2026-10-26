@@ -10,7 +10,7 @@ void main() {
   test('startEquivPoll does not modify providers during a provider build', () async {
     final manager = ConnectionManager(
       connect: () async => throw UnimplementedError(),
-      clientFactory: (_, __) async => throw UnimplementedError(),
+      clientFactory: (_, _, _) async => throw UnimplementedError(),
     );
     // Mirrors gatewayProvider: the poll is started from inside a provider's build.
     final harness = Provider<Timer>((ref) => startEquivPoll(
