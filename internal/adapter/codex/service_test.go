@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -681,5 +683,57 @@ func TestAwaitConnStartSurvivesCallerCancel(t *testing.T) {
 	close(release)
 	if err := <-second; err != nil {
 		t.Fatalf("other caller failed after the first cancelled: %v", err)
+	}
+}
+
+func TestDaemonDownMatchesDialErrors(t *testing.T) {
+	ctx := context.Background()
+	// t.TempDir is too long for a macOS socket path, which fails with EINVAL.
+	dir, err := os.MkdirTemp("", "cx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+
+	_, err = dialRPC(ctx, filepath.Join(dir, "missing.sock"))
+	if err == nil || !daemonDown(err) {
+		t.Fatalf("missing socket: daemonDown(%v) = false, want true", err)
+	}
+
+	// A socket file with no listener, as a crashed daemon leaves behind.
+	stale := filepath.Join(dir, "stale.sock")
+	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: stale, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.SetUnlinkOnClose(false)
+	l.Close()
+	_, err = dialRPC(ctx, stale)
+	if err == nil || !daemonDown(err) {
+		t.Fatalf("stale socket: daemonDown(%v) = false, want true", err)
+	}
+
+	if daemonDown(errConnClosed) {
+		t.Fatal("daemonDown(errConnClosed) = true, want false")
+	}
+}
+
+func TestAwaitConnStartsPumpBeforeFirstScan(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	d := newDiscoverer(registry.New(), nil)
+	sock := modelListDaemon(t).sock
+	d.sockPath = func() (string, error) { return sock, nil }
+	d.retry = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	d.ctx = ctx
+	old := startDaemon
+	t.Cleanup(func() { startDaemon = old })
+	startDaemon = func(context.Context) error { return nil }
+
+	actx, acancel := context.WithTimeout(ctx, 2*time.Second)
+	defer acancel()
+	if _, err := d.awaitConn(actx); err != nil {
+		t.Fatalf("awaitConn: %v", err)
 	}
 }
