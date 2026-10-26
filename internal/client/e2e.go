@@ -385,7 +385,7 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := m.peer.SendRawFrame(frame); err != nil {
+	if err := m.peer.SendRawFrame(api.EncodingJSON, frame); err != nil {
 		return err
 	}
 	select {
@@ -1091,9 +1091,9 @@ func (m *E2EClient) callNode(nodeID, method string, params, out any) error {
 	m.mu.Unlock()
 
 	nc.sendMu.Lock()
-	frame, err := ch.SealRequestFrame(&idRaw, method, nodeID, paramsRaw)
+	frame, err := ch.SealRequestFrame(api.EncodingJSON, &idRaw, method, nodeID, paramsRaw)
 	if err == nil {
-		err = m.peer.SendRawFrame(frame)
+		err = m.peer.SendRawFrame(api.EncodingJSON, frame)
 	}
 	nc.sendMu.Unlock()
 	if err != nil {

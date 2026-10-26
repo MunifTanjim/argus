@@ -44,7 +44,7 @@ func e2eNodePair(t *testing.T, d *Node) (cch *api.Channel, client *api.Peer, fro
 		t.Fatalf("NewInitiator: %v", err)
 	}
 	hf, _ := api.MarshalHandshakeFrame("c1", msg1)
-	if err := client.SendRawFrame(hf); err != nil {
+	if err := client.SendRawFrame(api.EncodingJSON, hf); err != nil {
 		t.Fatalf("send handshake: %v", err)
 	}
 	select {
@@ -75,8 +75,8 @@ func TestResponderRequestResponse(t *testing.T) {
 
 	id := json.RawMessage("1")
 	params := json.RawMessage(`{"hello":"world"}`)
-	req, _ := cch.SealRequestFrame(&id, "test.echo", "home", params)
-	if err := client.SendRawFrame(req); err != nil {
+	req, _ := cch.SealRequestFrame(api.EncodingJSON, &id, "test.echo", "home", params)
+	if err := client.SendRawFrame(api.EncodingJSON, req); err != nil {
 		t.Fatalf("send req: %v", err)
 	}
 	select {
@@ -102,8 +102,8 @@ func TestResponderErrorResponse(t *testing.T) {
 	defer cleanup()
 
 	id := json.RawMessage("2")
-	req, _ := cch.SealRequestFrame(&id, "test.fail", "home", nil)
-	client.SendRawFrame(req)
+	req, _ := cch.SealRequestFrame(api.EncodingJSON, &id, "test.fail", "home", nil)
+	client.SendRawFrame(api.EncodingJSON, req)
 	select {
 	case f := <-fromNode:
 		if bytes.Contains(f.Raw, []byte("boom detail")) {
@@ -135,8 +135,8 @@ func TestResponderStreamsNotifications(t *testing.T) {
 	defer cleanup()
 
 	id := json.RawMessage("3")
-	req, _ := cch.SealRequestFrame(&id, "test.sub", "home", nil)
-	client.SendRawFrame(req)
+	req, _ := cch.SealRequestFrame(api.EncodingJSON, &id, "test.sub", "home", nil)
+	client.SendRawFrame(api.EncodingJSON, req)
 
 	deadline := time.After(2 * time.Second)
 	for {
@@ -264,7 +264,7 @@ func runClientHandshake(t *testing.T, r *relayResponder, clientKP e2e.KeyPair) b
 		t.Fatalf("NewInitiator: %v", err)
 	}
 	hf, _ := api.MarshalHandshakeFrame(chanID, msg1)
-	if err := clientPeer.SendRawFrame(hf); err != nil {
+	if err := clientPeer.SendRawFrame(api.EncodingJSON, hf); err != nil {
 		t.Fatalf("send handshake: %v", err)
 	}
 	_ = init
@@ -364,11 +364,11 @@ func TestResponderPlaintextChannelNoHandshake(t *testing.T) {
 
 	ch := api.NewPlainChannel("c1")
 	id := json.RawMessage(`1`)
-	frame, err := ch.SealRequestFrame(&id, "test.echo", d.id, json.RawMessage(`{"hello":"plain"}`))
+	frame, err := ch.SealRequestFrame(api.EncodingJSON, &id, "test.echo", d.id, json.RawMessage(`{"hello":"plain"}`))
 	if err != nil {
 		t.Fatalf("SealRequestFrame: %v", err)
 	}
-	if err := clientPeer.SendRawFrame(frame); err != nil {
+	if err := clientPeer.SendRawFrame(api.EncodingJSON, frame); err != nil {
 		t.Fatalf("send req: %v", err)
 	}
 

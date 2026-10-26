@@ -54,7 +54,7 @@ func TestTerminalWireShape(t *testing.T) {
 		t.Errorf("Terminal = %s\nwant %s", b, want)
 	}
 	b, _ = json.Marshal(NodeCapabilities{SpawnSession: true, Terminal: true, HostWakelock: true})
-	if string(b) != `{"spawn_session":true,"terminal":true,"host_wakelock":true}` {
+	if string(b) != `{"spawn_session":true,"terminal":true,"host_wakelock":true,"cbor":false}` {
 		t.Errorf("NodeCapabilities = %s", b)
 	}
 	b, _ = json.Marshal(TerminalOpenParams{TermID: "t1", TerminalID: "@1", Cols: 80, Rows: 24})
@@ -112,7 +112,24 @@ func TestNodeCapabilitiesKeepUnknownKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := string(b), `{"future_cap":{"level":2},"host_wakelock":true,"spawn_session":true,"terminal":false}`; got != want {
+	if got, want := string(b), `{"cbor":false,"future_cap":{"level":2},"host_wakelock":true,"spawn_session":true,"terminal":false}`; got != want {
 		t.Fatalf("got %s, want %s", got, want)
+	}
+}
+
+func TestTerminalDataJSONWireUnchanged(t *testing.T) {
+	b, err := json.Marshal(TerminalOutput{TermID: "t1", Data: []byte("hi")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(b), `{"term_id":"t1","data":"aGk="}`; got != want {
+		t.Fatalf("marshal = %s, want %s", got, want)
+	}
+	var in TerminalInputParams
+	if err := json.Unmarshal([]byte(`{"term_id":"t1","data":"aGk="}`), &in); err != nil {
+		t.Fatal(err)
+	}
+	if string(in.Data) != "hi" {
+		t.Fatalf("data = %q, want hi", in.Data)
 	}
 }

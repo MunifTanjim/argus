@@ -142,7 +142,7 @@ func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
 		r.closeChan(f.Route.ChanID)
 		return
 	}
-	if err := peer.SendRawFrame(frame); err != nil {
+	if err := peer.SendRawFrame(api.EncodingJSON, frame); err != nil {
 		r.closeChan(f.Route.ChanID)
 		return
 	}
@@ -209,11 +209,11 @@ func (r *relayResponder) serve(cs *chanState, id *json.RawMessage, method string
 	}
 	cs.sendMu.Lock()
 	defer cs.sendMu.Unlock()
-	frame, err := cs.ch.SealResponseFrame(id, raw, rpcErr)
+	frame, err := cs.ch.SealResponseFrame(api.EncodingJSON, id, raw, rpcErr)
 	if err != nil {
 		return
 	}
-	_ = peer.SendRawFrame(frame)
+	_ = peer.SendRawFrame(api.EncodingJSON, frame)
 }
 
 // closeAll cancels every channel's context (dropping its pollers/terminals) and
@@ -312,11 +312,11 @@ func (cn *channelNotifier) Notify(method string, params any) error {
 	}
 	cn.cs.sendMu.Lock()
 	defer cn.cs.sendMu.Unlock()
-	frame, err := cn.cs.ch.SealNotificationFrame(method, api.RouteHeader{}, raw)
+	frame, err := cn.cs.ch.SealNotificationFrame(api.EncodingJSON, method, api.RouteHeader{}, raw)
 	if err != nil {
 		return err
 	}
-	return peer.SendRawFrame(frame)
+	return peer.SendRawFrame(api.EncodingJSON, frame)
 }
 
 // RelayChannelCountForTest reports how many client channels the active uplink holds.

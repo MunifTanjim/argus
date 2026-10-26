@@ -2,10 +2,12 @@ package api
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -316,5 +318,200 @@ func TestPeerKeepaliveRPCErrorCountsAsAlive(t *testing.T) {
 		t.Fatal("keepalive closed peer on RPCError reply; RPCError should count as alive")
 	case <-time.After(150 * time.Millisecond):
 		// good: RPCError reply proves the remote responded; link is healthy
+	}
+}
+
+// recordConn records every byte read from the wrapped conn.
+type recordConn struct {
+	net.Conn
+	mu  sync.Mutex
+	buf []byte
+}
+
+func (c *recordConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	c.mu.Lock()
+	c.buf = append(c.buf, p[:n]...)
+	c.mu.Unlock()
+	return n, err
+}
+
+func (c *recordConn) bytes() []byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]byte(nil), c.buf...)
+}
+
+func TestPeerCBORNotifyWhenRemoteAllows(t *testing.T) {
+	got := make(chan Notification, 2)
+	pa, _, done := makePeers(PeerOptions{}, PeerOptions{OnNotify: func(n Notification) { got <- n }})
+	defer done()
+	pa.SetRemoteCBOR(true)
+	if !pa.RemoteCBOR() {
+		t.Fatal("RemoteCBOR should be true")
+	}
+
+	if err := pa.Notify(MethodTerminalOutput, TerminalOutput{TermID: "t1", Data: []byte{0xff, 0x00}}); err != nil {
+		t.Fatalf("notify: %v", err)
+	}
+	n := <-got
+	if n.Enc != EncodingCBOR {
+		t.Fatalf("Enc = %v, want CBOR", n.Enc)
+	}
+	var o TerminalOutput
+	if err := n.Decode(&o); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if o.TermID != "t1" || !bytes.Equal(o.Data, []byte{0xff, 0x00}) {
+		t.Fatalf("decoded %+v", o)
+	}
+
+	if err := pa.Notify(MethodSessionEvent, map[string]string{"k": "v"}); err != nil {
+		t.Fatalf("notify: %v", err)
+	}
+	n = <-got
+	if n.Enc != EncodingJSON {
+		t.Fatalf("session.event Enc = %v, want JSON", n.Enc)
+	}
+	var m map[string]string
+	if err := n.Decode(&m); err != nil || m["k"] != "v" {
+		t.Fatalf("decode: %v %v", m, err)
+	}
+}
+
+func TestPeerJSONWhenRemoteNotAllowed(t *testing.T) {
+	ca, cb := net.Pipe()
+	rb := &recordConn{Conn: cb}
+	got := make(chan Notification, 1)
+	pa := NewPeer(ca, PeerOptions{})
+	pb := NewPeer(rb, PeerOptions{OnNotify: func(n Notification) { got <- n }})
+	defer pa.Close()
+	defer pb.Close()
+
+	if err := pa.Notify(MethodTerminalOutput, TerminalOutput{TermID: "t1", Data: []byte("x")}); err != nil {
+		t.Fatalf("notify: %v", err)
+	}
+	n := <-got
+	if n.Enc != EncodingJSON {
+		t.Fatalf("Enc = %v, want JSON", n.Enc)
+	}
+	if raw := rb.bytes(); len(raw) == 0 || raw[0] != '{' {
+		t.Fatalf("wire bytes = %q, want a JSON line", raw)
+	}
+}
+
+func TestPeerCBORRequestTranscodedAndAnsweredInCBOR(t *testing.T) {
+	ca, cb := net.Pipe()
+	ra := &recordConn{Conn: ca}
+	seen := make(chan json.RawMessage, 1)
+	pa := NewPeer(ra, PeerOptions{})
+	pb := NewPeer(cb, PeerOptions{Dispatch: func(_ context.Context, _ string, params json.RawMessage) (any, error) {
+		seen <- params
+		return nil, nil
+	}})
+	defer pa.Close()
+	defer pb.Close()
+	pa.SetRemoteCBOR(true)
+
+	if err := pa.Call(MethodTerminalInput, TerminalInputParams{TermID: "t1", Data: []byte("x")}, nil); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if got, want := string(<-seen), `{"data":"eA==","term_id":"t1"}`; got != want {
+		t.Fatalf("dispatch params = %s, want %s", got, want)
+	}
+	if raw := ra.bytes(); len(raw) == 0 || raw[0] != cborMarker {
+		t.Fatalf("response wire bytes = %q, want a CBOR frame", raw)
+	}
+}
+
+func TestPeerCBORParseError(t *testing.T) {
+	ca, cb := net.Pipe()
+	pb := NewPeer(cb, PeerOptions{Dispatch: echoDispatch})
+	defer pb.Close()
+	defer ca.Close()
+	r := bufio.NewReader(ca)
+
+	go func() { _, _ = ca.Write(appendFrame(nil, EncodingCBOR, []byte{0xff})) }()
+	enc, line, err := readFrame(r)
+	if err != nil || enc != EncodingJSON {
+		t.Fatalf("read reply: enc=%v err=%v", enc, err)
+	}
+	var m message
+	if err := json.Unmarshal(line, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m.ID != nil || m.Error == nil || m.Error.Code != CodeParseError || m.Error.Message != "parse error" {
+		t.Fatalf("reply = %s", line)
+	}
+
+	go func() {
+		_, _ = ca.Write([]byte(`{"jsonrpc":"2.0","id":7,"method":"echo","params":{"Msg":"hi"}}` + "\n"))
+	}()
+	_, line, err = readFrame(r)
+	if err != nil {
+		t.Fatalf("read reply: %v", err)
+	}
+	m = message{}
+	if err := json.Unmarshal(line, &m); err != nil || m.ID == nil || string(*m.ID) != "7" || m.Error != nil {
+		t.Fatalf("follow-up reply = %s (%v)", line, err)
+	}
+}
+
+func TestPeerRelayFrameKeepsEncoding(t *testing.T) {
+	ca, cb := net.Pipe()
+	got := make(chan RelayFrame, 1)
+	pb := NewPeer(cb, PeerOptions{OnRelayFrame: func(_ *Peer, f RelayFrame) { got <- f }})
+	defer pb.Close()
+	defer ca.Close()
+
+	envelope, err := CBORMarshal(cborMessage{
+		JSONRPC: jsonrpcVersion,
+		Method:  MethodTerminalOutput,
+		Route:   &RouteHeader{ChanID: "c1"},
+		Body:    []byte{1, 2, 3},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	go func() { _, _ = ca.Write(appendFrame(nil, EncodingCBOR, envelope)) }()
+	f := <-got
+	if f.Enc != EncodingCBOR || f.Route.ChanID != "c1" || f.Method != MethodTerminalOutput {
+		t.Fatalf("frame = %+v", f)
+	}
+	if !bytes.Equal(f.Body, []byte{1, 2, 3}) || !bytes.Equal(f.Raw, envelope) {
+		t.Fatalf("Body = %x Raw = %x", f.Body, f.Raw)
+	}
+}
+
+// frameRecorder implements FrameWriter and records each complete frame.
+type frameRecorder struct {
+	net.Conn
+	frames chan []byte
+}
+
+func (c *frameRecorder) WriteFrame(_ Encoding, frame []byte) error {
+	c.frames <- append([]byte(nil), frame...)
+	_, err := c.Conn.Write(frame)
+	return err
+}
+
+func TestPeerUsesFrameWriter(t *testing.T) {
+	ca, cb := net.Pipe()
+	fr := &frameRecorder{Conn: ca, frames: make(chan []byte, 1)}
+	got := make(chan Notification, 1)
+	pa := NewPeer(fr, PeerOptions{})
+	pb := NewPeer(cb, PeerOptions{OnNotify: func(n Notification) { got <- n }})
+	defer pa.Close()
+	defer pb.Close()
+	pa.SetRemoteCBOR(true)
+
+	if err := pa.Notify(MethodTerminalOutput, TerminalOutput{TermID: "t1", Data: []byte("x")}); err != nil {
+		t.Fatalf("notify: %v", err)
+	}
+	frame := <-fr.frames
+	<-got
+	enc, payload, err := readFrame(bufio.NewReader(bytes.NewReader(frame)))
+	if err != nil || enc != EncodingCBOR || len(payload)+5 != len(frame) {
+		t.Fatalf("frame not a single complete CBOR frame: enc=%v err=%v", enc, err)
 	}
 }

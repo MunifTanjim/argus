@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/base64"
 	"strings"
 	"sync"
 	"testing"
@@ -46,11 +45,7 @@ func (c *recordingClient) terminalInputData(t *testing.T) string {
 		if !ok {
 			t.Fatalf("terminal.input param #%d has type %T, want api.TerminalInputParams", i, c.params[i])
 		}
-		raw, err := base64.StdEncoding.DecodeString(p.Data)
-		if err != nil {
-			t.Fatalf("terminal.input #%d bad base64: %v", i, err)
-		}
-		b = append(b, raw...)
+		b = append(b, p.Data...)
 	}
 	return string(b)
 }

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -25,7 +24,7 @@ func TestScreenAttachDrainsEmulatorReplies(t *testing.T) {
 	m = withView(m, viewHome)
 	m2, _ := m.enterScreen("s1") // starts the drain goroutine
 
-	data := base64.StdEncoding.EncodeToString([]byte("hi\x1b[c\x1b[>c\x1b[6n more"))
+	data := []byte("hi\x1b[c\x1b[>c\x1b[6n more")
 	params, _ := json.Marshal(api.TerminalOutput{TermID: scr(m2).termID, Data: data})
 	done := make(chan struct{})
 	go func() {
@@ -203,7 +202,7 @@ func TestApplyEventWritesTerminalOutput(t *testing.T) {
 	m = withView(m, viewScreen)
 	m = withTerm(m, "s1", vt.NewEmulator(80, 24))
 
-	data := base64.StdEncoding.EncodeToString([]byte("hello"))
+	data := []byte("hello")
 	params, _ := json.Marshal(api.TerminalOutput{TermID: "s1", Data: data})
 	m.applyEvent(api.Notification{Method: api.MethodTerminalOutput, Params: params})
 
@@ -212,7 +211,7 @@ func TestApplyEventWritesTerminalOutput(t *testing.T) {
 	}
 
 	// Output for a different term id is ignored.
-	other, _ := json.Marshal(api.TerminalOutput{TermID: "other", Data: base64.StdEncoding.EncodeToString([]byte("zzz"))})
+	other, _ := json.Marshal(api.TerminalOutput{TermID: "other", Data: []byte("zzz")})
 	m.applyEvent(api.Notification{Method: api.MethodTerminalOutput, Params: other})
 	if strings.Contains(scr(m).term.Render(), "zzz") {
 		t.Errorf("render=%q must not contain output for another term", scr(m).term.Render())
