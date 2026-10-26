@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:typed_data';
 
+import 'package:cbor/simple.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../transport/gateway_client.dart';
-import '../transport/jsonrpc.dart' show RpcError, RpcMessage;
+import '../transport/jsonrpc.dart'
+    show RpcError, RpcMessage, cborToDart, jsonSafe;
 import '../transport/rpc_client.dart';
 import 'aggregate.dart';
 import 'bytes.dart' show bytesEqual, hexEncode;
@@ -55,9 +57,20 @@ class NodeChannel {
   final String nodeId;
   final String chanId;
   final Channel channel;
+
+  /// The gateway and the node both declared cbor; set after node.identify.
+  bool cbor = false;
 }
 
-typedef NodeEvent = ({String method, Uint8List params, String nodeId});
+typedef NodeEvent = ({
+  String method,
+  Uint8List params,
+  String nodeId,
+  bool cbor,
+});
+
+/// Methods whose params travel as CBOR on a channel that negotiated it.
+const cborMethods = {'terminal.output', 'terminal.input'};
 
 /// Talks to nodes over end-to-end encrypted channels relayed by a blind gateway.
 /// Gateway-level RPCs (relay.open/ping) go through a reused [RpcClient]; relay
@@ -77,7 +90,9 @@ class E2EClient implements GatewayClient {
     this.trustResyncInterval,
     this.onTrustChainAdvance,
     bool plaintext = false,
-  }) : _trust =
+    void Function(Uint8List)? sendBytes,
+  }) : _sendBytes = sendBytes,
+       _trust =
            trustStore ??
            (tofu
                ? TrustStore.tofu()
@@ -90,6 +105,9 @@ class E2EClient implements GatewayClient {
 
   final Stream<RpcMessage> _incoming;
   final void Function(String) _send;
+  // CBOR is used only when set.
+  final void Function(Uint8List)? _sendBytes;
+  bool _gatewayCbor = false;
   final KeyPair _static;
   final Duration handshakeTimeout;
   final Duration callTimeout;
@@ -263,7 +281,9 @@ class E2EClient implements GatewayClient {
   ) {
     Object? params;
     try {
-      params = jsonDecode(utf8.decode(e.params));
+      params = e.cbor
+          ? cborToDart(cbor.decode(e.params))
+          : jsonDecode(utf8.decode(e.params));
     } catch (_) {
       return (method: e.method, params: null);
     }
@@ -286,6 +306,11 @@ class E2EClient implements GatewayClient {
     return (method: e.method, params: params);
   });
 
+  static bool _hasCbor(Object? info) {
+    final caps = info is Map ? info['capabilities'] : null;
+    return caps is Map && caps['cbor'] == true;
+  }
+
   /// Discovers nodes (nodes.list) and opens an E2E channel to each node that
   /// advertises an identity key. When a genesis hash is configured, pulls and
   /// ingests the trust log first, then skips any node whose identity key is not
@@ -294,8 +319,15 @@ class E2EClient implements GatewayClient {
   /// It returns once the trust log is loaded; the channels keep opening in the
   /// background.
   Future<void> connect() async {
+    final info = _sendBytes == null
+        ? null
+        : _gateway
+              .call('server.info')
+              .then(_hasCbor)
+              .catchError((_) => false);
     final res = await _gateway.call('nodes.list');
     final nodes = (res is Map ? res['nodes'] : null) as List? ?? const [];
+    if (info != null) _gatewayCbor = await info;
     if (_trust != null) {
       // Rollback anchor: re-verify the last-known-good chain before pulling, so the
       // gateway's chain must be a monotonic extension (a stale/shorter chain is
@@ -385,21 +417,27 @@ class E2EClient implements GatewayClient {
       registered.complete();
       // Record identity pub hex so checkTipConsistency can distinguish
       // "was connected, now offline" from "never connected", then read the
-      // node's tip over its authenticated channel (node.identify).
-      if (desc.identityPubKey.isNotEmpty) {
-        try {
-          final key = hexEncode(base64.decode(desc.identityPubKey));
+      // node's tip over its authenticated channel (node.identify), declaring
+      // cbor there.
+      try {
+        String? key;
+        if (desc.identityPubKey.isNotEmpty) {
+          key = hexEncode(base64.decode(desc.identityPubKey));
           _everConnected.add(key);
-          final res = await _callNodeDecoded(desc.id, 'node.identify', null);
-          if (res is Map<String, dynamic>)
-            _authTip[key] = _decodeTip(res['tip']);
-        } catch (e) {
-          developer.log(
-            'node ${desc.id} identify failed: $e',
-            name: 'e2e',
-            level: 900,
-          );
         }
+        final res = await _callNodeDecoded(desc.id, 'node.identify', {
+          'capabilities': {'cbor': true},
+        });
+        if (res is Map<String, dynamic>) {
+          if (key != null) _authTip[key] = _decodeTip(res['tip']);
+          nc.cbor = _gatewayCbor && _hasCbor(res);
+        }
+      } catch (e) {
+        developer.log(
+          'node ${desc.id} identify failed: $e',
+          name: 'e2e',
+          level: 900,
+        );
       }
     } catch (e) {
       developer.log(
@@ -709,7 +747,9 @@ class E2EClient implements GatewayClient {
       nc = _byNodeId[nodeId];
     }
     if (nc == null) throw StateError('unknown node $nodeId');
-    final result = await callNode(nc, method, utf8.encode(jsonEncode(params)));
+    final result = nc.cbor && cborMethods.contains(method)
+        ? await _callNodeCbor(nc, method, params)
+        : await callNode(nc, method, utf8.encode(jsonEncode(jsonSafe(params))));
     if (result.isEmpty) return null;
     return jsonDecode(utf8.decode(result));
   }
@@ -1217,13 +1257,31 @@ class E2EClient implements GatewayClient {
   Duration callTimeoutFor(String method) =>
       method == 'server.upgrade' ? upgradeCallTimeout : callTimeout;
 
-  Future<Uint8List> callNode(NodeChannel nc, String method, List<int> params) {
+  Future<Uint8List> callNode(NodeChannel nc, String method, List<int> params) =>
+      _call(method, (id) {
+        _writeFrame(nc.channel.sealRequestFrame(id, method, nc.nodeId, params));
+      });
+
+  Future<Uint8List> _callNodeCbor(
+    NodeChannel nc,
+    String method,
+    Object? params,
+  ) {
+    final body = Uint8List.fromList(cbor.encode(params));
+    return _call(method, (id) {
+      _sendBytes!(nc.channel.sealRequestCbor(id, method, nc.nodeId, body));
+    });
+  }
+
+  /// Registers a pending reply for a fresh request id, then sends the sealed
+  /// request via [send]; the reply resolves to the raw result JSON bytes.
+  Future<Uint8List> _call(String method, void Function(int id) send) {
     if (_closed) return Future.error(StateError('client closed'));
     final idn = ++_nextId;
     final id = idn.toString();
     final c = Completer<Uint8List>();
     _pending[id] = c;
-    _writeFrame(nc.channel.sealRequestFrame(idn, method, nc.nodeId, params));
+    send(idn);
     return c.future.timeout(
       callTimeoutFor(method),
       onTimeout: () {
@@ -1276,7 +1334,12 @@ class E2EClient implements GatewayClient {
       try {
         final params = nc.channel.openParams(f);
         if (!_events.isClosed) {
-          _events.add((method: m.method!, params: params, nodeId: nc.nodeId));
+          _events.add((
+            method: m.method!,
+            params: params,
+            nodeId: nc.nodeId,
+            cbor: f.cbor,
+          ));
         }
       } catch (_) {
         /* drop */

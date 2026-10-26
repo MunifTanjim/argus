@@ -27,6 +27,8 @@ class _CallbackLink implements RpcLink {
   @override
   Stream<RpcMessage> get incoming => _ctrl.stream;
   @override
+  void sendBytes(Uint8List frame) {}
+  @override
   void send(String frame) {
     for (final part in frame.split('\n')) {
       if (part.trim().isEmpty) continue;

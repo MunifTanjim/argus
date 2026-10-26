@@ -16,7 +16,7 @@ class _Manager extends ConnectionManager {
   _Manager(this._client)
     : super(
         connect: () => throw UnimplementedError(),
-        clientFactory: (_, _) => _client,
+        clientFactory: (_, _, _) => _client,
       );
   final GatewayClient _client;
   @override
