@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -64,6 +65,8 @@ type discoverer struct {
 
 	connMu sync.Mutex
 	cur    *rpcConn
+
+	pendingMCPReload atomic.Bool // the MCP config changed while no app-server was connected
 
 	starts singleflight.Group // shares one daemon start among concurrent callers
 
@@ -166,6 +169,30 @@ func daemonDown(err error) bool {
 	return errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)
 }
 
+// reloadMCPServers makes the app-server pick up an edited MCP config, now or
+// as soon as a connection is up.
+func (d *discoverer) reloadMCPServers() {
+	if c := d.conn(); c != nil {
+		sendMCPReload(c)
+		return
+	}
+	d.pendingMCPReload.Store(true)
+	// runConn may have connected and checked the flag before it was set.
+	if c := d.conn(); c != nil && d.pendingMCPReload.Swap(false) {
+		sendMCPReload(c)
+	}
+}
+
+const mcpReloadTimeout = 5 * time.Second
+
+func sendMCPReload(c *rpcConn) {
+	ctx, cancel := context.WithTimeout(context.Background(), mcpReloadTimeout)
+	defer cancel()
+	if c.call(ctx, "config/mcpServer/reload", nil, nil) == nil {
+		clearMCPReloadMark()
+	}
+}
+
 func (d *discoverer) runPump(ctx context.Context) {
 	log := slog.Default().With("scope", "codex")
 	last := ""
@@ -217,6 +244,9 @@ func (d *discoverer) runConn(ctx context.Context) error {
 		return err
 	}
 	d.setConn(c)
+	if d.pendingMCPReload.Swap(false) {
+		sendMCPReload(c)
+	}
 	// The daemon unloads every thread when it exits, so a dropped connection ends
 	// every session; reconnect re-tracks whatever the daemon holds then.
 	defer d.dropAll()

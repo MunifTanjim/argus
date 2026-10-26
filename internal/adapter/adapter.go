@@ -6,11 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/modbridge"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -22,7 +25,13 @@ import (
 type InstallOptions struct {
 	ArgusBin string // binary the hooks invoke (hook-based agents)
 	Socket   string // argusd mod socket (Claude Code)
+	MCPURL   string // node MCP base URL; see MCPEndpoint
+	MCPToken string // bearer token for MCPURL
+	MCPOff   bool   // MCP is configured off: remove argus's MCP entries
 }
+
+// MCPEndpoint is the agent's own endpoint under MCPURL.
+func (o InstallOptions) MCPEndpoint(agent string) string { return o.MCPURL + "/" + agent }
 
 // ErrAgentNotInstalled reports that an agent's CLI is not available, so there is
 // nothing to install into.
@@ -59,6 +68,11 @@ func WithinDir(dir, p string) bool {
 		return false
 	}
 	return true
+}
+
+func DirExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.IsDir()
 }
 
 // HookMethod is the JSON-RPC method every argus hook invocation calls.
@@ -190,8 +204,15 @@ type Spawner interface {
 // SpawnOptions are the per-spawn choices an adapter turns into a launch. An empty
 // field means the agent's own default: the adapter adds nothing for it.
 type SpawnOptions struct {
-	Prompt string
-	Model  string // a ModelLister id
+	Prompt    string
+	Model     string // a ModelLister id
+	SessionID string // agent session id to start under; used only by a SessionIDPresetter
+}
+
+// SessionIDPresetter is an adapter whose SpawnCommand starts the session under
+// SpawnOptions.SessionID, so the agent session id is known before it registers.
+type SessionIDPresetter interface {
+	PresetsSessionID() bool
 }
 
 // ModelLister is an adapter that offers a model choice at spawn. The ids it
@@ -271,4 +292,46 @@ type Adapter interface {
 	Uninstall() error
 	SettingsPath() (string, error)
 	DefaultHookEvents() []string
+}
+
+// CallerIdentity lets argus tell which session ran a command.
+type CallerIdentity interface {
+	// CallerEnv is the variable the agent sets to its own session id on every command it runs.
+	CallerEnv() string
+	// IsAgentProcess reports whether p is this agent's own process.
+	IsAgentProcess(p procwalk.Proc, env map[string]string) bool
+}
+
+// AgentProcessEnv is a CallerIdentity whose IsAgentProcess reads variables
+// besides CallerEnv.
+type AgentProcessEnv interface {
+	AgentProcessEnv() []string
+}
+
+// RootSessionResolver maps a subagent's own session id to the session argus shows.
+type RootSessionResolver interface {
+	RootSession(ctx context.Context, agentSessionID string) (string, error)
+}
+
+// MCPIdentity reads the calling session's agent session id from an MCP tools/call _meta.
+type MCPIdentity interface {
+	MCPSessionID(meta map[string]json.RawMessage) (string, error)
+}
+
+// MetaSessionID returns the session id stored under key, or an error wrapping
+// api.ErrNoCaller.
+func MetaSessionID(meta map[string]json.RawMessage, key string) (string, error) {
+	if id, ok := MetaString(meta, key); ok {
+		return id, nil
+	}
+	return "", fmt.Errorf("%w: the call carries no %s", api.ErrNoCaller, key)
+}
+
+// MetaString returns the non-empty JSON string stored under key.
+func MetaString(meta map[string]json.RawMessage, key string) (string, bool) {
+	var v string
+	if err := json.Unmarshal(meta[key], &v); err != nil || v == "" {
+		return "", false
+	}
+	return v, true
 }

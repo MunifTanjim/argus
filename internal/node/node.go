@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +23,9 @@ import (
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/forge"
 	"github.com/MunifTanjim/argus/internal/host"
+	"github.com/MunifTanjim/argus/internal/mcphttp"
+	"github.com/MunifTanjim/argus/internal/mesh"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -34,10 +39,13 @@ import (
 
 // Node holds the wired-up core.
 type Node struct {
-	reg *registry.Registry
+	reg         *registry.Registry
+	mcpListener net.Listener
+	mcpToken    string
 	// adapterList holds agent adapters in priority order; [0] is the default.
 	adapterList []adapter.Adapter
 	adapters    map[string]adapter.Adapter
+	procTable   func(context.Context) (procwalk.Table, error)
 	discs       []adapter.Discoverer
 	server      *api.Server
 	clients     map[session.TmuxServer]*tmux.Client
@@ -101,6 +109,19 @@ type Node struct {
 	revealFn        func(ctx context.Context, c *tmux.Client, paneID string) error         // seam for tests; defaults to (*tmux.Client).Reveal
 	focusedFn       func(ctx context.Context, c *tmux.Client, paneID string) (bool, error) // seam for tests; defaults to (*tmux.Client).IsFocused
 	restoreMirrorFn func(c *tmux.Client, m *mirrorState)                                   // seam for tests; defaults to (*Node).restoreMirror
+
+	spawnFn func(ctx context.Context, p api.SpawnParams, presetID string) (api.SpawnResult, error) // seam for tests; defaults to (*Node).spawn
+
+	mesh          *mesh.Store     // nil = agentctl and messages disabled
+	meshCleared   map[string]bool // "<from> <to>" /clear rekeys already applied
+	meshPrev      map[string]session.Status
+	meshWorked    map[string]bool      // session id -> reported working since the last pass
+	meshLive      map[string]bool      // party keys live at the last pass
+	meshHeld      map[string]time.Time // party key -> when its delivery hold ends
+	meshSigs      map[string]string    // session id -> last pending interaction sig
+	meshKickCh    chan struct{}
+	meshExpiredAt time.Time
+	ownerSinks    atomic.Pointer[[]push.Sink] // Immediate then Delayed sinks, set by StartPush
 
 	pendingMu sync.Mutex
 	pending   map[string]*pendingDecision // session id -> parked PermissionRequest
@@ -289,11 +310,11 @@ func (d *Node) reevaluateTrustChannels() {
 	}
 }
 
-// remoteDispatch rejects lock.* methods (local-admin only) and dispatches the rest.
+// remoteDispatch rejects lock.* and agentctl.* methods (local-only) and dispatches the rest.
 func (d *Node) remoteDispatch() api.DispatchFunc {
 	full := d.server.DispatchFunc()
 	return func(ctx context.Context, method string, params json.RawMessage) (any, error) {
-		if strings.HasPrefix(method, "lock.") {
+		if strings.HasPrefix(method, "lock.") || strings.HasPrefix(method, "agentctl.") {
 			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
 		}
 		return full(ctx, method, params)
@@ -434,6 +455,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	d := &Node{
 		reg: reg, clients: clients, id: hostname, label: hostname,
 		adapterList:  adapterList,
+		procTable:    procwalk.Snapshot,
 		adapters:     adapterByAgent,
 		discs:        discs,
 		caps:         caps,
@@ -457,6 +479,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 		return c.IsFocused(ctx, paneID)
 	}
 	d.restoreMirrorFn = d.restoreMirror
+	d.spawnFn = d.spawn
 
 	srv := api.NewServer()
 	d.registerHandlers(srv)
@@ -504,6 +527,17 @@ func (d *Node) streamRegistry(n api.Notifier) func() {
 	}
 }
 
+// ListenMCP binds the local MCP listener on 127.0.0.1:port; Run serves it.
+// Call before Run.
+func (d *Node) ListenMCP(port int, token string) error {
+	l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		return err
+	}
+	d.mcpListener, d.mcpToken = l, token
+	return nil
+}
+
 // Run scans once at startup and serves the API on the unix socket until ctx is
 // cancelled. The socket (and a stale leftover) are managed automatically.
 func (d *Node) Run(ctx context.Context, socketPath string) error {
@@ -544,6 +578,10 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 		}
 	}()
 
+	if d.mcpListener != nil {
+		defer d.serveMCP()()
+	}
+
 	// Sweep orphaned mirror sessions left by unclean disconnects before any
 	// scan so stale sessions don't surface as live ones.
 	d.reapMirrors(context.Background())
@@ -555,5 +593,24 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	// bare shell the agent leaves behind.
 	go d.watchSessionExits(ctx)
 
+	if d.mesh != nil {
+		go d.meshLoop(ctx)
+	}
+
 	return d.server.ServeContext(ctx, l)
+}
+
+// mcpIdleTimeout closes keep-alive connections that agent runtimes leave open.
+const mcpIdleTimeout = 2 * time.Minute
+
+// serveMCP serves the bound MCP listener. The returned func stops the server.
+func (d *Node) serveMCP() func() {
+	srv := &http.Server{
+		Handler:           mcphttp.NewHandler(d.mcpToken, d.version, mcpBackend{d}),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       mcpIdleTimeout,
+	}
+	go func() { _ = srv.Serve(d.mcpListener) }()
+	d.log.Info("serving mcp", "addr", d.mcpListener.Addr().String())
+	return func() { _ = srv.Close() }
 }

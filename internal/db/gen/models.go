@@ -8,6 +8,33 @@ import (
 	"time"
 )
 
+type MeshLink struct {
+	ChildKey   string
+	ChildNode  string
+	ParentNode string
+	ParentKey  string
+	TaskID     string
+	EndedBy    string
+	CreatedAt  int64
+}
+
+type MeshMessage struct {
+	ID            string
+	Kind          string
+	SenderNode    string
+	SenderKey     string
+	RecipientNode string
+	RecipientKey  string
+	Body          string
+	ReplyTo       string
+	SubjectKey    string
+	Interaction   string
+	State         string
+	AnsweredBy    string
+	CreatedAt     int64
+	UpdatedAt     int64
+}
+
 type Project struct {
 	ID         string
 	Name       string

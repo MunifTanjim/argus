@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -22,7 +21,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
-	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/config"
@@ -137,7 +135,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		d.SetWakelockPath(config.GetStatePath("wakelock.json"))
 		d.SetMirrorAffixes(cfg.Tmux.MirrorSessionPrefix, cfg.Tmux.MirrorSessionSuffix)
 		d.SetLogger(logger.Scoped("node").L)
-		if err := enableProjectRegistry(d, cfg, logger.Scoped("node").L); err != nil {
+		if err := enableNodeDB(d, cfg, logger.Scoped("node").L); err != nil {
 			return fail(cmd, err)
 		}
 		if err := setWorkspaceTemplates(d, cfg); err != nil {
@@ -158,7 +156,8 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 	}
 
 	if local {
-		go reconcileHooks(logger.Scoped("hooks").L, adapter.InstallOptions{ArgusBin: cfg.Bin, Socket: node.ModSocketPath(cfg.Socket)})
+		opts := startMCP(cfg, d, adapter.InstallOptions{ArgusBin: cfg.Bin, Socket: node.ModSocketPath(cfg.Socket)}, logger.Scoped("mcp").L)
+		go d.ReconcileHooks(logger.Scoped("hooks").L, opts)
 		if err := connectGateway(ctx, cfg, d); err != nil {
 			return fail(cmd, err)
 		}
@@ -388,27 +387,28 @@ func applyLogLevel(cfg *config.Config) error {
 	return nil
 }
 
-// reconcileHooks skips agents that were never run. Best-effort, and slow when
-// it runs the claude CLI, so callers run it in the background.
-func reconcileHooks(log *slog.Logger, opts adapter.InstallOptions) {
-	for _, a := range adapters.All() {
-		path, err := a.SettingsPath()
-		if err != nil {
-			log.Warn("reconcile hooks failed", "agent", a.Agent(), "err", err)
-			continue
-		}
-		if path != "" && !dirExists(filepath.Dir(path)) {
-			continue
-		}
-		added, err := a.Reconcile(opts)
-		switch {
-		case errors.Is(err, adapter.ErrAgentNotInstalled):
-		case err != nil:
-			log.Warn("reconcile hooks failed", "agent", a.Agent(), "err", err)
-		case len(added) > 0:
-			log.Info("reconciled argus hooks", "agent", a.Agent(), "added", added)
-		}
+type mcpListener interface {
+	ListenMCP(port int, token string) error
+}
+
+// startMCP binds the node's MCP listener before reconcile writes the agents' MCP
+// entries, and returns the options for that reconcile. When the listener cannot
+// bind (another node may serve the port with its own token), the options leave
+// those entries as they are.
+func startMCP(cfg *config.Config, d mcpListener, opts adapter.InstallOptions, log *slog.Logger) adapter.InstallOptions {
+	opts, err := mcpInstallOptions(cfg, opts)
+	if err != nil {
+		log.Warn("mcp server disabled", "err", err)
+		return opts
 	}
+	if opts.MCPOff {
+		return opts
+	}
+	if err := d.ListenMCP(cfg.MCP.Port, opts.MCPToken); err != nil {
+		log.Error("mcp server is off for this node: the port is busy", "port", cfg.MCP.Port, "err", err)
+		opts.MCPURL, opts.MCPToken = "", ""
+	}
+	return opts
 }
 
 // watchParent stops a managed server once the TUI that owns it is gone. The TUI

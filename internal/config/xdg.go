@@ -23,11 +23,24 @@ var RuntimeDirIsFallback bool
 // in sessions without systemd-logind (su, cron, some SSH, containers). Falls back to
 // a per-user temp dir, as the XDG spec advises.
 func resolveRuntimeDir() string {
-	if runtimeDirUsable(xdg.RuntimeDir) {
-		return filepath.Join(xdg.RuntimeDir, ProjectName)
+	dir, fallback := pickRuntimeDir(xdg.RuntimeDir, os.TempDir())
+	RuntimeDirIsFallback = fallback
+	return dir
+}
+
+// pickRuntimeDir reuses an existing <base>/argus without a write probe, since a
+// sandboxed client can connect to a node's directory it cannot write to.
+func pickRuntimeDir(base, tempDir string) (dir string, fallback bool) {
+	if base != "" {
+		dir := filepath.Join(base, ProjectName)
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			return dir, false
+		}
+		if runtimeDirUsable(base) {
+			return dir, false
+		}
 	}
-	RuntimeDirIsFallback = true
-	return filepath.Join(os.TempDir(), fmt.Sprintf("%s-%d", ProjectName, os.Getuid()))
+	return filepath.Join(tempDir, fmt.Sprintf("%s-%d", ProjectName, os.Getuid())), true
 }
 
 // runtimeDirUsable reports whether base is a writable directory, probing with a temp

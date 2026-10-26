@@ -155,6 +155,26 @@ func TestProcessHookClearSurfacesRespondPrompt(t *testing.T) {
 	}
 }
 
+func TestProcessHookClearRecordsContinuation(t *testing.T) {
+	reg := registry.New()
+	hook := func(event, id string, fields map[string]any) session.Session {
+		fields["session_id"] = id
+		raw, _ := json.Marshal(fields)
+		s, _ := ProcessHook(reg, HookEvent{Event: event, TmuxPane: "%0", TmuxSocket: "default", Payload: raw})
+		return s
+	}
+	hook("SessionStart", "c0", map[string]any{"source": "startup"})
+	hook("SessionEnd", "c0", map[string]any{"reason": "clear"})
+	if got := hook("SessionStart", "c1", map[string]any{"source": "clear"}); got.ClearedFrom != "c0" {
+		t.Fatalf("cleared from = %q, want c0", got.ClearedFrom)
+	}
+	for _, source := range []string{"startup", "resume"} {
+		if got := hook("SessionStart", "c2-"+source, map[string]any{"source": source}); got.ClearedFrom != "" {
+			t.Fatalf("source=%s recorded cleared from = %q", source, got.ClearedFrom)
+		}
+	}
+}
+
 func TestProcessHookSessionStartStartupIsIdle(t *testing.T) {
 	reg := registry.New()
 	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{

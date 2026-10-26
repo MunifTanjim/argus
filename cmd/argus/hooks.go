@@ -3,13 +3,14 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapters"
+	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/mcphttp"
 	"github.com/MunifTanjim/argus/internal/node"
 	"github.com/MunifTanjim/argus/internal/shell"
 )
@@ -47,40 +48,20 @@ func newHooksInstallCmd() *cobra.Command {
 			if err != nil {
 				return fail(cmd, err)
 			}
-			opts := adapter.InstallOptions{ArgusBin: cfg.Bin, Socket: node.ModSocketPath(cfg.Socket)}
+			opts, err := mcpInstallOptions(cfg, adapter.InstallOptions{ArgusBin: cfg.Bin, Socket: node.ModSocketPath(cfg.Socket)})
+			if err != nil {
+				shell.StdErrF("argus mcp server not installed: %v\n", err)
+			}
 			hooked, failed := false, false
 			for _, a := range adapters.All() {
-				path, err := a.SettingsPath()
-				if err != nil {
-					shell.StdErrF("failed to install argus integration for %s: %v\n", a.Agent(), err)
+				line, ok, isHook := installAgent(a, opts)
+				if !ok {
+					shell.StdErrF("%s", line)
 					failed = true
 					continue
 				}
-				if path == "" {
-					continue // agent needs no hooks
-				}
-				// Only install for agents the user actually has set up: a missing config
-				// dir means the agent was never run, so don't materialize one for it.
-				if dir := filepath.Dir(path); !dirExists(dir) {
-					fmt.Printf("skipped %s: %s does not exist (agent not set up)\n", a.Agent(), dir)
-					continue
-				}
-				if err := a.Install(opts); err != nil {
-					if errors.Is(err, adapter.ErrAgentNotInstalled) {
-						fmt.Printf("skipped %s: not installed\n", a.Agent())
-						continue
-					}
-					shell.StdErrF("failed to install argus integration for %s: %v\n", a.Agent(), err)
-					failed = true
-					continue
-				}
-				if events := a.DefaultHookEvents(); len(events) > 0 {
-					hooked = true
-					fmt.Printf("installed argus hooks for %s into %s\n", a.Agent(), path)
-					fmt.Printf("  events: %v\n", events)
-				} else {
-					fmt.Printf("installed the argus plugin for %s\n", a.Agent())
-				}
+				fmt.Print(line)
+				hooked = hooked || isHook
 			}
 			if hooked {
 				fmt.Printf("  command: %s hook <event>\n", cfg.Bin)
@@ -106,24 +87,13 @@ func newHooksUninstallCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			failed := false
 			for _, a := range adapters.All() {
-				path, err := a.SettingsPath()
-				if err == nil {
-					err = a.Uninstall()
-				}
+				line, err := uninstallAgent(a)
 				if err != nil {
 					shell.StdErrF("failed to remove argus integration for %s: %v\n", a.Agent(), err)
 					failed = true
 					continue
 				}
-				if path == "" {
-					fmt.Printf("removed argus hooks for %s\n", a.Agent())
-					continue
-				}
-				if len(a.DefaultHookEvents()) == 0 {
-					fmt.Printf("removed argus integration for %s\n", a.Agent())
-					continue
-				}
-				fmt.Printf("removed argus hooks for %s from %s\n", a.Agent(), path)
+				fmt.Print(line)
 			}
 			if failed {
 				return errSilent // each failure was already printed
@@ -134,7 +104,76 @@ func newHooksUninstallCmd() *cobra.Command {
 	}
 }
 
-func dirExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
+// installAgent's ok is false when line is an error message; isHook reports
+// that argus hooks were installed.
+func installAgent(a adapter.Adapter, opts adapter.InstallOptions) (line string, ok, isHook bool) {
+	failure := func(err error) string {
+		return fmt.Sprintf("failed to install argus integration for %s: %v\n", a.Agent(), err)
+	}
+	path, err := a.SettingsPath()
+	if err != nil {
+		return failure(err), false, false
+	}
+	mcpOnly := path == ""
+	if mcpOnly && opts.MCPURL == "" && !opts.MCPOff {
+		return fmt.Sprintf("skipped %s: no argus mcp token\n", a.Agent()), true, false
+	}
+	// Only install for agents the user actually has set up: a missing config
+	// dir means the agent was never run, so don't materialize one for it.
+	// Agents without a settings file check their own config dir.
+	if dir := filepath.Dir(path); !mcpOnly && !adapter.DirExists(dir) {
+		return fmt.Sprintf("skipped %s: %s does not exist (agent not set up)\n", a.Agent(), dir), true, false
+	}
+	if err := a.Install(opts); err != nil {
+		if errors.Is(err, adapter.ErrAgentNotInstalled) {
+			return fmt.Sprintf("skipped %s: not installed\n", a.Agent()), true, false
+		}
+		return failure(err), false, false
+	}
+	switch {
+	case mcpOnly && opts.MCPOff:
+		return fmt.Sprintf("argus mcp server is off; removed it from %s\n", a.Agent()), true, false
+	case mcpOnly:
+		return fmt.Sprintf("installed the argus mcp server for %s\n", a.Agent()), true, false
+	}
+	if events := a.DefaultHookEvents(); len(events) > 0 {
+		return fmt.Sprintf("installed argus hooks for %s into %s\n  events: %v\n", a.Agent(), path, events), true, true
+	}
+	return fmt.Sprintf("installed the argus plugin for %s\n", a.Agent()), true, false
+}
+
+func uninstallAgent(a adapter.Adapter) (string, error) {
+	path, err := a.SettingsPath()
+	if err == nil {
+		err = a.Uninstall()
+	}
+	switch {
+	case err != nil:
+		return "", err
+	case path == "":
+		return fmt.Sprintf("removed the argus mcp server for %s\n", a.Agent()), nil
+	case len(a.DefaultHookEvents()) == 0:
+		return fmt.Sprintf("removed argus integration for %s\n", a.Agent()), nil
+	}
+	return fmt.Sprintf("removed argus hooks for %s from %s\n", a.Agent(), path), nil
+}
+
+// mcpInstallOptions adds the MCP URL and token to opts, creating the token on
+// first use, or marks MCP off when the port is 0. On a token error, opts leave
+// the agents' MCP entries as they are.
+func mcpInstallOptions(cfg *config.Config, opts adapter.InstallOptions) (adapter.InstallOptions, error) {
+	if cfg.MCP.Port == 0 {
+		opts.MCPOff = true
+		return opts, nil
+	}
+	token, err := mcphttp.LoadOrCreateToken(config.GetStatePath("mcp.token"))
+	if err != nil {
+		return opts, err
+	}
+	opts.MCPURL, opts.MCPToken = mcpBaseURL(cfg), token
+	return opts, nil
+}
+
+func mcpBaseURL(cfg *config.Config) string {
+	return fmt.Sprintf("http://127.0.0.1:%d/mcp", cfg.MCP.Port)
 }

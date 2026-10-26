@@ -74,6 +74,11 @@ type Registry struct {
 	// subagents are keyed by session id.
 	subagents map[string][]session.RunningSubagent
 	shells    map[string][]session.RunningShell
+
+	// prevAgentSession is the agent session id each session held before its
+	// latest change, so a /clear hook that lands after a scan saw the new id
+	// still knows what it cleared.
+	prevAgentSession map[string]string
 }
 
 // New returns an empty Registry.
@@ -88,6 +93,8 @@ func New() *Registry {
 		models:        make(map[string]liveModel),
 		subagents:     make(map[string][]session.RunningSubagent),
 		shells:        make(map[string][]session.RunningShell),
+
+		prevAgentSession: make(map[string]string),
 	}
 }
 
@@ -102,6 +109,21 @@ func PaneKey(server session.TmuxServer, paneID string) string {
 // so a pane-based id would not stay stable across adopt/respawn.
 func AgentSessionKey(agent, agentSessionID string) string {
 	return agent + ":" + agentSessionID
+}
+
+// FindByAgentSession returns the session of agent whose agent session id is agentSessionID.
+func (r *Registry) FindByAgentSession(agent, agentSessionID string) (session.Session, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id, ok := r.index.findByAgentSession(agentSessionID)
+	if !ok {
+		return session.Session{}, false
+	}
+	s, ok := r.sessions[id]
+	if !ok || s.Agent != agent {
+		return session.Session{}, false
+	}
+	return *s, true
 }
 
 // Get returns a copy of the session with the given ID and whether it exists.
@@ -323,7 +345,11 @@ func (r *Registry) reindexAgentSession(s *session.Session, agentSessionID string
 		}
 	}
 	r.index.clear("", s.AgentSessionID)
+	if s.AgentSessionID != "" {
+		r.prevAgentSession[s.ID] = s.AgentSessionID
+	}
 	s.AgentSessionID = agentSessionID
+	s.ClearedFrom = ""
 	r.index.setAgentSession(agentSessionID, s.ID)
 }
 
@@ -493,6 +519,7 @@ func (r *Registry) remove(id, paneK string, finalStatus session.Status) {
 	delete(r.models, id)
 	delete(r.subagents, id)
 	delete(r.shells, id)
+	delete(r.prevAgentSession, id)
 	r.index.clear(paneK, s.AgentSessionID)
 	r.publish(Event{Type: EventRemoved, Session: removed})
 }
@@ -709,6 +736,9 @@ type HookUpdate struct {
 	// replaces it (empty clears).
 	Subagents *[]session.RunningSubagent
 	Shells    *[]session.RunningShell
+	// Cleared marks the start of a conversation that /clear continued from the
+	// session's previous agent session id.
+	Cleared bool
 }
 
 // ApplyHook correlates a hook event to a session (by pane, else agent session id),
@@ -776,6 +806,9 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	}
 
 	r.reindexAgentSession(s, u.AgentSessionID)
+	if u.Cleared && u.AgentSessionID != "" {
+		s.ClearedFrom = r.prevAgentSession[s.ID]
+	}
 	if u.Name != "" {
 		s.Name = u.Name
 	}

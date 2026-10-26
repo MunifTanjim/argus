@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
+	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapter/hookset"
+	"github.com/MunifTanjim/argus/internal/jsonc"
 )
 
 // legacyHookMarker is the old shell-comment marker; recognized for removal only.
@@ -152,4 +155,75 @@ func decodeHooks(top map[string]json.RawMessage) (hookset.Map, error) {
 		}
 	}
 	return hooks, nil
+}
+
+// mcpAllowRule lets Claude call the argus mod's MCP tools without a prompt; a
+// plugin cannot allow its own tools.
+const mcpAllowRule = mcpToolPrefix + "*"
+
+var mcpAllowEntry = jsonc.Entry{Path: []string{"permissions", "allow"}, Value: mcpAllowRule}
+
+// allowMCPTools adds the allow rule to settings.json when Claude's config
+// directory exists. It holds the mod lock, as claude edits settings.json too.
+func allowMCPTools() (bool, error) {
+	path, err := SettingsPath()
+	if err != nil {
+		return false, err
+	}
+	if !adapter.DirExists(filepath.Dir(path)) {
+		return false, nil
+	}
+	if has, err := hasMCPAllowRule(path); err == nil && has {
+		return false, nil
+	}
+	unlock, err := lockMod()
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	return jsonc.EditFile(path, func(src []byte) ([]byte, error) { return jsonc.Set(src, mcpAllowEntry) })
+}
+
+func disallowMCPTools() (bool, error) {
+	path, err := SettingsPath()
+	if err != nil {
+		return false, err
+	}
+	if has, err := hasMCPAllowRule(path); err == nil && !has {
+		return false, nil
+	}
+	unlock, err := lockMod()
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	return removeMCPAllowRule()
+}
+
+// hasMCPAllowRule reads settings.json without the mod lock, so it only spares
+// taking the lock: an error means the edit under the lock must decide.
+func hasMCPAllowRule(path string) (bool, error) {
+	src, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	cfg, err := jsonc.Decode(src)
+	if err != nil {
+		return false, err
+	}
+	perms, _ := cfg["permissions"].(map[string]any)
+	allow, _ := perms["allow"].([]any)
+	return slices.Contains(allow, any(mcpAllowRule)), nil
+}
+
+// removeMCPAllowRule needs the mod lock held.
+func removeMCPAllowRule() (bool, error) {
+	path, err := SettingsPath()
+	if err != nil {
+		return false, err
+	}
+	return jsonc.EditFile(path, func(src []byte) ([]byte, error) { return jsonc.Unset(src, false, mcpAllowEntry) })
 }

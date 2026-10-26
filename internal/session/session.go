@@ -253,12 +253,26 @@ type Session struct {
 	// Interaction is the pending user request (non-nil only while awaiting input).
 	Interaction *Interaction `json:"interaction,omitempty"`
 
+	// Parent is the session that spawned this one through argus, when known.
+	Parent *ParentRef `json:"parent,omitempty"`
+	// ClearedFrom is the agent session id this session continued from through
+	// /clear; it is reset when AgentSessionID changes for any other reason.
+	ClearedFrom string `json:"-"`
+
 	// Origin fields — populated only when surfaced through a gateway.
 	NodeID    string `json:"node_id,omitempty"`    // originating node (also composite ID prefix)
 	NodeLabel string `json:"node_label,omitempty"` // human-friendly name (e.g. hostname)
 	// Offline marks a session whose node is disconnected: kept visible (greyed) for
 	// a grace period before removal.
 	Offline bool `json:"offline,omitempty"`
+}
+
+// ParentRef is the session that spawned this one through argus, by its stable party key.
+type ParentRef struct {
+	Node      string `json:"node"`
+	Key       string `json:"key"`
+	SessionID string `json:"session_id,omitempty"` // the live session with Key, when one exists
+	Gone      bool   `json:"gone,omitempty"`
 }
 
 // Controllable reports whether argus can drive the session's terminal. Only

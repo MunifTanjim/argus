@@ -3,10 +3,12 @@ package opencode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -31,6 +33,35 @@ func (ocAdapter) Agent() string      { return Agent }
 func (ocAdapter) AgentName() string  { return "OpenCode" }
 func (ocAdapter) AgentColor() string { return "#d3869b" }
 func (ocAdapter) IsHeadless() bool   { return true }
+
+func (ocAdapter) CallerEnv() string { return "OPENCODE_SESSION_ID" }
+func (ocAdapter) MCPSessionID(meta map[string]json.RawMessage) (string, error) {
+	return adapter.MetaSessionID(meta, "ai.opencode/sessionID")
+}
+
+func (ocAdapter) IsAgentProcess(p procwalk.Proc, env map[string]string) bool {
+	return p.Name() == "opencode"
+}
+
+const maxParentDepth = 10
+
+func (ocAdapter) RootSession(ctx context.Context, id string) (string, error) {
+	c, ok := serviceClient()
+	if !ok {
+		return "", errors.New("opencode service not running")
+	}
+	for range maxParentDepth {
+		s, err := c.getSession(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		if s.ParentID == "" {
+			return id, nil
+		}
+		id = s.ParentID
+	}
+	return "", fmt.Errorf("session %s: parent chain exceeds %d steps", id, maxParentDepth)
+}
 
 func (a *ocAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
 	a.disc = newDiscoverer(reg, clients)
@@ -157,11 +188,21 @@ func (a *ocAdapter) Respond(ctx context.Context, sess session.Session, p api.Res
 	return a.disc.respond(ctx, sess, p)
 }
 
-// OpenCode needs no argus-managed config.
-func (ocAdapter) Install(adapter.InstallOptions) error { return nil }
-func (ocAdapter) Reconcile(adapter.InstallOptions) ([]string, error) {
-	return nil, nil
+// OpenCode gets the argus MCP server in its global config. It has no reload, so
+// a change applies when the OpenCode service starts again.
+func (a ocAdapter) Install(opts adapter.InstallOptions) error {
+	_, err := a.Reconcile(opts)
+	return err
 }
-func (ocAdapter) Uninstall() error              { return nil }
+
+func (ocAdapter) Reconcile(opts adapter.InstallOptions) ([]string, error) {
+	changed, err := adapter.SyncMCP(Agent, opts, mcpServerURL, func() (bool, error) { return false, removeMCPServer() }, writeMCPServer)
+	if err != nil || !changed {
+		return nil, err
+	}
+	return []string{"mcp.argus"}, nil
+}
+
+func (ocAdapter) Uninstall() error              { return removeMCPServer() }
 func (ocAdapter) SettingsPath() (string, error) { return "", nil }
 func (ocAdapter) DefaultHookEvents() []string   { return nil }

@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -32,6 +35,15 @@ func (cxAdapter) Agent() string      { return Agent }
 func (cxAdapter) AgentName() string  { return "Codex" }
 func (cxAdapter) AgentColor() string { return "#b8bb26" } // green
 func (cxAdapter) IsHeadless() bool   { return true }
+
+func (cxAdapter) CallerEnv() string { return "CODEX_THREAD_ID" }
+func (cxAdapter) MCPSessionID(meta map[string]json.RawMessage) (string, error) {
+	return adapter.MetaSessionID(meta, "sessionId")
+}
+
+func (cxAdapter) IsAgentProcess(p procwalk.Proc, env map[string]string) bool {
+	return p.Name() == "codex"
+}
 
 func (a *cxAdapter) NewDiscoverer(reg *registry.Registry, clients map[session.TmuxServer]*tmux.Client) adapter.Discoverer {
 	a.disc = newDiscoverer(reg, clients)
@@ -184,12 +196,75 @@ func (a *cxAdapter) RenameSession(ctx context.Context, sess session.Session, nam
 	return true, nil
 }
 
-// Codex needs no argus-managed config. Node start strips hooks older argus
-// versions installed; `argus hooks uninstall` still removes them too.
-func (cxAdapter) Install(adapter.InstallOptions) error { return nil }
-func (cxAdapter) Reconcile(adapter.InstallOptions) ([]string, error) {
-	return nil, Uninstall()
+// Codex gets the argus MCP server in config.toml. Node start also strips hooks
+// older argus versions installed; `argus hooks uninstall` removes both. Only the
+// node's own adapter has a discoverer to reload the daemon's MCP servers; a
+// change made elsewhere (`argus hooks install`) leaves a marker, so the next node
+// start reloads them.
+func (a *cxAdapter) Install(opts adapter.InstallOptions) error {
+	changed, err := applyMCPServer(opts)
+	if changed {
+		a.reloadMCPServers()
+	}
+	return err
 }
-func (cxAdapter) Uninstall() error              { return Uninstall() }
+
+func (a *cxAdapter) Reconcile(opts adapter.InstallOptions) ([]string, error) {
+	if _, err := removeLegacyHooks(); err != nil {
+		return nil, err
+	}
+	changed, err := applyMCPServer(opts)
+	if changed || a.disc != nil && mcpReloadMarked() {
+		a.reloadMCPServers()
+	}
+	if err != nil || !changed || opts.MCPOff {
+		return nil, err
+	}
+	return []string{"mcp_servers.argus"}, nil
+}
+
+func (a *cxAdapter) Uninstall() error {
+	if _, err := removeLegacyHooks(); err != nil {
+		return err
+	}
+	changed, err := removeMCPServer()
+	if changed {
+		a.reloadMCPServers()
+	}
+	return err
+}
+
+func applyMCPServer(opts adapter.InstallOptions) (changed bool, err error) {
+	return adapter.SyncMCP(Agent, opts, mcpServerURL, removeMCPServer, writeMCPServer)
+}
+
+func (a *cxAdapter) reloadMCPServers() {
+	if a.disc == nil {
+		markMCPReload()
+		return
+	}
+	a.disc.reloadMCPServers()
+}
+
+// mcpReloadMarker, in the state dir, records an MCP config change no discoverer
+// could reload; the next reload the node sends clears it.
+const mcpReloadMarker = "codex-mcp-reload"
+
+func markMCPReload() {
+	if err := os.MkdirAll(config.StateDir, 0o700); err != nil {
+		return
+	}
+	_ = os.WriteFile(config.GetStatePath(mcpReloadMarker), nil, 0o600)
+}
+
+func mcpReloadMarked() bool {
+	_, err := os.Stat(config.GetStatePath(mcpReloadMarker))
+	return err == nil
+}
+
+func clearMCPReloadMark() {
+	_ = os.Remove(config.GetStatePath(mcpReloadMarker))
+}
+
 func (cxAdapter) SettingsPath() (string, error) { return "", nil }
 func (cxAdapter) DefaultHookEvents() []string   { return nil }

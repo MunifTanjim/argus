@@ -15,6 +15,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -55,6 +56,8 @@ type fakePlain struct{ adapter.Adapter }
 func (fakePlain) Agent() string     { return "plain" }
 func (fakePlain) AgentName() string { return "Plain" }
 
+func (fakeSpawner) CallerEnv() string                                    { return "" }
+func (fakeSpawner) IsAgentProcess(procwalk.Proc, map[string]string) bool { return false }
 func (fakeSpawner) IsHeadless() bool                                     { return true }
 func (fakeSpawner) Agent() string                                        { return "fake" }
 func (fakeSpawner) AgentName() string                                    { return "Fake" }
@@ -373,20 +376,20 @@ func TestWithCapsStampsCanPrompt(t *testing.T) {
 func TestResolveSpawnCommand(t *testing.T) {
 	d := New()
 	// Default agent (empty) resolves to the first adapter, claude.
-	cmd, args := d.resolveSpawnCommand(api.SpawnParams{Prompt: "fix the bug", Model: "sonnet"})
+	cmd, args := d.resolveSpawnCommand(api.SpawnParams{Prompt: "fix the bug", Model: "sonnet"}, "")
 	if cmd != "claude" || !slices.Equal(args, []string{"--model", "sonnet", "fix the bug"}) {
 		t.Fatalf("default: cmd=%q args=%#v, want claude [--model sonnet \"fix the bug\"]", cmd, args)
 	}
 	// A named agent resolves to its own binary.
-	if cmd, _ := d.resolveSpawnCommand(api.SpawnParams{Agent: "codex"}); cmd != "codex" {
+	if cmd, _ := d.resolveSpawnCommand(api.SpawnParams{Agent: "codex"}, ""); cmd != "codex" {
 		t.Fatalf("codex: cmd=%q, want codex", cmd)
 	}
 	// An unknown agent falls back to the default adapter.
-	if cmd, _ := d.resolveSpawnCommand(api.SpawnParams{Agent: "nope"}); cmd != "claude" {
+	if cmd, _ := d.resolveSpawnCommand(api.SpawnParams{Agent: "nope"}, ""); cmd != "claude" {
 		t.Fatalf("unknown: cmd=%q, want claude", cmd)
 	}
 	// An explicit command overrides the agent; the prompt becomes its arg.
-	cmd, args = d.resolveSpawnCommand(api.SpawnParams{Agent: "codex", Command: "zsh", Prompt: "hi"})
+	cmd, args = d.resolveSpawnCommand(api.SpawnParams{Agent: "codex", Command: "zsh", Prompt: "hi"}, "")
 	if cmd != "zsh" || len(args) != 1 || args[0] != "hi" {
 		t.Fatalf("override: cmd=%q args=%#v, want zsh [\"hi\"]", cmd, args)
 	}
