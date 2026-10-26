@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
@@ -120,7 +121,7 @@ func daemonSocketPath() (string, error) {
 }
 
 func (d *discoverer) ScanOnce(ctx context.Context) error {
-	d.pumpOnce.Do(func() { go d.runPump(d.ctx) })
+	d.startPump()
 	d.mu.Lock()
 	idle := len(d.threads) == 0 && len(d.panes) == 0
 	d.mu.Unlock()
@@ -155,16 +156,30 @@ func (d *discoverer) setConn(c *rpcConn) {
 	d.connMu.Unlock()
 }
 
+func (d *discoverer) startPump() {
+	d.pumpOnce.Do(func() { go d.runPump(d.ctx) })
+}
+
+// daemonDown reports whether err means no daemon listens on the socket. That is
+// the normal state until a spawn or model list starts the daemon.
+func daemonDown(err error) bool {
+	return errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)
+}
+
 func (d *discoverer) runPump(ctx context.Context) {
 	log := slog.Default().With("scope", "codex")
 	last := ""
 	for ctx.Err() == nil {
 		err := d.runConn(ctx)
-		// Log each distinct failure once, so a missing daemon is visible without
-		// a line every retry. A dropped connection always logs: it had connected.
+		// Log each distinct failure once, not every retry. A missing daemon logs at
+		// debug. A dropped connection always logs: it had connected.
 		if err != nil && ctx.Err() == nil {
 			if msg := err.Error(); msg != last {
-				log.Info("codex app-server daemon connection failed; retrying", "err", err)
+				if daemonDown(err) {
+					log.Debug("codex app-server daemon not running; waiting", "err", err)
+				} else {
+					log.Info("codex app-server daemon connection failed; retrying", "err", err)
+				}
 				last = msg
 			}
 			if errors.Is(err, errConnClosed) {
@@ -677,6 +692,8 @@ func (d *discoverer) awaitConn(ctx context.Context) (*rpcConn, error) {
 	if c := d.conn(); c != nil {
 		return c, nil
 	}
+	// A spawn can arrive before the first scan starts the pump.
+	d.startPump()
 	// Concurrent callers share one start. It runs on its own bounded context so a
 	// caller that gives up does not fail the others.
 	ch := d.starts.DoChan("start", func() (any, error) {
