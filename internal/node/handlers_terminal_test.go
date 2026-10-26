@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -94,7 +93,7 @@ func TestTerminalOpenStreamsAndCloses(t *testing.T) {
 
 	select {
 	case m := <-notif.outputs:
-		if m.TermID != "t1" || m.Data == "" {
+		if m.TermID != "t1" || len(m.Data) == 0 {
 			t.Fatalf("bad output: %+v", m)
 		}
 	case <-time.After(10 * time.Second):
@@ -565,7 +564,7 @@ func TestTerminalOpenByTerminalIDEndsWhenTheShellExits(t *testing.T) {
 		t.Errorf("attached = %v/%v, want only %s", got[0].Attached, got[1].Attached, a.ID)
 	}
 
-	if _, err := d.handleTerminalInput(ctx, mustJSON(api.TerminalInputParams{TermID: "t1", Data: base64.StdEncoding.EncodeToString([]byte("exit\r"))})); err != nil {
+	if _, err := d.handleTerminalInput(ctx, mustJSON(api.TerminalInputParams{TermID: "t1", Data: []byte("exit\r")})); err != nil {
 		t.Fatal(err)
 	}
 	if !waitExited(n, "t1", 10*time.Second) {
@@ -703,7 +702,7 @@ func TestTerminalWheelScrollsTheShellHistory(t *testing.T) {
 		return strings.TrimSpace(string(out))
 	}
 	time.Sleep(300 * time.Millisecond) // let the attach client start reading
-	wheelUp := base64.StdEncoding.EncodeToString([]byte("\x1b[<64;2;2M"))
+	wheelUp := []byte("\x1b[<64;2;2M")
 	if _, err := d.handleTerminalInput(ctx, mustJSON(api.TerminalInputParams{TermID: "t1", Data: wheelUp})); err != nil {
 		t.Fatal(err)
 	}
@@ -744,5 +743,14 @@ func TestDropAllTermsTearsDownEveryConnection(t *testing.T) {
 	d.termsMu.Unlock()
 	if left != 0 {
 		t.Fatalf("%d connections left", left)
+	}
+}
+
+func TestTerminalInputBadBase64KeepsError(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	_, err := d.handleTerminalInput(context.Background(), json.RawMessage(`{"term_id":"t1","data":"!!"}`))
+	var rpcErr *api.RPCError
+	if !errors.As(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest || rpcErr.Message != "bad base64" {
+		t.Fatalf("err = %v, want RPCError{CodeInvalidRequest, bad base64}", err)
 	}
 }

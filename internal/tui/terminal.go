@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/base64"
 	"os"
 	"strconv"
 	"strings"
@@ -324,8 +323,7 @@ func flushTermInput(client Client, termID string, data []byte) {
 	if len(data) == 0 {
 		return
 	}
-	enc := base64.StdEncoding.EncodeToString(data)
-	_ = client.Call(api.MethodTerminalInput, api.TerminalInputParams{TermID: termID, Data: enc}, nil)
+	_ = client.Call(api.MethodTerminalInput, api.TerminalInputParams{TermID: termID, Data: data}, nil)
 }
 
 func (m model) termResizeCmd(termID string, cols, rows int) tea.Cmd {

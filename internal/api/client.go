@@ -7,9 +7,19 @@ import (
 )
 
 // Notification is a remote-initiated message (no response expected).
+// When Enc is CBOR, Params holds CBOR bytes.
 type Notification struct {
 	Method string
 	Params json.RawMessage
+	Enc    Encoding
+}
+
+// Decode unmarshals Params into v by Enc. Empty params leave v untouched.
+func (n Notification) Decode(v any) error {
+	if len(n.Params) == 0 {
+		return nil
+	}
+	return n.Enc.Unmarshal(n.Params, v)
 }
 
 // Client is a JSON-RPC client over a stream connection. It is a thin consumer

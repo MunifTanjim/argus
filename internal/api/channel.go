@@ -6,16 +6,20 @@ import (
 	"fmt"
 
 	"github.com/MunifTanjim/argus/internal/e2e"
+	"github.com/fxamacker/cbor/v2"
 )
 
 // RelayFrame is a JSON-RPC frame on a relayed (gateway) link. A blind gateway
 // routes it by Route.ChanID alone and forwards Raw verbatim to the paired peer,
-// never reading the cleartext Method/ID or touching the sealed Body.
+// never reading the cleartext Method/ID or touching the sealed Body. Raw is the
+// envelope without framing; Body is the JSON body token (JSON) or the sealed
+// bytes (CBOR).
 type RelayFrame struct {
+	Enc    Encoding
 	Method string
 	ID     *json.RawMessage
 	Route  RouteHeader
-	Body   json.RawMessage
+	Body   []byte
 	Raw    []byte
 }
 
@@ -53,10 +57,15 @@ func NewPlainChannel(id string) *Channel {
 
 func (c *Channel) ID() string { return c.id }
 
-func (c *Channel) seal(inner json.RawMessage) (json.RawMessage, error) {
+// seal returns the Body for enc: a quoted base64 string for JSON, the sealed
+// bytes for CBOR.
+func (c *Channel) seal(enc Encoding, inner []byte) (json.RawMessage, error) {
 	sealed, err := c.cipher.Seal(inner)
 	if err != nil {
 		return nil, fmt.Errorf("api: channel seal: %w", err)
+	}
+	if enc == EncodingCBOR {
+		return json.RawMessage(sealed), nil
 	}
 	q, err := json.Marshal(base64.StdEncoding.EncodeToString(sealed))
 	if err != nil {
@@ -65,50 +74,24 @@ func (c *Channel) seal(inner json.RawMessage) (json.RawMessage, error) {
 	return json.RawMessage(q), nil
 }
 
-func (c *Channel) open(body json.RawMessage) (json.RawMessage, error) {
-	var enc string
-	if err := json.Unmarshal(body, &enc); err != nil {
-		return nil, fmt.Errorf("api: channel body not a string: %w", err)
-	}
-	sealed, err := base64.StdEncoding.DecodeString(enc)
-	if err != nil {
-		return nil, fmt.Errorf("api: channel body base64: %w", err)
+func (c *Channel) open(f RelayFrame) ([]byte, error) {
+	sealed := f.Body
+	if f.Enc != EncodingCBOR {
+		var enc string
+		if err := json.Unmarshal(f.Body, &enc); err != nil {
+			return nil, fmt.Errorf("api: channel body not a string: %w", err)
+		}
+		var err error
+		sealed, err = base64.StdEncoding.DecodeString(enc)
+		if err != nil {
+			return nil, fmt.Errorf("api: channel body base64: %w", err)
+		}
 	}
 	inner, err := c.cipher.Open(sealed)
 	if err != nil {
 		return nil, fmt.Errorf("api: channel open: %w", err)
 	}
-	return json.RawMessage(inner), nil
-}
-
-func (c *Channel) sealRequest(id *json.RawMessage, method, nodeID string, params json.RawMessage) (message, error) {
-	body, err := c.seal(params)
-	if err != nil {
-		return message{}, err
-	}
-	return message{
-		JSONRPC: jsonrpcVersion,
-		ID:      id,
-		Method:  method,
-		Route:   &RouteHeader{ChanID: c.id, NodeID: nodeID},
-		Body:    body,
-	}, nil
-}
-
-// sealNotification always overwrites route.ChanID with this channel; the caller
-// sets only SubID/TermID.
-func (c *Channel) sealNotification(method string, route RouteHeader, params json.RawMessage) (message, error) {
-	body, err := c.seal(params)
-	if err != nil {
-		return message{}, err
-	}
-	route.ChanID = c.id
-	return message{
-		JSONRPC: jsonrpcVersion,
-		Method:  method,
-		Route:   &route,
-		Body:    body,
-	}, nil
+	return inner, nil
 }
 
 // sealedResponse is the inner (sealed) shape of a response: exactly one of Result
@@ -118,31 +101,28 @@ type sealedResponse struct {
 	Error  *RPCError       `json:"error,omitempty"`
 }
 
-func (c *Channel) sealResponse(id *json.RawMessage, result json.RawMessage, rpcErr *RPCError) (message, error) {
-	inner, err := json.Marshal(sealedResponse{Result: result, Error: rpcErr})
-	if err != nil {
-		return message{}, err
-	}
-	body, err := c.seal(inner)
-	if err != nil {
-		return message{}, err
-	}
-	return message{
-		JSONRPC: jsonrpcVersion,
-		ID:      id,
-		Route:   &RouteHeader{ChanID: c.id},
-		Body:    body,
-	}, nil
+type cborSealedResponse struct {
+	Result cbor.RawMessage `cbor:"result,omitempty"`
+	Error  *RPCError       `cbor:"error,omitempty"`
 }
 
-func (c *Channel) OpenParams(f RelayFrame) (json.RawMessage, error) {
-	return c.open(f.Body)
+// OpenParams returns the inner params bytes, encoded in f.Enc.
+func (c *Channel) OpenParams(f RelayFrame) ([]byte, error) {
+	return c.open(f)
 }
 
-func (c *Channel) OpenResponse(f RelayFrame) (json.RawMessage, *RPCError, error) {
-	inner, err := c.open(f.Body)
+// OpenResponse returns the inner result bytes, encoded in f.Enc.
+func (c *Channel) OpenResponse(f RelayFrame) ([]byte, *RPCError, error) {
+	inner, err := c.open(f)
 	if err != nil {
 		return nil, nil, err
+	}
+	if f.Enc == EncodingCBOR {
+		var r cborSealedResponse
+		if err := CBORUnmarshal(inner, &r); err != nil {
+			return nil, nil, fmt.Errorf("api: response body: %w", err)
+		}
+		return r.Result, r.Error, nil
 	}
 	var r sealedResponse
 	if err := json.Unmarshal(inner, &r); err != nil {
@@ -151,50 +131,73 @@ func (c *Channel) OpenResponse(f RelayFrame) (json.RawMessage, *RPCError, error)
 	return r.Result, r.Error, nil
 }
 
-// SealRequestFrame output is ready for Peer.SendRawFrame.
-func (c *Channel) SealRequestFrame(id *json.RawMessage, method, nodeID string, params json.RawMessage) ([]byte, error) {
-	m, err := c.sealRequest(id, method, nodeID, params)
+// SealRequestFrame output is ready for Peer.SendRawFrame(enc, frame). params is
+// already encoded in enc.
+func (c *Channel) SealRequestFrame(enc Encoding, id *json.RawMessage, method, nodeID string, params []byte) ([]byte, error) {
+	body, err := c.seal(enc, params)
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(m)
+	return message{
+		ID:     id,
+		Method: method,
+		Route:  &RouteHeader{ChanID: c.id, NodeID: nodeID},
+		Body:   body,
+		enc:    enc,
+	}.marshal()
 }
 
-func (c *Channel) SealResponseFrame(id *json.RawMessage, result json.RawMessage, rpcErr *RPCError) ([]byte, error) {
-	m, err := c.sealResponse(id, result, rpcErr)
+// SealResponseFrame output is ready for Peer.SendRawFrame(enc, frame). result is
+// already encoded in enc.
+func (c *Channel) SealResponseFrame(enc Encoding, id *json.RawMessage, result []byte, rpcErr *RPCError) ([]byte, error) {
+	var inner []byte
+	var err error
+	if enc == EncodingCBOR {
+		inner, err = CBORMarshal(cborSealedResponse{Result: cbor.RawMessage(result), Error: rpcErr})
+	} else {
+		inner, err = json.Marshal(sealedResponse{Result: result, Error: rpcErr})
+	}
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(m)
+	body, err := c.seal(enc, inner)
+	if err != nil {
+		return nil, err
+	}
+	return message{
+		ID:    id,
+		Route: &RouteHeader{ChanID: c.id},
+		Body:  body,
+		enc:   enc,
+	}.marshal()
 }
 
 // SealNotificationFrame overwrites route.ChanID with this channel; the caller sets
-// only SubID/TermID.
-func (c *Channel) SealNotificationFrame(method string, route RouteHeader, params json.RawMessage) ([]byte, error) {
-	m, err := c.sealNotification(method, route, params)
+// only SubID/TermID. params is already encoded in enc.
+func (c *Channel) SealNotificationFrame(enc Encoding, method string, route RouteHeader, params []byte) ([]byte, error) {
+	body, err := c.seal(enc, params)
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(m)
+	route.ChanID = c.id
+	return message{
+		Method: method,
+		Route:  &route,
+		Body:   body,
+		enc:    enc,
+	}.marshal()
 }
 
-// ParseRelayFrame mirrors the RelayFrame construction in Peer's read loop; keep
-// them in sync.
-func ParseRelayFrame(line []byte) (RelayFrame, error) {
-	var m message
-	if err := json.Unmarshal(line, &m); err != nil {
+// ParseRelayFrame parses a frame payload (without framing) as a relay frame.
+func ParseRelayFrame(enc Encoding, raw []byte) (RelayFrame, error) {
+	m, err := unmarshalMessage(enc, raw)
+	if err != nil {
 		return RelayFrame{}, fmt.Errorf("api: parse relay frame: %w", err)
 	}
 	if !m.isRelay() {
 		return RelayFrame{}, fmt.Errorf("api: not a relay frame")
 	}
-	return RelayFrame{
-		Method: m.Method,
-		ID:     m.ID,
-		Route:  *m.Route,
-		Body:   m.Body,
-		Raw:    append([]byte(nil), line...),
-	}, nil
+	return m.relayFrame(append([]byte(nil), raw...)), nil
 }
 
 // MethodE2EHandshake carries a Noise handshake message (msg1/msg2) as a relay
