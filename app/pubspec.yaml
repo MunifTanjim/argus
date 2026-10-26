@@ -66,6 +66,7 @@ dependencies:
   super_sliver_list: ^0.4.1
   # Compares server/node versions against the app's minimums (state/compat.dart).
   pub_semver: ^2.2.0
+  cbor: ^6.5.1
 
 dev_dependencies:
   flutter_test:

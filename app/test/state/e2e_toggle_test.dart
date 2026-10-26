@@ -32,7 +32,7 @@ void main() {
       GatewayClient? captured;
       final manager = ConnectionManager(
         connect: () async => link,
-        clientFactory: (incoming, send) async {
+        clientFactory: (incoming, send, sendBytes) async {
           final client = E2EClient(
             incoming,
             send,
@@ -75,7 +75,7 @@ void main() {
       GatewayClient? captured;
       final manager = ConnectionManager(
         connect: () async => link,
-        clientFactory: (incoming, send) => buildE2EClient(
+        clientFactory: (incoming, send, sendBytes) => buildE2EClient(
           incoming,
           send,
           ClientIdentityStore(kv),
@@ -130,13 +130,13 @@ void main() {
         const creds = GatewayCredentials('wss://example.com/argus', 'tok-abc');
         // Mirror the gatewayProvider factory selection logic:
         final factory = creds.e2eEnabled
-            ? (Stream<RpcMessage> i, void Function(String) s) => buildE2EClient(
+            ? (Stream<RpcMessage> i, void Function(String) s, void Function(Uint8List) sb) => buildE2EClient(
                 i,
                 s,
                 ClientIdentityStore(_MemKv()),
                 TrustChainStore(_MemKv()),
               )
-            : (Stream<RpcMessage> i, void Function(String) s) async {
+            : (Stream<RpcMessage> i, void Function(String) s, void Function(Uint8List) sb) async {
                 final client = E2EClient(
                   i,
                   s,

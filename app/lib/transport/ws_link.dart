@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:cbor/simple.dart' as cbor_codec;
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../pairing/pairing_uri.dart';
 import 'connection.dart';
+import 'frame_reader.dart';
 import 'jsonrpc.dart';
 
 /// Appends the implicit /client route to a gateway base URL. The route is
@@ -60,7 +63,8 @@ class WebSocketRpcLink implements RpcLink {
   final Future<void> Function() _closeSocket;
   final void Function(dynamic) _sendFrame;
   final _controller = StreamController<RpcMessage>.broadcast();
-  final _buf = StringBuffer();
+  final _reader = FrameReader();
+  bool _failed = false;
 
   static Future<WebSocketRpcLink> connect(
     GatewayCredentials c, {
@@ -79,24 +83,51 @@ class WebSocketRpcLink implements RpcLink {
   void _onData(dynamic data) {
     // A frame buffered before close() can still be delivered after the controller
     // is closed; dropping it here avoids "add after close" on teardown.
-    if (_controller.isClosed) return;
-    _buf.write(data is List<int> ? utf8.decode(data) : data as String);
-    final parts = _buf.toString().split('\n');
-    _buf.clear();
-    _buf.write(parts.removeLast()); // trailing partial (or '')
-    for (final line in parts) {
-      if (line.trim().isEmpty) continue;
-      if (_controller.isClosed) return;
-      _controller.add(
-        RpcMessage.fromJson(jsonDecode(line) as Map<String, dynamic>),
+    if (_failed || _controller.isClosed) return;
+    final List<WireFrame> frames;
+    try {
+      frames = _reader.add(
+        data is List<int> ? data : utf8.encode(data as String),
       );
+    } on FormatException catch (e) {
+      _fail(e);
+      return;
     }
+    for (final f in frames) {
+      if (_controller.isClosed) return;
+      final RpcMessage m;
+      try {
+        m = switch (f) {
+          JsonFrame() => RpcMessage.fromJson(
+            jsonDecode(f.line) as Map<String, dynamic>,
+          ),
+          CborFrame() => RpcMessage.fromCbor(
+            cbor_codec.cbor.decode(f.envelope) as Map,
+          ),
+        };
+      } catch (e) {
+        // Dropping a frame would desync the E2E nonces, so the link ends.
+        _fail(e);
+        return;
+      }
+      _controller.add(m);
+    }
+  }
+
+  /// Reports the first decode failure and closes; later data is dropped.
+  void _fail(Object e) {
+    if (_failed) return;
+    _failed = true;
+    _controller.addError(e);
+    close();
   }
 
   @override
   Stream<RpcMessage> get incoming => _controller.stream;
   @override
   void send(String frame) => _sendFrame(frame);
+  @override
+  void sendBytes(Uint8List frame) => _sendFrame(frame);
   @override
   Future<void> close() async {
     await _closeSocket();
