@@ -176,9 +176,9 @@ func answered(err error) bool {
 // SetRemoteCBOR records whether the remote accepts CBOR frames.
 func (p *Peer) SetRemoteCBOR(ok bool) { p.remoteCBOR.Store(ok) }
 
-func (p *Peer) RemoteCBOR() bool { return p.remoteCBOR.Load() }
-
 var _ CBORNegotiator = (*Peer)(nil)
+
+func (p *Peer) RemoteCBOR() bool { return p.remoteCBOR.Load() }
 
 // Done is closed when the peer's read loop ends (connection closed or errored).
 func (p *Peer) Done() <-chan struct{} { return p.closed }
@@ -347,31 +347,31 @@ func (p *Peer) serveRequest(m message) {
 		_ = p.send(resp)
 		return
 	}
-	params := m.Params
-	if m.enc == EncodingCBOR && len(params) > 0 {
-		var err error
-		if params, err = CBORToJSON(params); err != nil {
-			resp.Error = &RPCError{Code: CodeInvalidRequest, Message: "invalid params: " + err.Error()}
-			_ = p.send(resp)
-			return
+	resp.Result, resp.Error = Serve(WithNotifier(p.ctx, p), p.dispatch, m.enc, m.Method, m.Params)
+	_ = p.send(resp)
+}
+
+// Serve dispatches a request whose params are encoded in enc and returns the
+// result encoded in enc. CBOR params are decoded by WithCBORParams, so dispatch
+// sees no params for them.
+func Serve(ctx context.Context, dispatch DispatchFunc, enc Encoding, method string, params []byte) ([]byte, *RPCError) {
+	if enc == EncodingCBOR {
+		var rpcErr *RPCError
+		if ctx, rpcErr = WithCBORParams(ctx, method, params); rpcErr != nil {
+			return nil, rpcErr
 		}
+		params = nil
 	}
-	result, err := p.dispatch(WithNotifier(p.ctx, p), m.Method, params)
+	result, err := dispatch(ctx, method, params)
 	if err != nil {
 		if rpcErr, ok := err.(*RPCError); ok {
-			resp.Error = rpcErr
-		} else {
-			resp.Error = &RPCError{Code: CodeInternalError, Message: err.Error()}
+			return nil, rpcErr
 		}
-		_ = p.send(resp)
-		return
+		return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
 	}
-	raw, err := m.enc.Marshal(result)
+	raw, err := enc.Marshal(result)
 	if err != nil {
-		resp.Error = &RPCError{Code: CodeInternalError, Message: err.Error()}
-		_ = p.send(resp)
-		return
+		return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
 	}
-	resp.Result = raw
-	_ = p.send(resp)
+	return raw, nil
 }

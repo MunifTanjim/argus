@@ -309,16 +309,21 @@ type relayChannel struct {
 	chanID   string
 	client   *api.Peer
 	node     *api.Peer
-	toNode   chan []byte
-	toClient chan []byte
+	toNode   chan queuedFrame
+	toClient chan queuedFrame
 	stop     chan struct{}
 	stopOnce sync.Once
+}
+
+type queuedFrame struct {
+	enc api.Encoding
+	raw []byte
 }
 
 func (s *Server) addChannel(chanID string, client, node *api.Peer) {
 	ch := &relayChannel{
 		chanID: chanID, client: client, node: node,
-		toNode: make(chan []byte, relayQueueDepth), toClient: make(chan []byte, relayQueueDepth),
+		toNode: make(chan queuedFrame, relayQueueDepth), toClient: make(chan queuedFrame, relayQueueDepth),
 		stop: make(chan struct{}),
 	}
 	s.relayMu.Lock()
@@ -360,13 +365,13 @@ func (s *Server) dropChannelsWhere(reason string, pred func(*relayChannel) bool)
 	}
 }
 
-func (s *Server) relayPump(ch *relayChannel, q chan []byte, dst *api.Peer) {
+func (s *Server) relayPump(ch *relayChannel, q chan queuedFrame, dst *api.Peer) {
 	for {
 		select {
 		case <-ch.stop:
 			return
-		case raw := <-q:
-			if err := dst.SendRawFrame(api.EncodingJSON, raw); err != nil {
+		case f := <-q:
+			if err := dst.SendRawFrame(f.enc, f.raw); err != nil {
 				s.dropChannel(ch.chanID, "frame write to peer failed: "+err.Error())
 				return
 			}
@@ -376,10 +381,10 @@ func (s *Server) relayPump(ch *relayChannel, q chan []byte, dst *api.Peer) {
 
 // enqueue tears the channel down on a full queue (never drops a frame — that
 // would desync the sealed stream).
-func (s *Server) enqueue(ch *relayChannel, q chan []byte, raw []byte) {
+func (s *Server) enqueue(ch *relayChannel, q chan queuedFrame, f api.RelayFrame) {
 	select {
 	case <-ch.stop:
-	case q <- raw:
+	case q <- queuedFrame{f.Enc, f.Raw}:
 	default:
 		s.dropChannel(ch.chanID, "relay queue overflow: peer is not draining")
 	}
@@ -390,7 +395,7 @@ func (s *Server) forwardFromClient(src *api.Peer, f api.RelayFrame) {
 	ch := s.channels[f.Route.ChanID]
 	s.relayMu.Unlock()
 	if ch != nil && ch.client == src {
-		s.enqueue(ch, ch.toNode, f.Raw)
+		s.enqueue(ch, ch.toNode, f)
 	}
 }
 
@@ -399,7 +404,7 @@ func (s *Server) forwardFromNode(src *api.Peer, f api.RelayFrame) {
 	ch := s.channels[f.Route.ChanID]
 	s.relayMu.Unlock()
 	if ch != nil && ch.node == src {
-		s.enqueue(ch, ch.toClient, f.Raw)
+		s.enqueue(ch, ch.toClient, f)
 	}
 }
 
@@ -446,7 +451,7 @@ func (s *Server) buildClientServer() *api.Server {
 
 	srv.Handle(api.MethodServerInfo, func(context.Context, json.RawMessage) (any, error) {
 		configured := s.pushPortStatus != nil && s.pushPortStatus()
-		return api.ServerInfo{Version: s.version, StartedAt: api.StartedAtRFC3339(), Nodes: s.agg.Nodes(), PushPortConfigured: configured}, nil
+		return api.ServerInfo{Version: s.version, StartedAt: api.StartedAtRFC3339(), Nodes: s.agg.Nodes(), PushPortConfigured: configured, Capabilities: &api.PeerCapabilities{CBOR: true}}, nil
 	})
 
 	srv.Handle(api.MethodNodesList, func(context.Context, json.RawMessage) (any, error) {
@@ -611,7 +616,7 @@ func (s *Server) serveNode(conn net.Conn) {
 	idCtx, idCancel := context.WithTimeout(context.Background(), nodeIdentifyTimeout)
 	defer idCancel()
 	var id api.IdentifyResult
-	if err := peer.CallContext(idCtx, api.MethodNodeIdentify, nil, &id); err != nil || id.ID == "" {
+	if err := peer.CallContext(idCtx, api.MethodNodeIdentify, api.IdentifyParams{Capabilities: &api.PeerCapabilities{CBOR: true}}, &id); err != nil || id.ID == "" {
 		return
 	}
 
