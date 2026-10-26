@@ -443,7 +443,7 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 	}
 	if n.Method == api.MethodTerminalOutput {
 		var o api.TerminalOutput
-		if json.Unmarshal(n.Params, &o) != nil {
+		if n.Decode(&o) != nil {
 			return nil
 		}
 		var cmd tea.Cmd

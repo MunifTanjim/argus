@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -46,6 +47,44 @@ func CBORToJSON(b []byte) (json.RawMessage, error) {
 		return nil, err
 	}
 	return json.Marshal(v)
+}
+
+type cborParamsKey struct{}
+
+// cborParamDecoders decode the params of the CBORMethods requests.
+var cborParamDecoders = map[string]func([]byte) (any, error){
+	MethodTerminalInput: decodeCBORParams[TerminalInputParams],
+}
+
+func decodeCBORParams[T any](b []byte) (any, error) {
+	var v T
+	if len(b) == 0 {
+		return v, nil
+	}
+	err := CBORUnmarshal(b, &v)
+	return v, err
+}
+
+// WithCBORParams prepares a CBOR request for dispatch. A method outside
+// CBORMethods is rejected without decoding its params; otherwise the params
+// decode into the method's typed struct, carried on the returned context (see
+// CBORParams), and the request is dispatched without JSON params.
+func WithCBORParams(ctx context.Context, method string, params []byte) (context.Context, *RPCError) {
+	decode := cborParamDecoders[method]
+	if decode == nil {
+		return ctx, &RPCError{Code: CodeInvalidRequest, Message: "cbor not supported for " + method}
+	}
+	v, err := decode(params)
+	if err != nil {
+		return ctx, &RPCError{Code: CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+	}
+	return context.WithValue(ctx, cborParamsKey{}, v), nil
+}
+
+// CBORParams returns the typed params WithCBORParams decoded for the request.
+func CBORParams[T any](ctx context.Context) (T, bool) {
+	v, ok := ctx.Value(cborParamsKey{}).(T)
+	return v, ok
 }
 
 // cborMessage is the CBOR form of message; Body carries raw bytes.

@@ -65,9 +65,19 @@ func (c *ReconnectingClient) setPeer(conn net.Conn) {
 			}
 		},
 	})
+	go negotiateCBOR(p)
 	c.mu.Lock()
 	c.peer = p
 	c.mu.Unlock()
+}
+
+// negotiateCBOR declares cbor via node.identify and records whether the remote
+// accepts it. An error (a gateway, an old node) leaves the peer on JSON.
+func negotiateCBOR(p *Peer) {
+	var res IdentifyResult
+	if p.Call(MethodNodeIdentify, IdentifyParams{Capabilities: &PeerCapabilities{CBOR: true}}, &res) == nil {
+		p.SetRemoteCBOR(res.Capabilities.CBOR)
+	}
 }
 
 func (c *ReconnectingClient) currentPeer() *Peer {

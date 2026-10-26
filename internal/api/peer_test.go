@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -400,24 +401,31 @@ func TestPeerJSONWhenRemoteNotAllowed(t *testing.T) {
 	}
 }
 
-func TestPeerCBORRequestTranscodedAndAnsweredInCBOR(t *testing.T) {
+func TestPeerCBORRequestTypedAndAnsweredInCBOR(t *testing.T) {
 	ca, cb := net.Pipe()
 	ra := &recordConn{Conn: ca}
-	seen := make(chan json.RawMessage, 1)
+	type seenReq struct {
+		params json.RawMessage
+		typed  TerminalInputParams
+		ok     bool
+	}
+	seen := make(chan seenReq, 1)
 	pa := NewPeer(ra, PeerOptions{})
-	pb := NewPeer(cb, PeerOptions{Dispatch: func(_ context.Context, _ string, params json.RawMessage) (any, error) {
-		seen <- params
+	pb := NewPeer(cb, PeerOptions{Dispatch: func(ctx context.Context, _ string, params json.RawMessage) (any, error) {
+		typed, ok := CBORParams[TerminalInputParams](ctx)
+		seen <- seenReq{params, typed, ok}
 		return nil, nil
 	}})
 	defer pa.Close()
 	defer pb.Close()
 	pa.SetRemoteCBOR(true)
 
-	if err := pa.Call(MethodTerminalInput, TerminalInputParams{TermID: "t1", Data: []byte("x")}, nil); err != nil {
+	if err := pa.Call(MethodTerminalInput, TerminalInputParams{TermID: "t1", Data: []byte{0, 0xff}}, nil); err != nil {
 		t.Fatalf("call: %v", err)
 	}
-	if got, want := string(<-seen), `{"data":"eA==","term_id":"t1"}`; got != want {
-		t.Fatalf("dispatch params = %s, want %s", got, want)
+	got := <-seen
+	if got.params != nil || !got.ok || got.typed.TermID != "t1" || !bytes.Equal(got.typed.Data, []byte{0, 0xff}) {
+		t.Fatalf("dispatch params=%s typed=%+v ok=%v, want nil params and typed t1", got.params, got.typed, got.ok)
 	}
 	if raw := ra.bytes(); len(raw) == 0 || raw[0] != cborMarker {
 		t.Fatalf("response wire bytes = %q, want a CBOR frame", raw)
@@ -513,5 +521,41 @@ func TestPeerUsesFrameWriter(t *testing.T) {
 	enc, payload, err := readFrame(bufio.NewReader(bytes.NewReader(frame)))
 	if err != nil || enc != EncodingCBOR || len(payload)+5 != len(frame) {
 		t.Fatalf("frame not a single complete CBOR frame: enc=%v err=%v", enc, err)
+	}
+}
+
+func TestPeerCBORRequestForNonCBORMethodRejectedUndecoded(t *testing.T) {
+	ca, cb := net.Pipe()
+	var dispatched atomic.Int32
+	pb := NewPeer(cb, PeerOptions{Dispatch: func(context.Context, string, json.RawMessage) (any, error) {
+		dispatched.Add(1)
+		return nil, nil
+	}})
+	defer pb.Close()
+	defer ca.Close()
+	r := bufio.NewReader(ca)
+
+	// {1: 2} is well-formed CBOR that fails to decode into map[string]any, so
+	// any attempt to decode the params would surface as "invalid params".
+	id := uint64(3)
+	envelope, err := CBORMarshal(cborMessage{JSONRPC: jsonrpcVersion, ID: &id, Method: MethodSessionsList, Params: []byte{0xa1, 0x01, 0x02}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	go func() { _, _ = ca.Write(appendFrame(nil, EncodingCBOR, envelope)) }()
+	enc, payload, err := readFrame(r)
+	if err != nil || enc != EncodingCBOR {
+		t.Fatalf("read reply: enc=%v err=%v", enc, err)
+	}
+	m, err := unmarshalMessage(enc, payload)
+	if err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := "cbor not supported for " + MethodSessionsList
+	if m.ID == nil || string(*m.ID) != "3" || m.Error == nil || m.Error.Code != CodeInvalidRequest || m.Error.Message != want {
+		t.Fatalf("reply = %+v (error %+v), want %d %q", m, m.Error, CodeInvalidRequest, want)
+	}
+	if n := dispatched.Load(); n != 0 {
+		t.Fatalf("dispatched %d times, want 0", n)
 	}
 }
