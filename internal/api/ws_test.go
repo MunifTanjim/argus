@@ -3,10 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
+	"github.com/fxamacker/cbor/v2"
 )
 
 // wsURL rewrites an http(s) test-server URL to its ws(s) equivalent.
@@ -153,5 +157,136 @@ func TestWSDialPeerServesInbound(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("server could not call back to the dialing peer")
+	}
+}
+
+func TestWSMixedMessages(t *testing.T) {
+	got := make(chan Notification, 4)
+	bc := make(chan *Peer, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := AcceptWS(w, r)
+		if err != nil {
+			return
+		}
+		b := NewPeer(conn, PeerOptions{OnNotify: func(n Notification) { got <- n }})
+		b.SetRemoteCBOR(true)
+		bc <- b
+		<-b.Done()
+	}))
+	defer ts.Close()
+
+	conn, err := dialWS(context.Background(), wsURL(ts.URL), "", nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	a := NewPeer(conn, PeerOptions{})
+	defer a.Close()
+	a.SetRemoteCBOR(true)
+	b := <-bc
+	defer b.Close()
+
+	if err := a.Notify(MethodTerminalOutput, TerminalOutput{TermID: "t1", Data: []byte{0xff, 0x00}}); err != nil {
+		t.Fatalf("notify: %v", err)
+	}
+	if err := a.Notify(MethodSessionEvent, map[string]string{"k": "v"}); err != nil {
+		t.Fatalf("notify: %v", err)
+	}
+	for i, want := range []Encoding{EncodingCBOR, EncodingJSON} {
+		select {
+		case n := <-got:
+			if n.Enc != want {
+				t.Fatalf("frame %d Enc = %v, want %v", i, n.Enc, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("frame %d not received", i)
+		}
+	}
+
+	// A frame may span messages of different types.
+	raw, _, err := websocket.Dial(context.Background(), wsURL(ts.URL), nil)
+	if err != nil {
+		t.Fatalf("raw dial: %v", err)
+	}
+	defer raw.CloseNow()
+	envelope, err := cbor.Marshal(map[string]any{"jsonrpc": "2.0", "method": MethodTerminalOutput})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := []byte(`{"jsonrpc":"2.0","method":"session.event","params":{}}` + "\n")
+	first := append(appendFrame(nil, EncodingCBOR, envelope), line[:10]...)
+	if err := raw.Write(context.Background(), websocket.MessageBinary, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Write(context.Background(), websocket.MessageText, line[10:]); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []Encoding{EncodingCBOR, EncodingJSON} {
+		select {
+		case n := <-got:
+			if n.Enc != want {
+				t.Fatalf("split frame %d Enc = %v, want %v", i, n.Enc, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("split frame %d not received", i)
+		}
+	}
+}
+
+func TestWSAcceptsFullSizeFrames(t *testing.T) {
+	got := make(chan Notification, 2)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := AcceptWS(w, r)
+		if err != nil {
+			return
+		}
+		b := NewPeer(conn, PeerOptions{OnNotify: func(n Notification) { got <- n }})
+		<-b.Done()
+	}))
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	raw, _, err := websocket.Dial(ctx, wsURL(ts.URL), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer raw.CloseNow()
+
+	envelope := func(n int) []byte {
+		params, err := CBORMarshal(TerminalOutput{TermID: "t1", Data: make([]byte, n)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		env, err := CBORMarshal(cborMessage{JSONRPC: jsonrpcVersion, Method: MethodTerminalOutput, Params: params})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return env
+	}
+	probe := MaxFrameSize - 1024
+	env := envelope(MaxFrameSize - (len(envelope(probe)) - probe))
+	if len(env) != MaxFrameSize {
+		t.Fatalf("envelope = %d bytes, want %d", len(env), MaxFrameSize)
+	}
+	if err := raw.Write(ctx, websocket.MessageBinary, appendFrame(nil, EncodingCBOR, env)); err != nil {
+		t.Fatal(err)
+	}
+
+	prefix := `{"jsonrpc":"2.0","method":"session.event","params":{"k":"`
+	suffix := `"}}`
+	line := prefix + strings.Repeat("x", MaxFrameSize-len(prefix)-len(suffix)) + suffix + "\n"
+	if err := raw.Write(ctx, websocket.MessageText, []byte(line)); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, want := range []Encoding{EncodingCBOR, EncodingJSON} {
+		select {
+		case n := <-got:
+			if n.Enc != want {
+				t.Fatalf("frame %d Enc = %v, want %v", i, n.Enc, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("full-size frame %d not received", i)
+		}
 	}
 }

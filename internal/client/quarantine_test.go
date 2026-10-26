@@ -187,7 +187,7 @@ func TestUnpinnedClientAdoptRaceWithTrip(t *testing.T) {
 				return
 			}
 			hf, _ := api.MarshalHandshakeFrame(f.Route.ChanID, msg2)
-			_ = p.SendRawFrame(hf)
+			_ = p.SendRawFrame(api.EncodingJSON, hf)
 		},
 	})
 	defer gw.Close()

@@ -75,10 +75,10 @@ func (f *fakeGatewayNode) onFrame(_ *api.Peer, fr api.RelayFrame) {
 		}
 		f.nodeCh = api.NewChannel(fr.Route.ChanID, sess)
 		hf, _ := api.MarshalHandshakeFrame(fr.Route.ChanID, msg2)
-		_ = f.peer.SendRawFrame(hf)
+		_ = f.peer.SendRawFrame(api.EncodingJSON, hf)
 		if n := f.postHandshake; n != nil {
-			nf, _ := f.nodeCh.SealNotificationFrame(n.method, api.RouteHeader{}, n.params)
-			_ = f.peer.SendRawFrame(nf)
+			nf, _ := f.nodeCh.SealNotificationFrame(api.EncodingJSON, n.method, api.RouteHeader{}, n.params)
+			_ = f.peer.SendRawFrame(api.EncodingJSON, nf)
 		}
 		return
 	}
@@ -91,11 +91,11 @@ func (f *fakeGatewayNode) onFrame(_ *api.Peer, fr api.RelayFrame) {
 	}
 	result, rpcErr, note := f.handle(fr.Method, params)
 	if note != nil { // seal the notification BEFORE the response (arrival order)
-		nf, _ := f.nodeCh.SealNotificationFrame(note.method, api.RouteHeader{}, note.params)
-		_ = f.peer.SendRawFrame(nf)
+		nf, _ := f.nodeCh.SealNotificationFrame(api.EncodingJSON, note.method, api.RouteHeader{}, note.params)
+		_ = f.peer.SendRawFrame(api.EncodingJSON, nf)
 	}
-	rf, _ := f.nodeCh.SealResponseFrame(fr.ID, result, rpcErr)
-	_ = f.peer.SendRawFrame(rf)
+	rf, _ := f.nodeCh.SealResponseFrame(api.EncodingJSON, fr.ID, result, rpcErr)
+	_ = f.peer.SendRawFrame(api.EncodingJSON, rf)
 }
 
 // fakeNode is one node the fakeMultiGateway terminates a channel for.
@@ -256,10 +256,10 @@ func (g *fakeMultiGateway) onFrame(_ *api.Peer, f api.RelayFrame) {
 			hook()
 		}
 		hf, _ := api.MarshalHandshakeFrame(f.Route.ChanID, msg2)
-		_ = g.peer.SendRawFrame(hf)
+		_ = g.peer.SendRawFrame(api.EncodingJSON, hf)
 		if note := n.postHandshake; note != nil {
-			nf, _ := n.ch.SealNotificationFrame(note.method, api.RouteHeader{}, note.params)
-			_ = g.peer.SendRawFrame(nf)
+			nf, _ := n.ch.SealNotificationFrame(api.EncodingJSON, note.method, api.RouteHeader{}, note.params)
+			_ = g.peer.SendRawFrame(api.EncodingJSON, nf)
 		}
 		return
 	}
@@ -275,17 +275,17 @@ func (g *fakeMultiGateway) onFrame(_ *api.Peer, f api.RelayFrame) {
 	}
 	if f.Method == api.MethodNodeIdentify {
 		res, _ := json.Marshal(api.IdentifyResult{ID: n.id, Tip: n.tip})
-		rf, _ := n.ch.SealResponseFrame(f.ID, res, nil)
-		_ = g.peer.SendRawFrame(rf)
+		rf, _ := n.ch.SealResponseFrame(api.EncodingJSON, f.ID, res, nil)
+		_ = g.peer.SendRawFrame(api.EncodingJSON, rf)
 		return
 	}
 	result, rpcErr, note := n.handle(f.Method, params)
 	if note != nil {
-		nf, _ := n.ch.SealNotificationFrame(note.method, api.RouteHeader{}, note.params)
-		_ = g.peer.SendRawFrame(nf)
+		nf, _ := n.ch.SealNotificationFrame(api.EncodingJSON, note.method, api.RouteHeader{}, note.params)
+		_ = g.peer.SendRawFrame(api.EncodingJSON, nf)
 	}
-	rf, _ := n.ch.SealResponseFrame(f.ID, result, rpcErr)
-	_ = g.peer.SendRawFrame(rf)
+	rf, _ := n.ch.SealResponseFrame(api.EncodingJSON, f.ID, result, rpcErr)
+	_ = g.peer.SendRawFrame(api.EncodingJSON, rf)
 }
 
 func (g *fakeMultiGateway) trustSyncCount() int {

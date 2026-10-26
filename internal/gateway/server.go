@@ -366,7 +366,7 @@ func (s *Server) relayPump(ch *relayChannel, q chan []byte, dst *api.Peer) {
 		case <-ch.stop:
 			return
 		case raw := <-q:
-			if err := dst.SendRawFrame(raw); err != nil {
+			if err := dst.SendRawFrame(api.EncodingJSON, raw); err != nil {
 				s.dropChannel(ch.chanID, "frame write to peer failed: "+err.Error())
 				return
 			}

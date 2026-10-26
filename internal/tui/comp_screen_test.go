@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -162,7 +161,7 @@ func TestTerminalOutputGoesToItsScreen(t *testing.T) {
 }
 
 func writeTerm(m model, termID, data string) model {
-	params, _ := json.Marshal(api.TerminalOutput{TermID: termID, Data: base64.StdEncoding.EncodeToString([]byte(data))})
+	params, _ := json.Marshal(api.TerminalOutput{TermID: termID, Data: []byte(data)})
 	m, _ = upd(m, notificationMsg(api.Notification{Method: api.MethodTerminalOutput, Params: params}))
 	return m
 }
@@ -320,7 +319,7 @@ func TestLiveScreenShowsTheProgramCursor(t *testing.T) {
 	m = openScreen(t, m)
 	s, _ := m.liveScreen()
 	out := func(m model, raw string) model {
-		b, _ := json.Marshal(api.TerminalOutput{TermID: s.termID, Data: base64.StdEncoding.EncodeToString([]byte(raw))})
+		b, _ := json.Marshal(api.TerminalOutput{TermID: s.termID, Data: []byte(raw)})
 		m, _ = upd(m, notificationMsg(api.Notification{Method: api.MethodTerminalOutput, Params: b}))
 		return m
 	}
@@ -339,7 +338,7 @@ func TestLiveScreenFillsThePaneFromTheStart(t *testing.T) {
 	m, _ := liveSession(t)
 	m = openScreen(t, m)
 	s, _ := m.liveScreen()
-	b, _ := json.Marshal(api.TerminalOutput{TermID: s.termID, Data: base64.StdEncoding.EncodeToString([]byte("$ "))})
+	b, _ := json.Marshal(api.TerminalOutput{TermID: s.termID, Data: []byte("$ ")})
 	m, _ = upd(m, notificationMsg(api.Notification{Method: api.MethodTerminalOutput, Params: b}))
 	frame := strings.Split(ansi.Strip(m.View().Content), "\n")
 	top, bottom := -1, -1
@@ -366,7 +365,7 @@ func TestLiveScreenFollowsTheCursorShape(t *testing.T) {
 	m = openScreen(t, m)
 	s, _ := m.liveScreen()
 	out := func(m model, raw string) model {
-		b, _ := json.Marshal(api.TerminalOutput{TermID: s.termID, Data: base64.StdEncoding.EncodeToString([]byte(raw))})
+		b, _ := json.Marshal(api.TerminalOutput{TermID: s.termID, Data: []byte(raw)})
 		m, _ = upd(m, notificationMsg(api.Notification{Method: api.MethodTerminalOutput, Params: b}))
 		return m
 	}

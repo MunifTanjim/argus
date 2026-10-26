@@ -390,7 +390,7 @@ func (d *Node) pumpTerm(tm *term) {
 	for {
 		nr, err := tm.pty.Read(buf)
 		if nr > 0 {
-			data := base64.StdEncoding.EncodeToString(buf[:nr])
+			data := append([]byte(nil), buf[:nr]...)
 			if e := tm.notifier.Notify(api.MethodTerminalOutput, api.TerminalOutput{TermID: tm.termID, Data: data}); e != nil {
 				return // connection gone; defer handles teardown
 			}
@@ -408,17 +408,17 @@ func (d *Node) pumpTerm(tm *term) {
 func (d *Node) handleTerminalInput(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.TerminalInputParams](params)
 	if err != nil {
+		var corrupt base64.CorruptInputError
+		if errors.As(err, &corrupt) {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "bad base64"}
+		}
 		return nil, err
 	}
 	tm, ok := d.lookupTerm(ctx, p.TermID)
 	if !ok {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown term_id: " + p.TermID}
 	}
-	raw, err := base64.StdEncoding.DecodeString(p.Data)
-	if err != nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "bad base64"}
-	}
-	_, err = tm.pty.Write(raw)
+	_, err = tm.pty.Write(p.Data)
 	return nil, err
 }
 

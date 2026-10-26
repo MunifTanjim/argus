@@ -110,7 +110,7 @@ func TestTerminalOpenByTerminalIDRoutesAndRecordsTheHandle(t *testing.T) {
 	if openTerminalID != "@3" {
 		t.Errorf("node saw terminal_id %q, want @3", openTerminalID)
 	}
-	if err := c.Call(api.MethodTerminalInput, api.TerminalInputParams{TermID: "t1", Data: "eA=="}, nil); err != nil {
+	if err := c.Call(api.MethodTerminalInput, api.TerminalInputParams{TermID: "t1", Data: []byte("x")}, nil); err != nil {
 		t.Fatalf("terminal.input: %v", err)
 	}
 	if inputTermID != "t1" {

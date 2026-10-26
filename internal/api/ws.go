@@ -2,21 +2,22 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/coder/websocket"
 )
 
-// wsMessageType carries newline-delimited JSON-RPC frames as WebSocket text
-// messages (human-debuggable; the framing is identical to the unix transport).
-const wsMessageType = websocket.MessageText
-
-// wsReadLimit matches the stream scanner's max frame size (16 MiB) so large
-// capture/transcript payloads are not rejected by the default 32 KiB limit.
-const wsReadLimit = 16 * 1024 * 1024
+// wsReadLimit admits one full-size frame per message: a CBOR frame's 5-byte
+// header plus MaxFrameSize, which also covers a MaxFrameSize JSON line and its
+// newline. The default 32 KiB limit would reject large capture/transcript payloads.
+const wsReadLimit = MaxFrameSize + 5
 
 // DialWS connects to a gateway over WebSocket and returns a consumer Client.
 // Non-empty token is sent as a Bearer header. httpClient may be nil (use a custom
@@ -79,9 +80,8 @@ func dialWS(ctx context.Context, url, token string, httpClient *http.Client) (ne
 		}
 		return nil, err
 	}
-	c.SetReadLimit(wsReadLimit)
 	// context.Background(): the net.Conn lives until it is explicitly closed.
-	return websocket.NetConn(context.Background(), c, wsMessageType), nil
+	return newWSConn(c), nil
 }
 
 // AcceptWS upgrades an HTTP request to a WebSocket and adapts it to a net.Conn.
@@ -92,8 +92,7 @@ func AcceptWS(w http.ResponseWriter, r *http.Request) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.SetReadLimit(wsReadLimit)
-	return websocket.NetConn(context.Background(), c, wsMessageType), nil
+	return newWSConn(c), nil
 }
 
 // BearerToken extracts the auth token from an HTTP request: the Authorization
@@ -121,4 +120,134 @@ func (s *Server) WSHandler(authorize func(token string) bool) http.Handler {
 		}
 		s.ServeConn(conn) // blocks until the connection closes
 	})
+}
+
+// wsConn adapts a websocket.Conn to a net.Conn that accepts both message types.
+// Reads concatenate every message into one byte stream; WriteFrame sends JSON
+// frames as text messages and CBOR frames as binary messages, one frame each.
+type wsConn struct {
+	c *websocket.Conn
+
+	rmu           sync.Mutex
+	reader        io.Reader
+	readCancel    context.CancelFunc
+	readEOFed     bool
+	wmu           sync.Mutex
+	dmu           sync.Mutex // guards the deadlines
+	readDeadline  time.Time
+	writeDeadline time.Time
+}
+
+func newWSConn(c *websocket.Conn) net.Conn {
+	c.SetReadLimit(wsReadLimit)
+	return &wsConn{c: c}
+}
+
+var (
+	_ net.Conn    = (*wsConn)(nil)
+	_ FrameWriter = (*wsConn)(nil)
+)
+
+func (w *wsConn) Read(p []byte) (int, error) {
+	w.rmu.Lock()
+	defer w.rmu.Unlock()
+	for {
+		if w.readEOFed {
+			return 0, io.EOF
+		}
+		if w.reader == nil {
+			// The context bounds the whole message, so it lives until the reader ends.
+			ctx, cancel := deadlineContext(w.deadline(&w.readDeadline))
+			_, r, err := w.c.Reader(ctx)
+			if err != nil {
+				cancel()
+				switch websocket.CloseStatus(err) {
+				case websocket.StatusNormalClosure, websocket.StatusGoingAway:
+					w.readEOFed = true
+					return 0, io.EOF
+				}
+				return 0, err
+			}
+			w.reader, w.readCancel = r, cancel
+		}
+		n, err := w.reader.Read(p)
+		if err != nil {
+			w.readCancel()
+			w.reader, w.readCancel = nil, nil
+			if errors.Is(err, io.EOF) {
+				err = nil
+			}
+		}
+		if n > 0 || err != nil {
+			return n, err
+		}
+	}
+}
+
+func (w *wsConn) Write(p []byte) (int, error) {
+	if err := w.write(websocket.MessageText, p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (w *wsConn) WriteFrame(enc Encoding, frame []byte) error {
+	typ := websocket.MessageText
+	if enc == EncodingCBOR {
+		typ = websocket.MessageBinary
+	}
+	return w.write(typ, frame)
+}
+
+func (w *wsConn) write(typ websocket.MessageType, p []byte) error {
+	w.wmu.Lock()
+	defer w.wmu.Unlock()
+	ctx, cancel := deadlineContext(w.deadline(&w.writeDeadline))
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("failed to write: %w", err)
+	}
+	return w.c.Write(ctx, typ, p)
+}
+
+func (w *wsConn) Close() error { return w.c.Close(websocket.StatusNormalClosure, "") }
+
+func (w *wsConn) SetDeadline(t time.Time) error {
+	_ = w.SetReadDeadline(t)
+	return w.SetWriteDeadline(t)
+}
+
+func (w *wsConn) SetReadDeadline(t time.Time) error {
+	w.dmu.Lock()
+	defer w.dmu.Unlock()
+	w.readDeadline = t
+	return nil
+}
+
+func (w *wsConn) SetWriteDeadline(t time.Time) error {
+	w.dmu.Lock()
+	defer w.dmu.Unlock()
+	w.writeDeadline = t
+	return nil
+}
+
+func (w *wsConn) deadline(d *time.Time) time.Time {
+	w.dmu.Lock()
+	defer w.dmu.Unlock()
+	return *d
+}
+
+func (w *wsConn) LocalAddr() net.Addr  { return wsAddr{} }
+func (w *wsConn) RemoteAddr() net.Addr { return wsAddr{} }
+
+type wsAddr struct{}
+
+func (wsAddr) Network() string { return "websocket" }
+func (wsAddr) String() string  { return "websocket/unknown-addr" }
+
+func deadlineContext(t time.Time) (context.Context, context.CancelFunc) {
+	if t.IsZero() {
+		return context.WithCancel(context.Background())
+	}
+	return context.WithDeadline(context.Background(), t)
 }
