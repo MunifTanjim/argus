@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -94,7 +93,7 @@ func TestTerminalOpenStreamsAndCloses(t *testing.T) {
 
 	select {
 	case m := <-notif.outputs:
-		if m.TermID != "t1" || m.Data == "" {
+		if m.TermID != "t1" || len(m.Data) == 0 {
 			t.Fatalf("bad output: %+v", m)
 		}
 	case <-time.After(10 * time.Second):
@@ -565,7 +564,7 @@ func TestTerminalOpenByTerminalIDEndsWhenTheShellExits(t *testing.T) {
 		t.Errorf("attached = %v/%v, want only %s", got[0].Attached, got[1].Attached, a.ID)
 	}
 
-	if _, err := d.handleTerminalInput(ctx, mustJSON(api.TerminalInputParams{TermID: "t1", Data: base64.StdEncoding.EncodeToString([]byte("exit\r"))})); err != nil {
+	if _, err := d.handleTerminalInput(ctx, mustJSON(api.TerminalInputParams{TermID: "t1", Data: []byte("exit\r")})); err != nil {
 		t.Fatal(err)
 	}
 	if !waitExited(n, "t1", 10*time.Second) {
@@ -703,7 +702,7 @@ func TestTerminalWheelScrollsTheShellHistory(t *testing.T) {
 		return strings.TrimSpace(string(out))
 	}
 	time.Sleep(300 * time.Millisecond) // let the attach client start reading
-	wheelUp := base64.StdEncoding.EncodeToString([]byte("\x1b[<64;2;2M"))
+	wheelUp := []byte("\x1b[<64;2;2M")
 	if _, err := d.handleTerminalInput(ctx, mustJSON(api.TerminalInputParams{TermID: "t1", Data: wheelUp})); err != nil {
 		t.Fatal(err)
 	}
@@ -744,5 +743,134 @@ func TestDropAllTermsTearsDownEveryConnection(t *testing.T) {
 	d.termsMu.Unlock()
 	if left != 0 {
 		t.Fatalf("%d connections left", left)
+	}
+}
+
+func TestTerminalInputBadBase64KeepsError(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	_, err := d.handleTerminalInput(context.Background(), json.RawMessage(`{"term_id":"t1","data":"!!"}`))
+	var rpcErr *api.RPCError
+	if !errors.As(err, &rpcErr) || rpcErr.Code != api.CodeInvalidRequest || rpcErr.Message != "bad base64" {
+		t.Fatalf("err = %v, want RPCError{CodeInvalidRequest, bad base64}", err)
+	}
+}
+
+// orderedNotifier records every notification in order; Notify fails with err
+// (when set) for terminal.output.
+type orderedNotifier struct {
+	mu   sync.Mutex
+	log  []api.Notification
+	err  error
+	seen chan struct{}
+}
+
+func (o *orderedNotifier) Notify(method string, params any) error {
+	if method == api.MethodTerminalOutput && o.err != nil {
+		return o.err
+	}
+	raw, _ := json.Marshal(params)
+	o.mu.Lock()
+	o.log = append(o.log, api.Notification{Method: method, Params: raw})
+	o.mu.Unlock()
+	select {
+	case o.seen <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (o *orderedNotifier) snapshot() []api.Notification {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]api.Notification(nil), o.log...)
+}
+
+// startPump runs pumpTerm on a term reading from a pipe and returns the pipe's
+// write end and a channel closed when the pump returns.
+func startPump(t *testing.T, n api.Notifier) (*os.File, *term, chan struct{}) {
+	t.Helper()
+	d := newNode(map[session.TmuxServer]*tmux.Client{})
+	d.restoreMirrorFn = func(*tmux.Client, *mirrorState) {}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	_, cancel := context.WithCancel(context.Background())
+	tm := &term{pty: r, cancel: cancel, sessionID: "s", termID: "t1", notifier: n, ct: newConnTerms()}
+	tm.ct.m["t1"] = tm
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.pumpTerm(tm)
+	}()
+	return w, tm, done
+}
+
+func waitPump(t *testing.T, done chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pumpTerm did not return")
+	}
+}
+
+func TestPumpTermFlushesOutputBeforeExited(t *testing.T) {
+	n := &orderedNotifier{seen: make(chan struct{}, 1)}
+	w, _, done := startPump(t, n)
+
+	if _, err := w.Write([]byte("a")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-n.seen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first output not sent")
+	}
+	// Within the coalescing window: gathered, then flushed at EOF.
+	if _, err := w.Write([]byte("bc")); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	waitPump(t, done)
+
+	log := n.snapshot()
+	if len(log) == 0 || log[len(log)-1].Method != api.MethodTerminalExited {
+		t.Fatalf("notifications = %v, want terminal.exited last", log)
+	}
+	var out []byte
+	for _, m := range log[:len(log)-1] {
+		if m.Method != api.MethodTerminalOutput {
+			t.Fatalf("unexpected %s before terminal.exited", m.Method)
+		}
+		var o api.TerminalOutput
+		if err := json.Unmarshal(m.Params, &o); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, o.Data...)
+	}
+	if string(out) != "abc" {
+		t.Fatalf("output = %q, want abc", out)
+	}
+}
+
+func TestPumpTermNotifyFailureSkipsExited(t *testing.T) {
+	n := &orderedNotifier{err: errors.New("connection gone")}
+	w, tm, done := startPump(t, n)
+
+	if _, err := w.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	waitPump(t, done)
+
+	if log := n.snapshot(); len(log) != 0 {
+		t.Fatalf("notifications = %v, want none (no terminal.exited)", log)
+	}
+	tm.ct.mu.Lock()
+	_, live := tm.ct.m["t1"]
+	tm.ct.mu.Unlock()
+	if live {
+		t.Fatal("term still registered after the pump ended")
 	}
 }

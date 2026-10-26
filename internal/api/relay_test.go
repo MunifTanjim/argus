@@ -65,7 +65,7 @@ func TestPeerNilOnRelayFrameDropsSilently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal relay frame: %v", err)
 	}
-	if err := sender.SendRawFrame(raw); err != nil {
+	if err := sender.SendRawFrame(EncodingJSON, raw); err != nil {
 		t.Fatalf("SendRawFrame: %v", err)
 	}
 
@@ -121,7 +121,7 @@ func TestChannelSealOpenRoundTrip(t *testing.T) {
 		idRaw := json.RawMessage(`1`)
 		params := json.RawMessage(`{"session_id":"s1"}`)
 
-		raw, err := clientCh.SealRequestFrame(&idRaw, "sessions.list", nodeID, params)
+		raw, err := clientCh.SealRequestFrame(EncodingJSON, &idRaw, "sessions.list", nodeID, params)
 		if err != nil {
 			t.Fatalf("SealRequestFrame: %v", err)
 		}
@@ -154,7 +154,7 @@ func TestChannelSealOpenRoundTrip(t *testing.T) {
 		idRaw := json.RawMessage(`2`)
 		result := json.RawMessage(`{"sessions":[]}`)
 
-		raw, err := nodeCh.SealResponseFrame(&idRaw, result, nil)
+		raw, err := nodeCh.SealResponseFrame(EncodingJSON, &idRaw, result, nil)
 		if err != nil {
 			t.Fatalf("SealResponseFrame: %v", err)
 		}

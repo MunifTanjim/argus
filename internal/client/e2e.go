@@ -59,11 +59,13 @@ type nodeChan struct {
 	sendMu      sync.Mutex                  // serializes Seal+SendRawFrame (enc-nonce order)
 	hs          chan error                  // handshake outcome, sent once ch is established
 	decFails    int                         // consecutive decrypt failures; read-loop only, reset on success
+	cbor        atomic.Bool                 // gateway and node both declared cbor; set after node.identify
 }
 
 type pendingReply struct {
 	result json.RawMessage
 	rpcErr *api.RPCError
+	enc    api.Encoding
 }
 
 // tipMissThreshold is the number of consecutive unreconciled ticks for the
@@ -83,6 +85,8 @@ type E2EClient struct {
 	ready     chan struct{} // closed at end of NewE2EClientWithGate; synchronises m.peer init
 	static    e2e.KeyPair
 	plaintext bool // when true, openChannel skips Noise and uses an identity cipher
+
+	gatewayCBOR atomic.Bool // gateway declared cbor in server.info
 
 	mu       sync.Mutex
 	byNode   map[string]*nodeChan
@@ -265,6 +269,10 @@ func (m *E2EClient) Connect() error {
 	if err := m.peer.Call(api.MethodNodesList, nil, &roster); err != nil {
 		return fmt.Errorf("client: nodes.list: %w", err)
 	}
+	var info api.ServerInfo
+	if err := m.peer.Call(api.MethodServerInfo, nil, &info); err == nil {
+		m.gatewayCBOR.Store(info.Capabilities != nil && info.Capabilities.CBOR)
+	}
 	// Locked mode: pull the trust log before deciding which nodes to open. The store
 	// is already disk-seeded (last verified HEAD), so enforcement is correct even if
 	// this pull fails.
@@ -339,12 +347,16 @@ func (m *E2EClient) openIfEligible(nd api.NodeDescriptor) error {
 		return err
 	}
 	var res api.IdentifyResult
-	if err := m.callNode(nd.ID, api.MethodNodeIdentify, nil, &res); err != nil {
+	if err := m.callNode(nd.ID, api.MethodNodeIdentify, api.IdentifyParams{Capabilities: &api.PeerCapabilities{CBOR: true}}, &res); err != nil {
 		log.Printf("client: node %s identify failed: %v", nd.ID, err)
 	} else {
 		m.mu.Lock()
 		m.authTip[string(pub)] = res.Tip
+		nc := m.byNode[nd.ID]
 		m.mu.Unlock()
+		if nc != nil {
+			nc.cbor.Store(m.gatewayCBOR.Load() && res.Capabilities.CBOR)
+		}
 	}
 	return nil
 }
@@ -385,7 +397,7 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := m.peer.SendRawFrame(frame); err != nil {
+	if err := m.peer.SendRawFrame(api.EncodingJSON, frame); err != nil {
 		return err
 	}
 	select {
@@ -485,7 +497,7 @@ func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
 		delete(m.pending, id)
 		m.mu.Unlock()
 		if waiter != nil {
-			waiter <- pendingReply{result: result, rpcErr: rpcErr}
+			waiter <- pendingReply{result: result, rpcErr: rpcErr, enc: f.Enc}
 		}
 	case f.Method != "" && f.ID == nil:
 		params, err := ch.OpenParams(f)
@@ -496,6 +508,20 @@ func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
 			return
 		}
 		nc.decFails = 0
+		if f.Enc == api.EncodingCBOR {
+			// CBOR methods need no stamping; anything else is transcoded so it
+			// gets stamped like JSON.
+			if api.CBORMethods[f.Method] {
+				select {
+				case m.events <- api.Notification{Method: f.Method, Params: params, Enc: api.EncodingCBOR}:
+				default:
+				}
+				return
+			}
+			if params, err = api.CBORToJSON(params); err != nil {
+				return
+			}
+		}
 		if f.Method == api.MethodSessionEvent {
 			params = stampEvent(params, nc.nodeID, nc.label)
 			m.trackSessionEvent(nc.nodeID, params)
@@ -522,6 +548,13 @@ func (m *E2EClient) forget(id uint64) {
 // handle routing for terminal calls, per-node fanout for push register/unregister/test,
 // and passthrough for gateway-native methods (server.info/nodes.list/push.vapidKey/clients.*).
 func (m *E2EClient) Call(method string, params, out any) error {
+	if terminalHandleAddressed[method] {
+		id, err := handleTermID(params)
+		if err != nil {
+			return err
+		}
+		return m.routeByHandle(m.termNode, id, method, params, out)
+	}
 	raw, err := toRaw(params)
 	if err != nil {
 		return err
@@ -557,14 +590,27 @@ func (m *E2EClient) Call(method string, params, out any) error {
 		delete(m.subNode, id)
 		m.mu.Unlock()
 		return err
-	case terminalHandleAddressed[method]:
-		id, _ := termIDFromParams(raw)
-		return m.routeByHandle(m.termNode, id, method, raw, out)
 	case pushFanoutMethods[method]:
 		return m.fanoutPush(method, raw, out)
 	default: // gateway-native: server.info, nodes.list, ping, push.vapidKey, clients.*
 		return m.peer.Call(method, raw, out)
 	}
+}
+
+// handleTermID returns a terminal handle call's term_id. Typed terminal.input
+// params are read directly, so a keystroke is not JSON-marshalled only to be
+// encoded again as CBOR.
+func handleTermID(params any) (string, error) {
+	switch p := params.(type) {
+	case api.TerminalInputParams:
+		return p.TermID, nil
+	}
+	raw, err := toRaw(params)
+	if err != nil {
+		return "", err
+	}
+	id, _ := termIDFromParams(raw)
+	return id, nil
 }
 
 func toRaw(params any) (json.RawMessage, error) {
@@ -1006,7 +1052,7 @@ func (m *E2EClient) routeByNode(method string, raw json.RawMessage, out any) err
 
 // routeByHandle routes a terminal/transcript handle call to the node the handle
 // was opened/subscribed on.
-func (m *E2EClient) routeByHandle(table map[string]string, id, method string, raw json.RawMessage, out any) error {
+func (m *E2EClient) routeByHandle(table map[string]string, id, method string, params any, out any) error {
 	if id == "" {
 		return &api.RPCError{Code: api.CodeInvalidRequest, Message: method + " requires a handle id"}
 	}
@@ -1016,7 +1062,7 @@ func (m *E2EClient) routeByHandle(table map[string]string, id, method string, ra
 	if nodeID == "" {
 		return &api.RPCError{Code: api.CodeInvalidRequest, Message: method + ": unknown handle " + id}
 	}
-	return m.callNode(nodeID, method, raw, out)
+	return m.callNode(nodeID, method, params, out)
 }
 
 func (m *E2EClient) soleNode() string {
@@ -1074,13 +1120,9 @@ func (m *E2EClient) callNode(nodeID, method string, params, out any) error {
 		return fmt.Errorf("client: channel to node %q not established", nodeID)
 	}
 
-	var paramsRaw json.RawMessage
-	if params != nil {
-		b, err := json.Marshal(params)
-		if err != nil {
-			return err
-		}
-		paramsRaw = b
+	enc, paramsRaw, err := api.EncodeParams(method, params, nc.cbor.Load())
+	if err != nil {
+		return err
 	}
 
 	id := atomic.AddUint64(&m.nextReq, 1)
@@ -1091,9 +1133,9 @@ func (m *E2EClient) callNode(nodeID, method string, params, out any) error {
 	m.mu.Unlock()
 
 	nc.sendMu.Lock()
-	frame, err := ch.SealRequestFrame(&idRaw, method, nodeID, paramsRaw)
+	frame, err := ch.SealRequestFrame(enc, &idRaw, method, nodeID, paramsRaw)
 	if err == nil {
-		err = m.peer.SendRawFrame(frame)
+		err = m.peer.SendRawFrame(enc, frame)
 	}
 	nc.sendMu.Unlock()
 	if err != nil {
@@ -1106,10 +1148,10 @@ func (m *E2EClient) callNode(nodeID, method string, params, out any) error {
 		if reply.rpcErr != nil {
 			return reply.rpcErr
 		}
-		if out != nil && len(reply.result) > 0 {
-			return json.Unmarshal(reply.result, out)
+		if out == nil || len(reply.result) == 0 {
+			return nil
 		}
-		return nil
+		return reply.enc.Unmarshal(reply.result, out)
 	case <-m.peer.Done():
 		m.forget(id)
 		return fmt.Errorf("client: connection closed")

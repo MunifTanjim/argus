@@ -1,7 +1,11 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import '../transport/jsonrpc.dart' show RpcError, RpcMessage;
+import 'package:cbor/simple.dart';
+
+import '../transport/frame_reader.dart' show frameCbor;
+import '../transport/jsonrpc.dart'
+    show RpcError, RpcMessage, cborToDart, jsonSafe;
 import 'session.dart';
 
 /// Method for a relay frame carrying a raw Noise handshake message (msg1/msg2),
@@ -41,15 +45,24 @@ class RouteHeader {
 }
 
 /// A parsed relay frame. [body] is the JSON body value (a base64 String for
-/// sealed or handshake frames); [raw] is the verbatim line.
+/// sealed or handshake frames) or the sealed bytes of a CBOR frame; [raw] is
+/// the verbatim line.
 class RelayFrame {
-  RelayFrame({this.method, this.id, this.route, this.body, required this.raw});
+  RelayFrame({
+    this.method,
+    this.id,
+    this.route,
+    this.body,
+    required this.raw,
+    this.cbor = false,
+  });
 
   final String? method;
   final Object? id;
   final RouteHeader? route;
   final Object? body;
   final Uint8List raw;
+  final bool cbor;
 
   static RelayFrame parse(List<int> line) {
     final data = line is Uint8List ? line : Uint8List.fromList(line);
@@ -69,6 +82,7 @@ class RelayFrame {
     route: RouteHeader.fromJson(m.route),
     body: m.body,
     raw: Uint8List(0),
+    cbor: m.cbor,
   );
 }
 
@@ -125,6 +139,7 @@ class Channel {
   String _sealBody(List<int> inner) => base64.encode(_cipher.seal(inner));
 
   Uint8List _openBody(Object? body) {
+    if (body is List<int>) return _cipher.open(body);
     if (body is! String) {
       throw const FormatException('channel body is not a string');
     }
@@ -138,24 +153,46 @@ class Channel {
     String nodeId,
     List<int> params,
   ) {
+    final frame = _requestEnvelope(id, method, nodeId, _sealBody(params));
+    return Uint8List.fromList(utf8.encode(jsonEncode(frame)));
+  }
+
+  /// Seals a request into a framed CBOR frame. [params] is the CBOR-encoded params.
+  Uint8List sealRequestCbor(
+    int id,
+    String method,
+    String nodeId,
+    Uint8List params,
+  ) {
+    final frame = _requestEnvelope(id, method, nodeId, _cipher.seal(params));
+    return frameCbor(Uint8List.fromList(cbor.encode(frame)));
+  }
+
+  Map<String, Object?> _requestEnvelope(
+    int id,
+    String method,
+    String nodeId,
+    Object body,
+  ) {
     final route = <String, Object?>{'chan_id': chanId};
     if (nodeId.isNotEmpty) route['node_id'] = nodeId;
-    final frame = <String, Object?>{
+    return {
       'jsonrpc': '2.0',
       'id': id,
       'method': method,
       'route': route,
-      'body': _sealBody(params),
+      'body': body,
     };
-    return Uint8List.fromList(utf8.encode(jsonEncode(frame)));
   }
 
   /// Decrypts a response frame's body into its raw result JSON bytes or rpc error.
+  /// A CBOR frame's result is converted to JSON, byte strings becoming base64.
   /// Relies on Go's canonical sealedResponse marshaling: `{"result":<raw>}` or
   /// `{"error":<raw>}` (no spaces, exactly one key). Returns raw bytes so int64
   /// results survive on the web (no JSON number decode).
   ({Uint8List? result, RpcError? error}) openResponse(RelayFrame f) {
     final inner = _openBody(f.body);
+    if (f.cbor) return _openCborResponse(inner);
     if (_hasPrefix(inner, '{"error":')) {
       final m = jsonDecode(utf8.decode(inner)) as Map<String, dynamic>;
       return (
@@ -173,6 +210,21 @@ class Channel {
     throw const FormatException('unexpected sealed response shape');
   }
 
+  ({Uint8List? result, RpcError? error}) _openCborResponse(Uint8List inner) {
+    final m = cborToDart(cbor.decode(inner));
+    if (m is! Map<String, dynamic>) {
+      throw const FormatException('unexpected sealed response shape');
+    }
+    final err = m['error'];
+    if (err is Map<String, dynamic>) {
+      return (result: null, error: RpcError.fromJson(err));
+    }
+    return (
+      result: utf8.encode(jsonEncode(jsonSafe(m['result']))),
+      error: null,
+    );
+  }
+
   static bool _hasPrefix(Uint8List b, String p) {
     if (b.length < p.length) return false;
     for (var i = 0; i < p.length; i++) {
@@ -181,5 +233,6 @@ class Channel {
     return true;
   }
 
+  /// The inner params bytes, encoded as the frame is (JSON or CBOR).
   Uint8List openParams(RelayFrame f) => _openBody(f.body);
 }

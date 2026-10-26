@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/transport/connection.dart';
 import 'package:argus/transport/jsonrpc.dart';
@@ -10,6 +11,8 @@ class FakeInner implements RpcLink {
   bool closed = false;
   @override
   Stream<RpcMessage> get incoming => _c.stream;
+  @override
+  void sendBytes(Uint8List frame) {}
   @override
   void send(String frame) => sent.add(frame);
   @override

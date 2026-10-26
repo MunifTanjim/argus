@@ -137,7 +137,7 @@ class _Manager extends ConnectionManager {
   _Manager(this._client)
       : super(
           connect: () => throw UnimplementedError(),
-          clientFactory: (incoming, send) =>
+          clientFactory: (incoming, send, sendBytes) =>
               RpcClient(incoming: incoming, sendFrame: send),
         );
   final GatewayClient _client;

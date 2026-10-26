@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
+import 'dart:typed_data';
 
 import '../models/enums.dart';
 import '../transport/jsonrpc.dart';
@@ -9,7 +10,7 @@ import '../util/id.dart';
 
 /// An open terminal attach the UI drives and disposes.
 abstract class TerminalSession {
-  /// Sends raw PTY bytes (base64-encoded on the wire) to the attached terminal.
+  /// Sends raw PTY bytes to the attached terminal.
   void send(List<int> data);
 
   /// Resizes the remote PTY. No-op when unchanged or non-positive.
@@ -81,7 +82,7 @@ class TerminalAttach implements TerminalSession {
     if (data.isEmpty || _disposed) return;
     client.call('terminal.input', {
       'term_id': termId,
-      'data': base64Encode(data),
+      'data': Uint8List.fromList(data),
     }).catchError(_logCallError('terminal.input'));
   }
 
@@ -104,7 +105,11 @@ class TerminalAttach implements TerminalSession {
     switch (m.method) {
       case 'terminal.output':
         final data = p['data'];
-        if (data is String) onData(base64Decode(data));
+        if (data is String) {
+          onData(base64Decode(data));
+        } else if (data is List<int>) {
+          onData(data);
+        }
       case 'terminal.exited':
         // The node already tore the term down, so stop listening now — don't rely
         // on the UI's dispose() (e.g. a pop that can't happen on a root route) to

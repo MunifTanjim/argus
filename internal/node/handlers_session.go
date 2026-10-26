@@ -110,8 +110,18 @@ func (d *Node) binaryAvailable(name string) bool {
 	return d.binCache[name]
 }
 
-// handleNodeIdentify announces this node's identity over the gateway uplink.
-func (d *Node) handleNodeIdentify(context.Context, json.RawMessage) (any, error) {
+// handleNodeIdentify announces this node's identity over the gateway uplink. An
+// explicit capabilities object records whether the caller accepts CBOR frames;
+// identify without one (clients re-identify during trust sync) or with malformed
+// params leaves that unchanged.
+func (d *Node) handleNodeIdentify(ctx context.Context, params json.RawMessage) (any, error) {
+	if p, err := api.Decode[api.IdentifyParams](params); err == nil && p.Capabilities != nil {
+		if n, ok := api.NotifierFrom(ctx); ok {
+			if r, ok := n.(api.CBORNegotiator); ok {
+				r.SetRemoteCBOR(p.Capabilities.CBOR)
+			}
+		}
+	}
 	res := api.IdentifyResult{ID: d.id, Label: d.label, Version: d.version, Capabilities: d.caps, IdentityPubKey: d.identityPubB64, SignerPubKey: d.signerPubB64, LockDisabled: d.localDisabled()}
 	if st := d.trust.Load(); st != nil {
 		res.Tip = st.Tip()

@@ -20,6 +20,7 @@ type chanState struct {
 	clientStatic []byte // Noise static public key of the authenticated client
 	stopStream   func() // ends the registry event stream; guarded by relayResponder.mu
 	decFails     int    // consecutive decrypt failures; read-loop only, reset on success
+	clientCBOR   atomic.Bool
 }
 
 // decryptWedgeWarnAfter is the run of consecutive decrypt failures that signals a
@@ -91,7 +92,7 @@ func (r *relayResponder) onFrame(_ *api.Peer, f api.RelayFrame) {
 			return
 		}
 		cs.decFails = 0
-		go r.serve(cs, f.ID, f.Method, params)
+		go r.serve(cs, f.Enc, f.ID, f.Method, params)
 	}
 }
 
@@ -142,7 +143,7 @@ func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
 		r.closeChan(f.Route.ChanID)
 		return
 	}
-	if err := peer.SendRawFrame(frame); err != nil {
+	if err := peer.SendRawFrame(api.EncodingJSON, frame); err != nil {
 		r.closeChan(f.Route.ChanID)
 		return
 	}
@@ -187,33 +188,27 @@ func (r *relayResponder) createPlain(chanID string) *chanState {
 	return cs
 }
 
-// serve dispatches a decrypted request and seals the response back on the channel.
-func (r *relayResponder) serve(cs *chanState, id *json.RawMessage, method string, params json.RawMessage) {
-	result, err := r.dispatch(cs.ctx, method, params)
-	var raw json.RawMessage
-	var rpcErr *api.RPCError
-	if err != nil {
-		if e, ok := err.(*api.RPCError); ok {
-			rpcErr = e
-		} else {
-			rpcErr = &api.RPCError{Code: api.CodeInternalError, Message: err.Error()}
-		}
-	} else if b, mErr := json.Marshal(result); mErr != nil {
-		rpcErr = &api.RPCError{Code: api.CodeInternalError, Message: mErr.Error()}
-	} else {
-		raw = b
-	}
+// serve dispatches a decrypted request and seals the response back on the
+// channel in the request's encoding.
+func (r *relayResponder) serve(cs *chanState, enc api.Encoding, id *json.RawMessage, method string, params []byte) {
+	raw, rpcErr := r.answer(cs, enc, method, params)
 	peer := r.peer.Load()
 	if peer == nil {
 		return
 	}
 	cs.sendMu.Lock()
 	defer cs.sendMu.Unlock()
-	frame, err := cs.ch.SealResponseFrame(id, raw, rpcErr)
+	frame, err := cs.ch.SealResponseFrame(enc, id, raw, rpcErr)
 	if err != nil {
 		return
 	}
-	_ = peer.SendRawFrame(frame)
+	_ = peer.SendRawFrame(enc, frame)
+}
+
+// answer dispatches a request whose params are encoded in enc and returns the
+// result encoded in enc.
+func (r *relayResponder) answer(cs *chanState, enc api.Encoding, method string, params []byte) ([]byte, *api.RPCError) {
+	return api.Serve(cs.ctx, r.dispatch, enc, method, params)
 }
 
 // closeAll cancels every channel's context (dropping its pollers/terminals) and
@@ -301,22 +296,29 @@ type channelNotifier struct {
 	cs *chanState
 }
 
+// SetRemoteCBOR records whether the client declared cbor on this channel.
+func (cn *channelNotifier) SetRemoteCBOR(ok bool) { cn.cs.clientCBOR.Store(ok) }
+
+var _ api.CBORNegotiator = (*channelNotifier)(nil)
+
+// Notify uses CBOR for a CBOR method only when both the client (on this channel)
+// and the gateway (on this uplink) declared cbor.
 func (cn *channelNotifier) Notify(method string, params any) error {
-	raw, err := json.Marshal(params)
-	if err != nil {
-		return err
-	}
 	peer := cn.r.peer.Load()
 	if peer == nil {
 		return nil
 	}
-	cn.cs.sendMu.Lock()
-	defer cn.cs.sendMu.Unlock()
-	frame, err := cn.cs.ch.SealNotificationFrame(method, api.RouteHeader{}, raw)
+	enc, raw, err := api.EncodeParams(method, params, cn.cs.clientCBOR.Load() && peer.RemoteCBOR())
 	if err != nil {
 		return err
 	}
-	return peer.SendRawFrame(frame)
+	cn.cs.sendMu.Lock()
+	defer cn.cs.sendMu.Unlock()
+	frame, err := cn.cs.ch.SealNotificationFrame(enc, method, api.RouteHeader{}, raw)
+	if err != nil {
+		return err
+	}
+	return peer.SendRawFrame(enc, frame)
 }
 
 // RelayChannelCountForTest reports how many client channels the active uplink holds.

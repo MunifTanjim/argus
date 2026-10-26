@@ -430,6 +430,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 
 	wakelock := host.NewWakelock("")
 	caps.HostWakelock = wakelock.Supported()
+	caps.CBOR = true
 
 	d := &Node{
 		reg: reg, clients: clients, id: hostname, label: hostname,

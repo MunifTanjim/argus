@@ -38,6 +38,7 @@ type fakeGatewayNode struct {
 type fakeNote struct {
 	method string
 	params json.RawMessage
+	enc    api.Encoding // encoding of params and of the sealed frame
 }
 
 func newFakeGatewayNode(t *testing.T, nodeID string) (*fakeGatewayNode, net.Conn) {
@@ -75,10 +76,10 @@ func (f *fakeGatewayNode) onFrame(_ *api.Peer, fr api.RelayFrame) {
 		}
 		f.nodeCh = api.NewChannel(fr.Route.ChanID, sess)
 		hf, _ := api.MarshalHandshakeFrame(fr.Route.ChanID, msg2)
-		_ = f.peer.SendRawFrame(hf)
+		_ = f.peer.SendRawFrame(api.EncodingJSON, hf)
 		if n := f.postHandshake; n != nil {
-			nf, _ := f.nodeCh.SealNotificationFrame(n.method, api.RouteHeader{}, n.params)
-			_ = f.peer.SendRawFrame(nf)
+			nf, _ := f.nodeCh.SealNotificationFrame(api.EncodingJSON, n.method, api.RouteHeader{}, n.params)
+			_ = f.peer.SendRawFrame(api.EncodingJSON, nf)
 		}
 		return
 	}
@@ -91,11 +92,11 @@ func (f *fakeGatewayNode) onFrame(_ *api.Peer, fr api.RelayFrame) {
 	}
 	result, rpcErr, note := f.handle(fr.Method, params)
 	if note != nil { // seal the notification BEFORE the response (arrival order)
-		nf, _ := f.nodeCh.SealNotificationFrame(note.method, api.RouteHeader{}, note.params)
-		_ = f.peer.SendRawFrame(nf)
+		nf, _ := f.nodeCh.SealNotificationFrame(api.EncodingJSON, note.method, api.RouteHeader{}, note.params)
+		_ = f.peer.SendRawFrame(api.EncodingJSON, nf)
 	}
-	rf, _ := f.nodeCh.SealResponseFrame(fr.ID, result, rpcErr)
-	_ = f.peer.SendRawFrame(rf)
+	rf, _ := f.nodeCh.SealResponseFrame(api.EncodingJSON, fr.ID, result, rpcErr)
+	_ = f.peer.SendRawFrame(api.EncodingJSON, rf)
 }
 
 // fakeNode is one node the fakeMultiGateway terminates a channel for.
@@ -117,6 +118,12 @@ type fakeNode struct {
 	tip []byte
 	// lockDisabled is advertised in the roster as LockDisabled.
 	lockDisabled bool
+	// cbor is reported as capabilities.cbor in the node.identify result.
+	cbor bool
+	// identifyParams and encs record node.identify params and per-method request
+	// encodings; guarded by the gateway's mu.
+	identifyParams []json.RawMessage
+	encs           map[string][]api.Encoding
 }
 
 // fakeMultiGateway is one peer playing the gateway for several nodes: nodes.list
@@ -134,7 +141,8 @@ type fakeMultiGateway struct {
 	// gotHandshake is set when any e2e.handshake frame is received; used to assert
 	// that plaintext clients send none.
 	gotHandshake  bool
-	syncCallCount int // incremented each time trustlog.sync is dispatched; guarded by mu
+	syncCallCount int  // incremented each time trustlog.sync is dispatched; guarded by mu
+	cbor          bool // reported as capabilities.cbor in server.info
 }
 
 func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, net.Conn) {
@@ -181,6 +189,12 @@ func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, n
 					return api.TrustLogSyncResult{}, nil
 				}
 				return api.TrustLogSyncResult{Entries: entries}, nil
+			case api.MethodServerInfo:
+				info := api.ServerInfo{Version: "test"}
+				if g.cbor {
+					info.Capabilities = &api.PeerCapabilities{CBOR: true}
+				}
+				return info, nil
 			}
 			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: method}
 		},
@@ -256,10 +270,10 @@ func (g *fakeMultiGateway) onFrame(_ *api.Peer, f api.RelayFrame) {
 			hook()
 		}
 		hf, _ := api.MarshalHandshakeFrame(f.Route.ChanID, msg2)
-		_ = g.peer.SendRawFrame(hf)
+		_ = g.peer.SendRawFrame(api.EncodingJSON, hf)
 		if note := n.postHandshake; note != nil {
-			nf, _ := n.ch.SealNotificationFrame(note.method, api.RouteHeader{}, note.params)
-			_ = g.peer.SendRawFrame(nf)
+			nf, _ := n.ch.SealNotificationFrame(api.EncodingJSON, note.method, api.RouteHeader{}, note.params)
+			_ = g.peer.SendRawFrame(api.EncodingJSON, nf)
 		}
 		return
 	}
@@ -273,19 +287,52 @@ func (g *fakeMultiGateway) onFrame(_ *api.Peer, f api.RelayFrame) {
 	if err != nil {
 		return
 	}
+	if f.Enc == api.EncodingCBOR && len(params) > 0 {
+		if params, err = api.CBORToJSON(params); err != nil {
+			return
+		}
+	}
+	g.mu.Lock()
+	if n.encs == nil {
+		n.encs = map[string][]api.Encoding{}
+	}
+	n.encs[f.Method] = append(n.encs[f.Method], f.Enc)
 	if f.Method == api.MethodNodeIdentify {
-		res, _ := json.Marshal(api.IdentifyResult{ID: n.id, Tip: n.tip})
-		rf, _ := n.ch.SealResponseFrame(f.ID, res, nil)
-		_ = g.peer.SendRawFrame(rf)
+		n.identifyParams = append(n.identifyParams, params)
+	}
+	nodeCBOR := n.cbor
+	g.mu.Unlock()
+	if f.Method == api.MethodNodeIdentify {
+		res, _ := json.Marshal(api.IdentifyResult{ID: n.id, Tip: n.tip, Capabilities: api.NodeCapabilities{CBOR: nodeCBOR}})
+		rf, _ := n.ch.SealResponseFrame(api.EncodingJSON, f.ID, res, nil)
+		_ = g.peer.SendRawFrame(api.EncodingJSON, rf)
 		return
 	}
 	result, rpcErr, note := n.handle(f.Method, params)
 	if note != nil {
-		nf, _ := n.ch.SealNotificationFrame(note.method, api.RouteHeader{}, note.params)
-		_ = g.peer.SendRawFrame(nf)
+		nf, _ := n.ch.SealNotificationFrame(note.enc, note.method, api.RouteHeader{}, note.params)
+		_ = g.peer.SendRawFrame(note.enc, nf)
 	}
-	rf, _ := n.ch.SealResponseFrame(f.ID, result, rpcErr)
-	_ = g.peer.SendRawFrame(rf)
+	if f.Enc == api.EncodingCBOR && result != nil {
+		var v any
+		_ = json.Unmarshal(result, &v)
+		result, _ = api.CBORMarshal(v)
+	}
+	rf, _ := n.ch.SealResponseFrame(f.Enc, f.ID, result, rpcErr)
+	_ = g.peer.SendRawFrame(f.Enc, rf)
+}
+
+// requestEncs returns the encodings of the requests n received for method.
+func (g *fakeMultiGateway) requestEncs(n *fakeNode, method string) []api.Encoding {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]api.Encoding(nil), n.encs[method]...)
+}
+
+func (g *fakeMultiGateway) setNodeCBOR(n *fakeNode, on bool) {
+	g.mu.Lock()
+	n.cbor = on
+	g.mu.Unlock()
 }
 
 func (g *fakeMultiGateway) trustSyncCount() int {

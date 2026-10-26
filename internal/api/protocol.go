@@ -583,6 +583,8 @@ type NodeCapabilities struct {
 	Terminal bool `json:"terminal"`
 	// HostWakelock reports whether the node can hold a wakelock (host.setWakelock).
 	HostWakelock bool `json:"host_wakelock"`
+	// CBOR reports whether the node accepts CBOR frames.
+	CBOR bool `json:"cbor"`
 
 	// unknown keeps the keys this build does not know, so a gateway relays the
 	// capabilities of a newer node unchanged.
@@ -640,13 +642,35 @@ func capabilityKeys(known knownCapabilities) (map[string]json.RawMessage, error)
 	return m, json.Unmarshal(b, &m)
 }
 
+// PeerCapabilities is what a connection peer supports, sent in the identify
+// handshake and echoed in server.info.
+type PeerCapabilities struct {
+	CBOR bool `json:"cbor"`
+}
+
+// IdentifyParams is what a client sends to declare its capabilities.
+// Capabilities is nil when absent, which leaves the recorded ones unchanged.
+type IdentifyParams struct {
+	Capabilities *PeerCapabilities `json:"capabilities,omitempty"`
+}
+
+// CBORNegotiator records whether the remote end of a connection accepts CBOR
+// frames.
+type CBORNegotiator interface {
+	SetRemoteCBOR(ok bool)
+}
+
+// CBORMethods are the methods whose messages travel as CBOR frames once negotiated.
+var CBORMethods = map[string]bool{MethodTerminalOutput: true, MethodTerminalInput: true}
+
 // ServerInfo carries server-wide metadata for a connected client: server version
 // and connected nodes. Served by the gateway.
 type ServerInfo struct {
-	Version            string     `json:"version"`
-	StartedAt          string     `json:"started_at,omitempty"` // RFC3339
-	Nodes              []NodeInfo `json:"nodes"`
-	PushPortConfigured bool       `json:"pushPortConfigured"`
+	Version            string            `json:"version"`
+	StartedAt          string            `json:"started_at,omitempty"` // RFC3339
+	Nodes              []NodeInfo        `json:"nodes"`
+	PushPortConfigured bool              `json:"pushPortConfigured"`
+	Capabilities       *PeerCapabilities `json:"capabilities,omitempty"`
 }
 
 // ServerTargetParams addresses a server.* call: the client sends it to the
@@ -973,6 +997,9 @@ type message struct {
 	Params  json.RawMessage  `json:"params,omitempty"`
 	Result  json.RawMessage  `json:"result,omitempty"`
 	Error   *RPCError        `json:"error,omitempty"`
+
+	// enc is the frame encoding; when CBOR, Params and Result hold CBOR bytes.
+	enc Encoding
 }
 
 func (m *message) isRequest() bool      { return m.Method != "" && m.ID != nil }
@@ -1054,10 +1081,10 @@ type TerminalOpenParams struct {
 	TerminalID string `json:"terminal_id,omitempty"`
 }
 
-// TerminalOutput is server→client output from a terminal session (base64-encoded data).
+// TerminalOutput is server→client output from a terminal session (base64 in JSON, raw in CBOR).
 type TerminalOutput struct {
 	TermID string `json:"term_id"`
-	Data   string `json:"data"`
+	Data   []byte `json:"data"`
 }
 
 // TerminalExited notifies the client that a terminal attach ended. Reason tells
@@ -1080,7 +1107,7 @@ const (
 // TerminalInputParams sends input data to a terminal session.
 type TerminalInputParams struct {
 	TermID string `json:"term_id"`
-	Data   string `json:"data"`
+	Data   []byte `json:"data"`
 }
 
 // TerminalResizeParams resizes a terminal session.

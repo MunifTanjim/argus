@@ -1,7 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:cbor/simple.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:argus/transport/frame_reader.dart';
+import 'package:argus/transport/jsonrpc.dart';
 import 'package:argus/transport/ws_link.dart';
 
 void main() {
@@ -65,5 +69,68 @@ void main() {
       expect(() => resolveClientUrl('https://host'), throwsFormatException);
       expect(() => resolveClientUrl('wss://'), throwsFormatException);
     });
+  });
+
+  test('ws link decodes a cbor frame and a json line in one message', () async {
+    final frames = StreamController<dynamic>();
+    addTearDown(frames.close);
+    final link = WebSocketRpcLink.fromStream(frames.stream);
+    final got = <RpcMessage>[];
+    final two = Completer<void>();
+    link.incoming.listen((m) {
+      got.add(m);
+      if (got.length == 2) two.complete();
+    });
+    final env = Uint8List.fromList(
+      cbor.encode({
+        'jsonrpc': '2.0',
+        'id': 7,
+        'route': {'chan_id': 'c1'},
+        'body': Uint8List.fromList([1, 2, 3]),
+      }),
+    );
+    frames.add(
+      Uint8List.fromList([
+        ...frameCbor(env),
+        ...utf8.encode('${jsonEncode({'jsonrpc': '2.0', 'method': 'ping'})}\n'),
+      ]),
+    );
+    await two.future.timeout(const Duration(seconds: 5));
+    expect(got[0].cbor, isTrue);
+    expect(got[0].id, '7');
+    expect((got[0].route as Map)['chan_id'], 'c1');
+    expect(got[0].body, [1, 2, 3]);
+    expect(got[1].cbor, isFalse);
+    expect(got[1].method, 'ping');
+    await link.close();
+  });
+
+  test('ws link errors and closes on a malformed cbor frame', () async {
+    final frames = StreamController<dynamic>();
+    addTearDown(frames.close);
+    var closes = 0;
+    final link = WebSocketRpcLink.fromStream(
+      frames.stream,
+      closeHook: () async => closes++,
+    );
+    final got = <RpcMessage>[];
+    final errors = <Object>[];
+    final done = Completer<void>();
+    link.incoming.listen(got.add, onError: errors.add, onDone: done.complete);
+    final ping = utf8.encode(
+      '${jsonEncode({'jsonrpc': '2.0', 'method': 'ping'})}\n',
+    );
+    frames.add(
+      Uint8List.fromList([
+        ...frameCbor(Uint8List.fromList(cbor.encode(5))),
+        ...frameCbor(Uint8List.fromList([0xa1])),
+        ...ping,
+      ]),
+    );
+    frames.add(Uint8List.fromList(ping));
+    await done.future.timeout(const Duration(seconds: 5));
+    expect(errors, hasLength(1));
+    expect(got, isEmpty);
+    expect(closes, greaterThanOrEqualTo(1));
   });
 }

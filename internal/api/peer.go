@@ -9,6 +9,7 @@ import (
 	"io"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -65,6 +66,13 @@ const defaultWriteTimeout = 10 * time.Second
 // (net.Conn satisfies it; an in-memory pipe used in tests does too).
 type writeDeadliner interface{ SetWriteDeadline(time.Time) error }
 
+// FrameWriter is optional on the transport: when present the Peer hands it each
+// complete framed frame instead of writing to its buffered stream (e.g. one
+// WebSocket message per frame).
+type FrameWriter interface {
+	WriteFrame(enc Encoding, frame []byte) error
+}
+
 // Peer is one end of a symmetric JSON-RPC 2.0 connection: it both issues and
 // serves requests/notifications over a single stream. The gateway↔node uplink uses
 // a Peer directly so both sides can call each other.
@@ -82,6 +90,7 @@ type Peer struct {
 	onNotify     func(Notification)
 	onRelayFrame func(*Peer, RelayFrame)
 	writeTimeout time.Duration
+	remoteCBOR   atomic.Bool
 
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -164,6 +173,13 @@ func answered(err error) bool {
 	return errors.As(err, &rpcErr)
 }
 
+// SetRemoteCBOR records whether the remote accepts CBOR frames.
+func (p *Peer) SetRemoteCBOR(ok bool) { p.remoteCBOR.Store(ok) }
+
+var _ CBORNegotiator = (*Peer)(nil)
+
+func (p *Peer) RemoteCBOR() bool { return p.remoteCBOR.Load() }
+
 // Done is closed when the peer's read loop ends (connection closed or errored).
 func (p *Peer) Done() <-chan struct{} { return p.closed }
 
@@ -183,13 +199,9 @@ func (p *Peer) Call(method string, params, out any) error {
 // CallContext is Call with a context: on cancel/deadline it abandons the request
 // and returns ctx.Err(), reclaiming the pending slot so a late reply isn't leaked.
 func (p *Peer) CallContext(ctx context.Context, method string, params, out any) error {
-	var rawParams json.RawMessage
-	if params != nil {
-		b, err := json.Marshal(params)
-		if err != nil {
-			return err
-		}
-		rawParams = b
+	enc, rawParams, err := EncodeParams(method, params, p.RemoteCBOR())
+	if err != nil {
+		return err
 	}
 
 	p.mu.Lock()
@@ -206,7 +218,7 @@ func (p *Peer) CallContext(ctx context.Context, method string, params, out any) 
 		p.mu.Unlock()
 	}
 
-	if err := p.send(message{ID: &idRaw, Method: method, Params: rawParams}); err != nil {
+	if err := p.send(message{enc: enc, ID: &idRaw, Method: method, Params: rawParams}); err != nil {
 		forget()
 		return err
 	}
@@ -217,7 +229,7 @@ func (p *Peer) CallContext(ctx context.Context, method string, params, out any) 
 			return resp.Error
 		}
 		if out != nil && len(resp.Result) > 0 {
-			return json.Unmarshal(resp.Result, out)
+			return resp.enc.Unmarshal(resp.Result, out)
 		}
 		return nil
 	case <-ctx.Done():
@@ -230,22 +242,29 @@ func (p *Peer) CallContext(ctx context.Context, method string, params, out any) 
 
 // Notify sends a one-way notification (no response expected).
 func (p *Peer) Notify(method string, params any) error {
-	var raw json.RawMessage
-	if params != nil {
-		b, err := json.Marshal(params)
-		if err != nil {
-			return err
-		}
-		raw = b
+	enc, raw, err := EncodeParams(method, params, p.RemoteCBOR())
+	if err != nil {
+		return err
 	}
-	return p.send(message{Method: method, Params: raw})
+	return p.send(message{enc: enc, Method: method, Params: raw})
 }
 
 func (p *Peer) send(m message) error {
-	m.JSONRPC = jsonrpcVersion
-	b, err := json.Marshal(m)
+	b, err := m.marshal()
 	if err != nil {
 		return err
+	}
+	return p.SendRawFrame(m.enc, b)
+}
+
+// SendRawFrame writes a pre-marshaled payload verbatim, adding the framing for
+// enc. A blind gateway uses it to forward a relayed frame's Raw bytes to the
+// paired peer without re-encoding — the sealed Body is never touched.
+func (p *Peer) SendRawFrame(enc Encoding, payload []byte) error {
+	fw, isFW := p.rwc.(FrameWriter)
+	var frame []byte
+	if isFW {
+		frame = appendFrame(nil, enc, payload)
 	}
 	p.wmu.Lock()
 	defer p.wmu.Unlock()
@@ -254,7 +273,13 @@ func (p *Peer) send(m message) error {
 			_ = wd.SetWriteDeadline(time.Now().Add(p.writeTimeout))
 		}
 	}
-	if err := p.writeFrame(b); err != nil {
+	var err error
+	if isFW {
+		err = fw.WriteFrame(enc, frame)
+	} else {
+		err = writeFrame(p.bw, enc, payload)
+	}
+	if err != nil {
 		// A failed or timed-out write leaves the frame half-emitted, so the stream
 		// is unusable: drop the peer rather than desync every later frame.
 		_ = p.Close()
@@ -263,59 +288,23 @@ func (p *Peer) send(m message) error {
 	return nil
 }
 
-// SendRawFrame writes a pre-marshaled frame verbatim, appending the newline
-// framing. A blind gateway uses it to forward a relayed frame's Raw bytes to the
-// paired peer without re-encoding — the sealed Body is never touched. Like send, a
-// failed/timed-out write drops the peer so the stream can't desync.
-func (p *Peer) SendRawFrame(raw []byte) error {
-	p.wmu.Lock()
-	defer p.wmu.Unlock()
-	if p.writeTimeout > 0 {
-		if wd, ok := p.rwc.(writeDeadliner); ok {
-			_ = wd.SetWriteDeadline(time.Now().Add(p.writeTimeout))
-		}
-	}
-	if err := p.writeFrame(raw); err != nil {
-		_ = p.Close()
-		return err
-	}
-	return nil
-}
-
-func (p *Peer) writeFrame(b []byte) error {
-	if _, err := p.bw.Write(b); err != nil {
-		return err
-	}
-	if err := p.bw.WriteByte('\n'); err != nil {
-		return err
-	}
-	return p.bw.Flush()
-}
-
 func (p *Peer) readLoop() {
 	defer close(p.closed)
 	defer p.cancel()
-	scanner := bufio.NewScanner(p.rwc)
-	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
+	r := bufio.NewReaderSize(p.rwc, 64*1024)
+	for {
+		enc, payload, err := readFrame(r)
+		if err != nil {
+			return
 		}
-		var m message
-		if err := json.Unmarshal(line, &m); err != nil {
+		m, err := unmarshalMessage(enc, payload)
+		if err != nil {
 			_ = p.send(message{Error: &RPCError{Code: CodeParseError, Message: "parse error"}})
 			continue
 		}
 		if m.isRelay() {
 			if p.onRelayFrame != nil {
-				p.onRelayFrame(p, RelayFrame{
-					Method: m.Method,
-					ID:     m.ID,
-					Route:  *m.Route,
-					Body:   m.Body,
-					Raw:    append([]byte(nil), line...),
-				})
+				p.onRelayFrame(p, m.relayFrame(payload))
 			}
 			continue
 		}
@@ -324,7 +313,7 @@ func (p *Peer) readLoop() {
 			go p.serveRequest(m)
 		case m.isNotification():
 			if p.onNotify != nil {
-				p.onNotify(Notification{Method: m.Method, Params: m.Params})
+				p.onNotify(Notification{Method: m.Method, Params: m.Params, Enc: m.enc})
 			}
 		default: // response: route to the waiting caller by id
 			var id int
@@ -343,13 +332,13 @@ func (p *Peer) readLoop() {
 }
 
 func (p *Peer) serveRequest(m message) {
-	resp := message{ID: m.ID}
+	resp := message{enc: m.enc, ID: m.ID}
 	// ping is a transport-level liveness probe, answered by the Peer itself so no
 	// application dispatch policy can break its own link's keepalive. Handlers may
 	// still register ping for callers that reach dispatch without a Peer (for example,
 	// a caller of Node.DispatchFunc).
 	if m.Method == MethodPing {
-		resp.Result = json.RawMessage("null")
+		resp.Result, _ = m.enc.Marshal(nil)
 		_ = p.send(resp)
 		return
 	}
@@ -358,22 +347,31 @@ func (p *Peer) serveRequest(m message) {
 		_ = p.send(resp)
 		return
 	}
-	result, err := p.dispatch(WithNotifier(p.ctx, p), m.Method, m.Params)
+	resp.Result, resp.Error = Serve(WithNotifier(p.ctx, p), p.dispatch, m.enc, m.Method, m.Params)
+	_ = p.send(resp)
+}
+
+// Serve dispatches a request whose params are encoded in enc and returns the
+// result encoded in enc. CBOR params are decoded by WithCBORParams, so dispatch
+// sees no params for them.
+func Serve(ctx context.Context, dispatch DispatchFunc, enc Encoding, method string, params []byte) ([]byte, *RPCError) {
+	if enc == EncodingCBOR {
+		var rpcErr *RPCError
+		if ctx, rpcErr = WithCBORParams(ctx, method, params); rpcErr != nil {
+			return nil, rpcErr
+		}
+		params = nil
+	}
+	result, err := dispatch(ctx, method, params)
 	if err != nil {
 		if rpcErr, ok := err.(*RPCError); ok {
-			resp.Error = rpcErr
-		} else {
-			resp.Error = &RPCError{Code: CodeInternalError, Message: err.Error()}
+			return nil, rpcErr
 		}
-		_ = p.send(resp)
-		return
+		return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
 	}
-	raw, err := json.Marshal(result)
+	raw, err := enc.Marshal(result)
 	if err != nil {
-		resp.Error = &RPCError{Code: CodeInternalError, Message: err.Error()}
-		_ = p.send(resp)
-		return
+		return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
 	}
-	resp.Result = raw
-	_ = p.send(resp)
+	return raw, nil
 }

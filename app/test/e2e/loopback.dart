@@ -4,7 +4,9 @@ import 'dart:typed_data';
 
 import 'package:argus/e2e/e2e.dart';
 import 'package:argus/transport/connection.dart' show RpcLink;
+import 'package:argus/transport/frame_reader.dart' show frameCbor;
 import 'package:argus/transport/jsonrpc.dart';
+import 'package:cbor/simple.dart';
 
 typedef NodeHandler = List<int> Function(String method, Uint8List params);
 
@@ -41,7 +43,14 @@ class LoopbackNode {
   /// off-chain tip to drive the client's tip-consistency check.
   Uint8List? tip;
 
+  /// Reported as `capabilities` in the node.identify result when set.
+  Map<String, Object?>? capabilities;
+
+  /// Every opened request, in arrival order.
+  final requests = <({String method, bool cbor, Uint8List params})>[];
+
   late void Function(String line) sendToClient;
+  late void Function(Uint8List framed) sendBytesToClient;
 
   Future<void> onClientFrame(RpcMessage m) async {
     final chanId = (m.route as Map)['chan_id'] as String;
@@ -69,6 +78,7 @@ class LoopbackNode {
     } catch (_) {
       return;
     }
+    requests.add((method: m.method!, cbor: m.cbor, params: params));
     (List<int>? ok, ({int code, String message})? err) handlerResult;
     if (m.method == 'node.identify') {
       // Answer node.identify with this node's id and (optional) trust-log tip,
@@ -76,7 +86,11 @@ class LoopbackNode {
       final t = tip;
       handlerResult = (
         utf8.encode(
-          jsonEncode({'id': id, if (t != null) 'tip': base64.encode(t)}),
+          jsonEncode({
+            'id': id,
+            if (t != null) 'tip': base64.encode(t),
+            if (capabilities != null) 'capabilities': capabilities,
+          }),
         ),
         null,
       );
@@ -89,6 +103,29 @@ class LoopbackNode {
         final msg = e is RpcError ? e.message : '$e';
         handlerResult = (null, (code: code, message: msg));
       }
+    }
+    if (m.cbor) {
+      final err = handlerResult.$2;
+      final inner = cbor.encode(
+        err != null
+            ? {
+                'error': {'code': err.code, 'message': err.message},
+              }
+            : {'result': jsonDecode(utf8.decode(handlerResult.$1!))},
+      );
+      sendBytesToClient(
+        frameCbor(
+          Uint8List.fromList(
+            cbor.encode({
+              'jsonrpc': '2.0',
+              'id': int.parse(m.id!),
+              'route': {'chan_id': chanId},
+              'body': _session!.seal(inner),
+            }),
+          ),
+        ),
+      );
+      return;
     }
     final inner = handlerResult.$2 != null
         ? utf8.encode(
@@ -117,7 +154,25 @@ class LoopbackNode {
       })}\n',
     );
   }
+
+  void emitNotificationCbor(String method, Object? params) {
+    sendBytesToClient(
+      frameCbor(
+        Uint8List.fromList(
+          cbor.encode({
+            'jsonrpc': '2.0',
+            'method': method,
+            'route': {'chan_id': _chanId},
+            'body': _session!.seal(cbor.encode(params)),
+          }),
+        ),
+      ),
+    );
+  }
 }
+
+RpcMessage _fromCborFrame(Uint8List framed) =>
+    RpcMessage.fromCbor(cbor.decode(framed.sublist(5)) as Map);
 
 /// An in-memory gateway RpcLink: answers gateway RPCs (relay.open/ping) and relays
 /// sealed/handshake frames to a single [LoopbackNode].
@@ -145,6 +200,8 @@ class LoopbackLink implements RpcLink {
   @override
   Stream<RpcMessage> get incoming => _ctrl.stream;
 
+  @override
+  void sendBytes(Uint8List frame) {}
   @override
   void send(String frame) {
     for (final part in frame.split('\n')) {
@@ -190,11 +247,15 @@ class MultiNodeLoopbackLink implements RpcLink {
     Set<String>? offline,
     Set<String>? failRelayOpen,
     Set<String>? lockDisabled,
+    this.serverInfo,
   }) : _offline = offline ?? const {},
        _failRelayOpen = failRelayOpen ?? const {},
        _lockDisabled = lockDisabled ?? const {} {
     for (final n in _nodes.values) {
       n.sendToClient = _push;
+      n.sendBytesToClient = (f) {
+        if (!_ctrl.isClosed) _ctrl.add(_fromCborFrame(f));
+      };
     }
     if (trustChain != null) {
       this.trustChain = trustChain;
@@ -213,6 +274,12 @@ class MultiNodeLoopbackLink implements RpcLink {
 
   /// Node ids reported `lock_disabled: true` in nodes.list.
   final Set<String> _lockDisabled;
+
+  /// The server.info result; server.info goes unanswered when null.
+  final Map<String, Object?>? serverInfo;
+
+  /// Every CBOR frame the client sent.
+  final cborFrames = <RpcMessage>[];
 
   /// Every node id passed to relay.open, in order. Lets a test assert that an
   /// offline node is skipped before any open is attempted.
@@ -252,6 +319,14 @@ class MultiNodeLoopbackLink implements RpcLink {
 
   @override
   Stream<RpcMessage> get incoming => _ctrl.stream;
+
+  @override
+  void sendBytes(Uint8List frame) {
+    final m = _fromCborFrame(frame);
+    cborFrames.add(m);
+    final chanId = (m.route as Map)['chan_id'] as String;
+    _chanToNode[chanId]?.onClientFrame(m);
+  }
 
   @override
   void send(String frame) {
@@ -316,6 +391,10 @@ class MultiNodeLoopbackLink implements RpcLink {
         onRelayOpen?.call(nodeId);
       case 'ping':
         _push(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': null}));
+      case 'server.info':
+        final info = serverInfo;
+        if (info == null) return;
+        _push(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': info}));
       case 'trustlog.sync':
         trustSyncCount++;
         beforeTrustSync?.call();

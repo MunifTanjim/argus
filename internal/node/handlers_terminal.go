@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -386,39 +387,57 @@ func (d *Node) pumpTerm(tm *term) {
 		}
 		d.teardownTerm(tm)
 	}()
-	buf := make([]byte, termOutputChunk)
-	for {
-		nr, err := tm.pty.Read(buf)
-		if nr > 0 {
-			data := base64.StdEncoding.EncodeToString(buf[:nr])
-			if e := tm.notifier.Notify(api.MethodTerminalOutput, api.TerminalOutput{TermID: tm.termID, Data: data}); e != nil {
-				return // connection gone; defer handles teardown
+	in := make(chan []byte)
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		defer close(in)
+		buf := make([]byte, termOutputChunk)
+		for {
+			nr, err := tm.pty.Read(buf)
+			if nr > 0 {
+				select {
+				case in <- append([]byte(nil), buf[:nr]...):
+				case <-stop:
+					return
+				}
+			}
+			if err != nil {
+				if err != io.EOF {
+					d.log.Info("terminal.output read", "term_id", tm.termID, "err", err)
+				}
+				return
 			}
 		}
-		if err != nil {
-			if err != io.EOF {
-				d.log.Info("terminal.output read", "term_id", tm.termID, "err", err)
-			}
-			ptyEnded = true
-			return
-		}
+	}()
+	send := func(data []byte) error {
+		return tm.notifier.Notify(api.MethodTerminalOutput, api.TerminalOutput{TermID: tm.termID, Data: data})
 	}
+	if err := coalesce(in, send, 8*time.Millisecond, termOutputChunk, time.After); err != nil {
+		return // connection gone; defer handles teardown
+	}
+	// coalesce returns nil only once the reader closed in, and the reader can
+	// leave through stop only after this function returns: the pty ended.
+	ptyEnded = true
 }
 
 func (d *Node) handleTerminalInput(ctx context.Context, params json.RawMessage) (any, error) {
-	p, err := api.Decode[api.TerminalInputParams](params)
-	if err != nil {
-		return nil, err
+	p, ok := api.CBORParams[api.TerminalInputParams](ctx)
+	if !ok {
+		var err error
+		if p, err = api.Decode[api.TerminalInputParams](params); err != nil {
+			var corrupt base64.CorruptInputError
+			if errors.As(err, &corrupt) {
+				return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "bad base64"}
+			}
+			return nil, err
+		}
 	}
 	tm, ok := d.lookupTerm(ctx, p.TermID)
 	if !ok {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown term_id: " + p.TermID}
 	}
-	raw, err := base64.StdEncoding.DecodeString(p.Data)
-	if err != nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "bad base64"}
-	}
-	_, err = tm.pty.Write(raw)
+	_, err := tm.pty.Write(p.Data)
 	return nil, err
 }
 

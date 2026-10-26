@@ -53,6 +53,7 @@ Future<GatewayClient> buildE2EClient(
   TrustChainStore chainStore, {
   ChainLoader loadChain = loadChainInBackground,
   void Function(GatewayClient client)? onTrustAdvance,
+  void Function(Uint8List)? sendBytes,
 }) async {
   final identity = await identityStore.loadOrCreate();
   final Uint8List? seed;
@@ -77,6 +78,7 @@ Future<GatewayClient> buildE2EClient(
     send,
     identity,
     trustStore: trust,
+    sendBytes: sendBytes,
     // Re-sync the trust log periodically so mid-session revocations take effect
     // (channels to now-unauthorized nodes are dropped), persisting each advance.
     trustResyncInterval: const Duration(seconds: 30),
@@ -239,7 +241,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   final chainStore = ref.read(trustChainStoreProvider);
   final manager = ConnectionManager(
     connect: () => connectForCredentials(creds, keyStore, hostKeys),
-    clientFactory: (incoming, send) => creds.e2eEnabled
+    clientFactory: (incoming, send, sendBytes) => creds.e2eEnabled
         ? buildE2EClient(
             incoming,
             send,
@@ -249,6 +251,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
             // banner clears when the device's channels open.
             onTrustAdvance: (client) => trustSignature.state =
                 trustSignatureOf(trustSummaryOf(client)),
+            sendBytes: sendBytes,
           )
         : Future(() async {
             final client = E2EClient(
@@ -256,6 +259,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
               send,
               KeyPair(Uint8List(32), Uint8List(32)),
               plaintext: true,
+              sendBytes: sendBytes,
             );
             await client.connect();
             return client;

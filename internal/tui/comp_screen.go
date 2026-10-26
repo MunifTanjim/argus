@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -113,9 +112,7 @@ func (s screenComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 		if s.term == nil {
 			return s, nil
 		}
-		if raw, err := base64.StdEncoding.DecodeString(msg.Data); err == nil {
-			_, _ = s.term.Write(raw)
-		}
+		_, _ = s.term.Write(msg.Data)
 	case api.TerminalExited:
 		s.gone = true
 		c.closeScreen(s.termID)
