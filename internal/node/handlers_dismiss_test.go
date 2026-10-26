@@ -61,3 +61,57 @@ func TestHandleSessionKillDismissesPanelessSession(t *testing.T) {
 		}
 	}
 }
+
+func TestKillsViewerPane(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		s    session.Session
+		want bool
+	}{
+		{"argus server pane", session.Session{Tmux: session.TmuxLocation{Server: session.TmuxServerArgus, PaneID: "%3"}}, true},
+		{"user's own pane", session.Session{Tmux: session.TmuxLocation{Server: session.TmuxServerDefault, PaneID: "%3"}}, false},
+		{"no pane", session.Session{}, false},
+	} {
+		if got := killsViewerPane(tc.s); got != tc.want {
+			t.Errorf("%s: killsViewerPane = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestHandleSessionKillKeepsUserPane(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		server    session.TmuxServer
+		paneAlive bool
+	}{
+		{session.TmuxServerDefault, true},
+		{session.TmuxServerArgus, false},
+	} {
+		c, _ := newTestClientSocket(t)
+		paneID, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: "u", Cwd: t.TempDir(), Command: "sleep", Args: []string{"300"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		fd := &fakeDismisser{}
+		d := newNode(map[session.TmuxServer]*tmux.Client{tc.server: c})
+		d.adapters["pi"] = fd
+		s, _ := d.reg.ApplyHook(registry.HookUpdate{
+			Agent: "pi", AgentSessionID: "p1", Server: tc.server, PaneID: paneID,
+			Input: session.InputAPI, Status: session.StatusAwaitingInput,
+		})
+		params, _ := json.Marshal(api.SessionRef{SessionID: s.ID})
+		if _, err := d.handleSessionKill(ctx, params); err != nil || !fd.called {
+			t.Fatalf("%s: kill err=%v dismissed=%v", tc.server, err, fd.called)
+		}
+		panes, _ := c.ListPanes(ctx)
+		alive := false
+		for _, p := range panes {
+			if p.PaneID == paneID {
+				alive = true
+			}
+		}
+		if alive != tc.paneAlive {
+			t.Fatalf("%s: pane alive = %v, want %v", tc.server, alive, tc.paneAlive)
+		}
+	}
+}

@@ -6,8 +6,10 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/charmbracelet/x/ansi"
@@ -181,8 +183,8 @@ func termDimsFor(w, h int, atEdge bool) (cols, rows int) {
 func attachScreen(c *ctx, id string) tea.Cmd {
 	m := c.m
 	cols, rows := m.termDims()
-	emu, cur := newScreenEmulator(cols, rows)
-	s := screenComp{sessionID: id, termID: newTermID(), term: emu, cursorState: cur, stop: make(chan struct{})}
+	emu, cur, frame := newScreenEmulator(cols, rows)
+	s := screenComp{sessionID: id, termID: newTermID(), term: emu, cursorState: cur, frame: frame, stop: make(chan struct{})}
 	go drainEmulator(s.term, s.stop)
 	c.open(s)
 	host, _ := os.Hostname()
@@ -210,9 +212,28 @@ type screenCursor struct {
 	steady atomic.Bool
 }
 
-func newScreenEmulator(cols, rows int) (*vt.Emulator, *screenCursor) {
+// syncFrameTimeout bounds how long a synchronized update holds the last frame
+// when the program never ends it.
+var syncFrameTimeout = time.Second
+
+// screenFrame is the last whole frame, held while the program draws a
+// synchronized update (mode 2026) so a half-drawn redraw never shows. The
+// emulator calls into it from Write, on the same goroutine as view.
+type screenFrame struct {
+	since  time.Time // zero outside a synchronized update
+	body   string
+	cursor uv.Position
+	hidden bool
+}
+
+func (f *screenFrame) held() bool {
+	return f != nil && !f.since.IsZero() && time.Since(f.since) < syncFrameTimeout
+}
+
+func newScreenEmulator(cols, rows int) (*vt.Emulator, *screenCursor, *screenFrame) {
 	e := vt.NewEmulator(cols, rows)
 	c := &screenCursor{}
+	f := &screenFrame{}
 	e.SetCallbacks(vt.Callbacks{
 		CursorVisibility: func(visible bool) { c.hidden.Store(!visible) },
 		// vt passes "steady" despite the parameter's documented name (blink):
@@ -221,8 +242,18 @@ func newScreenEmulator(cols, rows int) (*vt.Emulator, *screenCursor) {
 			c.style.Store(int32(style))
 			c.steady.Store(steady)
 		},
+		EnableMode: func(mode ansi.Mode) {
+			if mode == ansi.ModeSynchronizedOutput && !f.held() {
+				f.since, f.body, f.cursor, f.hidden = time.Now(), e.Render(), e.CursorPosition(), c.hidden.Load()
+			}
+		},
+		DisableMode: func(mode ansi.Mode) {
+			if mode == ansi.ModeSynchronizedOutput {
+				f.since = time.Time{}
+			}
+		},
 	})
-	return e, c
+	return e, c, f
 }
 
 func (c *screenCursor) shape() tea.CursorShape {

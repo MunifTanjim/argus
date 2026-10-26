@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"path/filepath"
 	"strings"
 
@@ -21,7 +22,7 @@ import (
 // is already installed.
 type InstallOptions struct {
 	ArgusBin string // binary the hooks invoke (hook-based agents)
-	Socket   string // argusd mod socket (Claude Code)
+	Socket   string // argusd mod socket (Claude Code, Pi)
 }
 
 // ErrAgentNotInstalled reports that an agent's CLI is not available, so there is
@@ -167,17 +168,25 @@ type PaneFiller interface {
 	FillPrompt(ctx context.Context, sess session.Session, text string) (filled bool, err error)
 }
 
-// ShellInput runs "!" bash mode input, which the agent takes only as keys typed
-// in its pane: its prompt API would send the text to the model.
+// ShellInput runs input the agent's prompt API would send to the model as text:
+// "!" bash mode, and commands only the agent's editor runs. submit is true when
+// the input waits in the session's input box for the node to submit with Enter
+// in its pane.
 type ShellInput interface {
 	IsShellInput(text string) bool
-	SendShellInput(ctx context.Context, sess session.Session, text string) error
+	SendShellInput(ctx context.Context, sess session.Session, text string) (submit bool, err error)
 }
 
 // ModBridged is an adapter whose sessions keep a mod connection to argusd (Claude
 // Code); the node serves the mod socket from its bridge.
 type ModBridged interface {
 	ModBridge() *modbridge.Bridge
+}
+
+// Beaconed is an adapter whose sessions hold one open connection to argusd on
+// the mod socket (Pi); the node hands it each connection upgraded there.
+type Beaconed interface {
+	ServeBeacon(conn net.Conn)
 }
 
 // Spawner creates a new session over the agent's own service API, for headless

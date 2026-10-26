@@ -42,6 +42,7 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"no-restart":       true, // `upgrade` only: per-invocation step selection
 		"no-download":      true, // `upgrade` only: per-invocation step selection
 		"beta":             true, // `upgrade` only: per-invocation channel selection
+		"cwd":              true, // `pi-host` only: the spawn cwd the relay reports
 	}
 
 	seen := map[string]bool{}

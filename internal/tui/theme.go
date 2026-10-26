@@ -92,6 +92,7 @@ var (
 	ColorAgentCodex       color.Color
 	ColorAgentAntigravity color.Color
 	ColorAgentOpenCode    color.Color
+	ColorAgentPi          color.Color
 )
 
 // -- Semantic text styles -----------------------------------------------------
@@ -191,6 +192,7 @@ func initTheme(hasDarkBg bool) {
 	ColorAgentCodex = ld(lipgloss.Color("2"), lipgloss.Color("114"))      // green
 	ColorAgentAntigravity = ld(lipgloss.Color("4"), lipgloss.Color("75")) // blue
 	ColorAgentOpenCode = ld(lipgloss.Color("0"), lipgloss.Color("223"))   // monochrome: black on light, cream on dark
+	ColorAgentPi = ld(lipgloss.Color("5"), lipgloss.Color("176"))         // purple
 
 	StylePrimaryBold = lipgloss.NewStyle().Bold(true).Foreground(ColorTextPrimary)
 	StyleSecondary = lipgloss.NewStyle().Foreground(ColorTextSecondary)
