@@ -100,6 +100,20 @@ test('PreToolUse is sent in the classic shape', OPTIONS, async ($, on) => {
   }))
 })
 
+test("PreToolUse names the subagent whose call it is", OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  on('classic.PreToolUse', () => ({ result: { ok: true } } as never))
+  await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a1' }).catch(() => undefined)
+  await $.tool.call({ tool: 'Bash', command: 'pwd' }).catch(() => undefined)
+  const pre = sent.filter(s => s.body.event === 'PreToolUse').map(s => s.body.payload as Record<string, unknown>)
+  expect(pre.length).toBe(2)
+  const [sub, main] = pre
+  expect(sub).toEqual(expect.objectContaining({ tool_input: { command: 'ls' }, agent_id: 'a1' }))
+  expect(main?.tool_input).toEqual({ command: 'pwd' })
+  expect(main !== undefined && 'agent_id' in main).toBe(false)
+})
+
 // Claude's own dialog: next(e) for classic.PermissionRequest stays pending until
 // someone answers it (a local answer abandons the hook instead of resolving).
 function dialog(on: On) {
