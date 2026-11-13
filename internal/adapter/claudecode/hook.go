@@ -63,6 +63,14 @@ func statusFor(event string) (session.Status, bool) {
 	}
 }
 
+func isToolEvent(event string) bool {
+	switch event {
+	case "PreToolUse", "PostToolUse", "PostToolUseFailure":
+		return true
+	}
+	return false
+}
+
 // interactionFor builds the pending user interaction implied by a hook event, or
 // nil when none.
 func interactionFor(event string, p hookPayload, autoMode bool) *session.Interaction {
@@ -268,6 +276,17 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 	}
 	replace := replacesInteraction(event, p)
 
+	// A subagent hook carries the subagent's cwd (its worktree, say). Its tool
+	// calls say nothing about the main thread, and its prompts arrive as
+	// PermissionRequest decisions.
+	cwd, transcriptPath := p.Cwd, p.TranscriptPath
+	if p.AgentID != "" {
+		cwd, transcriptPath = "", ""
+		if isToolEvent(event) {
+			status, ix = "", nil
+		}
+	}
+
 	// /clear resets in place: SessionEnd(reason=clear) then SessionStart(source=
 	// clear). Map each to its true meaning instead of removing the session. End →
 	// idle, stale prompt cleared (ix nil). Start → awaiting-input with an idle
@@ -338,9 +357,9 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 		Server:             server,
 		PaneID:             paneID,
 		AgentSessionID:     p.SessionID,
-		Cwd:                p.Cwd,
-		Repo:               gittree.RepoName(p.Cwd),
-		TranscriptPath:     p.TranscriptPath,
+		Cwd:                cwd,
+		Repo:               gittree.RepoName(cwd),
+		TranscriptPath:     transcriptPath,
 		Frontend:           frontendFor(entry.Entrypoint, paneID != ""),
 		Status:             status,
 		Summary:            sum,
