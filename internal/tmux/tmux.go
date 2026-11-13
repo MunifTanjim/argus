@@ -419,7 +419,26 @@ func (c *Client) NewSession(ctx context.Context, opts NewSessionOpts) (string, e
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(out), nil
+	paneID := strings.TrimSpace(out)
+	c.waitStarted(ctx, paneID)
+	return paneID, nil
+}
+
+// paneStartTimeout bounds waitStarted.
+var paneStartTimeout = time.Second
+
+// waitStarted waits until the pane at target runs its own process. tmux 3.6
+// can reply to new-session and new-window before then, and meanwhile the pane
+// reports the forked tmux process and the server's directory.
+func (c *Client) waitStarted(ctx context.Context, target string) {
+	deadline := time.Now().Add(paneStartTimeout)
+	for time.Now().Before(deadline) {
+		out, err := c.run(ctx, "display-message", "-p", "-t", target, "#{pane_dead} #{pane_current_command}")
+		if err != nil || strings.TrimSpace(out) != "0 tmux" {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 }
 
 // newSessionArgs builds the `tmux new-session` argument list. Command/Args are
@@ -722,7 +741,12 @@ func (c *Client) NewWindow(ctx context.Context, session, cwd string) (string, er
 			out, err = newWindow()
 		}
 	}
-	return strings.TrimSpace(out), err
+	if err != nil {
+		return "", err
+	}
+	windowID := strings.TrimSpace(out)
+	c.waitStarted(ctx, windowID)
+	return windowID, nil
 }
 
 // NewEmptySession creates a detached session and returns its first window id,
