@@ -110,6 +110,89 @@ func TestIdlePromptReplacesStaleInteraction(t *testing.T) {
 	}
 }
 
+// subagentHookEnv is a session whose hooks may come from a subagent (agent_id
+// set) or the main thread: in tmux pane pane, or paneless when pane is "".
+func subagentHookEnv(pane string) (*registry.Registry, func(event string, extra map[string]any) HookEvent) {
+	reg := registry.New()
+	if pane != "" {
+		reg.ReconcileSessions(Agent, []registry.DiscoveredSession{
+			{HasPane: true, Server: session.TmuxServerDefault, PaneID: pane, SessionName: "a", Frontend: session.FrontendTmux},
+		})
+	}
+	ev := func(event string, extra map[string]any) HookEvent {
+		m := map[string]any{"session_id": "s", "transcript_path": "/t/s.jsonl", "cwd": "/w"}
+		for k, v := range extra {
+			m[k] = v
+		}
+		raw, _ := json.Marshal(m)
+		if pane == "" {
+			return HookEvent{Event: event, Payload: raw}
+		}
+		return HookEvent{Event: event, TmuxPane: pane, TmuxSocket: "default", Payload: raw}
+	}
+	return reg, ev
+}
+
+func TestSubagentToolEventsLeaveMainSessionIdle(t *testing.T) {
+	reg, ev := subagentHookEnv("%0")
+	sub := map[string]any{"agent_id": "a1", "agent_type": "general-purpose", "tool_name": "Bash"}
+
+	if got, _ := ProcessHook(reg, ev("Stop", nil)); !got.TakesPrompt(false) {
+		t.Fatalf("main Stop should take a prompt: %+v", got)
+	}
+	for _, event := range []string{"PreToolUse", "PostToolUse", "PostToolUseFailure"} {
+		got, _ := ProcessHook(reg, ev(event, sub))
+		if got.Status != session.StatusAwaitingInput || got.Interaction == nil ||
+			got.Interaction.Kind != session.InteractionIdle || !got.TakesPrompt(false) {
+			t.Fatalf("subagent %s changed the idle main session: status %q interaction %+v", event, got.Status, got.Interaction)
+		}
+	}
+
+	// The main thread's own tool call still means it is working.
+	if got, _ := ProcessHook(reg, ev("PreToolUse", map[string]any{"tool_name": "Bash"})); got.Status != session.StatusWorking {
+		t.Fatalf("main PreToolUse should mean working, got %q", got.Status)
+	}
+}
+
+func TestSubagentToolEventKeepsPendingPrompt(t *testing.T) {
+	// A paneless session (VSCode, external) is found by session id, not pane.
+	for name, pane := range map[string]string{"tmux": "%0", "paneless": ""} {
+		t.Run(name, func(t *testing.T) {
+			reg, ev := subagentHookEnv(pane)
+			ask := map[string]any{"tool_name": "AskUserQuestion", "tool_input": map[string]any{
+				"questions": []any{map[string]any{"question": "Pick", "options": []any{map[string]any{"label": "A"}, map[string]any{"label": "B"}}}},
+			}}
+
+			asked, _ := ProcessHook(reg, ev("PreToolUse", ask))
+			if asked.Interaction == nil || asked.Interaction.Kind != session.InteractionQuestion {
+				t.Fatalf("want pending question, got %+v", asked.Interaction)
+			}
+			got, _ := ProcessHook(reg, ev("PostToolUse", map[string]any{"agent_id": "a1", "tool_name": "Read"}))
+			if got.ID != asked.ID {
+				t.Fatalf("subagent hook hit another session: %q, want %q", got.ID, asked.ID)
+			}
+			if got.Status != session.StatusAwaitingInput || got.Interaction == nil ||
+				got.Interaction.Kind != session.InteractionQuestion || len(got.Interaction.Questions) != 1 {
+				t.Fatalf("subagent tool call dropped the main thread's prompt: status %q interaction %+v", got.Status, got.Interaction)
+			}
+		})
+	}
+}
+
+func TestSubagentHookKeepsMainCwd(t *testing.T) {
+	for _, event := range []string{"PostToolUse", "PermissionRequest"} {
+		reg, ev := subagentHookEnv("%0")
+		_, _ = ProcessHook(reg, ev("Stop", nil))
+
+		got, _ := ProcessHook(reg, ev(event, map[string]any{
+			"agent_id": "a1", "tool_name": "Bash", "cwd": "/w/.worktrees/a1", "transcript_path": "/t/other.jsonl",
+		}))
+		if got.Cwd != "/w" || got.TranscriptPath != "/t/s.jsonl" {
+			t.Fatalf("subagent %s moved the main session: cwd %q transcript %q", event, got.Cwd, got.TranscriptPath)
+		}
+	}
+}
+
 func TestProcessHookClearSurfacesRespondPrompt(t *testing.T) {
 	reg := registry.New()
 	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{
