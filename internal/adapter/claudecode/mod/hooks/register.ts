@@ -193,6 +193,7 @@ export const register: Register = (on, options) => {
       tool_name: tool,
       tool_use_id,
       tool_input: toolInput,
+      ...agentField(String(tool_use_id)),
     })
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -421,6 +422,12 @@ async function settle($: EngineInterface, ask: Ask): Promise<void> {
 async function sessionFields($: EngineInterface): Promise<Record<string, string>> {
   const [id, cwd] = await Promise.all([$.session.id(), $.session.cwd()])
   return { session_id: id, transcript_path: transcriptPath, cwd }
+}
+
+// The classic agent_id of a subagent's tool call; none on the main loop.
+function agentField(toolUseId: string): { agent_id?: string } {
+  const id = calls.get(toolUseId)?.agentId
+  return id ? { agent_id: id } : {}
 }
 
 function withoutResponse(e: object): object {
