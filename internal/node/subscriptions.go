@@ -11,7 +11,6 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/gitmeta"
-	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
@@ -268,13 +267,9 @@ func (d *Node) handleTranscriptUnsubscribe(ctx context.Context, params json.RawM
 // question/permission) and a turn the parked-decision cleanup already reset to
 // working. The observed interaction kind drives SurfaceIdle's compare-and-swap.
 func (d *Node) surfaceIdleAfterInterrupt(sessionID string) {
-	s, ok := d.reg.Get(sessionID)
+	expect, ok := d.reg.BaseInteractionKind(sessionID)
 	if !ok {
 		return
-	}
-	var expect session.InteractionKind
-	if s.Interaction != nil {
-		expect = s.Interaction.Kind
 	}
 	d.reg.SurfaceIdle(sessionID, expect)
 }

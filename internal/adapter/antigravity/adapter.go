@@ -48,6 +48,10 @@ func (agAdapter) EventName(ev adapter.HookEvent) string { return EventName(ev) }
 
 func (agAdapter) RescanOnHook(ev adapter.HookEvent) bool { return RescanOnHook(ev) }
 
+func (agAdapter) PermissionPrompt(adapter.HookEvent) (*session.Interaction, string) {
+	return nil, ""
+}
+
 func (agAdapter) PermissionPayload(ev adapter.HookEvent) (string, json.RawMessage) {
 	return PermissionPayload(ev)
 }

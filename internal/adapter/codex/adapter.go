@@ -62,6 +62,8 @@ func (cxAdapter) ShouldBlock(adapter.HookEvent) bool                            
 func (cxAdapter) FormatDecision(string, json.RawMessage, api.RespondParams) string { return "" }
 func (cxAdapter) HookOutput(adapter.HookEvent) string                              { return "" }
 
+func (cxAdapter) PermissionPrompt(adapter.HookEvent) (*session.Interaction, string) { return nil, "" }
+
 func (cxAdapter) CollectSessionFiles(transcriptPath string) ([]adapter.BundledFile, error) {
 	return collectSessionFiles(transcriptPath)
 }

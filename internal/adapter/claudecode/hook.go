@@ -19,6 +19,7 @@ type hookPayload struct {
 	TranscriptPath   string          `json:"transcript_path"`
 	Cwd              string          `json:"cwd"`
 	HookEventName    string          `json:"hook_event_name"`
+	AgentID          string          `json:"agent_id"`
 	ToolName         string          `json:"tool_name"`
 	ToolInput        json.RawMessage `json:"tool_input"`
 	NotificationType string          `json:"notification_type"`
@@ -49,7 +50,7 @@ func statusFor(event string) (session.Status, bool) {
 	case "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PreCompact":
 		return session.StatusWorking, true
 	case "Notification":
-		// Permission prompts and idle waiting both want the user's attention.
+		// Waiting on the user; ProcessHook exempts permission_prompt.
 		return session.StatusAwaitingInput, true
 	case "Stop":
 		// Turn ended; surface awaiting-input immediately rather than waiting for
@@ -74,10 +75,6 @@ func interactionFor(event string, p hookPayload, autoMode bool) *session.Interac
 			return parsePlan(p.ToolInput, autoMode)
 		}
 		return nil
-	case "PermissionRequest":
-		// Payload carries tool_name + tool_input, so build directly (no transcript
-		// read needed).
-		return permissionInteraction(p, autoMode)
 	case "Notification", "Stop":
 		// Both resolve to an idle "waiting for input" prompt.
 		return classifyNotification(p)
@@ -145,6 +142,17 @@ func PermissionPayload(ev HookEvent) (toolName string, toolInput json.RawMessage
 	var p hookPayload
 	_ = json.Unmarshal(ev.Payload, &p)
 	return p.ToolName, p.ToolInput
+}
+
+// PermissionPrompt builds the prompt for a PermissionRequest event and returns
+// the raising subagent's id ("" for the main thread).
+func PermissionPrompt(ev HookEvent) (*session.Interaction, string) {
+	if EventName(ev) != "PermissionRequest" {
+		return nil, ""
+	}
+	var p hookPayload
+	_ = json.Unmarshal(ev.Payload, &p)
+	return permissionInteraction(p, ev.AutoMode), p.AgentID
 }
 
 // parseQuestion extracts every question (with its header + option labels) from
@@ -280,6 +288,10 @@ func ProcessHook(reg *registry.Registry, ev HookEvent) (session.Session, bool) {
 		replace = true
 	case event == "SessionStart" && p.Source == "startup":
 		ix = &session.Interaction{Kind: session.InteractionIdle}
+	case event == "Notification" && p.NotificationType == "permission_prompt":
+		// The permission itself is a decision overlay; an idle base here would
+		// outlive the request and show awaiting-input for the whole tool run.
+		status, ix, replace = "", nil, false
 	}
 
 	// Refresh the transcript digest only on summary-relevant events.

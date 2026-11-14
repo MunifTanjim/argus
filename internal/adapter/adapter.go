@@ -240,6 +240,10 @@ type Adapter interface {
 	EventName(ev HookEvent) string
 	RescanOnHook(ev HookEvent) bool
 	PermissionPayload(ev HookEvent) (toolName string, toolInput json.RawMessage)
+	// PermissionPrompt builds the prompt for a permission-request hook and names
+	// the subagent that raised it ("" for the main thread). It returns nil for
+	// any other event.
+	PermissionPrompt(ev HookEvent) (ix *session.Interaction, agentID string)
 	// ShouldBlock reports whether the hook must wait for the user's decision.
 	ShouldBlock(ev HookEvent) bool
 	// FormatDecision renders the user's answer into the stdout the hook expects.
