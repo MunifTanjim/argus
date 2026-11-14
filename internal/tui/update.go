@@ -254,6 +254,11 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dock.restoreDraft(msg.id, msg.text, m.liveSessionID() == msg.id)
 		}
 		return m, nil
+	case respondResultMsg:
+		if msg.err != nil {
+			m.flash = "respond failed: " + msg.err.Error()
+		}
+		return m, nil
 	case killResultMsg:
 		if msg.err != nil {
 			m.flash = "kill failed: " + msg.err.Error()

@@ -175,6 +175,8 @@ type inputSentMsg struct {
 	id, text string
 }
 
+type respondResultMsg struct{ err error }
+
 type hostWakelockMsg struct {
 	nodeID   string
 	wakelock api.HostWakelock

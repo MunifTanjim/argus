@@ -424,8 +424,7 @@ func (m model) respondCmd(id string, p api.RespondParams) tea.Cmd {
 	p.SessionID = id
 	client := m.client
 	return func() tea.Msg {
-		_ = client.Call(api.MethodSessionRespond, p, nil)
-		return nil
+		return respondResultMsg{err: client.Call(api.MethodSessionRespond, p, nil)}
 	}
 }
 
