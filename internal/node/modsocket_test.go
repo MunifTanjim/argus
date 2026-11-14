@@ -54,14 +54,18 @@ var bashLs = map[string]any{"command": "ls"}
 
 // askPermission registers a permission request for Claude session s1 and
 // returns its request id and the registry session id.
-func askPermission(t *testing.T, d *Node, srv *httptest.Server, toolName string, toolInput map[string]any) (string, string) {
+func askPermission(t *testing.T, d *Node, srv *httptest.Server, toolName string, toolInput map[string]any, agentID ...string) (string, string) {
 	t.Helper()
+	payload := map[string]any{
+		"session_id": "s1", "cwd": "/w", "tool_name": toolName, "tool_input": toolInput,
+	}
+	if len(agentID) > 0 {
+		payload["agent_id"] = agentID[0]
+	}
 	var out modEventResult
 	modPost(t, context.Background(), srv.URL+"/claude/event", map[string]any{
-		"event": "PermissionRequest",
-		"payload": map[string]any{
-			"session_id": "s1", "cwd": "/w", "tool_name": toolName, "tool_input": toolInput,
-		},
+		"event":   "PermissionRequest",
+		"payload": payload,
 	}, &out)
 	if out.RequestID == "" {
 		t.Fatalf("PermissionRequest answered %+v, want a requestId", out)
@@ -74,7 +78,7 @@ func askPermission(t *testing.T, d *Node, srv *httptest.Server, toolName string,
 // promptCleared reports that argus no longer waits on or shows the request.
 func promptCleared(d *Node, sid string) bool {
 	s, _ := d.reg.Get(sid)
-	return !parked(d, sid) && s.Interaction == nil
+	return released(d, sid) && s.Interaction == nil
 }
 
 func TestModEventRegistersSession(t *testing.T) {
@@ -205,7 +209,7 @@ func TestModPermissionLeaseClearsPrompt(t *testing.T) {
 }
 
 // A local cancel ends the turn (Stop) before the lease ends the request: the
-// unanswered request must leave the idle state as the Stop set it.
+// request keeps showing until it ends, then the idle state the Stop set shows.
 func TestModLeaseEndKeepsIdleAfterStop(t *testing.T) {
 	old := modDecisionLease
 	modDecisionLease = 200 * time.Millisecond
@@ -222,15 +226,10 @@ func TestModLeaseEndKeepsIdleAfterStop(t *testing.T) {
 		return s.Status == session.StatusAwaitingInput && s.Interaction != nil &&
 			s.Interaction.Kind == session.InteractionIdle
 	}
-	if !idle() {
-		s, _ := d.reg.Get(sid)
-		t.Fatalf("after Stop: status=%q interaction=%+v, want awaiting_input idle", s.Status, s.Interaction)
+	if s, _ := d.reg.Get(sid); s.Interaction == nil || s.Interaction.Kind != session.InteractionPermission {
+		t.Fatalf("after Stop: interaction=%+v, want the pending permission", s.Interaction)
 	}
-	waitFor(t, func() bool {
-		d.pendingMu.Lock()
-		defer d.pendingMu.Unlock()
-		return d.pending[sid] == nil
-	})
+	waitFor(t, func() bool { return released(d, sid) })
 	if !idle() {
 		s, _ := d.reg.Get(sid)
 		t.Fatalf("after the lease: status=%q interaction=%+v, want awaiting_input idle", s.Status, s.Interaction)
@@ -260,21 +259,46 @@ func TestModPermissionLeaseAfterClosedWait(t *testing.T) {
 	waitFor(t, func() bool { return promptCleared(d, sid) })
 }
 
-func postToolEvent(t *testing.T, srv *httptest.Server, event, toolName string, toolInput map[string]any) {
+func postToolEvent(t *testing.T, srv *httptest.Server, event, toolName string, toolInput map[string]any, agentID ...string) {
 	t.Helper()
+	payload := map[string]any{
+		"session_id": "s1", "cwd": "/w", "tool_name": toolName,
+		"tool_input": toolInput, "tool_use_id": "t1",
+	}
+	if len(agentID) > 0 {
+		payload["agent_id"] = agentID[0]
+	}
 	modPost(t, context.Background(), srv.URL+"/claude/event", map[string]any{
-		"event": event,
-		"payload": map[string]any{
-			"session_id": "s1", "cwd": "/w", "tool_name": toolName,
-			"tool_input": toolInput, "tool_use_id": "t1",
-		},
+		"event":   event,
+		"payload": payload,
 	}, nil)
 }
 
+// parked reports that a decision for sid waits in d.pending and shows on the
+// session.
 func parked(d *Node, sid string) bool {
+	return inPending(d, sid) && overlaid(d, sid)
+}
+
+// released reports that no decision for sid waits or shows.
+func released(d *Node, sid string) bool {
+	return !inPending(d, sid) && !overlaid(d, sid)
+}
+
+func inPending(d *Node, sid string) bool {
 	d.pendingMu.Lock()
 	defer d.pendingMu.Unlock()
-	return d.pending[sid] != nil
+	for _, pd := range d.pending {
+		if pd.sessionID == sid {
+			return true
+		}
+	}
+	return false
+}
+
+func overlaid(d *Node, sid string) bool {
+	s, _ := d.reg.Get(sid)
+	return s.Interaction != nil && s.Interaction.RequestID != ""
 }
 
 func TestModPermissionEndsOnMatchingPostToolUse(t *testing.T) {
@@ -288,7 +312,7 @@ func TestModPermissionEndsOnMatchingPostToolUse(t *testing.T) {
 
 	// The user allowed it in Claude and it ran; the recorded input may carry more fields.
 	postToolEvent(t, srv, "PostToolUse", "Bash", map[string]any{"command": "ls", "description": "list"})
-	waitFor(t, func() bool { return !parked(d, sid) })
+	waitFor(t, func() bool { return released(d, sid) })
 	var out modDecisionResult
 	modPost(t, context.Background(), srv.URL+"/claude/decision", map[string]any{"requestId": id}, &out)
 	if !out.Done || out.Output != "" {
@@ -311,7 +335,7 @@ func TestModPermissionEndsOnMatchingPostToolUseFailure(t *testing.T) {
 		t.Fatal("a failure for a different call must not end the request")
 	}
 	postToolEvent(t, srv, "PostToolUseFailure", "Bash", map[string]any{"command": "ls"})
-	waitFor(t, func() bool { return !parked(d, sid) })
+	waitFor(t, func() bool { return released(d, sid) })
 	if modRequestOpen(d, id) {
 		t.Fatal("the request must be forgotten")
 	}
@@ -332,7 +356,7 @@ func TestModPermissionEndsOnInteractivePostToolUse(t *testing.T) {
 		d, srv := modTestNode(t)
 		_, sid := askPermission(t, d, srv, tc.tool, tc.asked)
 		postToolEvent(t, srv, "PostToolUse", tc.tool, tc.ran)
-		waitFor(t, func() bool { return !parked(d, sid) })
+		waitFor(t, func() bool { return released(d, sid) })
 	}
 }
 
@@ -613,5 +637,71 @@ func TestModAckCarriesData(t *testing.T) {
 	r := <-got
 	if r.err != nil || string(r.data) != data {
 		t.Fatalf("Request = (%s, %v), want (%s, nil)", r.data, r.err, data)
+	}
+}
+
+func TestModPermissionIgnoresOtherAgentPostToolUse(t *testing.T) {
+	d, srv := modTestNode(t)
+	id, sid := askPermission(t, d, srv, "Bash", bashLs, "a1")
+
+	postToolEvent(t, srv, "PostToolUse", "Bash", bashLs, "a2")
+	if !modRequestOpen(d, id) {
+		t.Fatal("a PostToolUse from another agent loop must not end the request")
+	}
+	postToolEvent(t, srv, "PostToolUse", "Bash", bashLs, "a1")
+	waitFor(t, func() bool { return released(d, sid) })
+	if modRequestOpen(d, id) {
+		t.Fatal("the request must be forgotten")
+	}
+}
+
+func TestModMainThreadIgnoresSubagentPostToolUse(t *testing.T) {
+	d, srv := modTestNode(t)
+	id, _ := askPermission(t, d, srv, "Bash", bashLs)
+
+	postToolEvent(t, srv, "PostToolUse", "Bash", bashLs, "a1")
+	if !modRequestOpen(d, id) {
+		t.Fatal("a subagent PostToolUse must not end a main-thread request")
+	}
+}
+
+func TestModRepliesCarryInstanceID(t *testing.T) {
+	d, srv := modTestNode(t)
+	var ev modEventResult
+	modPost(t, context.Background(), srv.URL+"/claude/event", map[string]any{
+		"event":   "SessionStart",
+		"payload": map[string]any{"session_id": "s1", "cwd": "/w", "source": "startup"},
+	}, &ev)
+	if ev.InstanceID == "" {
+		t.Fatal("event reply carries no instanceId")
+	}
+	var perm modEventResult
+	modPost(t, context.Background(), srv.URL+"/claude/event", map[string]any{
+		"event":   "PermissionRequest",
+		"payload": map[string]any{"session_id": "s1", "cwd": "/w", "tool_name": "Bash", "tool_input": bashLs},
+	}, &perm)
+	if perm.RequestID == "" || perm.InstanceID != ev.InstanceID {
+		t.Fatalf("PermissionRequest reply = %+v, want a requestId and instanceId %q", perm, ev.InstanceID)
+	}
+	id, sid := perm.RequestID, registry.AgentSessionKey(claudecode.Agent, "s1")
+	waitFor(t, func() bool { return parked(d, sid) })
+	postToolEvent(t, srv, "PostToolUse", "Bash", bashLs)
+	waitFor(t, func() bool { return released(d, sid) })
+
+	var known, unknown modDecisionResult
+	modPost(t, context.Background(), srv.URL+"/claude/decision", map[string]any{"requestId": id}, &known)
+	modPost(t, context.Background(), srv.URL+"/claude/decision", map[string]any{"requestId": "nope"}, &unknown)
+	if known.InstanceID != ev.InstanceID || unknown.InstanceID != ev.InstanceID {
+		t.Fatalf("instance ids = %q, %q; want %q", known.InstanceID, unknown.InstanceID, ev.InstanceID)
+	}
+
+	_, srv2 := modTestNode(t)
+	var ev2 modEventResult
+	modPost(t, context.Background(), srv2.URL+"/claude/event", map[string]any{
+		"event":   "SessionStart",
+		"payload": map[string]any{"session_id": "s1", "cwd": "/w", "source": "startup"},
+	}, &ev2)
+	if ev2.InstanceID == "" || ev2.InstanceID == ev.InstanceID {
+		t.Fatalf("second node instanceId = %q, want a different one from %q", ev2.InstanceID, ev.InstanceID)
 	}
 }

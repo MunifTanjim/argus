@@ -59,6 +59,8 @@ func (ocAdapter) ShouldBlock(adapter.HookEvent) bool                            
 func (ocAdapter) FormatDecision(string, json.RawMessage, api.RespondParams) string { return "" }
 func (ocAdapter) HookOutput(adapter.HookEvent) string                              { return "" }
 
+func (ocAdapter) PermissionPrompt(adapter.HookEvent) (*session.Interaction, string) { return nil, "" }
+
 func (ocAdapter) CollectSessionFiles(transcriptPath string) ([]adapter.BundledFile, error) {
 	return collectSessionFiles(transcriptPath)
 }

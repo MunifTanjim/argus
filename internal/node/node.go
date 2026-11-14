@@ -102,8 +102,10 @@ type Node struct {
 	focusedFn       func(ctx context.Context, c *tmux.Client, paneID string) (bool, error) // seam for tests; defaults to (*tmux.Client).IsFocused
 	restoreMirrorFn func(c *tmux.Client, m *mirrorState)                                   // seam for tests; defaults to (*Node).restoreMirror
 
+	instanceID string // tells mods this node process from a restarted one
+
 	pendingMu sync.Mutex
-	pending   map[string]*pendingDecision // session id -> parked PermissionRequest
+	pending   map[string]*pendingDecision // request id -> parked PermissionRequest
 
 	modPermsMu sync.Mutex
 	modPerms   map[string]*modPermission // by request id
@@ -445,6 +447,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 		log:          slog.New(slog.DiscardHandler),
 		pending:      map[string]*pendingDecision{},
 		modPerms:     map[string]*modPermission{},
+		instanceID:   newID(),
 		forgeFor:     forge.For,
 		conns:        map[api.Notifier]*connSubs{},
 		transcripts:  newTranscriptCache(transcriptCacheMaxIdle, transcriptCacheIdleTTL),

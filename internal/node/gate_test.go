@@ -42,18 +42,18 @@ func permissionHook() claudecode.HookEvent {
 	}
 }
 
-// waitParkedID polls until a decision is parked and returns the session id it
-// parked under.
+// waitParkedID polls until a decision is parked and shows on its session, and
+// returns that session id.
 func waitParkedID(t *testing.T, d *Node) string {
 	t.Helper()
 	for i := 0; i < 400; i++ {
 		d.pendingMu.Lock()
 		var sid string
-		for id := range d.pending {
-			sid = id
+		for _, pd := range d.pending {
+			sid = pd.sessionID
 		}
 		d.pendingMu.Unlock()
-		if sid != "" {
+		if sid != "" && overlaid(d, sid) {
 			return sid
 		}
 		time.Sleep(time.Millisecond)
@@ -113,8 +113,8 @@ func TestPermissionRequestParksWithoutViewer(t *testing.T) {
 
 // TestPermissionRequestUnblocksOnHookDisconnect verifies that closing the hook
 // connection (the user answered in Claude's own pane, so Claude killed the hook)
-// cancels the parked decision promptly via ctx — never hanging until
-// decisionTimeout. This is the safety net that makes always-parking safe.
+// cancels the parked decision promptly via ctx. This is the safety net that
+// makes always-parking safe.
 func TestPermissionRequestUnblocksOnHookDisconnect(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -134,14 +134,11 @@ func TestPermissionRequestUnblocksOnHookDisconnect(t *testing.T) {
 	// Simulate Claude killing the hook: drop the connection.
 	hookClient.Close()
 
-	// The parked decision must be released promptly (well under decisionTimeout)
-	// and the stale interaction cleared.
+	// The parked decision must be released promptly and the stale interaction
+	// cleared.
 	for i := 0; i < 1000; i++ {
-		d.pendingMu.Lock()
-		_, parked := d.pending[sid]
-		d.pendingMu.Unlock()
 		s, _ := d.reg.Get(sid)
-		if !parked && s.Interaction == nil {
+		if released(d, sid) && s.Interaction == nil {
 			return // released and cleared
 		}
 		time.Sleep(time.Millisecond)

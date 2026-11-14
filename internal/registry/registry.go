@@ -74,6 +74,10 @@ type Registry struct {
 	// subagents are keyed by session id.
 	subagents map[string][]session.RunningSubagent
 	shells    map[string][]session.RunningShell
+
+	// decisions are pending decisions by session id, laid over the stored
+	// session by view.
+	decisions map[string]*decisionQueue
 }
 
 // New returns an empty Registry.
@@ -88,6 +92,7 @@ func New() *Registry {
 		models:        make(map[string]liveModel),
 		subagents:     make(map[string][]session.RunningSubagent),
 		shells:        make(map[string][]session.RunningShell),
+		decisions:     make(map[string]*decisionQueue),
 	}
 }
 
@@ -109,7 +114,7 @@ func (r *Registry) Get(id string) (session.Session, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if s, ok := r.sessions[id]; ok {
-		return *s, true
+		return r.view(s), true
 	}
 	return session.Session{}, false
 }
@@ -120,7 +125,7 @@ func (r *Registry) Snapshot() []session.Session {
 	defer r.mu.Unlock()
 	out := make([]session.Session, 0, len(r.sessions))
 	for _, s := range r.sessions {
-		cp := *s
+		cp := r.view(s)
 		cp.StatusLabel = cp.Status.Label()
 		out = append(out, cp)
 	}
@@ -155,9 +160,10 @@ func (r *Registry) Subscribe() (<-chan Event, func()) {
 	return ch, cancel
 }
 
-// publish delivers an event to all subscribers without blocking. Caller must
-// hold r.mu.
-func (r *Registry) publish(ev Event) {
+// publish delivers s, with its pending decisions laid over, to all subscribers
+// without blocking. Caller must hold r.mu.
+func (r *Registry) publish(t EventType, s *session.Session) {
+	ev := Event{Type: t, Session: r.view(s)}
 	ev.Session.StatusLabel = ev.Session.Status.Label()
 	for _, ch := range r.subs {
 		select {
@@ -282,7 +288,7 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 		if created {
 			evType = EventAdded
 		}
-		r.publish(Event{Type: evType, Session: *s})
+		r.publish(evType, s)
 	}
 
 	for id, s := range r.sessions {
@@ -359,7 +365,7 @@ func (r *Registry) RefreshInput(agentSessionID string) {
 	before := s.Input
 	r.refreshInput(s)
 	if s.Input != before {
-		r.publish(Event{Type: EventUpdated, Session: *s})
+		r.publish(EventUpdated, s)
 	}
 }
 
@@ -438,7 +444,7 @@ func (r *Registry) SurfaceIdle(id string, expectKind session.InteractionKind) bo
 	}
 	setStatus(s, session.StatusIdle)
 	s.Interaction = &session.Interaction{Kind: session.InteractionIdle}
-	r.publish(Event{Type: EventUpdated, Session: *s})
+	r.publish(EventUpdated, s)
 	return true
 }
 
@@ -488,13 +494,13 @@ func (r *Registry) remove(id, paneK string, finalStatus session.Status) {
 		return
 	}
 	setStatus(s, finalStatus)
-	removed := *s
+	delete(r.decisions, id)
 	delete(r.sessions, id)
 	delete(r.models, id)
 	delete(r.subagents, id)
 	delete(r.shells, id)
 	r.index.clear(paneK, s.AgentSessionID)
-	r.publish(Event{Type: EventRemoved, Session: removed})
+	r.publish(EventRemoved, s)
 }
 
 // ClearInteraction drops a session's pending interaction and, if it was awaiting
@@ -509,9 +515,9 @@ func (r *Registry) ClearInteraction(id string) {
 	r.clearInteractionLocked(s)
 }
 
-// ClearPendingDecision drops a still-pending permission, question or plan
-// interaction left by a decision nobody answered in argus. An idle interaction
-// (a later event already moved the session on) is left as is.
+// ClearPendingDecision drops a still-pending question or plan interaction (from
+// PreToolUse) left by a decision nobody answered in argus. An idle interaction
+// (from a Notification or Stop that already moved the session on) is left as is.
 func (r *Registry) ClearPendingDecision(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -527,7 +533,7 @@ func (r *Registry) clearInteractionLocked(s *session.Session) {
 	if s.Status == session.StatusAwaitingInput {
 		setStatus(s, session.StatusWorking)
 	}
-	r.publish(Event{Type: EventUpdated, Session: *s})
+	r.publish(EventUpdated, s)
 }
 
 // ClearPane detaches an adopted tmux pane from an agent-keyed session (found by
@@ -549,7 +555,7 @@ func (r *Registry) ClearPane(agentSessionID string) {
 	s.Tmux = session.TmuxLocation{}
 	s.Frontend = session.FrontendExternal
 	r.refreshInput(s)
-	r.publish(Event{Type: EventUpdated, Session: *s})
+	r.publish(EventUpdated, s)
 }
 
 // RenameSession sets a session's name, publishing an update only when it
@@ -563,7 +569,7 @@ func (r *Registry) RenameSession(id, name string) {
 		return
 	}
 	s.Name = name
-	r.publish(Event{Type: EventUpdated, Session: *s})
+	r.publish(EventUpdated, s)
 }
 
 // SetBranch updates a session's current git branch, publishing an update only
@@ -577,7 +583,7 @@ func (r *Registry) SetBranch(id, branch string) {
 		return
 	}
 	s.Branch = branch
-	r.publish(Event{Type: EventUpdated, Session: *s})
+	r.publish(EventUpdated, s)
 }
 
 func (r *Registry) SetWorkspaceID(id, workspaceID string) {
@@ -588,7 +594,7 @@ func (r *Registry) SetWorkspaceID(id, workspaceID string) {
 		return
 	}
 	s.WorkspaceID = workspaceID
-	r.publish(Event{Type: EventUpdated, Session: *s})
+	r.publish(EventUpdated, s)
 }
 
 // ModelUpdate is a live model and effort as an agent reports them.
@@ -837,14 +843,14 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 		}
 	}
 	if before != nil && reflect.DeepEqual(*before, *s) {
-		return *s, true
+		return r.view(s), true
 	}
 	evType := EventUpdated
 	if created {
 		evType = EventAdded
 	}
-	r.publish(Event{Type: evType, Session: *s})
-	return *s, true
+	r.publish(evType, s)
+	return r.view(s), true
 }
 
 // mergeInteraction stops a low-information update (idle Notification, bare

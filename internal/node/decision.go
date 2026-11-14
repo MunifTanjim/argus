@@ -2,73 +2,96 @@ package node
 
 import (
 	"context"
-	"time"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
-	"github.com/MunifTanjim/argus/internal/session"
 )
 
-// decisionTimeout bounds how long a parked permission request waits for an
-// answer in argus; the agent's own prompt stays up after it.
-var decisionTimeout = 1490 * time.Second
+var errRequestGone = errors.New("the request was already answered or withdrawn")
 
 // pendingDecision is a parked PermissionRequest awaiting the user's answer. The
 // blocked hook handler waits on ch; MethodSessionRespond sends the user's response.
 type pendingDecision struct {
-	ch chan api.RespondParams
+	id, sessionID string
+	ch            chan api.RespondParams
 }
 
-// park registers a pending decision for a session and returns it plus a cleanup.
-func (d *Node) park(sid string) (*pendingDecision, func()) {
-	pd := &pendingDecision{ch: make(chan api.RespondParams, 1)}
+func (d *Node) park(pd *pendingDecision) {
 	d.pendingMu.Lock()
-	d.pending[sid] = pd
+	d.pending[pd.id] = pd
 	d.pendingMu.Unlock()
-	return pd, func() {
-		d.pendingMu.Lock()
-		if d.pending[sid] == pd {
-			delete(d.pending, sid)
-		}
-		d.pendingMu.Unlock()
-	}
 }
 
-// takePending removes and returns a session's parked decision, if any.
-func (d *Node) takePending(sid string) *pendingDecision {
+func (d *Node) unpark(pd *pendingDecision) {
+	d.pendingMu.Lock()
+	if d.pending[pd.id] == pd {
+		delete(d.pending, pd.id)
+	}
+	d.pendingMu.Unlock()
+}
+
+// claimPending removes and returns the parked decision requestID only if it
+// belongs to sessionID.
+func (d *Node) claimPending(sessionID, requestID string) *pendingDecision {
 	d.pendingMu.Lock()
 	defer d.pendingMu.Unlock()
-	pd := d.pending[sid]
-	if pd != nil {
-		delete(d.pending, sid)
+	pd := d.pending[requestID]
+	if pd == nil || pd.sessionID != sessionID {
+		return nil
 	}
+	delete(d.pending, requestID)
 	return pd
 }
 
-// awaitDecision parks a PermissionRequest and blocks until the user answers in
-// argus, the hook goes away (dismissed/answered in Claude → ctx cancel), or the
-// timeout fires. It resolves the interaction on every exit so no stale prompt
-// lingers (an idle state a later event set is kept); non-answered exits return
-// "" so the hook prints nothing and Claude uses its own prompt. A cancel
-// interrupts the turn (Claude stops rather than continuing), so it surfaces the
-// idle composer instead of clearing to working.
-func (d *Node) awaitDecision(ctx context.Context, a adapter.Adapter, sid string, ev adapter.HookEvent) string {
+// awaitDecision parks a PermissionRequest under id and blocks until the user
+// answers in argus or the hook goes away (dismissed/answered in Claude → ctx
+// cancel). Non-answered exits return "" so the hook prints nothing and Claude
+// uses its own prompt. A subagent's request leaves the session's own state
+// alone: the main thread is still running. A cancel interrupts the turn, so it
+// surfaces the idle composer instead of clearing to working.
+func (d *Node) awaitDecision(ctx context.Context, a adapter.Adapter, sid, id string, ev adapter.HookEvent) string {
 	toolName, toolInput := a.PermissionPayload(ev)
-	pd, cancel := d.park(sid)
-	defer cancel()
+	ix, agentID := a.PermissionPrompt(ev)
+	pd := &pendingDecision{id: id, sessionID: sid, ch: make(chan api.RespondParams, 1)}
+	d.park(pd)
+	if ix != nil {
+		ix.RequestID = id
+		d.reg.PushDecision(sid, *ix)
+	}
+	// Dropped after any base change so the stale base never shows in between.
+	defer d.reg.DropDecision(sid, id)
+	defer d.unpark(pd)
+	var (
+		p        api.RespondParams
+		answered bool
+	)
 	select {
-	case p := <-pd.ch:
-		if p.QuestionAction == "cancel" {
-			d.reg.SurfaceIdle(sid, session.InteractionQuestion)
-		} else {
+	case p = <-pd.ch:
+		answered = true
+	case <-ctx.Done():
+	}
+	if agentID == "" {
+		switch {
+		case !answered:
+			d.reg.ClearPendingDecision(sid)
+		case p.QuestionAction == "cancel":
+			kind, _ := d.reg.BaseInteractionKind(sid)
+			d.reg.SurfaceIdle(sid, kind)
+		default:
 			d.reg.ClearInteraction(sid)
 		}
-		return a.FormatDecision(toolName, toolInput, p)
-	case <-ctx.Done():
-		d.reg.ClearPendingDecision(sid)
-		return ""
-	case <-time.After(decisionTimeout):
-		d.reg.ClearPendingDecision(sid)
+	}
+	if !answered {
 		return ""
 	}
+	return a.FormatDecision(toolName, toolInput, p)
+}
+
+func newID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }

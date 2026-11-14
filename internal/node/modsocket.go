@@ -44,7 +44,8 @@ type modEvent struct {
 }
 
 type modEventResult struct {
-	RequestID string `json:"requestId,omitempty"`
+	RequestID  string `json:"requestId,omitempty"`
+	InstanceID string `json:"instanceId,omitempty"`
 }
 
 type modRequest struct {
@@ -52,8 +53,9 @@ type modRequest struct {
 }
 
 type modDecisionResult struct {
-	Done   bool   `json:"done"`
-	Output string `json:"output,omitempty"`
+	Done       bool   `json:"done"`
+	Output     string `json:"output,omitempty"`
+	InstanceID string `json:"instanceId"`
 }
 
 type modPoll struct {
@@ -134,7 +136,7 @@ func (d *Node) handleModEvent(w http.ResponseWriter, r *http.Request, a adapter.
 	if in.Event == "PostToolUse" || in.Event == "PostToolUseFailure" {
 		d.endModPermissionsRan(in.Payload)
 	}
-	var res modEventResult
+	res := modEventResult{InstanceID: d.instanceID}
 	if alive && a.ShouldBlock(ev) {
 		res.RequestID = d.startModPermission(a, s, ev)
 	}
@@ -150,7 +152,7 @@ func (d *Node) handleModDecision(w http.ResponseWriter, r *http.Request, _ adapt
 	if r.Context().Err() != nil {
 		return // the mod hung up
 	}
-	writeModJSON(w, modDecisionResult{Done: done, Output: out})
+	writeModJSON(w, modDecisionResult{Done: done, Output: out, InstanceID: d.instanceID})
 }
 
 // handleModCancel ends a permission request the agent decided itself.

@@ -86,6 +86,10 @@ func (ccAdapter) PermissionPayload(ev adapter.HookEvent) (string, json.RawMessag
 	return PermissionPayload(ev)
 }
 
+func (ccAdapter) PermissionPrompt(ev adapter.HookEvent) (*session.Interaction, string) {
+	return PermissionPrompt(ev)
+}
+
 func (ccAdapter) FormatDecision(toolName string, toolInput json.RawMessage, p api.RespondParams) string {
 	return hookdecision.FormatDecision(toolName, toolInput, p)
 }

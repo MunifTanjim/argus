@@ -25,7 +25,7 @@ func (d *Node) handleHook(ctx context.Context, params json.RawMessage) (any, err
 	}
 	s, alive := d.applyHook(ctx, a, ev)
 	if alive && a.ShouldBlock(ev) {
-		return api.HookResult{Output: d.awaitDecision(ctx, a, s.ID, ev)}, nil
+		return api.HookResult{Output: d.awaitDecision(ctx, a, s.ID, newID(), ev)}, nil
 	}
 	return api.HookResult{}, nil
 }
@@ -49,20 +49,26 @@ func (d *Node) applyHook(ctx context.Context, a adapter.Adapter, ev adapter.Hook
 	return s, alive
 }
 
-// handleSessionRespond resolves the session's parked PermissionRequest with the
-// hook decision JSON. When no hook is parked, falls back to the adapter's
-// Responder capability for HTTP-service agents (e.g. opencode).
+// handleSessionRespond resolves a parked PermissionRequest with the hook
+// decision JSON: the one p.RequestID names, else the one the session shows.
+// When none is parked, falls back to the adapter's Responder capability for
+// HTTP-service agents (e.g. opencode).
 func (d *Node) handleSessionRespond(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.RespondParams](params)
 	if err != nil {
 		return nil, err
 	}
-	if pd := d.takePending(p.SessionID); pd != nil {
+	s, ok := d.reg.Get(p.SessionID)
+	rid := p.RequestID
+	if rid == "" && ok && s.Interaction != nil {
+		rid = s.Interaction.RequestID
+	}
+	if pd := d.claimPending(p.SessionID, rid); pd != nil {
 		pd.ch <- p
-		d.log.Info("respond delivered to parked decision", "session", p.SessionID, "kind", p.Kind)
+		d.log.Info("respond delivered to parked decision", "session", p.SessionID, "request", rid, "kind", p.Kind)
 		return nil, nil
 	}
-	if s, ok := d.reg.Get(p.SessionID); ok {
+	if ok {
 		if r, ok := d.adapterFor(s.Agent).(adapter.Responder); ok {
 			if err := r.Respond(ctx, s, p); err != nil {
 				d.log.Warn("responder failed", "session", p.SessionID, "err", err)
@@ -73,6 +79,10 @@ func (d *Node) handleSessionRespond(ctx context.Context, params json.RawMessage)
 			}
 			return nil, nil
 		}
+	}
+	if p.RequestID != "" {
+		d.log.Warn("respond to a request no longer parked", "session", p.SessionID, "request", p.RequestID)
+		return nil, errRequestGone
 	}
 	d.log.Warn("respond with no parked decision, dropped", "session", p.SessionID, "kind", p.Kind)
 	return nil, nil

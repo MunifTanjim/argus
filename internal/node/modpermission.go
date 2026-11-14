@@ -2,8 +2,6 @@ package node
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"reflect"
 	"time"
@@ -22,6 +20,7 @@ var modDecisionLease = 5 * time.Second
 type modPermission struct {
 	id             string
 	agentSessionID string
+	agentID        string
 	toolName       string
 	toolInput      json.RawMessage
 	out            chan string // buffered 1: the decision output, "" when none
@@ -34,10 +33,12 @@ type modPermission struct {
 // without blocking the caller, and returns the id the mod waits on.
 func (d *Node) startModPermission(a adapter.Adapter, s session.Session, ev adapter.HookEvent) string {
 	toolName, toolInput := a.PermissionPayload(ev)
+	_, agentID := a.PermissionPrompt(ev)
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &modPermission{
-		id:             newModRequestID(),
+		id:             newID(),
 		agentSessionID: s.AgentSessionID,
+		agentID:        agentID,
 		toolName:       toolName,
 		toolInput:      toolInput,
 		out:            make(chan string, 1),
@@ -51,7 +52,7 @@ func (d *Node) startModPermission(a adapter.Adapter, s session.Session, ev adapt
 	d.modPermsMu.Unlock()
 	go func() {
 		// awaitDecision clears the prompt on every exit; a cancelled ctx ends it empty.
-		p.out <- d.awaitDecision(ctx, a, s.ID, ev)
+		p.out <- d.awaitDecision(ctx, a, s.ID, p.id, ev)
 		cancel()
 		// An answer given between waits gets a full lease for the mod to collect it.
 		d.modPermsMu.Lock()
@@ -138,6 +139,7 @@ func (d *Node) endModPermissionsRan(payload json.RawMessage) {
 	}
 	var ran struct {
 		SessionID string          `json:"session_id"`
+		AgentID   string          `json:"agent_id"`
 		ToolName  string          `json:"tool_name"`
 		ToolInput json.RawMessage `json:"tool_input"`
 	}
@@ -147,7 +149,7 @@ func (d *Node) endModPermissionsRan(payload json.RawMessage) {
 	d.modPermsMu.Lock()
 	var ended []*modPermission
 	for _, p := range d.modPerms {
-		if p.agentSessionID == ran.SessionID && p.toolName == ran.ToolName &&
+		if p.agentSessionID == ran.SessionID && p.agentID == ran.AgentID && p.toolName == ran.ToolName &&
 			(oneAtATime[p.toolName] || containsJSON(ran.ToolInput, p.toolInput)) {
 			ended = append(ended, p)
 		}
@@ -177,10 +179,4 @@ func containsJSON(got, want json.RawMessage) bool {
 		}
 	}
 	return true
-}
-
-func newModRequestID() string {
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
 }

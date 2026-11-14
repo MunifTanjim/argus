@@ -531,3 +531,72 @@ func TestProcessHookShellsSetsRunning(t *testing.T) {
 		t.Fatalf("empty snapshot should clear: %+v", got.Shells)
 	}
 }
+
+func TestPermissionPrompt(t *testing.T) {
+	for payload, wantAgentID := range map[string]string{
+		`{"agent_id":"a1","tool_name":"Bash","tool_input":{"command":"ls"}}`: "a1",
+		`{"tool_name":"Bash","tool_input":{"command":"ls"}}`:                 "",
+	} {
+		raw := json.RawMessage(payload)
+		ix, agentID := PermissionPrompt(HookEvent{Event: "PermissionRequest", Payload: raw})
+		if agentID != wantAgentID {
+			t.Errorf("agentID = %q, want %q", agentID, wantAgentID)
+		}
+		if ix == nil || ix.Kind != session.InteractionPermission || ix.ToolName != "Bash" {
+			t.Errorf("unexpected interaction: %+v", ix)
+		}
+		if ix, id := PermissionPrompt(HookEvent{Event: "PreToolUse", Payload: raw}); ix != nil || id != "" {
+			t.Errorf("non-permission event: got %+v, %q", ix, id)
+		}
+	}
+}
+
+func TestPermissionRequestLeavesSessionInteraction(t *testing.T) {
+	reg := registry.New()
+	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
+	})
+	raw := json.RawMessage(`{"tool_name":"Bash","tool_input":{"command":"ls"}}`)
+	before := reg.Snapshot()[0]
+	s, _ := ProcessHook(reg, HookEvent{Event: "PermissionRequest", TmuxPane: "%0", TmuxSocket: "default", Payload: raw})
+	if s.Interaction != nil {
+		t.Errorf("interaction = %+v, want nil", s.Interaction)
+	}
+	if s.Status != before.Status {
+		t.Errorf("status = %q, want %q", s.Status, before.Status)
+	}
+
+	q := json.RawMessage(`{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Pick","options":[{"label":"A"},{"label":"B"}]}]}}`)
+	ProcessHook(reg, HookEvent{Event: "PreToolUse", TmuxPane: "%0", TmuxSocket: "default", Payload: q})
+	s, _ = ProcessHook(reg, HookEvent{Event: "PermissionRequest", TmuxPane: "%0", TmuxSocket: "default", Payload: raw})
+	if s.Interaction == nil || s.Interaction.Kind != session.InteractionQuestion || len(s.Interaction.Questions) != 1 {
+		t.Errorf("question base = %+v, want it kept", s.Interaction)
+	}
+	if s.Status != session.StatusAwaitingInput {
+		t.Errorf("status = %q, want awaiting_input", s.Status)
+	}
+}
+
+func TestPermissionPromptNotificationLeavesSession(t *testing.T) {
+	reg := registry.New()
+	reg.ReconcileSessions(Agent, []registry.DiscoveredSession{
+		{HasPane: true, Server: session.TmuxServerDefault, PaneID: "%0", SessionName: "a", Frontend: session.FrontendTmux},
+	})
+	hook := func(event string, payload string) session.Session {
+		s, _ := ProcessHook(reg, HookEvent{Event: event, TmuxPane: "%0", TmuxSocket: "default", Payload: json.RawMessage(payload)})
+		return s
+	}
+	notify := `{"notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}`
+
+	hook("PreToolUse", `{"tool_name":"Bash"}`)
+	s := hook("Notification", notify)
+	if s.Status != session.StatusWorking || s.Interaction != nil {
+		t.Errorf("working base: status=%q interaction=%+v, want working and nil", s.Status, s.Interaction)
+	}
+
+	hook("PreToolUse", `{"tool_name":"ExitPlanMode","tool_input":{"plan":"p"}}`)
+	s = hook("Notification", notify)
+	if s.Status != session.StatusAwaitingInput || s.Interaction == nil || s.Interaction.Kind != session.InteractionPlan {
+		t.Errorf("plan base: status=%q interaction=%+v, want the plan kept", s.Status, s.Interaction)
+	}
+}
