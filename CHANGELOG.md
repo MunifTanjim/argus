@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.1.4](https://github.com/MunifTanjim/argus/compare/0.1.3...0.1.4) (2026-11-14)
+
+
+### Features
+
+* **api:** add cbor frames ([ae45431](https://github.com/MunifTanjim/argus/commit/ae45431441ac446de0238de8af36deed8a9fac40))
+* **app:** complete agent commands and skills in the prompt ([b1a57db](https://github.com/MunifTanjim/argus/commit/b1a57db029454aade03b69a330b5993d1ca5104c))
+* **claude:** keep permission requests across restarts and end them on claude's own answer ([d30ed88](https://github.com/MunifTanjim/argus/commit/d30ed88a02ccb02c4e9b6598fa7703075be4c182))
+* **claude:** list slash commands through the mod ([4c4c22d](https://github.com/MunifTanjim/argus/commit/4c4c22d8b6b78424088867f0f57800facf22c1aa))
+* **claude:** run "!" input in bash mode ([b12abb0](https://github.com/MunifTanjim/argus/commit/b12abb087345026a245aad5e850ada705dc5cb7e))
+* **cli:** add argus stop ([84748ff](https://github.com/MunifTanjim/argus/commit/84748ffbc401911870db2429432666f107c277b5))
+* **cli:** add beta upgrade channel ([ae2fd32](https://github.com/MunifTanjim/argus/commit/ae2fd32dbf20c99ec594aa633348a2472c0cd6ed))
+* **codex:** complete and run skills and /compact ([2589df7](https://github.com/MunifTanjim/argus/commit/2589df7a2ad585a6a61c9a6a2987e7f2aa45c6fd))
+* negotiate cbor terminal frames ([c84a11a](https://github.com/MunifTanjim/argus/commit/c84a11a4a8caa54edf1074cefad1bc50ca825425))
+* **node:** add session.prompt.complete ([c2b4a13](https://github.com/MunifTanjim/argus/commit/c2b4a13edefc48b33bef9d98d5fe98c6452ffcb8))
+* **node:** coalesce terminal output ([e86e924](https://github.com/MunifTanjim/argus/commit/e86e92474b27baf3101709dfa8db8cfd009baae9))
+* **node:** keep each claude permission request until it is decided ([f684c7e](https://github.com/MunifTanjim/argus/commit/f684c7e3ac825d1ffff611132f51b35bfa3f5896))
+* **node:** log to a size-limited rotating file ([1d58813](https://github.com/MunifTanjim/argus/commit/1d58813b2d74390784dd00c3af3f295cca0de2e6))
+* **opencode:** complete and run commands and skills ([bbe31c0](https://github.com/MunifTanjim/argus/commit/bbe31c02a4c206c62aba046a4b735e5953d36c23))
+* **tui:** add a frame level with no sidebars ([45a6834](https://github.com/MunifTanjim/argus/commit/45a683468ea6e7fbfae3f629da73dd9603b0d1bf))
+* **tui:** add a settings screen ([b9230f7](https://github.com/MunifTanjim/argus/commit/b9230f7bfc98bd9b22cfacd13acedd7214d23d15))
+* **tui:** complete agent commands and skills in the prompt ([1ae3e87](https://github.com/MunifTanjim/argus/commit/1ae3e877873816cf971578793046863f9fdba0b1))
+* **tui:** go back from a session to its workspace ([84d5b75](https://github.com/MunifTanjim/argus/commit/84d5b75f4e8836ddc0a8fc581ad7c8148103b77a))
+* **tui:** keep started servers running across tui restarts ([989d752](https://github.com/MunifTanjim/argus/commit/989d7524ca8571f02c40d2ae425613c685132961))
+* **tui:** swap the client while the tui runs ([3051a48](https://github.com/MunifTanjim/argus/commit/3051a4891970436cf47618e183b1606153ad9f39))
+
+
+### Bug Fixes
+
+* **claude:** ignore subagent tool hooks for the main session ([90bcf52](https://github.com/MunifTanjim/argus/commit/90bcf527ba07e60500536457d99e6767ad8867a7))
+* **claude:** keep the subagent's cwd out of the mod's subagents report ([e08bec1](https://github.com/MunifTanjim/argus/commit/e08bec14843f7740cdae58d205fb9648c8908b63))
+* **claude:** name the subagent in the mod's PreToolUse ([c767901](https://github.com/MunifTanjim/argus/commit/c76790138e9e7b4a4a32bde95a8418cc12c666b9))
+* **codex:** log a missing app-server daemon at debug ([5c40923](https://github.com/MunifTanjim/argus/commit/5c4092365671a8fa2a86421460622eb870d400bb))
+* no upgrade for post-tag builds ([a5cc09e](https://github.com/MunifTanjim/argus/commit/a5cc09ecc65296f02439de50530f44044a9b97ea))
+* **node:** wait for new tmux panes to start ([a8d900b](https://github.com/MunifTanjim/argus/commit/a8d900b584190c2826407f47bd09a051a980fbeb))
+* **opencode:** age out sessions surfaced by session.updated ([0cac213](https://github.com/MunifTanjim/argus/commit/0cac213190ea599c6dc6a87cec5c2fa0de54c2bf))
+* run test tmux panes with sh ([c3f9623](https://github.com/MunifTanjim/argus/commit/c3f96239b3a6108dfc7c305f90188ad145198989))
+* **tui:** clamp stale transcript scroll before j/k ([4b263e0](https://github.com/MunifTanjim/argus/commit/4b263e01de1fc8c8bee7a160f3850ac62b30358b))
+* **tui:** show respond failures ([6778e08](https://github.com/MunifTanjim/argus/commit/6778e08ebe81b6c8d0cb6f8cf3d8e3e3dc513c8c))
+
 ## [0.1.3](https://github.com/MunifTanjim/argus/compare/0.1.2...0.1.3) (2026-10-18)
 
 
