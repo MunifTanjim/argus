@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -1419,4 +1420,46 @@ func TestQuestionHeadingNamesAgent(t *testing.T) {
 	s.Agent = "codex"
 	m.sessions["s1"] = s
 	assertContains(t, ansi.Strip(m.questionHeading(&q)), "Codex is asking")
+}
+
+type failingRespondClient struct {
+	recordingClient
+	err error
+}
+
+func (c *failingRespondClient) Call(method string, params, out any) error {
+	_ = c.recordingClient.Call(method, params, out)
+	return c.err
+}
+
+func TestRespondCmdCarriesCallError(t *testing.T) {
+	m := testModel()
+	want := errors.New("boom")
+	c := &failingRespondClient{err: want}
+	m.client = c
+	msg := m.respondCmd("s1", api.RespondParams{RequestID: "r1"})()
+	got, ok := msg.(respondResultMsg)
+	if !ok || !errors.Is(got.err, want) {
+		t.Fatalf("msg = %#v, want respondResultMsg carrying %v", msg, want)
+	}
+	if len(c.calls) != 1 || c.calls[0] != api.MethodSessionRespond {
+		t.Fatalf("calls = %v, want one %s", c.calls, api.MethodSessionRespond)
+	}
+	if p := c.params[0].(api.RespondParams); p.SessionID != "s1" || p.RequestID != "r1" {
+		t.Errorf("params = %+v, want session s1 request r1", p)
+	}
+}
+
+func TestRespondFailureFlashes(t *testing.T) {
+	m := testModel()
+	next, _ := m.update(respondResultMsg{err: errors.New("the request was already answered or withdrawn")})
+	if got := next.(model).flash; got != "respond failed: the request was already answered or withdrawn" {
+		t.Errorf("flash = %q", got)
+	}
+
+	m.flash = "keep"
+	next, _ = m.update(respondResultMsg{})
+	if got := next.(model).flash; got != "keep" {
+		t.Errorf("nil error changed flash to %q", got)
+	}
 }
