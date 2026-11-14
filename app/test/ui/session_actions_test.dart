@@ -37,6 +37,7 @@ class _Repo extends FakeSessionRepository {
   final renamed = <(String, String)>[];
   final killed = <String>[];
   bool applied = true;
+  Result<int> descendants = const Result.ok(0);
 
   @override
   Future<Result<bool>> rename(String sessionId, String name) async {
@@ -49,6 +50,9 @@ class _Repo extends FakeSessionRepository {
     killed.add(sessionId);
     return const Result.ok(null);
   }
+
+  @override
+  Future<Result<int>> descendantCount(String sessionId) async => descendants;
 }
 
 class _Projects extends ProjectsNotifier {
@@ -125,6 +129,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(repo.killed, ['A:s1']);
   });
+
+  for (final (count, text) in [
+    (const Result<int>.ok(2), 'Its 2 child sessions are killed too. This cannot be undone!'),
+    (const Result<int>.ok(1), 'Its 1 child session is killed too. This cannot be undone!'),
+    (Result<int>.error(Exception('method not found')),
+        'Child sessions: unknown. This cannot be undone!'),
+  ]) {
+    testWidgets('the kill confirmation says: $text', (tester) async {
+      final repo = _Repo()..descendants = count;
+      await _pumpList(tester, repo, _s('A:s1'));
+      await tester.longPress(find.text('Old'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Kill'));
+      await tester.pumpAndSettle();
+      expect(find.text(text), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextButton, 'Kill'));
+      await tester.pumpAndSettle();
+      expect(repo.killed, ['A:s1']);
+    });
+  }
 
   testWidgets('a session that cannot be killed offers only rename',
       (tester) async {

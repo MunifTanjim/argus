@@ -22,6 +22,7 @@ abstract class SessionRepository {
     required String prompt,
   });
   Future<Result<void>> kill(String sessionId);
+  Future<Result<int>> descendantCount(String sessionId);
   Future<Result<bool>> rename(String sessionId, String name);
   Future<Result<List<NodeRef>>> nodes();
 
@@ -84,6 +85,10 @@ class SessionRepositoryRemote implements SessionRepository {
 
   @override
   Future<Result<void>> kill(String sessionId) => _service.kill(sessionId);
+
+  @override
+  Future<Result<int>> descendantCount(String sessionId) =>
+      _service.descendantCount(sessionId);
 
   @override
   Future<Result<bool>> rename(String sessionId, String name) =>

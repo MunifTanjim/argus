@@ -145,3 +145,34 @@ func TestKillContinuesAfterAFailedDescendant(t *testing.T) {
 		t.Errorf("p3 ended_by = %q, want empty after its kill failed", by)
 	}
 }
+
+func TestDescendantCountMatchesWhatAKillKills(t *testing.T) {
+	d, _, _ := treeNode(t)
+	d.addAgentSession("claude", "p7")
+	for _, l := range [][2]string{{"p6", "p5"}, {"p7", "p6"}} {
+		if err := d.orch.PutLink(t.Context(), api.Link{
+			Child:  api.Actor{Node: "home", Key: "claude:" + l[0]},
+			Parent: api.Actor{Node: "home", Key: "claude:" + l[1]},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := func(id string) int {
+		params, _ := json.Marshal(api.SessionRef{SessionID: "default:%" + id})
+		out, err := d.handleSessionDescendantCount(t.Context(), params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.(api.DescendantCountResult).Count
+	}
+	if n := count("p2"); n != 4 {
+		t.Errorf("p2 count = %d, want 4 (p3, p4, p5, and p7 below the gone p6)", n)
+	}
+	if n := count("p4"); n != 0 {
+		t.Errorf("p4 count = %d, want 0", n)
+	}
+	params, _ := json.Marshal(api.SessionRef{SessionID: "default:%nope"})
+	if _, err := d.handleSessionDescendantCount(t.Context(), params); err == nil {
+		t.Error("an unknown session should fail")
+	}
+}

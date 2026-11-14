@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -166,7 +167,7 @@ func TestHomeKillConfirmation(t *testing.T) {
 	rc := &recordingClient{}
 	m := killableHome()
 	m.client = rc
-	m = typeKeys(m, "jdd")
+	m = countedKills(typeKeys(m, "jdd"))
 	if homeOf(m).killID == "" || paneOf(m).killID != "" {
 		t.Fatalf("dd should ask to kill on Home only: home=%q pane=%q", homeOf(m).killID, paneOf(m).killID)
 	}
@@ -190,7 +191,7 @@ func TestHomeKillTargetsTheSessionAskedAbout(t *testing.T) {
 	rc := &recordingClient{}
 	m := killableHome()
 	m.client = rc
-	m = typeKeys(m, "jdd")
+	m = countedKills(typeKeys(m, "jdd"))
 	s3 := m.sessions["n1:s3"]
 	s3.Status = session.StatusAwaitingInput
 	params, _ := json.Marshal(registry.Event{Type: registry.EventUpdated, Session: s3})
@@ -228,5 +229,48 @@ func TestHomeKeysReachOnlyTheHomePane(t *testing.T) {
 	mm := res.(model)
 	if homeOf(mm).cursor != 1 || mm.left.tree.cursor != 0 {
 		t.Errorf("j on Home: home cursor=%d tree cursor=%d", homeOf(mm).cursor, mm.left.tree.cursor)
+	}
+}
+
+func TestKillPromptShowsTheNodeCount(t *testing.T) {
+	s := session.Session{ID: "n1:s1", Name: "lead"}
+	for _, tc := range []struct {
+		counts map[string]killCountMsg
+		want   string
+	}{
+		{nil, "kill session lead? counting child sessions..."},
+		{map[string]killCountMsg{"n1:s1": {err: errors.New("x")}}, "kill session lead? child sessions: unknown · y/n"},
+		{map[string]killCountMsg{"n1:s1": {}}, "kill session lead? y/n"},
+		{map[string]killCountMsg{"n1:s1": {n: 1}}, "kill session lead and its 1 child session? y/n"},
+		{map[string]killCountMsg{"n1:s1": {n: 3}}, "kill session lead and its 3 child sessions? y/n"},
+	} {
+		if got := killPrompt(tc.counts, s); got != tc.want {
+			t.Errorf("killPrompt(%v) = %q, want %q", tc.counts, got, tc.want)
+		}
+	}
+}
+
+func TestHomeKillWaitsForTheNodeCount(t *testing.T) {
+	rc := &recordingClient{}
+	m := killableHome()
+	m.client = rc
+	m, count := typeKeysCmd(m, "jdd")
+	if count == nil {
+		t.Fatal("dd should ask the node for the count")
+	}
+	msg := count().(killCountMsg)
+	if rc.calls[len(rc.calls)-1] != api.MethodSessionDescendantCount || msg.id != "n1:s2" {
+		t.Fatalf("count call = %v, msg = %+v", rc.calls, msg)
+	}
+	m, cmd := typeKeysCmd(m, "y")
+	if homeOf(m).killID != "n1:s2" || cmd != nil {
+		t.Fatal("y before the count should not kill or drop the prompt")
+	}
+	m, _ = upd(m, killCountMsg{id: "n1:s2", err: errors.New("method not found")})
+	if !strings.Contains(ansi.Strip(m.View().Content), "kill session repo · %1? child sessions: unknown · y/n") {
+		t.Error("a failed count should say the child sessions are unknown")
+	}
+	if m, cmd = typeKeysCmd(m, "y"); homeOf(m).killID != "" || cmd == nil {
+		t.Fatal("y after a failed count should still kill")
 	}
 }

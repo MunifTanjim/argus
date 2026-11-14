@@ -52,7 +52,7 @@ func TestWorkspaceKillConfirmation(t *testing.T) {
 	rc := &recordingClient{}
 	m := killableHome()
 	m.client = rc
-	m = typeKeys(workspacePane(m), "jdd")
+	m = countedKills(typeKeys(workspacePane(m), "jdd"))
 	if paneOf(m).killID != "n1:s3" || homeOf(m).killID != "" {
 		t.Fatalf("dd should ask to kill n1:s3 in the pane only: pane=%q home=%q", paneOf(m).killID, homeOf(m).killID)
 	}

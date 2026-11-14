@@ -94,6 +94,8 @@ void main() {
     expect(seenSessionId, 's1');
     await client.call('session.rename', {'session_id': 'A:s1', 'name': 'New'});
     expect(seenSessionId, 's1');
+    await client.call('session.descendant.count', {'session_id': 'A:s1'});
+    expect(seenSessionId, 's1');
     await client.close();
   });
 

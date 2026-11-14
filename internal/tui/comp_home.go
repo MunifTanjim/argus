@@ -40,6 +40,9 @@ func (h homeComp) fullScreen(c *ctx) fullLevel {
 func (h homeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
 	m, k, n := c.m, listKeys, len(c.m.order)
 	if id := h.killID; id != "" {
+		if msg.String() == "y" && !m.killReady(id) {
+			return h, nil, true
+		}
 		h.killID = ""
 		if msg.String() == "y" {
 			return h, m.killCmd(id), true
@@ -101,6 +104,7 @@ func (h homeComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 				c.setFlash(refusal)
 			} else {
 				h.killID = m.order[h.cursor]
+				cmd = m.armKill(h.killID)
 			}
 		}
 	case m.matches(msg, k.Rename):
@@ -277,7 +281,7 @@ func (h homeComp) footer(c *ctx) []binding {
 func (h homeComp) footerPrompt(c *ctx) string {
 	m := c.m
 	if h.killID != "" {
-		return asstStyle.Render(killPrompt(m.sessions[h.killID]))
+		return asstStyle.Render(killPrompt(m.killCounts, m.sessions[h.killID]))
 	}
 	if h.rename.on() {
 		return h.rename.view()

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"maps"
 	"slices"
@@ -258,6 +259,12 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.flash = "respond failed: " + msg.err.Error()
 		}
+		return m, nil
+	case killCountMsg:
+		if m.killCounts == nil {
+			m.killCounts = map[string]killCountMsg{}
+		}
+		m.killCounts[msg.id] = msg
 		return m, nil
 	case killResultMsg:
 		if msg.err != nil {
@@ -756,8 +763,46 @@ func killRefusal(s session.Session) string {
 	return ""
 }
 
-func killPrompt(s session.Session) string {
-	return "kill session " + sessionRef(s) + "? y/n"
+func killPrompt(counts map[string]killCountMsg, s session.Session) string {
+	c, counted := counts[s.ID]
+	switch {
+	case !counted:
+		return "kill session " + sessionRef(s) + "? counting child sessions..."
+	case c.err != nil:
+		return "kill session " + sessionRef(s) + "? child sessions: unknown · y/n"
+	case c.n == 0:
+		return "kill session " + sessionRef(s) + "? y/n"
+	case c.n == 1:
+		return "kill session " + sessionRef(s) + " and its 1 child session? y/n"
+	default:
+		return fmt.Sprintf("kill session %s and its %d child sessions? y/n", sessionRef(s), c.n)
+	}
+}
+
+type killCountMsg struct {
+	id  string
+	n   int
+	err error
+}
+
+// armKill asks the node how many sessions a kill of id also kills. The kill
+// prompt takes y only once the answer is in.
+func (m *model) armKill(id string) tea.Cmd {
+	if m.killCounts == nil {
+		m.killCounts = map[string]killCountMsg{}
+	}
+	delete(m.killCounts, id)
+	client := m.client
+	return func() tea.Msg {
+		var res api.DescendantCountResult
+		err := client.Call(api.MethodSessionDescendantCount, api.SessionRef{SessionID: id}, &res)
+		return killCountMsg{id: id, n: res.Count, err: err}
+	}
+}
+
+func (m *model) killReady(id string) bool {
+	_, ok := m.killCounts[id]
+	return ok
 }
 
 func sessionRef(s session.Session) string {

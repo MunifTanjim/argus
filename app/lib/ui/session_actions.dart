@@ -30,11 +30,22 @@ Future<void> renameSession(ActionContext ax, Session s) async {
 
 /// Asks to kill [s] and kills it. True once it is killed.
 Future<bool> killSession(ActionContext ax, Session s) async {
+  final repo = ax.container.read(sessionRepositoryProvider);
+  final below = switch (await repo.descendantCount(s.id)) {
+    Ok(:final value) => value,
+    Error() => null,
+  };
+  if (!ax.navigator.mounted) return false;
   final confirmed = await showDialog<bool>(
     context: ax.navigator.context,
     builder: (ctx) => AlertDialog(
       title: const Text('Kill Session?'),
-      content: const Text('This cannot be undone!'),
+      content: Text(switch (below) {
+        null => 'Child sessions: unknown. This cannot be undone!',
+        0 => 'This cannot be undone!',
+        1 => 'Its 1 child session is killed too. This cannot be undone!',
+        _ => 'Its $below child sessions are killed too. This cannot be undone!',
+      }),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(false),
@@ -49,7 +60,7 @@ Future<bool> killSession(ActionContext ax, Session s) async {
     ),
   );
   if (confirmed != true) return false;
-  final result = await ax.container.read(sessionRepositoryProvider).kill(s.id);
+  final result = await repo.kill(s.id);
   switch (result) {
     case Ok():
       return true;

@@ -33,6 +33,9 @@ func (p workspaceComp) spins(c *ctx) bool                         { return c.m.a
 func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
 	m := c.m
 	if id := p.killID; id != "" {
+		if msg.String() == "y" && !m.killReady(id) {
+			return p, nil, true
+		}
 		p.killID = ""
 		if msg.String() == "y" {
 			return p, m.killCmd(id), true
@@ -121,6 +124,7 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 				c.setFlash(refusal)
 			} else {
 				p.killID = s.ID
+				cmd = m.armKill(p.killID)
 			}
 		}
 	case m.matches(msg, listKeys.Rename):
@@ -227,7 +231,7 @@ func (p workspaceComp) sessions(c *ctx, w, avail int) string {
 
 func (p workspaceComp) footerPrompt(c *ctx) string {
 	if p.killID != "" {
-		return asstStyle.Render(killPrompt(c.m.sessions[p.killID]))
+		return asstStyle.Render(killPrompt(c.m.killCounts, c.m.sessions[p.killID]))
 	}
 	if p.rename.on() {
 		return p.rename.view()
