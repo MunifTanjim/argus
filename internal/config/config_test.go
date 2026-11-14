@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -415,5 +416,36 @@ func TestReadKeymapsBadShape(t *testing.T) {
 	path := writeConfig(t, "tui:\n  keymap:\n    global: 5\n")
 	if _, err := config.ReadKeymaps(path); err == nil {
 		t.Error("a section that is not a map should fail")
+	}
+}
+
+func TestMCPPortDefault(t *testing.T) {
+	isolateConfigDir(t)
+	if got := load(t, "").MCP.Port; got != 7734 {
+		t.Fatalf("want 7734 got %d", got)
+	}
+}
+
+func TestMCPPortValidate(t *testing.T) {
+	for _, port := range []int{-1, 70000} {
+		c := config.Config{TUI: config.TUIConfig{Mouse: config.MouseOff}, MCP: config.MCPConfig{Port: port}}
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), "mcp.port") {
+			t.Errorf("port %d: want mcp.port error, got %v", port, err)
+		}
+	}
+	for _, port := range []int{0, 7734, 65535} {
+		c := config.Config{TUI: config.TUIConfig{Mouse: config.MouseOff}, MCP: config.MCPConfig{Port: port}}
+		if err := c.Validate(); err != nil {
+			t.Errorf("port %d should be valid: %v", port, err)
+		}
+	}
+}
+
+func TestMCPPortFromEnv(t *testing.T) {
+	isolateConfigDir(t)
+	t.Setenv("ARGUS_MCP_PORT", "0")
+	if got := load(t, "").MCP.Port; got != 0 {
+		t.Fatalf("mcp.port from env = %d, want 0", got)
 	}
 }

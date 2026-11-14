@@ -256,12 +256,12 @@ func installMod(ctx context.Context, opts adapter.InstallOptions) error {
 	if err != nil {
 		return err
 	}
-	return applyMod(ctx, opts.Socket, versions)
+	return applyMod(ctx, opts.Socket, mcpValuesFor(opts), versions)
 }
 
 // applyMod is installMod once claude is checked, given the installed plugins'
 // versions.
-func applyMod(ctx context.Context, socket string, versions installedVersions) error {
+func applyMod(ctx context.Context, socket string, mcp mcpValues, versions installedVersions) error {
 	_, installed := versions[pluginID]
 	if socket == "" && !installed {
 		// Checked before anything is removed, so the old hooks stay.
@@ -303,7 +303,17 @@ func applyMod(ctx context.Context, socket string, versions installedVersions) er
 		}
 	}
 	if installed {
-		if _, err := reapplySocket(ctx, socket); err != nil {
+		if _, err := reapplyConfig(ctx, socket, mcp); err != nil {
+			return err
+		}
+	} else {
+		if mcp.url != "" {
+			// Configured apart from the install, so the token stays off the command line.
+			if err := configureMod(ctx, socket, mcp); err != nil {
+				return err
+			}
+		}
+		if err := stampMCP(mcp); err != nil {
 			return err
 		}
 	}
@@ -315,19 +325,82 @@ func applyMod(ctx context.Context, socket string, versions installedVersions) er
 	return stampInstalled()
 }
 
-// reapplySocket points the installed mod at socket and reports whether it
-// moved; an empty socket or the one already configured is left alone.
-func reapplySocket(ctx context.Context, socket string) (bool, error) {
-	if socket == "" || configuredSocket() == socket {
-		return false, nil
-	}
-	return true, configureSocket(ctx, socket)
+// mcpValues are the mod's MCP options. With off, the mod's values are cleared;
+// with neither url nor off, they are left as they are.
+type mcpValues struct {
+	url, token string
+	off        bool
 }
 
-func configureSocket(ctx context.Context, socket string) error {
-	values, _ := json.Marshal(map[string]string{"socket": socket})
-	_, err := runClaude(ctx, string(values), "plugin", "configure", pluginID, "--values-stdin")
+func mcpValuesFor(opts adapter.InstallOptions) mcpValues {
+	switch {
+	case opts.MCPOff:
+		return mcpValues{off: true}
+	case opts.MCPURL == "":
+		return mcpValues{}
+	}
+	return mcpValues{url: opts.MCPEndpoint(Agent), token: opts.MCPToken}
+}
+
+// current reports whether the mod holds these values. Claude keeps the token in
+// secure storage, so a hash stamped at configure time stands in for reading it.
+func (v mcpValues) current() bool {
+	switch {
+	case v.off:
+		return stampedMCP() == ""
+	case v.url == "":
+		return true
+	}
+	return stampedMCP() == v.stamp()
+}
+
+func (v mcpValues) stamp() string {
+	h := sha256.Sum256([]byte(v.url + "\x00" + v.token))
+	return hex.EncodeToString(h[:])
+}
+
+// reapplyConfig points the installed mod at socket and the node's MCP endpoint,
+// returning what moved. An empty socket leaves the mod alone: another node owns
+// it, along with its MCP values.
+func reapplyConfig(ctx context.Context, socket string, mcp mcpValues) ([]string, error) {
+	if socket == "" {
+		return nil, nil
+	}
+	var moved []string
+	if configuredSocket() != socket {
+		moved = append(moved, "argus mod socket "+socket)
+	}
+	switch {
+	case mcp.current():
+	case mcp.off:
+		moved = append(moved, "argus mod mcp off")
+	default:
+		moved = append(moved, "argus mod mcp "+mcp.url)
+	}
+	if len(moved) == 0 {
+		return nil, nil
+	}
+	if err := configureMod(ctx, socket, mcp); err != nil {
+		return nil, err
+	}
+	return moved, stampMCP(mcp)
+}
+
+func configureMod(ctx context.Context, socket string, mcp mcpValues) error {
+	values := map[string]string{"socket": socket}
+	if mcp.url != "" || mcp.off {
+		values["mcp_url"] = mcp.url
+		values["mcp_token"] = mcp.token
+	}
+	b, _ := json.Marshal(values)
+	_, err := runClaude(ctx, string(b), "plugin", "configure", pluginID, "--values-stdin")
 	return err
+}
+
+// modOwnedElsewhere reports whether another node serves the mod (a dev node on
+// its own socket meets the user's), so the mod and its MCP setup stay with it.
+func modOwnedElsewhere(socket, configured string) bool {
+	return socket != configured && socketLive(configured)
 }
 
 func socketLive(path string) bool {
@@ -365,20 +438,19 @@ func configuredSocket() string {
 
 // reconcileMod installs or updates the mod, migrating old hooks and moving it
 // to a new socket. Old hooks that must stay are refreshed to opts.ArgusBin.
-func reconcileMod(ctx context.Context, opts adapter.InstallOptions) ([]string, error) {
+// configured is configuredSocket and foreign is modOwnedElsewhere for it.
+func reconcileMod(ctx context.Context, opts adapter.InstallOptions, configured string, foreign bool) ([]string, error) {
 	hooks, err := loadHooks()
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
 	legacy := err == nil && spec().AnyManaged(hooks)
-	socket, configured := opts.Socket, configuredSocket()
-	if socket != configured && socketLive(configured) {
-		// Another node serves the mod (a dev node on its own socket meets the
-		// user's): leave the mod with it.
+	socket, mcp := opts.Socket, mcpValuesFor(opts)
+	if foreign {
 		socket = ""
 	}
-	// The current mod was written and the socket stayed: skip the claude calls.
-	if !legacy && stampedVersion() == modVersion() && (socket == "" || configured == socket) {
+	// The current mod was written and its config stayed: skip the claude calls.
+	if !legacy && stampedVersion() == modVersion() && (socket == "" || configured == socket && mcp.current()) {
 		return nil, nil
 	}
 	unlock, err := lockMod()
@@ -406,12 +478,9 @@ func reconcileMod(ctx context.Context, opts adapter.InstallOptions) ([]string, e
 		// A live socket left in settings by a removed mod does not own it.
 		socket = opts.Socket
 	} else if !legacy && versions.current() {
-		if moved, err := reapplySocket(ctx, socket); err != nil || !moved {
-			return nil, err
-		}
-		return []string{"argus mod socket " + socket}, nil
+		return reapplyConfig(ctx, socket, mcp)
 	}
-	if err := applyMod(ctx, socket, versions); err != nil {
+	if err := applyMod(ctx, socket, mcp, versions); err != nil {
 		return nil, err
 	}
 	return []string{"argus mod " + modVersion()}, nil
@@ -443,6 +512,32 @@ func stampInstalled() error {
 	return os.WriteFile(filepath.Join(marketplaceDir(), installedStamp), []byte(modVersion()), 0o644)
 }
 
+// mcpStamp, in the marketplace dir, holds mcpValues.stamp of the values argus
+// last configured.
+const mcpStamp = ".mcp"
+
+func stampMCP(mcp mcpValues) error {
+	path := filepath.Join(marketplaceDir(), mcpStamp)
+	switch {
+	case mcp.off:
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return nil
+	case mcp.url == "":
+		return nil
+	}
+	return os.WriteFile(path, []byte(mcp.stamp()), 0o600)
+}
+
+func stampedMCP() string {
+	b, err := os.ReadFile(filepath.Join(marketplaceDir(), mcpStamp))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
 func stampedVersion() string {
 	b, err := os.ReadFile(filepath.Join(marketplaceDir(), installedStamp))
 	if err != nil {
@@ -463,7 +558,8 @@ func uninstallMod(ctx context.Context) error {
 	}
 	if !claudeOnPath() {
 		if _, err := os.Stat(marketplaceDir()); errors.Is(err, fs.ErrNotExist) {
-			return nil
+			_, err := removeMCPAllowRule()
+			return err
 		}
 		// Keep the marketplace: Claude would load a plugin whose source is gone.
 		return errors.New("claude is not on PATH, so the argus plugin cannot be removed from Claude Code")
@@ -479,6 +575,9 @@ func uninstallMod(ctx context.Context) error {
 		if _, err := runClaude(ctx, "", "plugin", "uninstall", p.id); err != nil {
 			return err
 		}
+	}
+	if _, err := removeMCPAllowRule(); err != nil {
+		return err
 	}
 	if path, found, err := findMarketplace(ctx); err != nil {
 		return err

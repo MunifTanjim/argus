@@ -10,10 +10,10 @@ import (
 )
 
 const (
-	replyFooter = "Reply to a message: argus session reply <id> \"<answer>\""
+	replyFooter = "Reply to a message with the argus `reply_to_message` tool (message_id is the message's id), or: argus session reply <id> \"<answer>\""
 	taskFooter  = "Do the task yourself. Spawn no argus sessions unless the task says to.\n" +
-		"When a task is done, report the result: argus session reply <id> \"<result>\""
-	respondFooter = "Answer a question:"
+		"When a task is done, report the result with the argus `reply_to_message` tool (message_id is the task's id), or: argus session reply <id> \"<result>\""
+	respondFooter = "Answer a question with the argus `respond_to_interaction` tool (message_id is the message's id), or:"
 	respondLines  = respondFooter + "\n" +
 		"  argus session respond <id> deny [--reason \"<text>\"]\n" +
 		"  argus session respond <id> --answer \"<question>=<option label>\""

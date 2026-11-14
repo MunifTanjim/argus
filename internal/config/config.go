@@ -26,6 +26,7 @@ type Config struct {
 	Lock      LockConfig
 	Workspace WorkspaceConfig
 	TUI       TUIConfig
+	MCP       MCPConfig
 }
 
 // WorkspaceConfig tunes workspace (git worktree) management.
@@ -137,6 +138,11 @@ type E2EEConfig struct {
 	Enabled bool
 }
 
+// MCPConfig configures the node's local MCP server. Port 0 disables it.
+type MCPConfig struct {
+	Port int
+}
+
 // Lock.Genesis is the base64 trust-log genesis this install is pinned to; "" = not configured (open/TOFU).
 type LockConfig struct {
 	Genesis string
@@ -176,6 +182,7 @@ var defaults = map[string]any{
 	"tui.leader-key":                  "<Space>",
 	"tui.mouse":                       "on",
 	"tui.verbose-transcript":          false,
+	"mcp.port":                        7734,
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
@@ -242,6 +249,9 @@ func (c Config) Validate() error {
 	}
 	if m := c.TUI.Mouse; m != MouseOn && m != MouseOff {
 		return fmt.Errorf("tui.mouse %q must be %q or %q", m, MouseOn, MouseOff)
+	}
+	if c.MCP.Port < 0 || c.MCP.Port > 65535 {
+		return fmt.Errorf("mcp.port %d must be between 0 and 65535", c.MCP.Port)
 	}
 	return nil
 }
@@ -311,6 +321,9 @@ func FromViper(v *viper.Viper) Config {
 			LeaderKey:         v.GetString("tui.leader-key"),
 			Mouse:             MouseMode(v.GetString("tui.mouse")),
 			VerboseTranscript: v.GetBool("tui.verbose-transcript"),
+		},
+		MCP: MCPConfig{
+			Port: v.GetInt("mcp.port"),
 		},
 	}
 }
