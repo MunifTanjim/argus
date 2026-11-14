@@ -485,7 +485,8 @@ test('reports running subagents when one starts', OPTIONS, async ($, on) => {
   await $.classic.SubagentStart(START as never)
   const events = subagentEvents(sent)
   expect(events.length).toBe(1)
-  expect(events[0]).toEqual(expect.objectContaining({ hook_event_name: 'Subagents', session_id: 's1', cwd: '/w' }))
+  expect(events[0]).toEqual(expect.objectContaining({ hook_event_name: 'Subagents', session_id: 's1' }))
+  expect(events[0]).not.toHaveProperty('cwd')
   expect(events[0].subagents).toEqual([{ id: 'a1', type: 'Explore', desc: 'map code' }])
 })
 

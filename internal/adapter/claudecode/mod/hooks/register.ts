@@ -484,7 +484,9 @@ async function reportSubagents(
     if (started && !listed.some(a => a.id === started.id)) {
       subagents.push({ id: started.id, type: started.type, desc: '' })
     }
-    await forward($, 'Subagents', { hook_event_name: 'Subagents', ...(await sessionFields($)), subagents })
+    // Raised in a subagent, $.session.cwd() is the subagent's.
+    const { cwd: _, ...fields } = await sessionFields($)
+    await forward($, 'Subagents', { hook_event_name: 'Subagents', ...fields, subagents })
   } catch {
     // argusd hears of it on the next event
   }
