@@ -367,7 +367,7 @@ func (d *Node) reply(ctx context.Context, caller callerRef, messageID, text stri
 	}
 	owner := api.Actor{Node: d.id, Key: api.ActorOwner}
 	if orig.From.Key == api.ActorArgus {
-		return api.OrchSendResult{}, errors.New("argus messages cannot be replied to: answer an interaction with argus session respond")
+		return api.OrchSendResult{}, errors.New("argus messages cannot be replied to: answer an interaction with the respond_to_interaction tool or argus session respond")
 	}
 	state := api.MessageQueued
 	if orig.From == owner {

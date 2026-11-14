@@ -498,7 +498,7 @@ func TestReplyToInteractionNamesRespondTool(t *testing.T) {
 	d.orchPass(t.Context())
 	n := onlyNotice(t, d)
 	_, err := d.reply(t.Context(), d.localCallerRef(p), n.ID, "yes")
-	want := "argus messages cannot be replied to: answer an interaction with argus session respond"
+	want := "argus messages cannot be replied to: answer an interaction with the respond_to_interaction tool or argus session respond"
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
 	}

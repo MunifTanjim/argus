@@ -35,6 +35,9 @@ func (ocAdapter) AgentColor() string { return "#d3869b" }
 func (ocAdapter) IsHeadless() bool   { return true }
 
 func (ocAdapter) CallerEnv() string { return "OPENCODE_SESSION_ID" }
+func (ocAdapter) MCPSessionID(meta map[string]json.RawMessage) (string, error) {
+	return adapter.MetaSessionID(meta, "ai.opencode/sessionID")
+}
 
 func (ocAdapter) IsAgentProcess(p procwalk.Proc, env map[string]string) bool {
 	return p.Runs("opencode")
@@ -186,11 +189,21 @@ func (a *ocAdapter) Respond(ctx context.Context, sess session.Session, p api.Res
 	return a.disc.respond(ctx, sess, p)
 }
 
-// OpenCode needs no argus-managed config.
-func (ocAdapter) Install(adapter.InstallOptions) error { return nil }
-func (ocAdapter) Reconcile(adapter.InstallOptions) ([]string, error) {
-	return nil, nil
+// OpenCode gets the argus MCP server in its global config. It has no reload, so
+// a change applies when the OpenCode service starts again.
+func (a ocAdapter) Install(opts adapter.InstallOptions) error {
+	_, err := a.Reconcile(opts)
+	return err
 }
-func (ocAdapter) Uninstall() error              { return nil }
+
+func (ocAdapter) Reconcile(opts adapter.InstallOptions) ([]string, error) {
+	changed, err := adapter.SyncMCP(Agent, opts, mcpServerURL, func() (bool, error) { return false, removeMCPServer() }, writeMCPServer)
+	if err != nil || !changed {
+		return nil, err
+	}
+	return []string{"mcp.argus"}, nil
+}
+
+func (ocAdapter) Uninstall() error              { return removeMCPServer() }
 func (ocAdapter) SettingsPath() (string, error) { return "", nil }
 func (ocAdapter) DefaultHookEvents() []string   { return nil }
