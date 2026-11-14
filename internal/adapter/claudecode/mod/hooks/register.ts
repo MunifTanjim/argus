@@ -4,6 +4,13 @@ import type { EngineInterface, Register } from 'claude-code'
 const EVENT_TIMEOUT_MS = 2000
 const RETRY_MIN_MS = 1000
 const RETRY_MAX_MS = 15000
+// The longest pause between a permission request's tries while argusd is unreachable.
+const ASK_RETRY_MAX_MS = 5000
+// The step a retry pause sleeps in, so a settled request stops pausing soon.
+const ASK_PAUSE_STEP_MS = 1000
+// How long a subagent's permission request waits out an argusd outage: Claude
+// shows no dialog for it while the mod waits (anthropics/claude-code#82150).
+const SUBAGENT_GRACE_MS = 90000
 // How long a command from argus may take to fail before it is acked as accepted.
 const ACK_WINDOW_MS = 1000
 // How long a fill's saved draft waits for argus's Enter to submit the text.
@@ -29,17 +36,24 @@ export type Command = { id: string; kind: (typeof KINDS)[number]; text: string }
 
 type Env = { tmuxPane: string; tmux: string; autoMode: boolean }
 
-type EventResult = { requestId?: string }
+type EventResult = { requestId?: string; instanceId?: string }
 
-type DecisionResult = { done: boolean; output?: string }
+type DecisionResult = { done: boolean; output?: string; instanceId?: string }
 
 // One permission request's wait for argus; settled once Claude's side decided.
 type Ask = {
   requestId?: string
+  // The argusd process holding requestId: a reply from another one lost it.
+  instanceId?: string
+  agentId?: string
   settled: boolean
   toolName: string
   toolInput: Record<string, unknown>
+  // The tool call it asks for, whose row starting to run means Claude allowed it.
+  toolUseId?: string
 }
+
+type Call = { tool: string; input: Record<string, unknown>; agentId?: string }
 
 type Decision =
   | { behavior: 'allow'; updatedInput?: Record<string, unknown>; updatedPermissions?: never[] }
@@ -53,6 +67,8 @@ let transcriptPath = ''
 let pollGen = 0
 // The permission requests still waiting on argus.
 const asks = new Set<Ask>()
+// The tool calls in flight, by tool_use_id.
+const calls = new Map<string, Call>()
 // The running main-loop turn, which $.turn.abort takes; '' when idle.
 let turnId = ''
 // The model and effort last reported to argusd, so steps report only a change.
@@ -76,6 +92,7 @@ export const register: Register = (on, options) => {
   filled = undefined
   abandoned.clear()
   shells.clear()
+  calls.clear()
 
   // The session may move to a new id (/clear, /resume): repoll under it at once.
   on('classic.SessionStart', async ($, e, next) => {
@@ -191,11 +208,13 @@ export const register: Register = (on, options) => {
       toolInput: ev.tool_input && typeof ev.tool_input === 'object' && !Array.isArray(ev.tool_input)
         ? (ev.tool_input as Record<string, unknown>)
         : {},
+      ...(typeof ev.agent_id === 'string' && ev.agent_id !== '' ? { agentId: ev.agent_id } : {}),
     }
+    ask.toolUseId = callOf(ask)
     asks.add(ask)
     try {
-      // A local answer aborts this hook: stop waiting on argus, so its lease ends the prompt there.
-      next.signal.addEventListener('abort', () => { ask.settled = true })
+      // A local answer or a stopped subagent aborts this hook: take the prompt down in argus.
+      next.signal.addEventListener('abort', () => { if (!ask.settled) void settle($, ask) })
       const theirs = next(e)
       const mine = askArgus($, e, ask)
       const first = await Promise.race([
@@ -221,9 +240,29 @@ export const register: Register = (on, options) => {
   // The tool call's next(e) covers Claude's permission step: when it returns,
   // Claude has decided any request argus still holds for this call.
   on('tool.call', async ($, e, next) => {
-    const result = await next(e)
-    if (socketPath !== '' && asks.size > 0) await endAsksFor($, e as Record<string, unknown>)
-    return result
+    const { tool, tool_use_id, agentId, ...input } = e as Record<string, unknown>
+    const call: Call = { tool: String(tool), input, ...(typeof agentId === 'string' ? { agentId } : {}) }
+    const id = String(tool_use_id ?? '')
+    const recorded = socketPath !== '' && id !== ''
+    if (recorded) calls.set(id, call)
+    try {
+      const result = await next(e)
+      await endAsks($, ask => asksFor(ask, call))
+      return result
+    } finally {
+      if (recorded) calls.delete(id)
+    }
+  }).catch(($, e, next) => next(e))
+
+  // Claude fires nothing at a local "Yes" and leaves the hook running until the
+  // tool ends: the call's row starting to run is the first sign of it.
+  on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
+    endRunning($, e.props.calls)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
+    endRunning($, [e.props])
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   // An interrupted turn fires no Stop: report every main-loop turn end as one
@@ -287,17 +326,22 @@ async function sendEvent($: EngineInterface, event: string, payload: object): Pr
 }
 
 // Register the permission request with argusd, then wait for the user's answer
-// there in requests short enough for $.http.fetch's 30 s limit. Undefined when
-// argus has no answer: no socket is configured, argusd is unreachable, or the
-// request ended elsewhere.
+// there in requests short enough for $.http.fetch's 30 s limit. A restarted
+// argusd gets the request again. Undefined when argus has no answer: no socket
+// is configured, the request ended elsewhere, or a subagent's argusd stayed
+// unreachable past SUBAGENT_GRACE_MS.
 async function askArgus($: EngineInterface, e: object, ask: Ask): Promise<Decision | undefined> {
   if (socketPath === '') return undefined
   try {
-    const { requestId } = await sendEvent($, 'PermissionRequest', e)
-    if (!requestId) return undefined
-    ask.requestId = requestId
+    if (!(await registerAsk($, e, ask))) return undefined
     while (!ask.settled) {
-      const r = JSON.parse(await post($, '/claude/decision', { requestId })) as DecisionResult
+      const out = await retrying($, ask, () => post($, '/claude/decision', { requestId: ask.requestId }))
+      if (out === undefined) return undefined
+      const r = JSON.parse(out) as DecisionResult
+      if (r.instanceId && r.instanceId !== ask.instanceId) {
+        if (!(await registerAsk($, e, ask))) return undefined
+        continue
+      }
       if (r.done) return parseDecision(r.output ?? '')
     }
     return undefined
@@ -306,17 +350,65 @@ async function askArgus($: EngineInterface, e: object, ask: Ask): Promise<Decisi
   }
 }
 
-// Take down argus's prompt for every open request this tool call settles.
-// Mirrors argusd's PostToolUse matching.
-async function endAsksFor($: EngineInterface, call: Record<string, unknown>): Promise<void> {
-  for (const ask of [...asks]) {
-    if (ask.toolName !== call.tool) continue
-    const whole = ask.toolName === 'AskUserQuestion' || ask.toolName === 'ExitPlanMode'
-    const matches = whole || Object.entries(ask.toolInput).every(
-      ([k, v]) => k in call && JSON.stringify(call[k]) === JSON.stringify(v),
-    )
-    if (matches) await settle($, ask)
+// Sends the PermissionRequest event and keeps the request id argusd gives it;
+// false when argusd gave none. A request registered after ask settled is
+// taken down at once.
+async function registerAsk($: EngineInterface, e: object, ask: Ask): Promise<boolean> {
+  const r = await retrying($, ask, () => sendEvent($, 'PermissionRequest', e))
+  if (!r?.requestId) return false
+  ask.requestId = r.requestId
+  ask.instanceId = r.instanceId
+  if (ask.settled) await settle($, ask)
+  return true
+}
+
+// Calls argusd until it answers. Undefined once ask settled, or once a
+// subagent's outage outlasted SUBAGENT_GRACE_MS. The pauses run as a process,
+// not on $.clock, so they cost the hook none of its budget.
+async function retrying<T>($: EngineInterface, ask: Ask, call: () => Promise<T>): Promise<T | undefined> {
+  let outage: number | undefined
+  let pause = RETRY_MIN_MS
+  while (!ask.settled) {
+    try {
+      return await call()
+    } catch {
+      const now = await $.clock.now()
+      outage ??= now
+      if (ask.agentId !== undefined && now - outage >= SUBAGENT_GRACE_MS) return undefined
+      for (let slept = 0; slept < pause && !ask.settled; slept += ASK_PAUSE_STEP_MS) {
+        await $.process.run(['sleep', String(ASK_PAUSE_STEP_MS / 1000)])
+      }
+      pause = Math.min(pause * 2, ASK_RETRY_MAX_MS)
+    }
   }
+  return undefined
+}
+
+// Take down argus's prompt for every open request match picks.
+async function endAsks($: EngineInterface, match: (ask: Ask) => boolean): Promise<void> {
+  await Promise.all([...asks].filter(ask => !ask.settled && match(ask)).map(ask => settle($, ask)))
+}
+
+function endRunning($: EngineInterface, rows: { isRunning?: boolean; tool_use_id?: string }[]): void {
+  if (asks.size === 0) return
+  const running = new Set(rows.filter(r => r.isRunning && r.tool_use_id).map(r => r.tool_use_id))
+  void endAsks($, ask => running.has(ask.toolUseId))
+}
+
+// The in-flight call ask is for that no other open request claimed.
+function callOf(ask: Ask): string | undefined {
+  const claimed = new Set([...asks].map(a => a.toolUseId))
+  for (const [id, call] of calls) if (!claimed.has(id) && asksFor(ask, call)) return id
+  return undefined
+}
+
+// Mirrors argusd's PostToolUse matching.
+function asksFor(ask: Ask, call: Call): boolean {
+  if (ask.toolName !== call.tool || ask.agentId !== call.agentId) return false
+  if (ask.toolName === 'AskUserQuestion' || ask.toolName === 'ExitPlanMode') return true
+  return Object.entries(ask.toolInput).every(
+    ([k, v]) => k in call.input && JSON.stringify(call.input[k]) === JSON.stringify(v),
+  )
 }
 
 // Stop waiting on argus for ask and take its prompt down there.
