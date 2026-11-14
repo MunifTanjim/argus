@@ -372,6 +372,20 @@ func (c *client) deleteSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// interrupt stops the session's running turn. An idle session has no turn to
+// stop, and a session the service does not know has nothing to stop.
+func (c *client) interrupt(ctx context.Context, sessionID string) error {
+	resp, err := c.do(ctx, http.MethodPost, "/api/session/"+sessionID+"/interrupt", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
+		return fmt.Errorf("interrupt session: %s", resp.Status)
+	}
+	return nil
+}
+
 // switchModel sets the model used by the session's subsequent turns.
 func (c *client) switchModel(ctx context.Context, sessionID string, model ocModelRef) error {
 	return c.send(ctx, http.MethodPost, "/api/session/"+sessionID+"/model", "switch model", map[string]any{

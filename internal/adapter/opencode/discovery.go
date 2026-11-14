@@ -521,7 +521,17 @@ func (d *discoverer) hasPendingPrompt(id string) bool {
 	return form || perm
 }
 
-func (d *discoverer) dismiss(id string) { d.remove(id) }
+// dismiss stops the session's running turn before it drops the session: the
+// session lives on in the service, and a kill must not leave it working.
+func (d *discoverer) dismiss(ctx context.Context, id string) error {
+	if c, ok := d.dial(); ok {
+		if err := c.interrupt(ctx, id); err != nil {
+			return err
+		}
+	}
+	d.remove(id)
+	return nil
+}
 
 func (d *discoverer) remove(id string) {
 	d.mu.Lock()
