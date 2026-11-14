@@ -953,3 +953,47 @@ func TestAutoStartWakesEventPump(t *testing.T) {
 		t.Fatal("event pump did not reconnect promptly after the service was started")
 	}
 }
+
+func TestDismissInterruptsTheTurn(t *testing.T) {
+	cases := map[string]struct {
+		status  int
+		noSvc   bool
+		wantErr bool
+	}{
+		"running":       {status: http.StatusOK},
+		"unknown":       {status: http.StatusNotFound},
+		"service error": {status: http.StatusInternalServerError, wantErr: true},
+		"no service":    {noSvc: true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var got string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					got = r.URL.Path
+					w.WriteHeader(tc.status)
+					return
+				}
+				_, _ = w.Write([]byte(`{"data":{"id":"ses_1"}}`))
+			}))
+			defer srv.Close()
+			reg := registry.New()
+			c := newClient(serviceInfo{URL: srv.URL})
+			d := newTestDiscoverer(reg, c)
+			d.upsert("ses_1", session.StatusWorking, nil)
+			if tc.noSvc {
+				d = newTestDiscoverer(reg, nil)
+			}
+			err := d.dismiss(context.Background(), "ses_1")
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error %v", err, tc.wantErr)
+			}
+			if !tc.noSvc && got != "/api/session/ses_1/interrupt" {
+				t.Fatalf("interrupt path = %q", got)
+			}
+			if _, live := reg.FindByAgentSession(Agent, "ses_1"); live != tc.wantErr {
+				t.Fatalf("live = %v after dismiss, want %v", live, tc.wantErr)
+			}
+		})
+	}
+}

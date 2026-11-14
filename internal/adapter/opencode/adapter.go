@@ -130,12 +130,11 @@ func (ocAdapter) PrepareTextInput(ctx context.Context, pc adapter.PaneController
 	return prepareTextInput(ctx, pc, paneID)
 }
 
-func (a *ocAdapter) Dismiss(_ context.Context, sess session.Session) error {
+func (a *ocAdapter) Dismiss(ctx context.Context, sess session.Session) error {
 	if a.disc == nil {
 		return fmt.Errorf("opencode: no active discoverer")
 	}
-	a.disc.dismiss(sess.AgentSessionID)
-	return nil
+	return a.disc.dismiss(ctx, sess.AgentSessionID)
 }
 
 // SendPrompt takes a prompt only while the session is idle.
