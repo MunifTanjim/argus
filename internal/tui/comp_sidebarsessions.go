@@ -54,7 +54,7 @@ func (s sidebarSessionsComp) footer(*ctx) []binding {
 func (s sidebarSessionsComp) footerPrompt(c *ctx) string {
 	switch {
 	case s.killID != "":
-		return asstStyle.Render(killPrompt(c.m.sessions[s.killID]))
+		return asstStyle.Render(killPrompt(c.m.killCounts, c.m.sessions[s.killID]))
 	case s.rename.on():
 		return s.rename.view()
 	case s.filter.on:
@@ -144,6 +144,9 @@ func (s sidebarSessionsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, 
 	ids := s.ids(c)
 	i, n := s.index(ids), len(ids)
 	if id := s.killID; id != "" {
+		if msg.String() == "y" && !m.killReady(id) {
+			return s, nil, true
+		}
 		s.killID = ""
 		if msg.String() == "y" {
 			return s, m.killCmd(id), true
@@ -210,6 +213,7 @@ func (s sidebarSessionsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, 
 				c.setFlash(refusal)
 			} else {
 				s.killID = ids[i]
+				return s, m.armKill(s.killID), true
 			}
 		}
 	case m.matches(msg, listKeys.Rename):

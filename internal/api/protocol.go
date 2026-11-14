@@ -41,12 +41,13 @@ const (
 	MethodSessionSpawn          = "sessions.spawn"          // request: SpawnParams; result: SpawnResult
 	MethodSessionResume         = "sessions.resume"         // request: ResumeParams; result: ResumeResult (reuses/adopts/launches a pane, waits until openable)
 	// Probed live per call.
-	MethodAgentsList            = "agents.list"             // request: AgentsListParams; result: AgentsListResult
-	MethodAgentModelList        = "agent.model.list"        // request: AgentModelListParams; result: AgentModelListResult
-	MethodSessionKill           = "sessions.kill"           // request: SessionRef; result: nil (kills the tmux pane, or dismisses a paneless presence card)
-	MethodSessionFocus          = "sessions.focus"          // request: SessionRef; result: nil (focus the session's tmux pane on its owning node)
-	MethodSessionRename         = "session.rename"          // request: SessionRenameParams; result: SessionRenameResult
-	MethodSessionPromptComplete = "session.prompt.complete" // request: PromptCompleteParams; result: PromptCompleteResult
+	MethodAgentsList             = "agents.list"              // request: AgentsListParams; result: AgentsListResult
+	MethodAgentModelList         = "agent.model.list"         // request: AgentModelListParams; result: AgentModelListResult
+	MethodSessionKill            = "sessions.kill"            // request: SessionRef; result: nil (kills the tmux pane, or dismisses a paneless presence card)
+	MethodSessionFocus           = "sessions.focus"           // request: SessionRef; result: nil (focus the session's tmux pane on its owning node)
+	MethodSessionRename          = "session.rename"           // request: SessionRenameParams; result: SessionRenameResult
+	MethodSessionPromptComplete  = "session.prompt.complete"  // request: PromptCompleteParams; result: PromptCompleteResult
+	MethodSessionDescendantCount = "session.descendant.count" // request: SessionRef; result: DescendantCountResult
 	// History (read-only, past sessions discovered on disk). Projects are aggregated
 	// across nodes by the gateway; sessions/transcript are routed to the owning node.
 	MethodSessionsHistoryProjects   = "sessions.historyProjects"   // request: no params; result: []session.HistoryProject
@@ -876,6 +877,12 @@ type SessionRef struct {
 type SessionRenameParams struct {
 	SessionID string `json:"session_id"`
 	Name      string `json:"name"`
+}
+
+// DescendantCountResult is the number of live sessions that sessions.kill on
+// the session also kills.
+type DescendantCountResult struct {
+	Count int `json:"count"`
 }
 
 // SessionRenameResult is the requested name. Applied is false when the agent

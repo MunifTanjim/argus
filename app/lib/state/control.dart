@@ -172,6 +172,12 @@ class SessionService {
   Future<Result<void>> kill(String sessionId) =>
       _guard((c) => c.call('sessions.kill', {'session_id': sessionId}));
 
+  /// How many live sessions a kill of [sessionId] also kills.
+  Future<Result<int>> descendantCount(String sessionId) => _guard((c) async {
+        final r = await c.call('session.descendant.count', {'session_id': sessionId});
+        return (r as Map)['count'] as int;
+      });
+
   /// Renames a session through the agent's own rename feature. Returns
   /// whether the agent has applied the name; false means it takes it later.
   Future<Result<bool>> rename(String sessionId, String name) =>

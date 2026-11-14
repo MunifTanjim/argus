@@ -784,6 +784,22 @@ func (d *Node) handleSessionKill(ctx context.Context, params json.RawMessage) (a
 	return nil, err
 }
 
+func (d *Node) handleSessionDescendantCount(ctx context.Context, params json.RawMessage) (any, error) {
+	p, err := api.Decode[api.SessionRef](params)
+	if err != nil {
+		return nil, err
+	}
+	s, ok := d.reg.Get(p.SessionID)
+	if !ok {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session " + p.SessionID}
+	}
+	below, err := d.descendants(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	return api.DescendantCountResult{Count: len(below)}, nil
+}
+
 func (d *Node) killSession(ctx context.Context, s session.Session) error {
 	// A headless agent's pane is a disposable viewer, not the session's process:
 	// killing it alone leaves the session in the list. Remove the session, tearing

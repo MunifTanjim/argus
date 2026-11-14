@@ -303,7 +303,7 @@ func TestSidebarSessionsKill(t *testing.T) {
 	a := m.sessions["n1:a"]
 	a.Tmux.PaneID = "%1"
 	m.sessions["n1:a"] = a
-	m = typeKeys(m, "dd")
+	m = countedKills(typeKeys(m, "dd"))
 	if m.left.sessions.killID != "n1:a" {
 		t.Fatalf("dd asks to kill alpha, killID = %q", m.left.sessions.killID)
 	}

@@ -44,6 +44,14 @@ func killableHome() model {
 	return m
 }
 
+// countedKills answers the count request of an open kill prompt: no child sessions.
+func countedKills(m model) model {
+	for id := range m.sessions {
+		m, _ = upd(m, killCountMsg{id: id})
+	}
+	return m
+}
+
 func TestHomeAndWorkspaceFramesUnchanged(t *testing.T) {
 	onTree := func(m model) model { return pressKeys(m, cw('h')...) }
 	cases := []struct {
@@ -51,7 +59,7 @@ func TestHomeAndWorkspaceFramesUnchanged(t *testing.T) {
 		build func() model
 	}{
 		{"home", func() model { return typeKeys(homeTestModel(), "j") }},
-		{"home-kill", func() model { return typeKeys(killableHome(), "jdd") }},
+		{"home-kill", func() model { return countedKills(typeKeys(killableHome(), "jdd")) }},
 		{"home-terminals", func() model {
 			m := homeTestModel()
 			m, _ = upd(m, terminalsMsg{list: twoTerminals, nodes: capable("n1")})
@@ -74,7 +82,7 @@ func TestHomeAndWorkspaceFramesUnchanged(t *testing.T) {
 			return typeKeys(pressKeys(typeKeys(onTree(homeTestModel()), "jjj"), keyMsg("enter")), "j")
 		}},
 		{"workspace-kill", func() model {
-			return typeKeys(pressKeys(typeKeys(onTree(killableHome()), "jjj"), keyMsg("enter")), "jdd")
+			return countedKills(typeKeys(pressKeys(typeKeys(onTree(killableHome()), "jjj"), keyMsg("enter")), "jdd"))
 		}},
 		{"workspace-files", func() model {
 			m := homeTestModel()

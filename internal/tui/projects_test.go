@@ -927,7 +927,7 @@ func TestKillFromWorkspaceSessionsTab(t *testing.T) {
 	m = withFocus(m, mainPane)
 
 	res, _ := m.runKey(seqKey("dd"))
-	m = res.(model)
+	m = countedKills(res.(model))
 	if paneOf(m).killID != "n1:s1" || !strings.Contains(ansi.Strip(m.currentFooter()), "kill session repo · %1? y/n") {
 		t.Fatalf("dd should ask to kill n1:s1: pending=%q footer=%q", paneOf(m).killID, m.currentFooter())
 	}
