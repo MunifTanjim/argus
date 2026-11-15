@@ -6,13 +6,16 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // TestMain resolves theme colors and icons once so rendering helpers under test
-// produce real glyphs/colors (initTheme/initIcons set package globals).
+// produce real glyphs/colors (initTheme/initIcons set package globals). Frames
+// show local times, so the zone is pinned for goldens recorded on any machine.
 func TestMain(m *testing.M) {
+	time.Local = time.UTC
 	initTheme(true)
 	initIcons()
 	strictScreens = true
