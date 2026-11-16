@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -156,10 +157,28 @@ void main() {
             _s(status: 'awaiting_input', interaction: {'kind': 'question'}),
             now),
         'Question');
-    expect(modelLine(const Summary(modelName: 'Opus 5.5', effort: 'high')),
+    String line(Summary? s) {
+      final (:parts, base: _) = modelParts(s);
+      return modelLine(parts, parts.length).toPlainText();
+    }
+
+    expect(line(const Summary(modelName: 'Opus 5.5', effort: 'high')),
         'Opus 5.5 · high');
-    expect(modelLine(const Summary(modelName: 'Opus 5.5')), 'Opus 5.5');
-    expect(modelLine(null), isNull);
+    expect(line(const Summary(modelName: 'Opus 5.5')), 'Opus 5.5');
+    expect(line(null), isEmpty);
+    expect(
+        line(const Summary(
+            modelName: 'Opus 5.5',
+            effort: 'high',
+            hasContext: true,
+            contextPct: 42.5,
+            tokens: 84000,
+            hasCost: true,
+            costUsd: 1.234)),
+        'Opus 5.5 · high · 84.0k (43%) · \$1.23');
+    expect(line(const Summary(tokens: 1200000, hasCost: true, costUsd: 0.5)),
+        '1.2M · \$0.50');
+    expect(line(const Summary(hasContext: true, contextPct: 42)), '42%');
     expect(formatElapsed(const Duration(seconds: 12)), '12s');
     expect(formatElapsed(const Duration(hours: 1, minutes: 2, seconds: 9)),
         '1h 02m');
@@ -502,7 +521,8 @@ void main() {
     expect(t.takeException(), isNull);
   });
 
-  testWidgets('long rule labels truncate on a narrow screen', (t) async {
+  testWidgets('on a narrow screen, a long status truncates and a long model drops',
+      (t) async {
     t.view.physicalSize = const Size(320, 800);
     t.view.devicePixelRatio = 1;
     addTearDown(t.view.reset);
@@ -519,7 +539,7 @@ void main() {
     await t.pump();
     expect(t.takeException(), isNull);
     expect(find.textContaining('Permission:'), findsOneWidget);
-    expect(find.textContaining('Claude Opus'), findsOneWidget);
+    expect(find.textContaining('Claude Opus'), findsNothing);
   });
 
   testWidgets('text typed while a send is in flight is kept', (t) async {
@@ -634,6 +654,44 @@ void main() {
       expect(find.text('make test'), findsOneWidget);
       expect(find.text('npm run dev'), findsOneWidget);
     });
+  });
+
+  testWidgets('the model line drops parts in the TUI order, never truncating',
+      (t) async {
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    final s = _s(subagents: [
+      {'id': 'a1', 'type': 'Explore'},
+    ], summary: {
+      'model_name': 'Opus 5.5',
+      'effort': 'high',
+      'has_context': true,
+      'context_pct': 42,
+      'tokens': 84000,
+      'has_cost': true,
+      'cost_usd': 1.234,
+    });
+    const steps = [
+      (true, 'Opus 5.5 · high · 84.0k (42%) · \$1.23'),
+      (true, 'Opus 5.5 · high · 84.0k (42%)'),
+      (true, 'Opus 5.5 · high'),
+      (false, 'Opus 5.5 · high'),
+      (false, 'Opus 5.5'),
+    ];
+    final seen = <int>[];
+    for (var w = 800.0; w >= 140; w -= 4) {
+      t.view.physicalSize = Size(w, 800);
+      await _pump(t, s, _Recording());
+      final count = find.byIcon(Icons.smart_toy_outlined).evaluate().isNotEmpty;
+      final i = steps.indexWhere(
+          (st) => st.$1 == count && find.text(st.$2).evaluate().isNotEmpty);
+      expect(i, isNot(-1), reason: 'width $w');
+      final p = t.renderObject<RenderParagraph>(find.text(steps[i].$2));
+      expect(p.didExceedMaxLines, isFalse, reason: 'width $w');
+      if (seen.isEmpty || seen.last != i) seen.add(i);
+    }
+    expect(seen, [0, 1, 2, 3, 4]);
+    expect(t.takeException(), isNull);
   });
 
   testWidgets('a queueing session sends while working', (t) async {

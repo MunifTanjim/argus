@@ -33,6 +33,8 @@ class Summary {
   final bool hasContext;
   final double contextPct;
   final int tokens;
+  final bool hasCost;
+  final double costUsd;
   final String? task;
   final String? lastActivity;
   final String? effort;
@@ -43,6 +45,8 @@ class Summary {
     this.hasContext = false,
     this.contextPct = 0,
     this.tokens = 0,
+    this.hasCost = false,
+    this.costUsd = 0,
     this.task,
     this.lastActivity,
     this.effort,
@@ -54,6 +58,8 @@ class Summary {
         hasContext: j['has_context'] as bool? ?? false,
         contextPct: (j['context_pct'] as num?)?.toDouble() ?? 0,
         tokens: (j['tokens'] as num?)?.toInt() ?? 0,
+        hasCost: j['has_cost'] as bool? ?? false,
+        costUsd: (j['cost_usd'] as num?)?.toDouble() ?? 0,
         task: j['task'] as String?,
         lastActivity: j['last_activity'] as String?,
         effort: j['effort'] as String?,

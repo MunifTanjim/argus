@@ -20,6 +20,7 @@ import 'running_shells_sheet.dart';
 import 'running_subagents_sheet.dart';
 import 'status_style.dart';
 import 'theme.dart';
+import 'usage_format.dart';
 import 'voice_input_field.dart';
 
 String interactionLabel(Interaction ix) => switch (ix.kind) {
@@ -76,17 +77,53 @@ String? composerStatus(Session s, DateTime now) {
   }
 }
 
-/// The model line's text, `model · effort`, or null when neither is known.
-String? modelLine(Summary? s) {
-  final parts = [
-    if ((s?.modelName ?? '').isNotEmpty) s!.modelName!,
-    if ((s?.effort ?? '').isNotEmpty) s!.effort!,
+/// A model line part: its text and color.
+typedef ModelPart = ({String text, Color color});
+
+/// The model line's parts: model, effort, usage, cost, each left out when
+/// unknown. The first [base] are the model and effort.
+({List<ModelPart> parts, int base}) modelParts(Summary? s) {
+  if (s == null) return (parts: const <ModelPart>[], base: 0);
+  final parts = <ModelPart>[
+    if ((s.modelName ?? '').isNotEmpty)
+      (text: s.modelName!, color: hexColor(s.modelColor) ?? AppColors.dim),
+    if ((s.effort ?? '').isNotEmpty) (text: s.effort!, color: AppColors.dim),
   ];
-  return parts.isEmpty ? null : parts.join(' · ');
+  final base = parts.length;
+  if (s.hasContext) {
+    final pct = fmtPct(s.contextPct);
+    parts.add((
+      text: s.tokens > 0 ? '${fmtTokens(s.tokens)} ($pct)' : pct,
+      color: contextColor(s.contextPct)
+    ));
+  } else if (s.tokens > 0) {
+    parts.add((text: fmtTokens(s.tokens), color: AppColors.dim));
+  }
+  if (s.hasCost) {
+    parts.add(
+        (text: '\$${s.costUsd.toStringAsFixed(2)}', color: AppColors.dim));
+  }
+  return (parts: parts, base: base);
+}
+
+/// The first [n] of [parts].
+TextSpan modelLine(List<ModelPart> parts, int n) {
+  const dim = TextStyle(color: AppColors.dim);
+  return TextSpan(children: [
+    for (var i = 0; i < n; i++) ...[
+      if (i > 0) const TextSpan(text: ' · ', style: dim),
+      TextSpan(text: parts[i].text, style: TextStyle(color: parts[i].color)),
+    ],
+  ]);
 }
 
 /// The least tap target width a touch control gets.
 const _countTapWidth = 48.0;
+const _countPad = 6.0;
+const _countIcon = 14.0;
+const _countGap = 4.0;
+const _ruleEdge = 12.0;
+const _rulePad = 6.0;
 const _maxQueued = 3;
 
 final _whitespace = RegExp(r'\s+');
@@ -406,7 +443,10 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     // A collapsed prompt still waits on the user, so its line stands out.
     final alert = showPanel && _collapsed;
     final status = _rule(
-      label: composerStatus(s, DateTime.now()),
+      label: switch (composerStatus(s, DateTime.now())) {
+        final t? => TextSpan(text: t),
+        null => null,
+      },
       alert: alert,
       trailing: showPanel
           ? IconButton(
@@ -435,15 +475,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
           else
             status,
           body,
-          _rule(
-            label: modelLine(s.summary),
-            leading: s.subagents.isEmpty && s.shells.isEmpty
-                ? null
-                : Row(mainAxisSize: MainAxisSize.min, children: [
-                    if (s.subagents.isNotEmpty) _subagentCount(s),
-                    if (s.shells.isNotEmpty) _shellCount(s),
-                  ]),
-          ),
+          _modelRule(s),
         ],
       ),
     );
@@ -573,10 +605,10 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
             child: ColoredBox(
               color: AppColors.canvas,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
+                padding: const EdgeInsets.symmetric(horizontal: _countPad),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(icon, size: 14, color: AppColors.dim),
-                  const SizedBox(width: 4),
+                  Icon(icon, size: _countIcon, color: AppColors.dim),
+                  const SizedBox(width: _countGap),
                   Text('$n',
                       style: mono.copyWith(color: AppColors.dim)),
                 ]),
@@ -586,45 +618,108 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
         ),
       );
 
-  // A divider with a label set into its right end, like the TUI's rules.
+  double _textWidth(BuildContext context, InlineSpan span) {
+    final p = TextPainter(
+        text: TextSpan(
+            style: DefaultTextStyle.of(context).style.merge(mono),
+            children: [span]),
+        maxLines: 1,
+        textDirection: TextDirection.ltr,
+        textScaler: MediaQuery.textScalerOf(context))
+      ..layout();
+    final w = p.width;
+    p.dispose();
+    return w;
+  }
+
+  /// The model line: running counts at its left end, model parts at its
+  /// right. As the TUI's bottom rule does, it drops cost, usage, the counts,
+  /// effort, then the model, to fit without truncating.
+  Widget _modelRule(Session s) {
+    final (:parts, :base) = modelParts(s.summary);
+    final counts = [
+      if (s.subagents.isNotEmpty) (s.subagents.length, _subagentCount(s)),
+      if (s.shells.isNotEmpty) (s.shells.length, _shellCount(s)),
+    ];
+    final order = [
+      for (var n = parts.length; n > base; n--) (counts.length, n),
+      for (var k = counts.length; k > 0; k--) (k, base),
+      for (var n = base; n >= 0; n--) (0, n),
+    ];
+    double countsWidth(BuildContext context, int k) {
+      var w = 0.0;
+      for (final (n, _) in counts.take(k)) {
+        final content = 2 * _countPad + _countIcon + _countGap +
+            _textWidth(context, TextSpan(text: '$n'));
+        w += math.max(_countTapWidth, content);
+      }
+      return w;
+    }
+    return LayoutBuilder(builder: (context, c) {
+      final room = c.maxWidth - 2 * _ruleEdge;
+      final (k, n) = order.firstWhere((o) {
+        final (k, n) = o;
+        if (k == 0 && n == 0) return true;
+        final label = n == 0
+            ? 0
+            : _textWidth(context, modelLine(parts, n)) + 2 * _rulePad;
+        return countsWidth(context, k) + label <= room;
+      }, orElse: () => (0, 0));
+      return _rule(
+        label: n == 0 ? null : modelLine(parts, n),
+        leading: k == 0
+            ? null
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [for (final c in counts.take(k)) c.$2]),
+      );
+    });
+  }
+
+  /// A divider with [label] set into its right end, like the TUI's rules. The
+  /// label truncates when it alone exceeds the width.
   Widget _rule(
-      {String? label, Widget? leading, Widget? trailing, bool alert = false}) {
+      {InlineSpan? label,
+      Widget? leading,
+      Widget? trailing,
+      bool alert = false}) {
     final bg = alert ? AppColors.awaitingSurface : AppColors.canvas;
     final line = Divider(
         height: 1, color: alert ? AppColors.awaitingBorder : AppColors.border);
-    // The label sits on the line and truncates when it alone exceeds the width.
-    Widget onLine(String t) => Stack(
-          alignment: Alignment.center,
-          children: [
-            line,
-            Align(
-              alignment: Alignment.centerRight,
-              child: ColoredBox(
-                color: bg,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Text(t,
-                      maxLines: 1,
-                      softWrap: false,
-                      overflow: TextOverflow.ellipsis,
-                      style: mono.copyWith(
-                          color: alert
-                              ? statusColor(SessionStatus.awaitingInput)
-                              : AppColors.dim)),
-                ),
-              ),
-            ),
-          ],
-        );
+    final style = mono.copyWith(
+        color: alert ? statusColor(SessionStatus.awaitingInput) : AppColors.dim);
     return Container(
       height: trailing == null ? 20 : 36,
       color: bg,
       child: Row(children: [
-        SizedBox(width: 12, child: line),
+        SizedBox(width: _ruleEdge, child: line),
         ?leading,
-        Expanded(child: label != null ? onLine(label) : line),
+        Expanded(
+            child: label == null
+                ? line
+                : Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      line,
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: ColoredBox(
+                          color: bg,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: _rulePad),
+                            child: Text.rich(label,
+                                maxLines: 1,
+                                softWrap: false,
+                                overflow: TextOverflow.ellipsis,
+                                style: style),
+                          ),
+                        ),
+                      ),
+                    ],
+                  )),
         ?trailing,
-        SizedBox(width: 12, child: line),
+        SizedBox(width: _ruleEdge, child: line),
       ]),
     );
   }
