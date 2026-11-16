@@ -10,29 +10,13 @@ import 'item_row.dart';
 import 'subagent_trace_screen.dart';
 import 'theme.dart';
 import 'tool_registry.dart';
+import 'usage_format.dart';
 
 const _mono = TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1.3);
 final _monoDim = _mono.copyWith(color: AppColors.dim);
 
-/// Mirrors the TUI thresholds. A healthy context stays dim so it doesn't
-/// compete with the elevated states.
-Color _ctxColor(double pct) {
-  if (pct >= 80) return const Color(0xFFfb4934); // red
-  if (pct >= 50) return const Color(0xFFfabd2f); // yellow
-  return AppColors.dim;
-}
-
-Color? _hexColor(String? hex) {
-  if (hex == null || hex.length != 7 || !hex.startsWith('#')) return null;
-  final v = int.tryParse(hex.substring(1), radix: 16);
-  return v == null ? null : Color(0xFF000000 | v);
-}
-
 const thinkingCountColor = Color(0xFFd79921); // gruvbox neutral yellow
 const toolCountColor = Color(0xFF458588); // gruvbox neutral blue
-
-String _fmtTokens(int n) =>
-    n >= 1000 ? '${(n / 1000).toStringAsFixed(1)}k' : '$n';
 
 // Matches the TUI duration format.
 String _fmtDuration(int ms) {
@@ -45,10 +29,10 @@ String _fmtDuration(int ms) {
 String _fmtContext(Entry e) {
   if (e.contextDeltaTokens == 0 &&
       e.contextFirstPct.round() == e.contextPct.round()) {
-    return 'ctx ${e.contextPct.round()}%';
+    return fmtContextPct(e.contextPct);
   }
   return 'ctx ${e.contextFirstPct.round()}% → ${e.contextPct.round()}% '
-      '(+${_fmtTokens(e.contextDeltaTokens)})';
+      '(+${fmtTokens(e.contextDeltaTokens)})';
 }
 
 String _clockTime(String? ts) {
@@ -502,7 +486,7 @@ class _TurnEndDivider extends StatelessWidget {
 
     if (e.interrupted) add('interrupted', color: AppColors.error);
     if (e.modelName?.isNotEmpty ?? false) {
-      add(e.modelName!, color: _hexColor(e.modelColor) ?? AppColors.secondary);
+      add(e.modelName!, color: hexColor(e.modelColor) ?? AppColors.secondary);
     }
     if (e.thinking > 0) {
       add(
@@ -514,8 +498,8 @@ class _TurnEndDivider extends StatelessWidget {
     if (e.toolCount > 0) {
       add('${e.toolCount}', icon: Icons.build, iconColor: toolCountColor);
     }
-    if (e.usage.output > 0) add(_fmtTokens(e.usage.output), icon: Icons.token);
-    if (e.hasContext) add(_fmtContext(e), color: _ctxColor(e.contextPct));
+    if (e.usage.output > 0) add(fmtTokens(e.usage.output), icon: Icons.token);
+    if (e.hasContext) add(_fmtContext(e), color: contextColor(e.contextPct));
     if (e.durationMs > 0) add(_fmtDuration(e.durationMs), icon: Icons.schedule);
     final time = _clockTime(e.timestamp);
     if (time.isNotEmpty) add(time);

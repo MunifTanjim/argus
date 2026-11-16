@@ -4,7 +4,6 @@ import 'package:argus/state/tool_detail.dart';
 import 'package:argus/ui/entry_row.dart';
 import 'package:argus/ui/item_detail_screen.dart';
 import 'package:argus/ui/subagent_trace_screen.dart';
-import 'package:argus/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -348,7 +347,7 @@ void main() {
     expect(_span(tester, 'ctx 85%').style?.color, const Color(0xFFfb4934));
   });
 
-  testWidgets('turn_end healthy context % stays dim', (tester) async {
+  testWidgets('turn_end healthy context % is green', (tester) async {
     await _pump(
       tester,
       const Entry(
@@ -359,7 +358,7 @@ void main() {
         contextPct: 42,
       ),
     );
-    expect(_span(tester, 'ctx 42%').style?.color, AppColors.dim);
+    expect(_span(tester, 'ctx 42%').style?.color, const Color(0xFFb8bb26));
   });
 
   testWidgets('compact divider renders its summary', (tester) async {
