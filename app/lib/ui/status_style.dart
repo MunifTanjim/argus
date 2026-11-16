@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../models/enums.dart';
+import '../models/session.dart';
+import 'theme.dart';
 
 String statusGlyph(SessionStatus s) {
   switch (s) {
@@ -25,7 +27,7 @@ Color statusColor(SessionStatus s) {
     case SessionStatus.working:
       return const Color(0xFFb8bb26);
     case SessionStatus.awaitingInput:
-      return const Color(0xFFfabd2f);
+      return AppColors.waiting;
     case SessionStatus.dead:
       return const Color(0xFFfb4934);
     case SessionStatus.idle:
@@ -36,3 +38,6 @@ Color statusColor(SessionStatus s) {
   }
 }
 
+/// [statusColor], with blocked sessions set apart.
+Color sessionColor(Session s) =>
+    s.blocked ? AppColors.blocked : statusColor(s.status);

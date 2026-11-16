@@ -16,7 +16,6 @@ import 'package:argus/state/sessions.dart';
 import 'package:argus/ui/interaction_panel.dart';
 import 'package:argus/ui/prompt_completion.dart';
 import 'package:argus/ui/session_composer.dart';
-import 'package:argus/ui/status_style.dart';
 import 'package:argus/ui/theme.dart';
 import '../support/fake_session_repository.dart';
 
@@ -286,11 +285,26 @@ void main() {
     expect(find.byType(TextField), findsNothing);
     Color? labelColor() =>
         t.widget<Text>(find.text('Permission: Bash')).style?.color;
-    expect(labelColor(), AppColors.dim);
+    Set<Color?> ruleColors() =>
+        {for (final d in t.widgetList<Divider>(find.byType(Divider))) d.color};
+    Set<Color?> surfaces() => {
+          for (final c in t.widgetList<Container>(find.ancestor(
+              of: find.byType(Divider), matching: find.byType(Container))))
+            c.color
+        };
+    Color? iconColor() => t
+        .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.expand_more))
+        .color;
+    expect(labelColor(), AppColors.blocked);
+    expect(iconColor(), AppColors.blocked);
+    expect(ruleColors(), {AppColors.blocked});
+    expect(surfaces(), isNot(contains(AppColors.awaitingSurface)));
     await t.tap(find.byTooltip('Collapse'));
     await t.pump();
     expect(find.byType(InteractionPanel), findsNothing);
-    expect(labelColor(), statusColor(SessionStatus.awaitingInput));
+    expect(labelColor(), AppColors.blocked);
+    expect(ruleColors(), {AppColors.awaitingBorder, AppColors.border});
+    expect(surfaces(), contains(AppColors.awaitingSurface));
     await t.tap(find.byTooltip('Expand'));
     await t.pump();
     expect(find.byType(InteractionPanel), findsOneWidget);

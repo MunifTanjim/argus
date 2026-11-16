@@ -13,6 +13,12 @@ class AppColors {
   static const accent = Color(0xFF8ec07c); // aqua — non-status chrome
   static const awaitingSurface = Color(0xFF32281d);
   static const awaitingBorder = Color(0xFF7c5f1e);
+  static const blocked = Color(0xFFfabd2f); // gruvbox yellow — blocked on a prompt
+  static const blockedSurface = awaitingSurface;
+  static const blockedBorder = awaitingBorder;
+  static const waiting = Color(0xFF83a598); // gruvbox blue — finished its turn
+  static const waitingSurface = Color(0xFF1f2b2c);
+  static const waitingBorder = Color(0xFF45707a);
   static const error = Color(
     0xFFfb4934,
   ); // gruvbox red — fatal connection state

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/ui/node_header.dart';
+import 'package:argus/ui/theme.dart';
 
 void main() {
   Future<void> pump(WidgetTester tester, Widget w) =>
@@ -28,7 +29,7 @@ void main() {
   });
 
   testWidgets('needs you shows the needs-input diamond', (tester) async {
-    await pump(tester, const NeedsYouHeader(label: 'Needs you'));
+    await pump(tester, const NeedsYouHeader(label: 'Needs you', color: AppColors.blocked));
     expect(find.text('◆'), findsOneWidget);
     expect(find.text('NEEDS YOU'), findsOneWidget);
   });

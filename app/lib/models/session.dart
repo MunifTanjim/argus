@@ -345,6 +345,15 @@ class Session {
   /// API agents like opencode, false for decision-only sessions.
   bool get acceptsInput => inputMode != InputMode.none;
 
+  /// A permission, question or plan awaiting the user. Mirrors the backend
+  /// session.InteractionPending().
+  bool get interactionPending =>
+      interaction != null && interaction!.kind != InteractionKind.idle;
+
+  /// Waiting on a pending prompt, as opposed to having finished its turn.
+  bool get blocked =>
+      status == SessionStatus.awaitingInput && interactionPending;
+
   /// Whether a paneless API session can be torn down (dismissed). Kill is
   /// unconditional, so status and interaction do not gate it.
   bool get _dismissable => inputMode == InputMode.api && !controllable;

@@ -219,7 +219,7 @@ class _SessionRow extends StatelessWidget {
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontFamily: 'monospace',
-                      color: dim ? AppColors.border : statusColor(s.status),
+                      color: dim ? AppColors.border : sessionColor(s),
                     ),
                   ),
                 ),

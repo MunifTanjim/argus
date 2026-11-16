@@ -29,7 +29,11 @@ class SessionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = session;
-    final awaiting = s.status == SessionStatus.awaitingInput;
+    final (surface, border) = s.blocked
+        ? (AppColors.blockedSurface, AppColors.blockedBorder)
+        : s.status == SessionStatus.awaitingInput
+            ? (AppColors.waitingSurface, AppColors.waitingBorder)
+            : (AppColors.card, AppColors.border);
     final title = s.displayTitle;
     final nodeLabel = s.nodeLabel ?? s.nodeId ?? 'local';
 
@@ -42,9 +46,8 @@ class SessionCard extends StatelessWidget {
 
     final card = Container(
       decoration: BoxDecoration(
-        color: awaiting ? AppColors.awaitingSurface : AppColors.card,
-        border: Border.all(
-            color: awaiting ? AppColors.awaitingBorder : AppColors.border),
+        color: surface,
+        border: Border.all(color: border),
         borderRadius: BorderRadius.circular(6),
       ),
       padding: const EdgeInsets.all(12),
@@ -55,7 +58,7 @@ class SessionCard extends StatelessWidget {
             children: [
               Text(statusGlyph(s.status),
                   style: TextStyle(
-                      fontFamily: 'monospace', color: statusColor(s.status))),
+                      fontFamily: 'monospace', color: sessionColor(s))),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(title,

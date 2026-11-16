@@ -14,7 +14,7 @@ void main() {
 
   test('colors by status', () {
     expect(statusColor(SessionStatus.working), const Color(0xFFb8bb26));
-    expect(statusColor(SessionStatus.awaitingInput), const Color(0xFFfabd2f));
+    expect(statusColor(SessionStatus.awaitingInput), const Color(0xFF83a598));
     expect(statusColor(SessionStatus.idle), const Color(0xFF928374));
     expect(statusColor(SessionStatus.dead), const Color(0xFFfb4934));
   });
