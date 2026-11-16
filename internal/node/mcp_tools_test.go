@@ -380,6 +380,28 @@ func TestMCPTranscriptHonorsLast(t *testing.T) {
 	}
 }
 
+func TestMCPTranscriptOmitsArgusMessages(t *testing.T) {
+	d, b := toolNode(t)
+	entries := []transcript.Entry{{ID: "0", Kind: transcript.EntryUser, Text: "<argus-message raw",
+		ArgusMessages: []transcript.ArgusMessage{{ID: "m-1", Kind: "task", Body: "build it"}}}}
+	d.adapters["codex"] = transcriptAdapter{Adapter: d.adapters["codex"], view: transcript.TranscriptView{Entries: entries}}
+	d.reg.ApplyHook(registry.HookUpdate{
+		Agent: "codex", Server: session.TmuxServerDefault, PaneID: "%t9",
+		AgentSessionID: "t9", Status: session.StatusIdle, TranscriptPath: "/t9.jsonl",
+	})
+	res := b.Call(t.Context(), "codex", "get_session_transcript", nil, json.RawMessage(`{"session_id":"home:default:%t9"}`))
+	var out api.OrchTranscriptResult
+	if res.IsError || json.Unmarshal([]byte(res.Text), &out) != nil {
+		t.Fatalf("res = %+v", res)
+	}
+	if strings.Contains(res.Text, "argusMessages") || len(out.Entries) != 1 || out.Entries[0].Text != "<argus-message raw" {
+		t.Fatalf("res = %s", res.Text)
+	}
+	if entries[0].ArgusMessages == nil {
+		t.Fatal("the adapter's entries were changed")
+	}
+}
+
 // oldToolName matches a tool name from before the rename, as text that names a
 // tool: in backticks, or as "the <name> tool", or after "with" or "Use".
 var oldToolName = regexp.MustCompile("`(whoami|list|show|spawn|send|reply|respond|output|transcript|kill|rename)`|\\b(whoami|list|show|spawn|send|reply|respond|output|transcript|kill|rename) tool\\b|\\b(with|Use) (whoami|list|show|spawn|send|reply|respond|output|transcript|kill|rename)\\b")

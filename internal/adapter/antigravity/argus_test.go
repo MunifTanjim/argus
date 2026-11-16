@@ -1,0 +1,50 @@
+package antigravity
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/MunifTanjim/argus/internal/transcript"
+)
+
+const argusTaskPrompt = "<argus-message id=\"m-1\" kind=\"task\" from=\"lead\" session=\"home:argus:%1\">\nReview the API\n</argus-message>\n\n<argus-message id=\"m-2\" kind=\"text\" from=\"lead\" session=\"home:argus:%1\">\nAlso check the docs\n</argus-message>\n\nDo the task yourself."
+
+func userInputLine(t *testing.T, text string) string {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{"type": "USER_INPUT", "source": "USER_EXPLICIT", "content": text, "step_index": 0, "created_at": "2026-07-05T01:00:00Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b) + "\n"
+}
+
+func TestParseTranscriptSplitsArgusMessages(t *testing.T) {
+	entries, err := parseTranscript(writeLines(t, userInputLine(t, argusTaskPrompt)), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantArgusRows(t, entries)
+	// Antigravity's Task line is its latest prompt; each message is one.
+	if s := summarizeEntries(entries); s == nil || s.Task != "Also check the docs" {
+		t.Fatalf("summary = %+v; want Task %q", s, "Also check the docs")
+	}
+}
+
+func wantArgusRows(t *testing.T, es []transcript.Entry) {
+	t.Helper()
+	if len(es) < 2 {
+		t.Fatalf("got %d entries, want 2 user rows: %+v", len(es), es)
+	}
+	for i, want := range []struct{ text, id, body string }{
+		{"<argus-message id=\"m-1\" kind=\"task\" from=\"lead\" session=\"home:argus:%1\">\nReview the API\n</argus-message>", "e0", "Review the API"},
+		{"<argus-message id=\"m-2\" kind=\"text\" from=\"lead\" session=\"home:argus:%1\">\nAlso check the docs\n</argus-message>", "e1", "Also check the docs"},
+	} {
+		e := es[i]
+		if e.Kind != transcript.EntryUser || e.Text != want.text || e.ID != want.id {
+			t.Errorf("entry %d = %+v", i, e)
+		}
+		if len(e.ArgusMessages) != 1 || e.ArgusMessages[0].Body != want.body {
+			t.Errorf("entry %d messages = %+v", i, e.ArgusMessages)
+		}
+	}
+}

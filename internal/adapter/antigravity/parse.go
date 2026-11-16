@@ -45,7 +45,10 @@ func foldTranscript(lines []line, finished bool) []transcript.Entry {
 		case "USER_INPUT":
 			closeTurn()
 			pendingIdx = -1
-			add(transcript.Entry{Kind: transcript.EntryUser, Timestamp: l.CreatedAt, Text: stripUserWrappers(l.Content)})
+			text := stripUserWrappers(l.Content)
+			for _, e := range transcript.UserEntries(transcript.Entry{Kind: transcript.EntryUser, Timestamp: l.CreatedAt, Text: text}) {
+				add(e)
+			}
 		case "PLANNER_RESPONSE":
 			pendingIdx = -1 // a new step: the prior tool_call (if any) got no result
 			if turn.Footer == nil {

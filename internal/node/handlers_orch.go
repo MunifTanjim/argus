@@ -184,7 +184,14 @@ func (d *Node) transcript(id string, last int) (api.OrchTranscriptResult, error)
 	if last > 0 && last < len(entries) {
 		entries = entries[len(entries)-last:]
 	}
-	return api.OrchTranscriptResult{Entries: entries}, nil
+	// Agents read the raw prompt; the parsed copy would only cost tokens. A copy,
+	// as the adapter may hand out its cached entries.
+	out := make([]transcript.Entry, len(entries))
+	for i, e := range entries {
+		e.ArgusMessages = nil
+		out[i] = e
+	}
+	return api.OrchTranscriptResult{Entries: out}, nil
 }
 
 func (d *Node) handleOrchSessionSpawn(ctx context.Context, params json.RawMessage) (any, error) {

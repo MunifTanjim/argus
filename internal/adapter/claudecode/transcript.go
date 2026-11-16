@@ -119,7 +119,7 @@ func foldEntries(pchunks []parser.Chunk, agentRefs map[string]string, finished b
 		switch pc.Type {
 		case parser.UserChunk:
 			if strings.TrimSpace(pc.UserText) != "" {
-				out = append(out, Entry{ID: id, Kind: EntryUser, Timestamp: ts, Text: pc.UserText})
+				out = append(out, transcript.UserEntries(Entry{ID: id, Kind: EntryUser, Timestamp: ts, Text: pc.UserText})...)
 			}
 			out = append(out, foldItems(pc.Items, agentRefs, id)...)
 		case parser.AIChunk:
@@ -175,7 +175,7 @@ func foldItems(pitems []parser.DisplayItem, agentRefs map[string]string, chunkID
 	var out []Entry
 	for j, pit := range pitems {
 		if e, ok := foldItem(pit, agentRefs, chunkID+"."+strconv.Itoa(j)); ok {
-			out = append(out, e)
+			out = append(out, transcript.UserEntries(e)...)
 		}
 	}
 	return out

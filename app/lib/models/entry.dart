@@ -66,6 +66,40 @@ EntryKind entryKindFromWire(String? s) {
   }
 }
 
+/// One `<argus-message>` block of a user prompt, parsed by the node.
+class ArgusMessage {
+  final String id;
+  final String kind;
+  final String? from;
+  final String? session;
+  final String? replyTo;
+  final String? child;
+  final String? childSession;
+  final String body;
+
+  const ArgusMessage({
+    required this.id,
+    required this.kind,
+    this.from,
+    this.session,
+    this.replyTo,
+    this.child,
+    this.childSession,
+    required this.body,
+  });
+
+  factory ArgusMessage.fromJson(Map<String, dynamic> j) => ArgusMessage(
+    id: j['id'] as String? ?? '',
+    kind: j['kind'] as String? ?? '',
+    from: j['from'] as String?,
+    session: j['session'] as String?,
+    replyTo: j['replyTo'] as String?,
+    child: j['child'] as String?,
+    childSession: j['childSession'] as String?,
+    body: j['body'] as String? ?? '',
+  );
+}
+
 /// Teammates are also modeled as subagents (with [isTeammate] set).
 class Subagent {
   final String id;
@@ -93,20 +127,21 @@ class Subagent {
   });
 
   factory Subagent.fromJson(Map<String, dynamic> j) => Subagent(
-        id: j['id'] as String? ?? '',
-        name: j['name'] as String? ?? '',
-        type: j['type'] as String? ?? '',
-        desc: j['desc'] as String? ?? '',
-        status: j['status'] as String? ?? '',
-        color: j['color'] as String? ?? '',
-        isTeammate: j['isTeammate'] as bool? ?? false,
-        idle: j['idle'] as bool? ?? false,
-        hasTrace: j['hasTrace'] as bool? ?? false,
-        trace: (j['trace'] as List?)
-                ?.map((e) => Entry.fromJson(e as Map<String, dynamic>))
-                .toList() ??
-            const [],
-      );
+    id: j['id'] as String? ?? '',
+    name: j['name'] as String? ?? '',
+    type: j['type'] as String? ?? '',
+    desc: j['desc'] as String? ?? '',
+    status: j['status'] as String? ?? '',
+    color: j['color'] as String? ?? '',
+    isTeammate: j['isTeammate'] as bool? ?? false,
+    idle: j['idle'] as bool? ?? false,
+    hasTrace: j['hasTrace'] as bool? ?? false,
+    trace:
+        (j['trace'] as List?)
+            ?.map((e) => Entry.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        const [],
+  );
 }
 
 /// One unit of the flat transcript timeline. Fields are used per [kind].
@@ -141,6 +176,8 @@ class Entry {
   final String? label;
   final String? detail;
   final bool isError;
+  // user: the prompt's argus messages; [text] keeps the raw prompt
+  final List<ArgusMessage> argusMessages;
 
   const Entry({
     required this.id,
@@ -171,6 +208,7 @@ class Entry {
     this.label,
     this.detail,
     this.isError = false,
+    this.argusMessages = const [],
   });
 
   Subagent? get soleSubagent => subagents.length == 1 ? subagents.first : null;
@@ -183,55 +221,61 @@ class Entry {
       (kind == EntryKind.subagent && !isTeammate);
 
   factory Entry.fromJson(Map<String, dynamic> j) => Entry(
-        id: j['id'] as String? ?? '',
-        kind: entryKindFromWire(j['kind'] as String?),
-        timestamp: j['timestamp'] as String?,
-        text: j['text'] as String?,
-        signature: j['signature'] as bool? ?? false,
-        toolName: j['toolName'] as String?,
-        toolId: j['toolId'] as String?,
-        toolInput: j['toolInput'] as String?,
-        inputPreview: j['inputPreview'] as String?,
-        result: j['result'] as String?,
-        resultIsError: j['resultIsError'] as bool? ?? false,
-        subagents: (j['subagents'] as List?)
-                ?.map((e) => Subagent.fromJson(e as Map<String, dynamic>))
-                .toList() ??
-            const [],
-        modelName: j['modelName'] as String?,
-        modelColor: j['modelColor'] as String?,
-        usage: Usage.fromJson(j['usage'] as Map<String, dynamic>?),
-        stopReason: j['stopReason'] as String?,
-        durationMs: (j['durationMs'] as num?)?.toInt() ?? 0,
-        thinking: (j['thinking'] as num?)?.toInt() ?? 0,
-        toolCount: (j['toolCount'] as num?)?.toInt() ?? 0,
-        interrupted: j['interrupted'] as bool? ?? false,
-        hasContext: j['hasContext'] as bool? ?? false,
-        contextPct: (j['contextPct'] as num?)?.toDouble() ?? 0,
-        contextFirstPct: (j['contextFirstPct'] as num?)?.toDouble() ?? 0,
-        contextDeltaTokens: (j['contextDeltaTokens'] as num?)?.toInt() ?? 0,
-        summary: j['summary'] as String?,
-        label: j['label'] as String?,
-        detail: j['detail'] as String?,
-        isError: j['isError'] as bool? ?? false,
-      );
+    id: j['id'] as String? ?? '',
+    kind: entryKindFromWire(j['kind'] as String?),
+    timestamp: j['timestamp'] as String?,
+    text: j['text'] as String?,
+    signature: j['signature'] as bool? ?? false,
+    toolName: j['toolName'] as String?,
+    toolId: j['toolId'] as String?,
+    toolInput: j['toolInput'] as String?,
+    inputPreview: j['inputPreview'] as String?,
+    result: j['result'] as String?,
+    resultIsError: j['resultIsError'] as bool? ?? false,
+    subagents:
+        (j['subagents'] as List?)
+            ?.map((e) => Subagent.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        const [],
+    modelName: j['modelName'] as String?,
+    modelColor: j['modelColor'] as String?,
+    usage: Usage.fromJson(j['usage'] as Map<String, dynamic>?),
+    stopReason: j['stopReason'] as String?,
+    durationMs: (j['durationMs'] as num?)?.toInt() ?? 0,
+    thinking: (j['thinking'] as num?)?.toInt() ?? 0,
+    toolCount: (j['toolCount'] as num?)?.toInt() ?? 0,
+    interrupted: j['interrupted'] as bool? ?? false,
+    hasContext: j['hasContext'] as bool? ?? false,
+    contextPct: (j['contextPct'] as num?)?.toDouble() ?? 0,
+    contextFirstPct: (j['contextFirstPct'] as num?)?.toDouble() ?? 0,
+    contextDeltaTokens: (j['contextDeltaTokens'] as num?)?.toInt() ?? 0,
+    summary: j['summary'] as String?,
+    label: j['label'] as String?,
+    detail: j['detail'] as String?,
+    isError: j['isError'] as bool? ?? false,
+    argusMessages:
+        (j['argusMessages'] as List?)
+            ?.map((e) => ArgusMessage.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        const [],
+  );
 
   /// Entries ship without [toolInput]/[result] (see the server's
   /// Entry.MarshalJSON).
   Entry withToolBody(ToolDetail d) => Entry(
-        id: id,
-        kind: kind,
-        timestamp: timestamp,
-        text: text,
-        signature: signature,
-        toolName: toolName,
-        toolId: toolId,
-        toolInput: d.toolInput,
-        inputPreview: inputPreview,
-        result: d.result,
-        resultIsError: d.resultIsError,
-        subagents: subagents,
-      );
+    id: id,
+    kind: kind,
+    timestamp: timestamp,
+    text: text,
+    signature: signature,
+    toolName: toolName,
+    toolId: toolId,
+    toolInput: d.toolInput,
+    inputPreview: inputPreview,
+    result: d.result,
+    resultIsError: d.resultIsError,
+    subagents: subagents,
+  );
 }
 
 /// ToolDetail is one tool item's heavy body, fetched on demand via
@@ -244,10 +288,10 @@ class ToolDetail {
   const ToolDetail({this.toolInput, this.result, this.resultIsError = false});
 
   factory ToolDetail.fromJson(Map<String, dynamic> j) => ToolDetail(
-        toolInput: j['toolInput'] as String?,
-        result: j['result'] as String?,
-        resultIsError: j['resultIsError'] as bool? ?? false,
-      );
+    toolInput: j['toolInput'] as String?,
+    result: j['result'] as String?,
+    resultIsError: j['resultIsError'] as bool? ?? false,
+  );
 }
 
 class QueuedPrompt {
@@ -275,14 +319,15 @@ class TranscriptDelta {
   });
 
   factory TranscriptDelta.fromJson(Map<String, dynamic> j) => TranscriptDelta(
-        subId: j['sub_id'] as String? ?? '',
-        fromIndex: (j['from_index'] as num?)?.toInt() ?? 0,
-        entries: (j['entries'] as List?)
-                ?.map((e) => Entry.fromJson(e as Map<String, dynamic>))
-                .toList() ??
-            const [],
-        queue: (j['queue'] as List?)
-            ?.map((e) => QueuedPrompt.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
+    subId: j['sub_id'] as String? ?? '',
+    fromIndex: (j['from_index'] as num?)?.toInt() ?? 0,
+    entries:
+        (j['entries'] as List?)
+            ?.map((e) => Entry.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        const [],
+    queue: (j['queue'] as List?)
+        ?.map((e) => QueuedPrompt.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
 }

@@ -113,6 +113,9 @@ func (m tview) entryExpandable(e transcript.Entry) bool {
 		}
 		return true
 	case transcript.EntryUser:
+		if len(e.ArgusMessages) > 0 {
+			return m.argusBodyLines(e, max(m.c.m.transcriptWidth()-detailGutter, 10)) > maxCollapsedLines
+		}
 		return userLineCount(e.Text, m.c.m.transcriptWidth()) > maxCollapsedLines
 	case transcript.EntrySystem:
 		return e.Detail != ""
@@ -347,7 +350,9 @@ func (m tview) entryLayout(e transcript.Entry, expanded, selected, focused, full
 	iw := max(width-detailGutter, 10)
 	var body string
 	var spans []cardSpan
-	if e.Kind == transcript.EntryUser {
+	if e.Kind == transcript.EntryUser && len(e.ArgusMessages) > 0 {
+		body, spans = m.argusBand(e, expanded, iw)
+	} else if e.Kind == transcript.EntryUser {
 		body, spans = userBand(e, expanded, iw)
 	} else {
 		body, spans = m.entryContent(e, expanded, full, iw)

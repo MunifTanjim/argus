@@ -103,11 +103,12 @@ func TestInstallAddsMarketplaceAndInstallsMod(t *testing.T) {
 		"plugin marketplace list --json",
 		"plugin marketplace add " + dir,
 		"plugin install argus@argus --config socket=/run/argus/mod.sock",
+		"plugin install argus-ui@argus",
 	}
 	if strings.Join(f.calls, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("calls:\n%s\nwant:\n%s", strings.Join(f.calls, "\n"), strings.Join(want, "\n"))
 	}
-	for _, name := range []string{"argus"} {
+	for _, name := range []string{"argus", "argus-ui"} {
 		var manifest struct {
 			Name    string `json:"name"`
 			Version string `json:"version"`
@@ -135,8 +136,26 @@ func TestInstallAddsMarketplaceAndInstallsMod(t *testing.T) {
 		t.Fatalf("marketplace.json not written: %v", err)
 	}
 	_ = json.Unmarshal(b, &market)
-	if len(market.Plugins) != 1 || market.Plugins[0].Source != "./argus" {
+	if len(market.Plugins) != 2 || market.Plugins[0].Source != "./argus" || market.Plugins[1].Source != "./argus-ui" {
 		t.Fatalf("marketplace plugins = %+v", market.Plugins)
+	}
+}
+
+func TestInstallAddsMissingUIPlugin(t *testing.T) {
+	seedSettings(t, `{}`)
+	f := &fakeClaude{version: "2.1.296", marketplaces: `[{"name":"argus"}]`,
+		plugins: `[{"id":"argus@argus","scope":"user","version":"` + modVersion() + `"}]`}
+	installFake(t, f)
+	if err := New().Install(adapter.InstallOptions{Socket: "/run/argus/mod.sock"}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.calls, "plugin marketplace update argus") || !slices.Contains(f.calls, "plugin install argus-ui@argus") {
+		t.Fatalf("calls = %v; want the marketplace updated and argus-ui installed", f.calls)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "plugin install argus@argus") || strings.HasPrefix(c, "plugin update argus@argus") {
+			t.Fatalf("current argus plugin touched: %q", c)
+		}
 	}
 }
 
@@ -156,6 +175,7 @@ func TestInstallUpdatesStaleModAndSetsSocket(t *testing.T) {
 	for _, want := range []string{
 		"plugin marketplace update argus",
 		"plugin update argus@argus",
+		"plugin install argus-ui@argus",
 		"plugin configure argus@argus --values-stdin",
 	} {
 		if !strings.Contains(joined, want) {
@@ -216,7 +236,7 @@ func TestReconcileInstallsWhenNeverInstalled(t *testing.T) {
 func TestReconcileIgnoresNonUserScopeRows(t *testing.T) {
 	seedSettings(t, `{}`)
 	f := &fakeClaude{version: "2.1.296", marketplaces: `[{"name":"argus"}]`,
-		plugins: `[{"id":"argus@argus","scope":"project","version":"other"},{"id":"argus@argus","scope":"user","version":"` + modVersion() + `"}]`}
+		plugins: `[{"id":"argus@argus","scope":"project","version":"other"},{"id":"argus@argus","scope":"user","version":"` + modVersion() + `"},{"id":"argus-ui@argus","scope":"user","version":"` + modVersion() + `"}]`}
 	installFake(t, f)
 	if err := os.MkdirAll(marketplaceDir(), 0o755); err != nil {
 		t.Fatal(err)
@@ -331,7 +351,7 @@ func currentModFake(t *testing.T, plugins string) *fakeClaude {
 	return f
 }
 
-const currentUserPlugin = `[{"id":"argus@argus","scope":"user","version":"%s"}]`
+const currentUserPlugin = `[{"id":"argus@argus","scope":"user","version":"%s"},{"id":"argus-ui@argus","scope":"user","version":"%s"}]`
 
 func TestReconcileReappliesChangedSocket(t *testing.T) {
 	seedSettings(t, socketSettings("/tmp/argus-1/mod.sock"))
@@ -408,15 +428,28 @@ func TestReconcileLeavesCurrentModAlone(t *testing.T) {
 	}
 }
 
+func TestReconcileInstallsMissingUIPlugin(t *testing.T) {
+	seedSettings(t, socketSettings("/tmp/argus-1/mod.sock"))
+	f := &fakeClaude{version: "2.1.296", marketplaces: `[{"name":"argus"}]`, plugins: `[{"id":"argus@argus","scope":"user","version":"` + modVersion() + `"}]`}
+	installFake(t, f)
+	changed, err := New().Reconcile(adapter.InstallOptions{Socket: "/tmp/argus-1/mod.sock"})
+	if err != nil || len(changed) == 0 {
+		t.Fatalf("Reconcile = %v, %v; want a change", changed, err)
+	}
+	if !slices.Contains(f.calls, "plugin install argus-ui@argus") {
+		t.Fatalf("calls = %v; want argus-ui installed", f.calls)
+	}
+}
+
 func TestUninstallRemovesModAndHooks(t *testing.T) {
 	path := seedSettings(t, legacyAndUserHooks)
-	f := &fakeClaude{version: "2.1.296", marketplaces: `[{"name":"argus"}]`, plugins: `[{"id":"argus@argus","scope":"user","version":"x"}]`}
+	f := &fakeClaude{version: "2.1.296", marketplaces: `[{"name":"argus"}]`, plugins: `[{"id":"argus@argus","scope":"user","version":"x"},{"id":"argus-ui@argus","scope":"user","version":"x"}]`}
 	installFake(t, f)
 	if err := New().Uninstall(); err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(f.calls, "\n")
-	for _, want := range []string{"plugin uninstall argus@argus", "plugin marketplace remove argus"} {
+	for _, want := range []string{"plugin uninstall argus@argus", "plugin uninstall argus-ui@argus", "plugin marketplace remove argus"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("missing %q in %v", want, f.calls)
 		}

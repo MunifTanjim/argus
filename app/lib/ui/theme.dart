@@ -13,9 +13,14 @@ class AppColors {
   static const accent = Color(0xFF8ec07c); // aqua — non-status chrome
   static const awaitingSurface = Color(0xFF32281d);
   static const awaitingBorder = Color(0xFF7c5f1e);
-  static const error = Color(0xFFfb4934); // gruvbox red — fatal connection state
+  static const error = Color(
+    0xFFfb4934,
+  ); // gruvbox red — fatal connection state
   static const errorSurface = Color(0xFF3c1f1d);
-  static const link = Color(0xFF83a598); // gruvbox blue — branches, paths, hunk headers
+  static const notice = Color(0xFFfabd2f); // gruvbox yellow — prompt notices
+  static const link = Color(
+    0xFF83a598,
+  ); // gruvbox blue — branches, paths, hunk headers
 }
 
 const mono = TextStyle(fontFamily: 'monospace', fontSize: 12);
@@ -44,14 +49,15 @@ Color teamColor(String? name) {
 }
 
 ThemeData buildArgusTheme() {
-  final scheme = ColorScheme.fromSeed(
-    seedColor: AppColors.accent,
-    brightness: Brightness.dark,
-  ).copyWith(
-    primary: AppColors.accent,
-    surface: AppColors.card,
-    onSurface: AppColors.text,
-  );
+  final scheme =
+      ColorScheme.fromSeed(
+        seedColor: AppColors.accent,
+        brightness: Brightness.dark,
+      ).copyWith(
+        primary: AppColors.accent,
+        surface: AppColors.card,
+        onSurface: AppColors.text,
+      );
   return ThemeData(
     useMaterial3: true,
     brightness: Brightness.dark,

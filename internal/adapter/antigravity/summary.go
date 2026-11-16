@@ -17,7 +17,11 @@ func summarizeEntries(entries []transcript.Entry) *session.Summary {
 			s.LastActivity = e.Timestamp
 		}
 		if s.Task == "" && e.Kind == transcript.EntryUser && strings.TrimSpace(e.Text) != "" {
-			s.Task = firstLine(e.Text)
+			if line, ok := transcript.ArgusTaskLine(e.Text); ok {
+				s.Task = line
+			} else {
+				s.Task = firstLine(e.Text)
+			}
 		}
 		if s.Task != "" && s.LastActivity != "" {
 			break

@@ -90,6 +90,9 @@ type Entry struct {
 	Label   string `json:"label,omitempty"`   // system: preview after the timestamp (e.g. "Recap")
 	Detail  string `json:"detail,omitempty"`  // system/shell: detail text (shell: raw result scaffolding)
 	IsError bool   `json:"isError,omitempty"` // system: error flag; shell: nonzero exit code
+
+	// user: the prompt's <argus-message> blocks, parsed; Text keeps the raw prompt.
+	ArgusMessages []ArgusMessage `json:"argusMessages,omitempty"`
 }
 
 // MarshalJSON drops ToolInput/Result from the wire form; clients fetch them on demand.

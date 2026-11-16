@@ -31,6 +31,14 @@ func (m tview) sourceOf(e transcript.Entry) (src string, ok, loading, unavailabl
 		}
 		return strings.Join(out, "\n\n")
 	}
+	if e.Kind == transcript.EntryUser && len(e.ArgusMessages) > 0 {
+		// What the row shows, not the raw block the agent read.
+		var parts []string
+		for _, msg := range e.ArgusMessages {
+			parts = append(parts, argusHeadingText(msg)+"\n"+msg.Body)
+		}
+		return strings.Join(parts, "\n\n"), true, false, false
+	}
 	switch e.Kind {
 	case transcript.EntryTurnEnd, transcript.EntryCompact:
 		return "", false, false, false
