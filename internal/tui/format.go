@@ -97,6 +97,23 @@ func statusWord(s session.Session) string {
 	return string(s.Status)
 }
 
+// sessionColor is statusColor, with blocked sessions set apart.
+func sessionColor(s session.Session) color.Color {
+	if s.Status == session.StatusAwaitingInput {
+		return awaitingColor(s.Blocked())
+	}
+	return statusColor(s.Status)
+}
+
+// awaitingColor colors an awaiting session: blocked on a prompt, or waiting
+// for the next one.
+func awaitingColor(blocked bool) color.Color {
+	if blocked {
+		return ColorBlocked
+	}
+	return statusColor(session.StatusAwaitingInput)
+}
+
 func statusColor(s session.Status) color.Color {
 	switch s {
 	case session.StatusWorking:
@@ -186,7 +203,7 @@ func (m model) sessionCard(s session.Session, selected, focused bool, cardW int,
 	innerW := max(cardW-4, 10)
 
 	// Status glyph keeps its color on every card (working keeps the spinner).
-	glyph, gcolor := statusGlyph(s.Status), statusColor(s.Status)
+	glyph, gcolor := statusGlyph(s.Status), sessionColor(s)
 	if s.Status == session.StatusWorking {
 		glyph, gcolor = SpinnerFrames[m.spin%len(SpinnerFrames)], ColorOngoing
 	}

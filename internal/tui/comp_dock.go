@@ -134,13 +134,19 @@ func (d dockComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 // A prompt's body is inset to align with the transcript; the input spans the
 // rules' full width.
 func (d dockComp) view(c *ctx, w, h int) string {
-	focused := c.m.focused == sessionDock
+	focused, pending := c.m.focused == sessionDock, !c.m.composing()
 	ruleColor := ColorBorder
-	if focused {
+	switch {
+	case focused && pending:
+		ruleColor = ColorBlocked
+	case focused:
 		ruleColor = ColorAccent
 	}
 	cw := containerWidthOf(w)
 	top, bottom, zones := c.m.dockRules(cw, ruleColor)
+	if pending && !focused {
+		top = c.m.dockTopRule(cw, ColorBlocked)
+	}
 	bodyH := h - dockChrome
 	var body string
 	switch {
@@ -229,7 +235,7 @@ type countZone struct {
 // then the running counts drop, then model and effort.
 func (m model) dockRules(w int, c color.Color) (top, bottom string, zones []countZone) {
 	s := m.sessions[m.liveSessionID()]
-	top = dockRule("", m.dockStatusLabel(s), w, c)
+	top = m.dockTopRule(w, c)
 	info, base := sessionInfo(s.Summary)
 	var labels []string
 	var all []countZone

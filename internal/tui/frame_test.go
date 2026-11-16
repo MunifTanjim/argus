@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
@@ -514,5 +515,31 @@ func TestSidebarTogglesDoNothingOverAFullFrame(t *testing.T) {
 	m = m.titleClick(&hitArea{zones: []hitZone{{rect: uv.Rect(0, 0, 1, 1), target: hitTarget{kind: hitTab, index: treeIcon}}}}, tea.Mouse{X: 0, Y: 0, Button: tea.MouseLeft})
 	if m.left.hidden || m.focused != mainPane {
 		t.Errorf("the title icon changed state: left.hidden=%v focus=%v", m.left.hidden, m.focused)
+	}
+}
+
+func TestDockPromptHasBlockedTopRule(t *testing.T) {
+	initTheme(true)
+	blockedRule := lipgloss.NewStyle().Foreground(ColorBlocked).Render(strings.Repeat("─", dockRuleEdge))
+	m := waitingSession()
+	view := m.dock.view(&ctx{m: &m}, m.width, m.dockRows())
+	blockedTop := m.dockTopRule(containerWidthOf(m.width), ColorBlocked)
+	if !strings.Contains(blockedTop, blockedRule) || !strings.Contains(blockedTop, StyleBlockedBold.Render("Permission")) {
+		t.Fatalf("blocked top rule = %q", blockedTop)
+	}
+	if !strings.Contains(view, blockedTop) {
+		t.Errorf("collapsed dock lacks the blocked top rule:\n%q", view)
+	}
+	if strings.Count(view, blockedRule) != strings.Count(blockedTop, blockedRule) {
+		t.Errorf("only the top rule should be blocked:\n%q", view)
+	}
+	m = withFocus(m, sessionDock)
+	view = m.dock.view(&ctx{m: &m}, m.width, m.dockRows())
+	if !strings.Contains(view, blockedTop) {
+		t.Errorf("expanded dock lacks the blocked top rule:\n%q", view)
+	}
+	_, blockedBottom, _ := m.dockRules(containerWidthOf(m.width), ColorBlocked)
+	if !strings.Contains(view, blockedBottom) {
+		t.Errorf("expanded dock lacks the blocked bottom rule:\n%q", view)
 	}
 }

@@ -66,10 +66,15 @@ var clockNow = time.Now
 
 // dockStatusLabel is the top rule's label: the pending prompt's kind, or what
 // the session is doing; "" while it waits for a prompt.
+// dockTopRule is the dock's top rule, labeled with the session status.
+func (m model) dockTopRule(w int, c color.Color) string {
+	return dockRule("", m.dockStatusLabel(m.sessions[m.liveSessionID()]), w, c)
+}
+
 func (m model) dockStatusLabel(s session.Session) string {
 	accent := lipgloss.NewStyle().Foreground(ColorAccent)
 	if ix := s.Interaction; ix != nil && ix.Kind != session.InteractionIdle {
-		return StyleAccentBold.Render(interactionKindLabel(ix.Kind))
+		return StyleBlockedBold.Render(interactionKindLabel(ix.Kind))
 	}
 	switch s.Status {
 	case session.StatusWorking:

@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 
+	lipgloss "charm.land/lipgloss/v2"
+
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
 )
@@ -78,7 +80,7 @@ func hostName(label string) string {
 
 func (m model) sessionSection(s session.Session) sectionInfo {
 	if s.Status == session.StatusAwaitingInput {
-		icon := StyledIcon{statusGlyph(s.Status), statusColor(s.Status)}
+		icon := StyledIcon{statusGlyph(s.Status), sessionColor(s)}
 		return sectionInfo{title: "Needs you", rank: rankNeedsYou, icon: icon, needsYou: true}
 	}
 	switch m.groupBy {
@@ -148,7 +150,7 @@ func (m model) workspaceOf(wsID string) (api.ProjectNode, api.WorkspaceNode, boo
 func (m model) sectionHeader(sec sectionInfo) string {
 	switch {
 	case sec.needsYou:
-		return sec.icon.Render() + " " + m.needsYouHeader()
+		return sec.icon.Render() + " " + lipgloss.NewStyle().Bold(true).Foreground(sec.icon.Color).Render(sec.title)
 	case m.byHost() && !m.grouped():
 		return ""
 	}

@@ -113,7 +113,7 @@ func (sessionsSource) items(m model) []paletteItem {
 			continue
 		}
 		// An offline session reads as inactive, as on its card.
-		glyph, color := statusGlyph(s.Status), statusColor(s.Status)
+		glyph, color := statusGlyph(s.Status), sessionColor(s)
 		if s.Offline {
 			glyph, color = "○", ColorBorder
 		}

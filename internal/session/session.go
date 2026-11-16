@@ -316,6 +316,12 @@ func (s Session) InteractionPending() bool {
 	return s.Interaction != nil && s.Interaction.Kind != InteractionIdle
 }
 
+// Blocked reports a session awaiting the user on a pending interaction, as
+// opposed to one that finished its turn.
+func (s Session) Blocked() bool {
+	return s.Status == StatusAwaitingInput && s.InteractionPending()
+}
+
 // ReadyForPrompt reports whether the session is idle enough to take a new prompt.
 func (s Session) ReadyForPrompt() bool {
 	return s.Status != StatusWorking && !s.InteractionPending()
