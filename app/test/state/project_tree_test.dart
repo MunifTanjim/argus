@@ -51,6 +51,7 @@ Session _s(
   SessionStatus status, {
   String? ws,
   bool offline = false,
+  InteractionKind? kind,
 }) => Session(
   id: id,
   agent: 'claude',
@@ -65,6 +66,7 @@ Session _s(
   source: SessionSource.discovered,
   workspaceId: ws,
   offline: offline,
+  interaction: kind == null ? null : Interaction(kind: kind),
 );
 
 const _all = TreeView();
@@ -254,6 +256,19 @@ void main() {
       expect(sum.live, 2);
     },
   );
+
+  test('activity counts blocked apart from waiting', () {
+    final act = workspaceActivity([
+      _s('1', SessionStatus.awaitingInput, ws: 'A:w1', kind: InteractionKind.permission),
+      _s('2', SessionStatus.awaitingInput, ws: 'A:w1', kind: InteractionKind.idle),
+      _s('3', SessionStatus.awaitingInput, ws: 'A:w1'),
+      _s('4', SessionStatus.working, ws: 'A:w1'),
+    ]);
+    final a = act['A:w1']!;
+    expect((a.live, a.blocked, a.waiting), (4, 1, 2));
+    final sum = sumActivity(act, ['A:w1']);
+    expect((sum.blocked, sum.waiting), (1, 2));
+  });
 
   test('rows carry hidden and gone flags', () {
     final rows = buildTreeRows([
