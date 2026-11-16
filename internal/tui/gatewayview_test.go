@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -137,5 +138,24 @@ func TestOfflineGroupAndCard(t *testing.T) {
 	}
 	if !strings.Contains(out, "(node offline)") {
 		t.Fatalf("offline session card should show the offline task line:\n%s", out)
+	}
+}
+
+func TestNeedsYouListsBlockedFirst(t *testing.T) {
+	waitA := nodeSession("alpha:wait", "alpha", "alpha", session.StatusAwaitingInput)
+	waitA.Interaction = &session.Interaction{Kind: session.InteractionIdle}
+	blockB := nodeSession("beta:block", "beta", "beta", session.StatusAwaitingInput)
+	blockB.Interaction = &session.Interaction{Kind: session.InteractionPermission}
+	waitC := nodeSession("gamma:wait", "gamma", "gamma", session.StatusAwaitingInput)
+	m := modelWith(waitA, blockB, waitC)
+	if want := []string{"beta:block", "alpha:wait", "gamma:wait"}; !slices.Equal(m.order, want) {
+		t.Fatalf("order = %v, want %v", m.order, want)
+	}
+	// Answered: back to host order.
+	blockB.Interaction = &session.Interaction{Kind: session.InteractionIdle}
+	m.sessions[blockB.ID] = blockB
+	m.refilter("")
+	if want := []string{"alpha:wait", "beta:block", "gamma:wait"}; !slices.Equal(m.order, want) {
+		t.Fatalf("after answer, order = %v, want %v", m.order, want)
 	}
 }

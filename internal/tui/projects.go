@@ -325,7 +325,24 @@ func (m model) wsRow(ws string) (projectsRow, bool) {
 	return projectsRow{}, false
 }
 
-type wsActivity struct{ live, working, waiting int }
+type wsActivity struct{ live, working, waiting, blocked int }
+
+func (a *wsActivity) add(b wsActivity) {
+	a.live, a.working, a.waiting, a.blocked = a.live+b.live, a.working+b.working, a.waiting+b.waiting, a.blocked+b.blocked
+}
+
+// count tallies one live session.
+func (a *wsActivity) count(s session.Session) {
+	a.live++
+	switch {
+	case s.Status == session.StatusWorking:
+		a.working++
+	case s.Blocked():
+		a.blocked++
+	case s.Status == session.StatusAwaitingInput:
+		a.waiting++
+	}
+}
 
 func (m model) workspaceActivity() map[string]wsActivity {
 	out := map[string]wsActivity{}
@@ -334,13 +351,7 @@ func (m model) workspaceActivity() map[string]wsActivity {
 			continue
 		}
 		a := out[s.WorkspaceID]
-		a.live++
-		switch s.Status {
-		case session.StatusWorking:
-			a.working++
-		case session.StatusAwaitingInput:
-			a.waiting++
-		}
+		a.count(s)
 		out[s.WorkspaceID] = a
 	}
 	return out
@@ -349,8 +360,7 @@ func (m model) workspaceActivity() map[string]wsActivity {
 func (m model) activityBadge(act map[string]wsActivity, ws []string) string {
 	var a wsActivity
 	for _, id := range ws {
-		b := act[id]
-		a.live, a.working, a.waiting = a.live+b.live, a.working+b.working, a.waiting+b.waiting
+		a.add(act[id])
 	}
 	return m.badgeFor(a)
 }
@@ -362,13 +372,7 @@ func (m model) homeBadge() string {
 		if s.Offline || s.Status == session.StatusDead {
 			continue
 		}
-		a.live++
-		switch s.Status {
-		case session.StatusWorking:
-			a.working++
-		case session.StatusAwaitingInput:
-			a.waiting++
-		}
+		a.count(s)
 	}
 	return m.badgeFor(a)
 }
@@ -378,8 +382,8 @@ func (m model) badgeFor(a wsActivity) string {
 	switch {
 	case a.live == 0:
 		return ""
-	case a.waiting > 0:
-		return lipgloss.NewStyle().Foreground(statusColor(session.StatusAwaitingInput)).Render(statusGlyph(session.StatusAwaitingInput) + " " + n)
+	case a.blocked > 0 || a.waiting > 0:
+		return awaitingBadge(a.blocked > 0, n)
 	case a.working > 0:
 		return lipgloss.NewStyle().Foreground(ColorOngoing).Render(SpinnerFrames[m.spin%len(SpinnerFrames)] + " " + n)
 	}

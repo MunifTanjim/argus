@@ -42,7 +42,7 @@ type sidebarSessionGroup struct {
 }
 
 // sidebarSessionGroups lists the sessions by section, the most recently active
-// first in each; empty sections are left out.
+// first in each (blocked ahead in Needs you); empty sections are left out.
 func sidebarSessionGroups(sessions map[string]session.Session) []sidebarSessionGroup {
 	by := map[sidebarSection][]string{}
 	for id, s := range sessions {
@@ -57,7 +57,13 @@ func sidebarSessionGroups(sessions map[string]session.Session) []sidebarSessionG
 		if len(ids) == 0 {
 			continue
 		}
-		slices.SortFunc(ids, func(a, b string) int { return byActivity(sessions[a], sessions[b]) })
+		slices.SortFunc(ids, func(a, b string) int {
+			sa, sb := sessions[a], sessions[b]
+			if c := cmpBlocked(sa, sb); sec == sideNeedsYou && c != 0 {
+				return c
+			}
+			return byActivity(sa, sb)
+		})
 		out = append(out, sidebarSessionGroup{sec, ids})
 	}
 	return out

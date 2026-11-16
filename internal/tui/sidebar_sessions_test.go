@@ -54,3 +54,16 @@ func TestSidebarSessionGroupsHidesEmptySections(t *testing.T) {
 		t.Fatalf("no sessions: groups = %+v", got)
 	}
 }
+
+func TestSidebarNeedsYouListsBlockedFirst(t *testing.T) {
+	ss := map[string]session.Session{
+		"wait":  {ID: "wait", Status: session.StatusAwaitingInput, Summary: act("2026-10-11T09:00:00Z"), Interaction: &session.Interaction{Kind: session.InteractionIdle}},
+		"block": {ID: "block", Status: session.StatusAwaitingInput, Summary: act("2026-10-11T08:00:00Z"), Interaction: &session.Interaction{Kind: session.InteractionQuestion}},
+		"work2": {ID: "work2", Status: session.StatusWorking, Summary: act("2026-10-11T09:00:00Z")},
+		"work1": {ID: "work1", Status: session.StatusWorking, Summary: act("2026-10-11T08:00:00Z")},
+	}
+	got := sidebarSessionGroups(ss)
+	if len(got) != 2 || !slices.Equal(got[0].ids, []string{"block", "wait"}) || !slices.Equal(got[1].ids, []string{"work2", "work1"}) {
+		t.Fatalf("groups = %+v", got)
+	}
+}

@@ -555,9 +555,14 @@ func (m *model) reorder() {
 		if sa.key != sb.key {
 			return sa.key < sb.key
 		}
-		// Needs you spans hosts: host, then id.
-		if sa.needsYou && a.NodeLabel != b.NodeLabel {
-			return a.NodeLabel < b.NodeLabel
+		// Needs you spans hosts: blocked first, then host, then id.
+		if sa.needsYou {
+			if c := cmpBlocked(a, b); c != 0 {
+				return c < 0
+			}
+			if a.NodeLabel != b.NodeLabel {
+				return a.NodeLabel < b.NodeLabel
+			}
 		}
 		return a.ID < b.ID
 	})

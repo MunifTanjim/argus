@@ -769,7 +769,7 @@ func TestStatusBarShowsGlobalState(t *testing.T) {
 	out := m.View().Content
 	lines := strings.Split(ansi.Strip(out), "\n")
 	bar := lines[0]
-	for _, want := range []string{"argus", "◆ 1 need you", "reconnecting…", "QUARANTINED", "argus lock pin"} {
+	for _, want := range []string{"argus", "◆ 1 waiting", "reconnecting…", "QUARANTINED", "argus lock pin"} {
 		if !strings.Contains(bar, want) {
 			t.Errorf("status bar missing %q: %q", want, bar)
 		}
@@ -794,15 +794,34 @@ func TestNarrowStatusBarKeepsTheState(t *testing.T) {
 	m.sessions["n1:s1"] = session.Session{ID: "n1:s1", Status: session.StatusAwaitingInput}
 	m.reconnecting = true
 	bar := ansi.Strip(m.frameTitle())
-	if !strings.HasSuffix(bar, "1 need you · reconnecting…") || ansi.StringWidth(bar) > m.width {
+	if !strings.HasSuffix(bar, "1 waiting · reconnecting…") || ansi.StringWidth(bar) > m.width {
 		t.Errorf("a narrow status bar should cut the brand, not the state: %q", bar)
+	}
+}
+
+func TestStatusBarCountsBlockedAndWaiting(t *testing.T) {
+	m := homeTestModel()
+	m.width = 120
+	perm := &session.Interaction{Kind: session.InteractionPermission}
+	m.sessions = map[string]session.Session{
+		"n1:b": {ID: "n1:b", Status: session.StatusAwaitingInput, Interaction: perm},
+		"n1:w": {ID: "n1:w", Status: session.StatusAwaitingInput, Interaction: &session.Interaction{Kind: session.InteractionIdle}},
+		"n1:x": {ID: "n1:x", Status: session.StatusAwaitingInput},
+		"n1:o": {ID: "n1:o", Status: session.StatusAwaitingInput, Interaction: perm, Offline: true},
+	}
+	if bar := ansi.Strip(m.frameTitle()); !strings.Contains(bar, "◆ 1 blocked · ◆ 2 waiting") {
+		t.Errorf("bar = %q, want blocked then waiting counts", bar)
+	}
+	delete(m.sessions, "n1:b")
+	if bar := ansi.Strip(m.frameTitle()); strings.Contains(bar, "blocked") || !strings.Contains(bar, "◆ 2 waiting") {
+		t.Errorf("bar = %q, want only the waiting count", bar)
 	}
 }
 
 func TestStatusBarQuietWhenAllIsWell(t *testing.T) {
 	m := homeTestModel()
 	bar := strings.Split(ansi.Strip(m.View().Content), "\n")[0]
-	if strings.Contains(bar, "need you") || strings.Contains(bar, "reconnecting") || strings.Contains(bar, "QUARANTINED") {
+	if strings.Contains(bar, "waiting") || strings.Contains(bar, "blocked") || strings.Contains(bar, "reconnecting") || strings.Contains(bar, "QUARANTINED") {
 		t.Errorf("status bar should show only the brand when nothing needs attention: %q", bar)
 	}
 }
