@@ -1434,3 +1434,35 @@ test('every main turn end re-sends the shells', OPTIONS, async ($, on) => {
   await $.turn.complete(TURN)
   expect(shellEvents(sent).map(e => e.map(s => s.id))).toEqual([['b1'], ['b1'], ['b1']])
 })
+
+function costs(sent: Sent[]) {
+  return sent.filter(s => s.body.event === 'Usage').map(s => s.body.payload as Record<string, unknown>)
+}
+
+const MEASURE = { context: {}, rateLimits: [], changed: ['cost'] }
+
+test('a measurement reports the cost on change only', OPTIONS, async ($, on) => {
+  world(on)
+  const sent = argusd(on, () => ({}))
+  on('session.measure', (_, e) => ({ changed: e.changed }) as never)
+  await $.session.measure({ ...MEASURE, cost: { usd: 0.5 } } as never)
+  await $.session.measure({ ...MEASURE, cost: { usd: 0.5 }, changed: ['context'] } as never)
+  await $.session.measure({ ...MEASURE, changed: ['context'] } as never)
+  await $.session.measure({ ...MEASURE, cost: { usd: 1.25 } } as never)
+  const got = costs(sent)
+  expect(got.map(p => p.cost_usd)).toEqual([0.5, 1.25])
+  expect(got[0]).toEqual(expect.objectContaining({ hook_event_name: 'Usage', session_id: 's1' }))
+})
+
+test('a session start reports the cost again', OPTIONS, async ($, on) => {
+  world(on)
+  let usd = 0.5
+  on('session.usage', () => ({ value: { startedAt: 0, context: {}, rateLimits: [], cost: { usd } } }) as never)
+  on('session.measure', (_, e) => ({ changed: e.changed }) as never)
+  const sent = argusd(on, () => ({}))
+  on('classic.SessionStart', () => ({}))
+  await $.session.measure({ ...MEASURE, cost: { usd: 0.5 } } as never)
+  usd = 0
+  await $.classic.SessionStart({ session_id: 's1', source: 'clear', transcript_path: '/t/s1.jsonl', cwd: '/w' } as never)
+  expect(costs(sent).map(p => p.cost_usd)).toEqual([0.5, 0])
+})

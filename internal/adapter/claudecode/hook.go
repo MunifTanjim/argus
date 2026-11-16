@@ -36,6 +36,8 @@ type hookPayload struct {
 	// ModelInfo's model id and effort (nil: not reported; "": none).
 	Model  string  `json:"model"`
 	Effort *string `json:"effort"`
+	// CostUSD is the Usage event's session cost so far.
+	CostUSD *float64 `json:"cost_usd"`
 	// Subagents is the Subagents event's snapshot of running subagents.
 	Subagents []session.RunningSubagent `json:"subagents"`
 	// Shells is the Shells event's snapshot of running background shells.
@@ -352,6 +354,11 @@ func processHook(reg *registry.Registry, ev HookEvent, p hookPayload) (session.S
 		model = modelUpdate(p)
 	}
 
+	var cost *float64
+	if event == "Usage" {
+		cost = p.CostUSD
+	}
+
 	var subagents *[]session.RunningSubagent
 	if event == "Subagents" {
 		subagents = &p.Subagents
@@ -376,6 +383,7 @@ func processHook(reg *registry.Registry, ev HookEvent, p hookPayload) (session.S
 		Interaction:        ix,
 		ReplaceInteraction: replace,
 		Model:              model,
+		CostUSD:            cost,
 		Subagents:          subagents,
 		Shells:             shells,
 		Cleared:            event == "SessionStart" && p.Source == "clear",

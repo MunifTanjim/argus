@@ -564,6 +564,18 @@ func TestProcessHookModelInfoSetsLiveModel(t *testing.T) {
 	}
 }
 
+func TestProcessHookUsageSetsCost(t *testing.T) {
+	reg := registry.New()
+	start, _ := ProcessHook(reg, HookEvent{Event: "ModelInfo", Payload: []byte(`{"session_id":"sess-1","model":"claude-opus-5-5"}`)})
+	got, _ := ProcessHook(reg, HookEvent{Event: "Usage", Payload: []byte(`{"session_id":"sess-1","hook_event_name":"Usage","cost_usd":0.42}`)})
+	if got.Summary == nil || !got.Summary.HasCost || got.Summary.CostUSD != 0.42 {
+		t.Fatalf("cost not applied: %+v", got.Summary)
+	}
+	if got.Status != start.Status || got.Summary.ModelName != start.Summary.ModelName {
+		t.Fatalf("a usage report should keep status and model: %q %+v", got.Status, got.Summary)
+	}
+}
+
 func TestProcessHookSubagentsSetsRunning(t *testing.T) {
 	reg := registry.New()
 	mk := func(list []map[string]any) HookEvent {

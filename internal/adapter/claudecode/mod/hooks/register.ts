@@ -74,6 +74,8 @@ let turnId = ''
 // The model and effort last reported to argusd, so steps report only a change.
 let lastModel = ''
 let lastEffort: string | undefined
+// The cost last reported to argusd, so a measurement reports only a change.
+let lastCost: number | undefined
 // The text a fill put in Claude's input box and the draft it replaced, until
 // argus's Enter submits the text.
 let filled: { text: string; draft: string; at: number } | undefined
@@ -89,6 +91,7 @@ export const register: Register = (on, options) => {
   env = undefined
   lastModel = ''
   lastEffort = undefined
+  lastCost = undefined
   filled = undefined
   abandoned.clear()
   shells.clear()
@@ -164,6 +167,13 @@ export const register: Register = (on, options) => {
     .catch(($, e, next) => next(e))
   on('classic.PostModelSwitch', async ($, e, next) => {
     await reportModel($, String((e as Record<string, unknown>).to_model ?? ''))
+    return next(e)
+  })
+    .catch(($, e, next) => next(e))
+
+  // Fires after each main-thread turn with the session's cost so far.
+  on('session.measure', async ($, e, next) => {
+    await reportCost($, e.cost?.usd)
     return next(e)
   })
     .catch(($, e, next) => next(e))
@@ -469,6 +479,17 @@ async function reportModel($: EngineInterface, model: string, effort?: string): 
   }
 }
 
+// Report the session's cost so far to argusd when it changed. Never throws.
+async function reportCost($: EngineInterface, usd: number | undefined): Promise<void> {
+  if (usd === undefined || usd === lastCost) return
+  lastCost = usd
+  try {
+    await forward($, 'Usage', { hook_event_name: 'Usage', ...(await sessionFields($)), cost_usd: usd })
+  } catch {
+    // argusd hears of it on the next change or reconnect
+  }
+}
+
 // argusd replaces its set with this one. started and stopped fix up the hook's
 // own agent, which $.agent.list may not show yet or still show. Never throws.
 async function reportSubagents(
@@ -546,13 +567,15 @@ async function reportShells($: EngineInterface): Promise<void> {
   }
 }
 
-// Send argusd the live model and subagents it keeps in memory again, unchanged
-// or not. Never throws.
+// Send argusd the live model, cost and subagents it keeps in memory again,
+// unchanged or not. Never throws.
 async function resendState($: EngineInterface): Promise<void> {
   lastModel = ''
   lastEffort = undefined
+  lastCost = undefined
   await Promise.all([
     $.session.model().catch(() => '').then(model => reportModel($, model)),
+    $.session.usage().then(u => reportCost($, u.cost?.usd), () => undefined),
     reportSubagents($),
     reportShells($),
   ])

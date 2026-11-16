@@ -2026,6 +2026,8 @@ Summary {
   has_context?:       boolean
   context_pct?:       number          // 0 to 100
   tokens?:            number
+  has_cost?:          boolean
+  cost_usd?:          number          // the session's cost so far, as the agent reports it: an estimate at list prices, not a charge
   task?:              string
   last_activity?:     string          // RFC 3339
 }
