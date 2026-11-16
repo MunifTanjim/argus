@@ -114,6 +114,22 @@ func awaitingColor(blocked bool) color.Color {
 	return statusColor(session.StatusAwaitingInput)
 }
 
+// awaitingBadge is the awaiting glyph and text in the awaiting color.
+func awaitingBadge(blocked bool, text string) string {
+	return lipgloss.NewStyle().Foreground(awaitingColor(blocked)).Render(statusGlyph(session.StatusAwaitingInput) + " " + text)
+}
+
+// cmpBlocked orders blocked sessions first.
+func cmpBlocked(a, b session.Session) int {
+	switch ba, bb := a.Blocked(), b.Blocked(); {
+	case ba == bb:
+		return 0
+	case ba:
+		return -1
+	}
+	return 1
+}
+
 func statusColor(s session.Status) color.Color {
 	switch s {
 	case session.StatusWorking:

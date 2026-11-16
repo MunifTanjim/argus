@@ -226,9 +226,12 @@ func (m model) framedBody(c *ctx, l frameLayout, pane string) string {
 func (m model) frameTitle() string {
 	left := strings.Repeat(" ", screenMargin) + m.brandIcon() + " " + headerStyle.Render("Argus")
 	var parts []string
-	if n := m.waitingCount(); n > 0 {
-		attn := lipgloss.NewStyle().Foreground(statusColor(session.StatusAwaitingInput))
-		parts = append(parts, attn.Render(statusGlyph(session.StatusAwaitingInput)+" "+strconv.Itoa(n)+" need you"))
+	nBlocked, nWaiting := m.attentionCounts()
+	if nBlocked > 0 {
+		parts = append(parts, awaitingBadge(true, strconv.Itoa(nBlocked)+" blocked"))
+	}
+	if nWaiting > 0 {
+		parts = append(parts, awaitingBadge(false, strconv.Itoa(nWaiting)+" waiting"))
 	}
 	if m.reconnecting {
 		parts = append(parts, dimStyle.Render("reconnecting…"))
@@ -327,14 +330,19 @@ func (m model) sidebarIcons() string {
 		" " + icon(m.filesVisible(), glyphSidebarRight, glyphSidebarRightOff)
 }
 
-func (m model) waitingCount() int {
-	n := 0
+// attentionCounts counts the online sessions awaiting the user: blocked on a
+// prompt, and waiting for the next one.
+func (m model) attentionCounts() (blockedN, waitingN int) {
 	for _, s := range m.sessions {
-		if s.Status == session.StatusAwaitingInput && !s.Offline {
-			n++
+		switch {
+		case s.Offline || s.Status != session.StatusAwaitingInput:
+		case s.Blocked():
+			blockedN++
+		default:
+			waitingN++
 		}
 	}
-	return n
+	return blockedN, waitingN
 }
 
 // footerPrompter is a component that can ask a question or take text in the

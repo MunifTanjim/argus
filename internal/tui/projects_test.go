@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/MunifTanjim/argus/internal/registry"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1513,5 +1514,26 @@ func TestPTogglesPin(t *testing.T) {
 	res, _ = m.Update(cmd())
 	if got := res.(model).flash; got != "unpinned argus" {
 		t.Errorf("flash = %q, want %q", got, "unpinned argus")
+	}
+}
+
+func TestWorkspaceBadgeBlockedWins(t *testing.T) {
+	initTheme(true)
+	m := projectsTestModel()
+	m.sessions["n1:s1"] = session.Session{ID: "n1:s1", WorkspaceID: "n1:w1", Status: session.StatusAwaitingInput, Interaction: &session.Interaction{Kind: session.InteractionIdle}}
+	m.sessions["n1:s2"] = session.Session{ID: "n1:s2", WorkspaceID: "n1:w1", Status: session.StatusAwaitingInput, Interaction: &session.Interaction{Kind: session.InteractionPermission}}
+	act := m.workspaceActivity()
+	if a := act["n1:w1"]; a.blocked != 1 || a.waiting != 1 {
+		t.Fatalf("w1 activity = %+v, want 1 blocked, 1 waiting", a)
+	}
+	n := strconv.Itoa(act["n1:w1"].live)
+	if got, want := m.activityBadge(act, []string{"n1:w1"}), lipgloss.NewStyle().Foreground(ColorBlocked).Render("◆ "+n); got != want {
+		t.Errorf("badge = %q, want blocked-colored %q", got, want)
+	}
+	delete(m.sessions, "n1:s2")
+	act = m.workspaceActivity()
+	n = strconv.Itoa(act["n1:w1"].live)
+	if got, want := m.activityBadge(act, []string{"n1:w1"}), lipgloss.NewStyle().Foreground(ColorAccent).Render("◆ "+n); got != want {
+		t.Errorf("badge = %q, want accent-colored %q", got, want)
 	}
 }
