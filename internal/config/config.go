@@ -55,6 +55,9 @@ type TUIConfig struct {
 	// VerboseTranscript shows runs of thinking and tool calls expanded by
 	// default instead of folded into a one-line summary.
 	VerboseTranscript bool
+	// TmuxNavigation hands a focus left/down/up/right with no pane in that
+	// direction to tmux, which selects the pane next to the TUI's.
+	TmuxNavigation bool
 	// Keymaps is tui.keymap as written: screen → key sequence → mapping.
 	Keymaps map[string]map[string]Mapping
 }
@@ -176,6 +179,7 @@ var defaults = map[string]any{
 	"tui.leader-key":                  "<Space>",
 	"tui.mouse":                       "on",
 	"tui.verbose-transcript":          false,
+	"tui.tmux-navigation":             false,
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
@@ -311,6 +315,7 @@ func FromViper(v *viper.Viper) Config {
 			LeaderKey:         v.GetString("tui.leader-key"),
 			Mouse:             MouseMode(v.GetString("tui.mouse")),
 			VerboseTranscript: v.GetBool("tui.verbose-transcript"),
+			TmuxNavigation:    v.GetBool("tui.tmux-navigation"),
 		},
 	}
 }

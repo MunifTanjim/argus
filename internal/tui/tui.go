@@ -71,6 +71,7 @@ func Run(client Client, gatewayURL string, logs *logbuf.Buffer, cfg config.TUICo
 	m.left.tab = tab
 	m.mouse = cfg.Mouse == config.MouseOn
 	m.verboseTranscript = cfg.VerboseTranscript
+	m.tmuxNavPane = tmuxNavPane(cfg)
 	go sendTermKeyLoop(swap, m.termKeyCh) // single ordered sender for live-terminal input
 	f := newInputFilter()
 	p := tea.NewProgram(m, tea.WithFilter(f.filter))
@@ -273,6 +274,7 @@ func RunViewer(client *fileClient, bundlePath string, redact bool, cfg config.TU
 	m := newViewerModel(client, hasDark).withKeymaps(cfg)
 	m.mouse = cfg.Mouse == config.MouseOn
 	m.verboseTranscript = cfg.VerboseTranscript
+	m.tmuxNavPane = tmuxNavPane(cfg)
 	m.redactMode = redact
 	m.bundlePath = bundlePath
 	m.redactSrcDir = client.destDir
@@ -285,4 +287,14 @@ func RunViewer(client *fileClient, bundlePath string, redact bool, cfg config.TU
 		return err
 	}
 	return cerr
+}
+
+// tmuxNavPane is the TUI's tmux pane when cfg turns tmux navigation on. It
+// needs $TMUX as well: without it, tmux would look the pane id up on the
+// default server, which may not be the one that owns the pane.
+func tmuxNavPane(cfg config.TUIConfig) string {
+	if !cfg.TmuxNavigation || os.Getenv("TMUX") == "" {
+		return ""
+	}
+	return os.Getenv("TMUX_PANE")
 }

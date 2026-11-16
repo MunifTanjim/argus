@@ -532,6 +532,13 @@ func (c *Client) SelectPane(ctx context.Context, paneID string) error {
 	return err
 }
 
+// SelectPaneToward selects the pane next to paneID in dir: "L", "D", "U", or
+// "R". Like select-pane, it wraps around at the window's edge.
+func (c *Client) SelectPaneToward(ctx context.Context, paneID, dir string) error {
+	_, err := c.run(ctx, "select-pane", "-t", paneID, "-"+dir)
+	return err
+}
+
 // WindowInfo reports the state we must save/restore for a target window.
 type WindowInfo struct {
 	Panes      int

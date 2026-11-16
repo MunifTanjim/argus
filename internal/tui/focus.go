@@ -1,9 +1,14 @@
 package tui
 
 import (
+	"context"
+	"log"
 	"slices"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/MunifTanjim/argus/internal/tmux"
 )
 
 // A key goes to exactly one handler, in this order: the live screen, the front
@@ -351,24 +356,31 @@ func (m model) listedMatch(msg tea.KeyPressMsg, b binding) bool {
 	return screenHas(m.screen(), b.name) && m.matches(msg, b)
 }
 
-// A pane command with no pane in its direction still uses the key.
+// A pane command with no pane in its direction still uses the key. With
+// tui.tmux-navigation on, a focus left/down/up/right there, from any key that
+// runs it, moves to the tmux pane in that direction instead.
 func (m model) handlePaneKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 	pk := paneKeys
 	m.flash = ""
 	var (
 		mm  tea.Model = m
 		cmd tea.Cmd
+		dir string // the tmux direction of focus left/down/up/right
 	)
 	switch {
 	case m.listedMatch(msg, pk.Left):
 		mm, cmd = m.paneLeft()
+		dir = "L"
 	case m.listedMatch(msg, pk.Right):
 		mm, cmd = m.paneRight()
+		dir = "R"
 	case m.listedMatch(msg, pk.Down):
 		if m.focused == mainPane && m.dockShown() {
 			mm = m.focusContainer(sessionDock)
 		}
+		dir = "D"
 	case m.listedMatch(msg, pk.Up):
+		dir = "U"
 	case m.listedMatch(msg, pk.Next):
 		mm, cmd = m.cyclePane(1)
 	case m.listedMatch(msg, pk.Prev):
@@ -376,5 +388,25 @@ func (m model) handlePaneKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 	default:
 		return m, nil, false
 	}
+	if dir != "" && m.tmuxNavPane != "" && mm.(model).focused == m.focused {
+		cmd = tea.Batch(cmd, tmuxNavCmd(m.tmuxNavPane, dir))
+	}
 	return mm, cmd, true
+}
+
+// selectTmuxPane selects the tmux pane next to pane in dir; tests replace it.
+// tmux finds the TUI's server through the inherited $TMUX.
+var selectTmuxPane = func(ctx context.Context, pane, dir string) error {
+	return tmux.New("").SelectPaneToward(ctx, pane, dir)
+}
+
+func tmuxNavCmd(pane, dir string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := selectTmuxPane(ctx, pane, dir); err != nil {
+			log.Printf("tmux navigation: %v", err)
+		}
+		return nil
+	}
 }

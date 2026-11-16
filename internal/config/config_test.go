@@ -353,6 +353,20 @@ func TestVerboseTranscriptFromFile(t *testing.T) {
 	}
 }
 
+func TestTmuxNavigationDefaultOff(t *testing.T) {
+	isolateConfigDir(t)
+	if c := load(t, ""); c.TUI.TmuxNavigation {
+		t.Error("tui.tmux-navigation = true, want false by default")
+	}
+}
+
+func TestTmuxNavigationFromFile(t *testing.T) {
+	isolateConfigDir(t)
+	if c := load(t, writeConfig(t, "tui:\n  tmux-navigation: true\n")); !c.TUI.TmuxNavigation {
+		t.Error("tui.tmux-navigation: true not honoured")
+	}
+}
+
 func TestMouseOffFromFile(t *testing.T) {
 	isolateConfigDir(t)
 	if c := load(t, writeConfig(t, "tui:\n  mouse: off\n")); c.TUI.Mouse != config.MouseOff {

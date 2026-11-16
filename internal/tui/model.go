@@ -118,6 +118,9 @@ type model struct {
 	sel       selectDrag // the press a text drag starts from
 
 	verboseTranscript bool // transcript runs of thinking/tool calls start expanded
+	// tmuxNavPane is the TUI's own tmux pane when tui.tmux-navigation is on,
+	// "" when off or outside tmux.
+	tmuxNavPane string
 
 	keyBuf    []tea.KeyPressMsg // keys of a pending sequence
 	keyMatch  string            // id of the complete match inside keyBuf, "" when none

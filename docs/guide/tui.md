@@ -105,6 +105,7 @@ tui:
   key-timeout: 1s
   mouse: on
   verbose-transcript: false
+  tmux-navigation: false
   keymap:
     global:
       "<C-q>": ":quit<CR>"
@@ -225,6 +226,54 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
   the TUI shows a warning at startup.
 - A bad mapping is skipped, and the other mappings still load. At startup, the
   footer shows the first error.
+
+### tmux navigation
+
+To move between the TUI's panes and the tmux panes around it with the same
+keys, set `tui.tmux-navigation` to `true`. Then a `focus left`, `focus down`,
+`focus up`, or `focus right` with no pane in its direction selects the tmux
+pane in that direction instead. This applies to every key that runs these
+commands, so `<C-w>h` leaves the TUI at its edge. It does not lead back: the
+program in the other pane takes it.
+
+To move both ways with the same keys, map keys that tmux passes to the TUI:
+
+```yaml
+tui:
+  tmux-navigation: true
+  keymap:
+    global:
+      "<C-h>": ":focus left<CR>"
+      "<C-j>": ":focus down<CR>"
+      "<C-k>": ":focus up<CR>"
+      "<C-l>": ":focus right<CR>"
+      "<C-p>": ":open palette<CR>" # <C-k> was the palette key
+```
+
+In `~/.tmux.conf`, pass these keys to the TUI, and let tmux move between the
+other panes. Match the command line, not the process name, so that panes that
+run `argus start` or other `argus` commands keep the keys:
+
+```sh
+is_argus="ps -o state= -o args= -t '#{pane_tty}' \
+    | grep -iqE '^[^TXZ ]+ +(\\S+\\/)?argus( +-.*| +view .*)?$'"
+bind-key -n 'C-h' if-shell "$is_argus" 'send-keys C-h' 'select-pane -L'
+bind-key -n 'C-j' if-shell "$is_argus" 'send-keys C-j' 'select-pane -D'
+bind-key -n 'C-k' if-shell "$is_argus" 'send-keys C-k' 'select-pane -U'
+bind-key -n 'C-l' if-shell "$is_argus" 'send-keys C-l' 'select-pane -R'
+```
+
+If tmux already passes these keys to another program, such as Vim, keep that
+check and add this one, for example `"$is_vim || $is_argus"`.
+
+A pane that runs `argus` with a flag before the command, such as
+`argus --config node.yaml start`, takes the keys too: put the command first.
+
+- The session dock and the live screen keep their keys. Press `<Tab>` or
+  `<Esc>` to leave the dock, and `<C-]>` to leave the live screen.
+- At the outer edge of the tmux window, tmux wraps to the other side. Moving
+  out of a zoomed pane unzooms it.
+- The TUI selects a tmux pane only when `$TMUX` and `$TMUX_PANE` are set.
 
 ### Commands
 
