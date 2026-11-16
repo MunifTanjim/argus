@@ -218,8 +218,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
         outdatedNodeIdsProvider.select((ids) => ids.contains(live.nodeId)));
     final canKill = live.canKill && !outdated;
     final canOpenTerminal = live.canOpenTerminal && !outdated;
-    final ix = live.interaction;
-    final pendingPrompt = ix != null && ix.kind != InteractionKind.idle;
+    final pendingPrompt = live.interactionPending;
     final String? inputNotice;
     if (outdated) {
       inputNotice = 'Upgrade argus on ${live.nodeLabel ?? 'this node'}';
@@ -252,7 +251,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                 Text(statusGlyph(live.status),
                     style: TextStyle(
                         fontFamily: 'monospace',
-                        color: statusColor(live.status))),
+                        color: sessionColor(live))),
                 const SizedBox(width: 8),
                 Flexible(
                     child: Text(title,

@@ -63,9 +63,12 @@ class NodeHeader extends StatelessWidget {
 }
 
 class NeedsYouHeader extends StatelessWidget {
-  const NeedsYouHeader({super.key, required this.label});
+  const NeedsYouHeader({super.key, required this.label, required this.color});
 
   final String label;
+
+  /// The header color: blocked when any session in the section is.
+  final Color color;
 
   @override
   Widget build(BuildContext context) => SectionLabel(
@@ -74,10 +77,10 @@ class NeedsYouHeader extends StatelessWidget {
       style: TextStyle(
         fontFamily: 'monospace',
         fontSize: 12,
-        color: statusColor(SessionStatus.awaitingInput),
+        color: color,
       ),
     ),
     label: label,
-    color: AppColors.accent,
+    color: color,
   );
 }

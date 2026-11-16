@@ -222,7 +222,10 @@ class _SectionHeader extends ConsumerWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8, top: 4),
       child: switch (section.icon) {
-        SectionIcon.needsYou => NeedsYouHeader(label: section.title),
+        SectionIcon.needsYou => NeedsYouHeader(
+          label: section.title,
+          color: sessionColor(section.sessions.first),
+        ),
         SectionIcon.host => NodeHeader(
           label: section.title,
           offline: section.offline,

@@ -18,7 +18,6 @@ import 'interaction_panel.dart';
 import 'prompt_completion.dart';
 import 'running_shells_sheet.dart';
 import 'running_subagents_sheet.dart';
-import 'status_style.dart';
 import 'theme.dart';
 import 'usage_format.dart';
 import 'voice_input_field.dart';
@@ -57,13 +56,10 @@ Object _promptKey(Interaction? ix) => ix == null
         ix.questions.map((q) => q.question).join('\u0000'),
       );
 
-bool _pending(Interaction? ix) => ix != null && ix.kind != InteractionKind.idle;
-
 /// The status line's text: the pending prompt, or what the session is doing;
 /// null while it waits for a prompt.
 String? composerStatus(Session s, DateTime now) {
-  final ix = s.interaction;
-  if (_pending(ix)) return interactionLabel(ix!);
+  if (s.interactionPending) return interactionLabel(s.interaction!);
   switch (s.status) {
     case SessionStatus.working:
       final since = s.statusSince;
@@ -411,7 +407,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   Widget _build(double maxHeight) {
     final s = widget.session;
     final notice = widget.inputNotice;
-    final pending = _pending(s.interaction);
+    final pending = s.interactionPending;
     final showPanel = pending && notice == null;
     final Widget body;
     if (notice != null) {
@@ -440,19 +436,27 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
         ],
       );
     }
-    // A collapsed prompt still waits on the user, so its line stands out.
+    // A pending prompt waits on the user, so its rules stand out; collapsed,
+    // the status line stands out more.
     final alert = showPanel && _collapsed;
+    final blocked = showPanel && !_collapsed;
     final status = _rule(
       label: switch (composerStatus(s, DateTime.now())) {
         final t? => TextSpan(text: t),
         null => null,
       },
-      alert: alert,
+      bg: alert ? AppColors.awaitingSurface : AppColors.canvas,
+      lineColor: alert
+          ? AppColors.awaitingBorder
+          : blocked
+              ? AppColors.blocked
+              : AppColors.border,
+      labelColor: showPanel ? AppColors.blocked : AppColors.dim,
       trailing: showPanel
           ? IconButton(
               tooltip: _collapsed ? 'Expand' : 'Collapse',
               visualDensity: VisualDensity.compact,
-              color: alert ? statusColor(SessionStatus.awaitingInput) : null,
+              color: AppColors.blocked,
               icon: Icon(_collapsed ? Icons.expand_less : Icons.expand_more),
               onPressed: _toggle,
             )
@@ -475,7 +479,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
           else
             status,
           body,
-          _modelRule(s),
+          _modelRule(s, blocked: blocked),
         ],
       ),
     );
@@ -635,7 +639,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   /// The model line: running counts at its left end, model parts at its
   /// right. As the TUI's bottom rule does, it drops cost, usage, the counts,
   /// effort, then the model, to fit without truncating.
-  Widget _modelRule(Session s) {
+  Widget _modelRule(Session s, {bool blocked = false}) {
     final (:parts, :base) = modelParts(s.summary);
     final counts = [
       if (s.subagents.isNotEmpty) (s.subagents.length, _subagentCount(s)),
@@ -666,6 +670,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
         return countsWidth(context, k) + label <= room;
       }, orElse: () => (0, 0));
       return _rule(
+        lineColor: blocked ? AppColors.blocked : AppColors.border,
         label: n == 0 ? null : modelLine(parts, n),
         leading: k == 0
             ? null
@@ -682,12 +687,11 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
       {InlineSpan? label,
       Widget? leading,
       Widget? trailing,
-      bool alert = false}) {
-    final bg = alert ? AppColors.awaitingSurface : AppColors.canvas;
-    final line = Divider(
-        height: 1, color: alert ? AppColors.awaitingBorder : AppColors.border);
-    final style = mono.copyWith(
-        color: alert ? statusColor(SessionStatus.awaitingInput) : AppColors.dim);
+      Color bg = AppColors.canvas,
+      Color lineColor = AppColors.border,
+      Color labelColor = AppColors.dim}) {
+    final line = Divider(height: 1, color: lineColor);
+    final style = mono.copyWith(color: labelColor);
     return Container(
       height: trailing == null ? 20 : 36,
       color: bg,
