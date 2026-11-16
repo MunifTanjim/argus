@@ -54,7 +54,7 @@ func TestLiveModelEndsWithTheSession(t *testing.T) {
 	s, _ := r.ApplyHook(HookUpdate{Agent: "a", AgentSessionID: "s1", Status: session.StatusIdle,
 		Model: &ModelUpdate{Name: "Opus 5.5"}})
 	r.ApplyHook(HookUpdate{Agent: "a", AgentSessionID: "s1", Status: session.StatusDead})
-	if _, ok := r.models[s.ID]; ok {
+	if _, ok := r.live[s.ID]; ok {
 		t.Fatal("the live model outlived its session")
 	}
 }

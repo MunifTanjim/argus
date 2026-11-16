@@ -67,9 +67,9 @@ type Registry struct {
 	// inputPolicies are per-agent input channel overrides (see SetInputPolicy).
 	inputPolicies map[string]InputPolicy
 
-	// models are the live models agents report, by session id. They win over
-	// the transcript-derived Summary fields (see overlayModel).
-	models map[string]liveModel
+	// live is what agents report of a session live, by session id. It wins
+	// over the transcript-derived Summary fields (see overlayLive).
+	live map[string]liveState
 
 	// subagents are keyed by session id.
 	subagents map[string][]session.RunningSubagent
@@ -93,7 +93,7 @@ func New() *Registry {
 		ended:         make(map[string]time.Time),
 		endedGrace:    defaultEndedGrace,
 		inputPolicies: make(map[string]InputPolicy),
-		models:        make(map[string]liveModel),
+		live:          make(map[string]liveState),
 		subagents:     make(map[string][]session.RunningSubagent),
 		shells:        make(map[string][]session.RunningShell),
 		decisions:     make(map[string]*decisionQueue),
@@ -300,7 +300,7 @@ func (r *Registry) ReconcileSessions(agent string, found []DiscoveredSession) {
 		if f.Summary != nil {
 			s.Summary = f.Summary
 		}
-		r.overlayModel(s)
+		r.overlayLive(s)
 		r.overlayRunning(s)
 		r.refreshInput(s)
 		applyStatusHint(s, f.StatusHint)
@@ -531,7 +531,7 @@ func (r *Registry) remove(id, paneK string, finalStatus session.Status) {
 	setStatus(s, finalStatus)
 	delete(r.decisions, id)
 	delete(r.sessions, id)
-	delete(r.models, id)
+	delete(r.live, id)
 	delete(r.subagents, id)
 	delete(r.shells, id)
 	delete(r.prevAgentSession, id)
@@ -641,24 +641,43 @@ type ModelUpdate struct {
 	Effort *string
 }
 
-type liveModel struct{ name, color, effort string }
-
-// setModel merges u into session id's live model. Caller holds r.mu.
-func (r *Registry) setModel(id string, u ModelUpdate) {
-	lm := r.models[id]
-	if u.Name != "" {
-		lm.name, lm.color = u.Name, u.Color
-	}
-	if u.Effort != nil {
-		lm.effort = *u.Effort
-	}
-	r.models[id] = lm
+// liveState is a session's live model and cost; each is laid over the
+// summary only once reported.
+type liveState struct {
+	hasModel            bool
+	name, color, effort string
+	cost                *float64
 }
 
-// overlayModel lays the session's live model over its summary. It copies the
-// summary: a published event shares the pointer. Caller holds r.mu.
-func (r *Registry) overlayModel(s *session.Session) {
-	lm, ok := r.models[s.ID]
+// setLive merges a hook's live model and cost into session id's live state.
+// Caller holds r.mu.
+func (r *Registry) setLive(id string, u HookUpdate) {
+	ls, ok := r.live[id]
+	if u.Model == nil && u.CostUSD == nil && !(ok && u.Cleared) {
+		return
+	}
+	if u.Cleared {
+		ls.cost = nil
+	}
+	if m := u.Model; m != nil {
+		ls.hasModel = true
+		if m.Name != "" {
+			ls.name, ls.color = m.Name, m.Color
+		}
+		if m.Effort != nil {
+			ls.effort = *m.Effort
+		}
+	}
+	if u.CostUSD != nil {
+		ls.cost = u.CostUSD
+	}
+	r.live[id] = ls
+}
+
+// overlayLive lays the session's live model and cost over its summary. It
+// copies the summary: a published event shares the pointer. Caller holds r.mu.
+func (r *Registry) overlayLive(s *session.Session) {
+	ls, ok := r.live[s.ID]
 	if !ok {
 		return
 	}
@@ -666,10 +685,16 @@ func (r *Registry) overlayModel(s *session.Session) {
 	if s.Summary != nil {
 		sum = *s.Summary
 	}
-	if lm.name != "" {
-		sum.ModelName, sum.ModelColor = lm.name, lm.color
+	if ls.hasModel {
+		if ls.name != "" {
+			sum.ModelName, sum.ModelColor = ls.name, ls.color
+		}
+		sum.Effort = ls.effort
 	}
-	sum.Effort = lm.effort
+	sum.HasCost, sum.CostUSD = false, 0
+	if ls.cost != nil {
+		sum.HasCost, sum.CostUSD = true, *ls.cost
+	}
 	s.Summary = &sum
 }
 
@@ -747,6 +772,8 @@ type HookUpdate struct {
 	// stale pending interaction.
 	ReplaceInteraction bool
 	Model              *ModelUpdate
+	// CostUSD is the session's cost so far, or nil to keep the last one.
+	CostUSD *float64
 	// Subagents and Shells are nil to leave the running set unchanged; non-nil
 	// replaces it (empty clears).
 	Subagents *[]session.RunningSubagent
@@ -850,10 +877,8 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 		s.Summary = u.Summary
 	}
 
-	if u.Model != nil {
-		r.setModel(s.ID, *u.Model)
-	}
-	r.overlayModel(s)
+	r.setLive(s.ID, u)
+	r.overlayLive(s)
 	if u.Subagents != nil {
 		r.setSubagents(s.ID, *u.Subagents, time.Now())
 	}

@@ -167,6 +167,8 @@ type Summary struct {
 	HasContext   bool    `json:"has_context,omitempty"`   // whether ContextPct is meaningful
 	ContextPct   float64 `json:"context_pct,omitempty"`   // 0..100, latest turn
 	Tokens       int     `json:"tokens,omitempty"`        // latest turn prompt-side token count
+	HasCost      bool    `json:"has_cost,omitempty"`      // whether CostUSD is meaningful
+	CostUSD      float64 `json:"cost_usd,omitempty"`      // session cost so far, as the agent reports it
 	Task         string  `json:"task,omitempty"`          // latest user prompt, first line
 	LastActivity string  `json:"last_activity,omitempty"` // RFC3339 of the last chunk
 	// TaskSessionKeys holds the candidate session_id keys for the on-disk tasks
