@@ -18,35 +18,34 @@ const dockRuleEdge = 2
 // when it cannot fit; the left one is dropped, never truncated, when it cannot
 // fit whole.
 func dockRule(left, right string, w int, c color.Color) string {
-	rule, _ := dockRuleFit(left, right, w, c)
-	return rule
-}
-
-// dockRuleFit is dockRule that also reports whether the left label is drawn.
-func dockRuleFit(left, right string, w int, c color.Color) (string, bool) {
 	dash := func(n int) string {
 		return lipgloss.NewStyle().Foreground(c).Render(strings.Repeat("─", max(0, n)))
 	}
 	if w < 2*dockRuleEdge {
-		return dash(w), false
+		return dash(w)
 	}
-	pad := func(s string) string {
-		if s == "" {
-			return ""
-		}
-		return " " + s + " "
+	if !dockRuleFits("", right, w) {
+		right = ""
 	}
-	r := pad(right)
-	if 2*dockRuleEdge+lipgloss.Width(r) > w {
-		r = ""
+	if !dockRuleFits(left, right, w) {
+		left = ""
 	}
-	room := w - 2*dockRuleEdge - lipgloss.Width(r)
-	l := pad(left)
-	if lipgloss.Width(l) > room {
-		l = ""
-	}
+	l, r := padLabel(left), padLabel(right)
 	fill := w - 2*dockRuleEdge - lipgloss.Width(l) - lipgloss.Width(r)
-	return dash(dockRuleEdge) + l + dash(fill) + r + dash(dockRuleEdge), l != ""
+	return dash(dockRuleEdge) + l + dash(fill) + r + dash(dockRuleEdge)
+}
+
+// dockRuleFits reports whether dockRule draws both labels whole in w cells.
+func dockRuleFits(left, right string, w int) bool {
+	return 2*dockRuleEdge+lipgloss.Width(padLabel(left))+lipgloss.Width(padLabel(right)) <= w
+}
+
+// padLabel sets a rule label off from its dashes by a space each side.
+func padLabel(s string) string {
+	if s == "" {
+		return ""
+	}
+	return " " + s + " "
 }
 
 // formatElapsed: "12s", "3m 04s", "1h 02m".
@@ -98,12 +97,13 @@ func interactionKindLabel(k session.InteractionKind) string {
 	return "Input"
 }
 
-// modelEffortLabel is "<model> · <effort>", each part left out when unknown.
-func modelEffortLabel(sum *session.Summary) string {
+// sessionInfo is the bottom rule's right label as parts: model, effort, usage,
+// cost, each left out when unknown. The first base parts are the model and
+// effort.
+func sessionInfo(sum *session.Summary) (parts []string, base int) {
 	if sum == nil {
-		return ""
+		return nil, 0
 	}
-	var parts []string
 	if sum.ModelName != "" {
 		st := dimStyle
 		if sum.ModelColor != "" {
@@ -114,5 +114,28 @@ func modelEffortLabel(sum *session.Summary) string {
 	if sum.Effort != "" {
 		parts = append(parts, dimStyle.Render(sum.Effort))
 	}
-	return strings.Join(parts, dimStyle.Render(" · "))
+	base = len(parts)
+	if u := usageLabel(sum); u != "" {
+		parts = append(parts, u)
+	}
+	if sum.HasCost {
+		parts = append(parts, dimStyle.Render(fmt.Sprintf("$%.2f", sum.CostUSD)))
+	}
+	return parts, base
+}
+
+// usageLabel is the context window's fill as "84.0k (42%)", in the context's
+// color.
+func usageLabel(sum *session.Summary) string {
+	switch {
+	case !sum.HasContext && sum.Tokens == 0:
+		return ""
+	case !sum.HasContext:
+		return dimStyle.Render(formatTokens(sum.Tokens))
+	}
+	label := formatPct(sum.ContextPct)
+	if sum.Tokens > 0 {
+		label = formatTokens(sum.Tokens) + " (" + label + ")"
+	}
+	return lipgloss.NewStyle().Foreground(contextUsageColor(sum.ContextPct)).Render(label)
 }

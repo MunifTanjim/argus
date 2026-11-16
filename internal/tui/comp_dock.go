@@ -224,11 +224,13 @@ type countZone struct {
 }
 
 // dockRules draws the dock's rules. zones are the running counts drawn on the
-// bottom rule: the counts that fit, dropped from the end.
+// bottom rule: the counts that fit, dropped from the end. When the bottom rule
+// is short, the session info drops its parts after model and effort first,
+// then the running counts drop, then model and effort.
 func (m model) dockRules(w int, c color.Color) (top, bottom string, zones []countZone) {
 	s := m.sessions[m.liveSessionID()]
 	top = dockRule("", m.dockStatusLabel(s), w, c)
-	right := modelEffortLabel(s.Summary)
+	info, base := sessionInfo(s.Summary)
 	var labels []string
 	var all []countZone
 	off := 0
@@ -239,12 +241,25 @@ func (m model) dockRules(w int, c color.Color) (top, bottom string, zones []coun
 			off += lipgloss.Width(l) + 1
 		}
 	}
-	for n := len(labels); n > 0; n-- {
-		if b, ok := dockRuleFit(strings.Join(labels[:n], " "), right, w, c); ok {
-			return top, b, all[:n]
+	// Candidates in drop order, as (counts, info parts) kept; the last, (0, 0),
+	// always fits.
+	type keep struct{ counts, info int }
+	var order []keep
+	for n := len(info); n > base; n-- {
+		order = append(order, keep{len(labels), n})
+	}
+	for k := len(labels); k > 0; k-- {
+		order = append(order, keep{k, base})
+	}
+	for n := base; n >= 0; n-- {
+		order = append(order, keep{0, n})
+	}
+	for _, o := range order {
+		l, r := strings.Join(labels[:o.counts], " "), strings.Join(info[:o.info], dimStyle.Render(" · "))
+		if o == (keep{}) || dockRuleFits(l, r, w) {
+			return top, dockRule(l, r, w, c), all[:o.counts]
 		}
 	}
-	bottom, _ = dockRuleFit("", right, w, c)
 	return top, bottom, nil
 }
 

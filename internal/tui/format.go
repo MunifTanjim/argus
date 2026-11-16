@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"image/color"
+	"math"
 	"strings"
 	"time"
 
@@ -57,16 +58,22 @@ func contextUsageColor(pct float64) color.Color {
 	}
 }
 
+// contextLabel is a context-window usage percentage as "ctx 42%".
+func contextLabel(pct float64) string { return "ctx " + formatPct(pct) }
+
+// formatPct rounds half away from zero, as the app does.
+func formatPct(pct float64) string { return fmt.Sprintf("%d%%", int(math.Round(pct))) }
+
 func formatContext(e transcript.Entry) string {
 	if !e.HasContext {
 		return ""
 	}
 	st := lipgloss.NewStyle().Foreground(contextUsageColor(e.ContextPct))
 	if e.ContextDeltaTokens == 0 && e.ContextFirstPct == e.ContextPct {
-		return st.Render(fmt.Sprintf("ctx %.0f%%", e.ContextPct))
+		return st.Render(contextLabel(e.ContextPct))
 	}
-	return st.Render(fmt.Sprintf("ctx %.0f%% → %.0f%% (+%s)",
-		e.ContextFirstPct, e.ContextPct, formatTokens(e.ContextDeltaTokens)))
+	return st.Render(fmt.Sprintf("ctx %s → %s (+%s)",
+		formatPct(e.ContextFirstPct), formatPct(e.ContextPct), formatTokens(e.ContextDeltaTokens)))
 }
 
 // paneTag is the bracket label shown for a session: its tmux pane id when it has
@@ -267,7 +274,7 @@ func (m model) cardMeta(s session.Session, width int, selected bool, nodeLabel s
 			if selected || sum.ContextPct >= 50 {
 				st = lipgloss.NewStyle().Foreground(contextUsageColor(sum.ContextPct))
 			}
-			parts = append(parts, st.Render(fmt.Sprintf("ctx %.0f%%", sum.ContextPct)))
+			parts = append(parts, st.Render(contextLabel(sum.ContextPct)))
 		}
 		if sum.Tokens > 0 {
 			parts = append(parts, StyleDim.Render(formatTokens(sum.Tokens)))
