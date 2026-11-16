@@ -4,9 +4,10 @@ import 'package:argus/models/project.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/state/grouping.dart';
 
-Session _s(String id, String host, String status, {bool offline = false}) =>
+Session _s(String id, String host, String status,
+        {bool offline = false, String? kind}) =>
     Session.fromJson(jsonDecode(
-        '{"id":"$id","agent":"t","status":"$status","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"node_label":"$host","offline":$offline}'));
+        '{"id":"$id","agent":"t","status":"$status","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"node_label":"$host","offline":$offline${kind == null ? '' : ',"interaction":{"kind":"$kind"}'}}'));
 
 Session _sn(String id, {String? nodeId, String? nodeLabel}) =>
     Session.fromJson(jsonDecode(jsonEncode({
@@ -76,6 +77,16 @@ void main() {
     expect(sections.first.title, 'Needs you');
     expect(sections.first.sessions.map((s) => s.id),
         ['dev:2', 'home:1']); // sorted by host then id
+  });
+
+  test('needs-you lists blocked sessions first', () {
+    final sections = buildSections([
+      _s('alpha:1', 'alpha', 'awaiting_input', kind: 'idle'),
+      _s('beta:1', 'beta', 'awaiting_input', kind: 'permission'),
+      _s('gamma:1', 'gamma', 'awaiting_input'),
+    ]);
+    expect(sections.first.sessions.map((s) => s.id),
+        ['beta:1', 'alpha:1', 'gamma:1']);
   });
 
   test('host sections exclude awaiting, sorted by title and id', () {

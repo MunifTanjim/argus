@@ -10,6 +10,7 @@ Session _s(
   String? activity,
   bool offline = false,
   String? name,
+  String? kind,
 }) => Session.fromJson(
   jsonDecode(
         jsonEncode({
@@ -27,12 +28,26 @@ Session _s(
             'current_path': '/p',
           },
           if (activity case final _?) 'summary': {'last_activity': activity},
+          if (kind case final _?) 'interaction': {'kind': kind},
         }),
       )
       as Map<String, dynamic>,
 );
 
 void main() {
+  test('needs you lists blocked sessions first', () {
+    final groups = buildSidebarSections([
+      _s('wait', 'awaiting_input', activity: '2026-10-11T09:00:00Z', kind: 'idle'),
+      _s('block', 'awaiting_input', activity: '2026-10-11T08:00:00Z', kind: 'question'),
+      _s('work2', 'working', activity: '2026-10-11T09:00:00Z'),
+      _s('work1', 'working', activity: '2026-10-11T08:00:00Z'),
+    ]);
+    expect(groups.map((g) => g.sessions.map((s) => s.id).toList()), [
+      ['block', 'wait'],
+      ['work2', 'work1'],
+    ]);
+  });
+
   test('sections in order, newest first, dead hidden', () {
     final groups = buildSidebarSections([
       _s('idle-old', 'idle', activity: '2026-10-11T08:00:00Z'),

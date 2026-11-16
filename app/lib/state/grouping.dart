@@ -229,6 +229,8 @@ List<SessionSection> buildSections(
       .where((s) => s.status == SessionStatus.awaitingInput)
       .toList()
     ..sort((a, b) {
+      final c = Session.compareBlocked(a, b);
+      if (c != 0) return c;
       final h = _host(a).compareTo(_host(b));
       return h != 0 ? h : a.id.compareTo(b.id);
     });

@@ -40,7 +40,13 @@ List<SidebarSessionGroup> buildSidebarSections(Iterable<Session> sessions) {
   return [
     for (final sec in SidebarSection.values)
       if (by[sec] case final list?)
-        SidebarSessionGroup(sec, list..sort(_byActivity)),
+        SidebarSessionGroup(
+          sec,
+          list
+            ..sort(
+              sec == SidebarSection.needsYou ? _blockedFirst : _byActivity,
+            ),
+        ),
   ];
 }
 
@@ -55,6 +61,11 @@ final _never = DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
 
 DateTime _activity(Session s) =>
     DateTime.tryParse(s.summary?.lastActivity ?? '') ?? _never;
+
+int _blockedFirst(Session a, Session b) {
+  final c = Session.compareBlocked(a, b);
+  return c != 0 ? c : _byActivity(a, b);
+}
 
 int _byActivity(Session a, Session b) {
   final c = _activity(b).compareTo(_activity(a));

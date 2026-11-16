@@ -354,6 +354,10 @@ class Session {
   bool get blocked =>
       status == SessionStatus.awaitingInput && interactionPending;
 
+  /// Orders blocked sessions first.
+  static int compareBlocked(Session a, Session b) =>
+      a.blocked == b.blocked ? 0 : (a.blocked ? -1 : 1);
+
   /// Whether a paneless API session can be torn down (dismissed). Kill is
   /// unconditional, so status and interaction do not gate it.
   bool get _dismissable => inputMode == InputMode.api && !controllable;

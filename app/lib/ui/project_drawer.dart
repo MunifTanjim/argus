@@ -477,7 +477,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
       : Row(mainAxisSize: MainAxisSize.min, children: children);
 
   Widget? _badges(Activity a) =>
-      a.live > 0 || a.waiting > 0 ? _Badges(a) : null;
+      a.live > 0 ? _Badges(a) : null;
 
   // The leading icon column plus its gap. A workspace is indented by one
   // column, so its icon sits under its project's name.
@@ -567,7 +567,10 @@ class _Badges extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      if (activity.waiting > 0) _badge('${activity.waiting}', _amber),
+      if (activity.blocked > 0)
+        _badge('${activity.blocked}', AppColors.blocked),
+      if (activity.waiting > 0)
+        _badge('${activity.waiting}', AppColors.waiting),
       if (activity.live > 0) _badge('${activity.live}', _green),
     ],
   );
