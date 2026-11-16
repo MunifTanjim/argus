@@ -30,18 +30,22 @@ const (
 	marketplaceName = "argus"
 	pluginName      = "argus"
 	pluginID        = pluginName + "@" + marketplaceName
+	uiPluginName    = "argus-ui"
+	uiPluginID      = uiPluginName + "@" + marketplaceName
 	claudeTimeout   = 2 * time.Minute
 )
 
-//go:embed all:mod
+//go:embed all:mod all:modui
 var modFS embed.FS
 
 // modPlugin is one plugin of argus's marketplace, embedded under root.
 type modPlugin struct{ name, id, root string }
 
-// modPlugins are installed together under one version.
+// modPlugins are installed together under one version. argus-ui draws the
+// rows argus submits: Claude Code skips a plugin's hooks for its own prompts.
 var modPlugins = []modPlugin{
 	{pluginName, pluginID, "mod"},
+	{uiPluginName, uiPluginID, "modui"},
 }
 
 // Replaced by tests.
@@ -228,7 +232,7 @@ func installedPlugins(ctx context.Context) (installedVersions, error) {
 	}
 	v := installedVersions{}
 	for _, p := range list {
-		if p.Scope == "user" && p.ID == pluginID {
+		if p.Scope == "user" && (p.ID == pluginID || p.ID == uiPluginID) {
 			v[p.ID] = p.Version
 		}
 	}

@@ -29,12 +29,12 @@ func foldMessages(msgs []ocMessage, finished bool) []transcript.Entry {
 		case "user":
 			closeTurn(0)
 			runStart = 0
-			out = append(out, transcript.Entry{
+			out = append(out, transcript.UserEntries(transcript.Entry{
 				ID:        m.ID,
 				Kind:      transcript.EntryUser,
 				Timestamp: tsMillis(m.Time.Created),
 				Text:      m.Text,
-			})
+			})...)
 		case "idle":
 			closeTurn(m.Time.Created)
 			runStart = 0

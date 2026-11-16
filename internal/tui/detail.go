@@ -761,7 +761,13 @@ func (m tview) wheelDetail(d int) {
 }
 
 func (m tview) bodyFrame(e transcript.Entry) detailFrame {
-	body, spans := m.c.m.renderDetail(e)
+	var body string
+	var spans []cardSpan
+	if e.Kind == transcript.EntryUser && len(e.ArgusMessages) > 0 {
+		body, spans = m.argusBand(e, true, max(m.c.m.transcriptWidth()-detailGutter, 10))
+	} else {
+		body, spans = m.c.m.renderDetail(e)
+	}
 	return detailFrame{label: "detail", body: body, bodySpans: spans, entry: e}
 }
 

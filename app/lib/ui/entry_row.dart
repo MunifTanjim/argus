@@ -103,6 +103,9 @@ class EntryRow extends StatelessWidget {
     final e = entry;
     switch (e.kind) {
       case EntryKind.user:
+        if (e.argusMessages.isNotEmpty) {
+          return _ArgusCard(entry: e, expanded: expanded, onToggle: onToggle);
+        }
         return _UserBand(entry: e, expanded: expanded, onToggle: onToggle);
       case EntryKind.text:
         return Padding(
@@ -134,14 +137,18 @@ class EntryRow extends StatelessWidget {
       case EntryKind.subagent
           when e.isTeammate && !(e.soleSubagent?.idle ?? false):
         return _TeammateMessage(
-            entry: e, expanded: expanded, onToggle: onToggle);
+          entry: e,
+          expanded: expanded,
+          onToggle: onToggle,
+        );
       case EntryKind.tool:
       case EntryKind.skill:
       case EntryKind.subagent:
         return ItemRow(
-            item: e,
-            agent: detailRef.agent,
-            onTap: drillFor(context, e, detailRef));
+          item: e,
+          agent: detailRef.agent,
+          onTap: drillFor(context, e, detailRef),
+        );
       case EntryKind.unknown:
         return const SizedBox.shrink();
     }
@@ -197,17 +204,133 @@ class _UserBand extends StatelessWidget {
   }
 }
 
-/// Markdown [text] that folds to its first lines behind Show more / Show less
-/// when it is long.
+typedef _ArgusKind = ({String label, Color color, bool markdown});
+
+/// Follows the argus-ui Claude Code plugin: messages draw their body as
+/// markdown, notices keep their lines (tool input) as written.
+_ArgusKind _argusKind(String kind) => switch (kind) {
+  'text' => (label: 'message', color: AppColors.accent, markdown: true),
+  'task' => (label: 'task', color: AppColors.link, markdown: true),
+  'reply' => (label: 'reply', color: AppColors.accent, markdown: true),
+  'interaction' => (label: 'prompt', color: AppColors.notice, markdown: false),
+  'turn_ended' => (label: 'turn ended', color: AppColors.dim, markdown: false),
+  'interaction_ended' => (
+    label: 'prompt ended',
+    color: AppColors.dim,
+    markdown: false,
+  ),
+  _ => (label: kind, color: AppColors.dim, markdown: false),
+};
+
+/// A user entry whose prompt argus delivered: one framed card per message.
+class _ArgusCard extends StatelessWidget {
+  const _ArgusCard({
+    required this.entry,
+    required this.expanded,
+    required this.onToggle,
+  });
+  final Entry entry;
+  final bool expanded;
+  final VoidCallback? onToggle;
+  @override
+  Widget build(BuildContext context) {
+    final msgs = entry.argusMessages;
+    return Padding(
+      key: const ValueKey('argus-card'),
+      padding: const EdgeInsets.only(top: 12, bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (msgs.length > 1)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text('argus · ${msgs.length} messages', style: _monoDim),
+            ),
+          for (var i = 0; i < msgs.length; i++)
+            _argusMessage(msgs[i], first: i == 0),
+        ],
+      ),
+    );
+  }
+
+  Widget _argusMessage(ArgusMessage m, {required bool first}) {
+    final k = _argusKind(m.kind);
+    final name = m.child ?? m.from ?? '';
+    final session = m.child != null ? m.childSession : m.session;
+    return Container(
+      key: ValueKey('argus-message:${m.id}'),
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      constraints: const BoxConstraints(minWidth: double.infinity),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        border: Border.all(color: k.color),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                k.label,
+                style: _mono.copyWith(
+                  color: k.color,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  name,
+                  overflow: TextOverflow.ellipsis,
+                  style: _mono.copyWith(color: AppColors.text),
+                ),
+              ),
+              if (session != null && session.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    session,
+                    overflow: TextOverflow.ellipsis,
+                    style: _monoDim,
+                  ),
+                ),
+              ],
+              const SizedBox(width: 6),
+              Text(m.id, style: _monoDim),
+              if (first) ...[
+                const Spacer(),
+                Text(_clockTime(entry.timestamp), style: _monoDim),
+              ],
+            ],
+          ),
+          const SizedBox(height: 4),
+          _Foldable(
+            text: m.body,
+            expanded: expanded,
+            onToggle: onToggle,
+            markdown: k.markdown,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// [text] that folds to its first lines behind Show more / Show less when it
+/// is long; drawn as markdown, or as plain monospace lines.
 class _Foldable extends StatelessWidget {
   const _Foldable({
     required this.text,
     required this.expanded,
     required this.onToggle,
+    this.markdown = true,
   });
   final String text;
   final bool expanded;
   final VoidCallback? onToggle;
+  final bool markdown;
   static const _maxLines = 10;
   @override
   Widget build(BuildContext context) {
@@ -221,10 +344,17 @@ class _Foldable extends StatelessWidget {
             text.split('\n').take(_maxLines).join('\n'),
             maxLines: _maxLines,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: AppColors.text, fontSize: 14),
+            style: markdown
+                ? const TextStyle(color: AppColors.text, fontSize: 14)
+                : _mono.copyWith(color: AppColors.text, fontSize: 12),
           )
+        else if (markdown)
+          appMarkdown(text)
         else
-          appMarkdown(text),
+          Text(
+            text,
+            style: _mono.copyWith(color: AppColors.text, fontSize: 12),
+          ),
         if (long)
           GestureDetector(
             onTap: onToggle,
@@ -354,7 +484,11 @@ class _TurnEndDivider extends StatelessWidget {
               children: [
                 WidgetSpan(
                   alignment: PlaceholderAlignment.middle,
-                  child: Icon(icon, size: 12, color: iconColor ?? AppColors.dim),
+                  child: Icon(
+                    icon,
+                    size: 12,
+                    color: iconColor ?? AppColors.dim,
+                  ),
                 ),
                 TextSpan(text: ' ', style: _monoDim),
                 value,

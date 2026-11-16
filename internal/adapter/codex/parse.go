@@ -147,7 +147,8 @@ func foldRollout(lines []rolloutLine, models map[string]string, finished bool) [
 				// Another agent's message starts this agent's turn, as a user
 				// prompt starts a session's.
 				endTurn()
-				out = append(out, transcript.Entry{Kind: transcript.EntryUser, Timestamp: l.Timestamp, Text: agentMessageText(p)})
+				text := agentMessageText(p)
+				out = append(out, transcript.UserEntries(transcript.Entry{Kind: transcript.EntryUser, Timestamp: l.Timestamp, Text: text})...)
 			case "message":
 				switch p.Role {
 				case "user":
@@ -177,7 +178,7 @@ func foldRollout(lines []rolloutLine, models map[string]string, finished bool) [
 						})
 						continue
 					}
-					out = append(out, transcript.Entry{Kind: transcript.EntryUser, Timestamp: l.Timestamp, Text: text})
+					out = append(out, transcript.UserEntries(transcript.Entry{Kind: transcript.EntryUser, Timestamp: l.Timestamp, Text: text})...)
 				case "assistant":
 					if text := contentText(p.Content); strings.TrimSpace(text) != "" {
 						add(transcript.Entry{Kind: transcript.EntryText, Timestamp: l.Timestamp, Text: text})

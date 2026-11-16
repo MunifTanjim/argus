@@ -22,6 +22,7 @@ const (
 	spanChrome                 // the lines as shown, not in the source
 	spanWhole                  // the whole source, once
 	spanTool                   // a tool's body, split by expand
+	spanSkip                   // lines a copy leaves out (a frame's borders)
 )
 
 // cardSpan is a run of a card's rendered lines and what they copy.
@@ -30,6 +31,21 @@ type cardSpan struct {
 	lines  int
 	src    string
 	expand func() []cardSpan // spanTool's spans, computed only for a copy
+	framed bool              // spanText inside a frame: a line copied as shown drops the frame's edges
+}
+
+// unframe drops a frame's side edges ("│ " and " │") from each line.
+func unframe(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, l := range lines {
+		l = strings.TrimRight(l, " ")
+		if rest, ok := strings.CutPrefix(l, "│"); ok {
+			l = strings.TrimPrefix(strings.TrimSuffix(strings.TrimRight(rest, " "), "│"), " ")
+			l = strings.TrimRight(l, " ")
+		}
+		lines[i] = l
+	}
+	return strings.Join(lines, "\n")
 }
 
 // cardSource is what a card copies: text for a character selection, spans for
@@ -178,6 +194,7 @@ func (s textSurface) lineText(p0, p1, l0, l1 int, src cardSource) string {
 						parts = append(parts, t)
 					}
 				}
+			case spanSkip:
 			case spanWhole:
 				switch {
 				case sp.src == "":
@@ -187,7 +204,11 @@ func (s textSurface) lineText(p0, p1, l0, l1 int, src cardSource) string {
 					lastWhole = sp.src
 				}
 			default:
-				parts = append(parts, s.alignedText(line, line+sp.lines, from, to, sp.src))
+				t := s.alignedText(line, line+sp.lines, from, to, sp.src)
+				if sp.framed {
+					t = unframe(t)
+				}
+				parts = append(parts, t)
 			}
 		}
 		line += sp.lines

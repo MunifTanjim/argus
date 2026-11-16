@@ -5,6 +5,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode/parser"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // summarize reads a transcript and distills the list-view summary (plus the
@@ -44,7 +45,11 @@ func summarizeChunks(pchunks []parser.Chunk) *session.Summary {
 			s.Tokens = transformUsage(pc.Usage).Context()
 		}
 		if s.Task == "" && pc.Type == parser.UserChunk && strings.TrimSpace(pc.UserText) != "" {
-			s.Task = firstLineOf(pc.UserText)
+			if line, ok := transcript.ArgusTaskLine(pc.UserText); ok {
+				s.Task = line
+			} else {
+				s.Task = firstLineOf(pc.UserText)
+			}
 		}
 		if s.ModelName != "" && s.Task != "" && s.LastActivity != "" {
 			break

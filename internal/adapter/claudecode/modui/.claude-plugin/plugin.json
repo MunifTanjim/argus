@@ -1,0 +1,6 @@
+{
+  "name": "argus-ui",
+  "version": "0.0.0",
+  "description": "Draws argus messages in the Claude Code transcript.",
+  "author": { "name": "Munif Tanjim" }
+}
