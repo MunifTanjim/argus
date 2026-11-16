@@ -48,3 +48,40 @@ func lastLine(s string) string {
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
 	return lines[len(lines)-1]
 }
+
+func TestSessionColor(t *testing.T) {
+	initTheme(true)
+	awaiting := func(ix *session.Interaction) session.Session {
+		return session.Session{Status: session.StatusAwaitingInput, Interaction: ix}
+	}
+	for _, k := range []session.InteractionKind{session.InteractionPermission, session.InteractionQuestion, session.InteractionPlan} {
+		if got := sessionColor(awaiting(&session.Interaction{Kind: k})); got != ColorBlocked {
+			t.Errorf("%s: color = %v, want ColorBlocked", k, got)
+		}
+	}
+	if got := sessionColor(awaiting(&session.Interaction{Kind: session.InteractionIdle})); got != ColorAccent {
+		t.Errorf("idle: color = %v, want ColorAccent", got)
+	}
+	if got := sessionColor(awaiting(nil)); got != ColorAccent {
+		t.Errorf("nil interaction: color = %v, want ColorAccent", got)
+	}
+	if got := sessionColor(session.Session{Status: session.StatusWorking}); got != ColorOngoing {
+		t.Errorf("working: color = %v, want ColorOngoing", got)
+	}
+	if ColorBlocked == ColorAccent {
+		t.Fatal("ColorBlocked must differ from ColorAccent")
+	}
+}
+
+func TestInteractionHintColor(t *testing.T) {
+	initTheme(true)
+	blockedStyle := StyleAccentBold.Foreground(ColorBlocked)
+	perm := interactionHint("claude", &session.Interaction{Kind: session.InteractionPermission, ToolName: "Bash"})
+	if want := blockedStyle.Render("needs permission · Bash"); perm != want {
+		t.Errorf("permission hint = %q, want %q", perm, want)
+	}
+	idle := interactionHint("claude", &session.Interaction{Kind: session.InteractionIdle})
+	if want := StyleAccentBold.Render("waiting"); idle != want {
+		t.Errorf("idle hint = %q, want %q", idle, want)
+	}
+}

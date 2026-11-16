@@ -296,7 +296,7 @@ func (m model) listedMultiAgent(ids []string) bool {
 }
 
 func (m model) sidebarSessionRow(s session.Session, sel, focused, open, showAgent bool, w int) string {
-	glyph, gcolor := statusGlyph(s.Status), statusColor(s.Status)
+	glyph, gcolor := statusGlyph(s.Status), sessionColor(s)
 	if s.Status == session.StatusWorking {
 		glyph, gcolor = SpinnerFrames[m.spin%len(SpinnerFrames)], ColorOngoing
 	}

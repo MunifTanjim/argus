@@ -22,12 +22,6 @@ func (m model) grouped() bool {
 	return false
 }
 
-// needsYouHeader labels the cross-host group of awaiting-input sessions at the top
-// of the list (mirrors the mobile "Needs you" section).
-func (m model) needsYouHeader() string {
-	return StyleAccentBold.Render("Needs you")
-}
-
 // Shared view styles, bound to theme colors by initStyles(). Zero-valued (plain
 // rendering) until Run() initializes the theme, which is fine for theme-less tests.
 var (
@@ -81,17 +75,17 @@ func interactionHint(agent string, ix *session.Interaction) string {
 		if ix.ToolName != "" {
 			s += " · " + toolDisplayName(agent, ix.ToolName)
 		}
-		return StyleAccentBold.Render(s)
+		return StyleBlockedBold.Render(s)
 	case session.InteractionQuestion:
 		if len(ix.Questions) > 1 {
-			return StyleAccentBold.Render(fmt.Sprintf("questions · %d", len(ix.Questions)))
+			return StyleBlockedBold.Render(fmt.Sprintf("questions · %d", len(ix.Questions)))
 		}
 		if len(ix.Questions) == 1 && ix.Questions[0].Question != "" {
-			return StyleAccentBold.Render("question · " + truncate(ix.Questions[0].Question, 40))
+			return StyleBlockedBold.Render("question · " + truncate(ix.Questions[0].Question, 40))
 		}
-		return StyleAccentBold.Render("question")
+		return StyleBlockedBold.Render("question")
 	case session.InteractionPlan:
-		return StyleAccentBold.Render("plan approval")
+		return StyleBlockedBold.Render("plan approval")
 	default: // idle / generic notification
 		if ix.Message != "" {
 			return StyleAccentBold.Render(truncate(ix.Message, 50))

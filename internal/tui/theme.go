@@ -21,10 +21,11 @@ var (
 	ColorTextMuted     color.Color
 
 	// Accents
-	ColorAccent color.Color
-	ColorError  color.Color
-	ColorInfo   color.Color
-	ColorFocus  color.Color // bright cyan: the focus/selection highlight
+	ColorAccent  color.Color
+	ColorError   color.Color
+	ColorInfo    color.Color
+	ColorFocus   color.Color // bright cyan: the focus/selection highlight
+	ColorBlocked color.Color // yellow: a session blocked on a permission, question or plan
 
 	// Surfaces
 	ColorBorder color.Color
@@ -105,6 +106,7 @@ var (
 	StyleDim             lipgloss.Style
 	StyleMuted           lipgloss.Style
 	StyleAccentBold      lipgloss.Style
+	StyleBlockedBold     lipgloss.Style
 	StyleErrorBold       lipgloss.Style
 	StyleSearchHighlight lipgloss.Style
 )
@@ -125,6 +127,7 @@ func initTheme(hasDarkBg bool) {
 	ColorError = ld(lipgloss.Color("1"), lipgloss.Color("196"))
 	ColorInfo = ld(lipgloss.Color("4"), lipgloss.Color("69"))
 	ColorFocus = ld(lipgloss.Color("6"), lipgloss.Color("51")) // cyan / bright cyan
+	ColorBlocked = ld(lipgloss.Color("3"), lipgloss.Color("214"))
 
 	// Surfaces
 	ColorBorder = ld(lipgloss.Color("250"), lipgloss.Color("60"))
@@ -198,6 +201,7 @@ func initTheme(hasDarkBg bool) {
 	StyleDim = lipgloss.NewStyle().Foreground(ColorTextDim)
 	StyleMuted = lipgloss.NewStyle().Foreground(ColorTextMuted)
 	StyleAccentBold = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
+	StyleBlockedBold = lipgloss.NewStyle().Bold(true).Foreground(ColorBlocked)
 	StyleErrorBold = lipgloss.NewStyle().Bold(true).Foreground(ColorError)
 	StyleSearchHighlight = lipgloss.NewStyle().Bold(true).
 		Foreground(ColorSearchHighlightFg).Background(ColorSearchHighlightBg)
