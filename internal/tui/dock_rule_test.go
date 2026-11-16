@@ -41,12 +41,12 @@ func TestDockRuleDropsLeftBeforeRight(t *testing.T) {
 }
 
 func TestDockRuleDropsLeftLabelThatCannotFit(t *testing.T) {
-	got, drawn := dockRuleFit("◆ 12", "Opus 5.5", 14, ColorBorder)
-	if drawn || strings.Contains(ansi.Strip(got), "◆") || strings.Contains(ansi.Strip(got), "…") {
+	got := dockRule("◆ 12", "Opus 5.5", 14, ColorBorder)
+	if dockRuleFits("◆ 12", "Opus 5.5", 14) || strings.Contains(ansi.Strip(got), "◆") || strings.Contains(ansi.Strip(got), "…") {
 		t.Fatalf("a left label that cannot fit whole should be dropped: %q", ansi.Strip(got))
 	}
-	got, drawn = dockRuleFit("◆ 12", "Opus 5.5", 40, ColorBorder)
-	if !drawn || !strings.Contains(ansi.Strip(got), "◆ 12") {
+	got = dockRule("◆ 12", "Opus 5.5", 40, ColorBorder)
+	if !dockRuleFits("◆ 12", "Opus 5.5", 40) || !strings.Contains(ansi.Strip(got), "◆ 12") {
 		t.Fatalf("a left label that fits should be drawn whole: %q", ansi.Strip(got))
 	}
 }
@@ -139,5 +139,66 @@ func TestRegionSpinsOnlyWhileWorking(t *testing.T) {
 	c = &ctx{m: &m}
 	if !m.dock.spins(c) {
 		t.Fatal("a working session should spin")
+	}
+}
+
+func TestDockRuleShowsSessionInfo(t *testing.T) {
+	m := withSession(sessionModel(nil), func(s *session.Session) {
+		s.Subagents = twoRunning
+		s.Summary = &session.Summary{ModelName: "Opus 5.5", Effort: "high",
+			HasContext: true, ContextPct: 42.5, Tokens: 84_000, HasCost: true, CostUSD: 1.234}
+	})
+	sub := Icon.Subagent.Glyph + " 2"
+	full := "Opus 5.5 · high · 84.0k (43%) · $1.23"
+	_, bottom, _ := m.dockRules(80, ColorBorder)
+	if got := ansi.Strip(bottom); !strings.HasSuffix(got, " "+full+" ──") || !strings.Contains(got, sub) {
+		t.Fatalf("bottom rule should end with the session info: %q", got)
+	}
+	// A rule fits its labels exactly in 2*2 edge cells plus each label padded by 2.
+	fit := func(left, right string) int {
+		w := 4
+		for _, l := range []string{left, right} {
+			if l != "" {
+				w += ansi.StringWidth(l) + 2
+			}
+		}
+		return w
+	}
+	for _, tc := range []struct {
+		w      int
+		want   string
+		counts int
+	}{
+		{fit(sub, full) - 1, "Opus 5.5 · high · 84.0k (43%)", 1},
+		{fit(sub, "Opus 5.5 · high · 84.0k (43%)") - 1, "Opus 5.5 · high", 1},
+		{fit(sub, "Opus 5.5 · high") - 1, "Opus 5.5 · high", 0},
+		{fit("", "Opus 5.5 · high") - 1, "Opus 5.5", 0},
+		{fit("", "Opus 5.5") - 1, "", 0},
+	} {
+		_, bottom, zones := m.dockRules(tc.w, ColorBorder)
+		got := ansi.Strip(bottom)
+		wantSuffix := "─ " + tc.want + " ──"
+		if tc.want == "" {
+			wantSuffix = "────"
+		}
+		if !strings.HasSuffix(got, wantSuffix) || strings.Contains(got, sub) != (tc.counts > 0) || len(zones) != tc.counts {
+			t.Fatalf("width %d: want %d counts and %q, got %q", tc.w, tc.counts, tc.want, got)
+		}
+	}
+}
+
+func TestUsageLabel(t *testing.T) {
+	for _, tc := range []struct {
+		sum  session.Summary
+		want string
+	}{
+		{session.Summary{Tokens: 84_000, HasContext: true, ContextPct: 42}, "84.0k (42%)"},
+		{session.Summary{HasContext: true, ContextPct: 42}, "42%"},
+		{session.Summary{Tokens: 84_000}, "84.0k"},
+		{session.Summary{}, ""},
+	} {
+		if got := ansi.Strip(usageLabel(&tc.sum)); got != tc.want {
+			t.Errorf("%+v: got %q, want %q", tc.sum, got, tc.want)
+		}
 	}
 }
