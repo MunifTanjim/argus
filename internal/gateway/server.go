@@ -47,9 +47,12 @@ type Server struct {
 	relayMu   sync.Mutex
 	channels  map[string]*relayChannel // chan_id -> paired client/node + pumps
 	nodePeers map[string]*api.Peer     // node id -> live uplink peer (relay.open target)
-	entries   *trustlog.EntryStore     // retained trust-log entries (blind)
-	nextChan  atomic.Uint64            // chan_id allocator
-	log       *slog.Logger             // relay lifecycle logging; nil disables
+	// nodeOpening counts the channels each node uplink is opening, so the
+	// channel limit holds while an open is between its check and addChannel.
+	nodeOpening map[*api.Peer]int
+	entries     *trustlog.EntryStore // retained trust-log entries (blind)
+	nextChan    atomic.Uint64        // chan_id allocator
+	log         *slog.Logger         // relay lifecycle logging; nil disables
 }
 
 // NewServer builds a gateway Server over agg using the relay path for all connections.
@@ -66,7 +69,7 @@ func NewServer(agg *Aggregator, nodeAuth, clientAuth func(token string) bool) *S
 		nodeKeepaliveFailures: api.DefaultKeepaliveFailures,
 	}
 	s.clientSrv = s.buildClientServer()
-	s.clientSrv.SetRelayFrameHandler(s.forwardFromClient)
+	s.clientSrv.SetRelayFrameHandler(s.forwardFrame)
 	return s
 }
 
@@ -303,12 +306,19 @@ const relayQueueDepth = 64
 // so an uncapped client could exhaust node/gateway resources.
 const maxChannelsPerClient = 64
 
-// relayChannel is one client<->node E2E channel. The gateway forwards opaque
-// frames between the two peers by chan_id, never reading the sealed Body.
+// maxChannelsPerNode caps how many relay channels one node uplink may open to
+// other nodes, for the same reason as maxChannelsPerClient.
+const maxChannelsPerNode = 64
+
+// relayChannel is one client<->node or node<->node E2E channel. The gateway
+// forwards opaque frames between the two peers by chan_id, never reading the
+// sealed Body. For a node-opened channel (fromNode), client is the opener's
+// node uplink and node is the target's.
 type relayChannel struct {
 	chanID   string
 	client   *api.Peer
 	node     *api.Peer
+	fromNode bool
 	toNode   chan queuedFrame
 	toClient chan queuedFrame
 	stop     chan struct{}
@@ -320,9 +330,9 @@ type queuedFrame struct {
 	raw []byte
 }
 
-func (s *Server) addChannel(chanID string, client, node *api.Peer) {
+func (s *Server) addChannel(chanID string, client, node *api.Peer, fromNode bool) {
 	ch := &relayChannel{
-		chanID: chanID, client: client, node: node,
+		chanID: chanID, client: client, node: node, fromNode: fromNode,
 		toNode: make(chan queuedFrame, relayQueueDepth), toClient: make(chan queuedFrame, relayQueueDepth),
 		stop: make(chan struct{}),
 	}
@@ -348,6 +358,9 @@ func (s *Server) dropChannel(chanID, reason string) {
 		// The node holds per-channel state (event stream, transcript pollers) that
 		// only it can free. Fails harmlessly when the node uplink is what closed.
 		go func() { _ = ch.node.Notify(api.MethodRelayClosed, api.RelayCloseParams{ChanID: chanID}) }()
+		if ch.fromNode {
+			go func() { _ = ch.client.Notify(api.MethodRelayClosed, api.RelayCloseParams{ChanID: chanID}) }()
+		}
 	}
 }
 
@@ -390,20 +403,17 @@ func (s *Server) enqueue(ch *relayChannel, q chan queuedFrame, f api.RelayFrame)
 	}
 }
 
-func (s *Server) forwardFromClient(src *api.Peer, f api.RelayFrame) {
+// forwardFrame routes a relayed frame to the other end of its channel. A frame
+// from a peer that is neither end of the channel is dropped.
+func (s *Server) forwardFrame(src *api.Peer, f api.RelayFrame) {
 	s.relayMu.Lock()
 	ch := s.channels[f.Route.ChanID]
 	s.relayMu.Unlock()
-	if ch != nil && ch.client == src {
+	switch {
+	case ch == nil:
+	case src == ch.client:
 		s.enqueue(ch, ch.toNode, f)
-	}
-}
-
-func (s *Server) forwardFromNode(src *api.Peer, f api.RelayFrame) {
-	s.relayMu.Lock()
-	ch := s.channels[f.Route.ChanID]
-	s.relayMu.Unlock()
-	if ch != nil && ch.node == src {
+	case src == ch.node:
 		s.enqueue(ch, ch.toClient, f)
 	}
 }
@@ -414,14 +424,15 @@ func (s *Server) addNodePeer(id string, peer *api.Peer) {
 	s.relayMu.Unlock()
 }
 
-// removeNodePeer drops a node uplink and tears down every channel bound to it.
+// removeNodePeer drops a node uplink and tears down every channel bound to it,
+// on either end.
 func (s *Server) removeNodePeer(id string, peer *api.Peer) {
 	s.relayMu.Lock()
 	if s.nodePeers[id] == peer {
 		delete(s.nodePeers, id)
 	}
 	s.relayMu.Unlock()
-	s.dropChannelsWhere("node uplink closed", func(ch *relayChannel) bool { return ch.node == peer })
+	s.dropChannelsWhere("node uplink closed", func(ch *relayChannel) bool { return ch.node == peer || ch.client == peer })
 }
 
 // notifyNodePeers sends a notification to every connected node uplink except
@@ -493,7 +504,7 @@ func (s *Server) buildClientServer() *api.Server {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "too many open channels for this client"}
 		}
 		chanID := "c" + strconv.FormatUint(s.nextChan.Add(1), 10)
-		s.addChannel(chanID, clientPeer, nodePeer)
+		s.addChannel(chanID, clientPeer, nodePeer, false)
 		return api.RelayOpenResult{ChanID: chanID}, nil
 	})
 
@@ -553,6 +564,7 @@ func (s *Server) buildClientServer() *api.Server {
 // as a relay target, and block until it disconnects.
 func (s *Server) serveNode(conn net.Conn) {
 	var self atomic.Pointer[api.Peer]
+	var selfID atomic.Pointer[string]
 
 	nodeDispatch := func(_ context.Context, method string, params json.RawMessage) (any, error) {
 		switch method {
@@ -574,6 +586,28 @@ func (s *Server) serveNode(conn net.Conn) {
 			if added > 0 {
 				s.notifyNodePeers(self.Load(), api.MethodTrustLogChanged, api.TrustLogChangedParams{Heads: s.entries.Heads()})
 				s.agg.PublishTrustChanged()
+			}
+			return nil, nil
+		case api.MethodRelayOpen:
+			idp := selfID.Load()
+			if idp == nil {
+				return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "node not identified"}
+			}
+			p, err := api.Decode[api.RelayOpenParams](params)
+			if err != nil {
+				return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+			}
+			return s.openNodeChannel(*idp, self.Load(), p.NodeID)
+		case api.MethodRelayClose:
+			p, err := api.Decode[api.RelayCloseParams](params)
+			if err != nil {
+				return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
+			}
+			s.relayMu.Lock()
+			ch := s.channels[p.ChanID]
+			s.relayMu.Unlock()
+			if ch != nil && ch.fromNode && ch.client == self.Load() {
+				s.dropChannel(p.ChanID, "closed by opener node")
 			}
 			return nil, nil
 		case api.MethodPushDeliver:
@@ -608,7 +642,7 @@ func (s *Server) serveNode(conn net.Conn) {
 		KeepaliveTimeout:          s.nodeKeepaliveTimeout,
 		KeepaliveFailureThreshold: s.nodeKeepaliveFailures,
 		Dispatch:                  nodeDispatch,
-		OnRelayFrame:              s.forwardFromNode,
+		OnRelayFrame:              s.forwardFrame,
 	})
 	self.Store(peer)
 	defer peer.Close()
@@ -621,7 +655,73 @@ func (s *Server) serveNode(conn net.Conn) {
 	}
 
 	s.agg.AddSource(NewRemoteSource(id, peer))
+	selfID.Store(&id.ID)
 	s.addNodePeer(id.ID, peer)
 	defer s.removeNodePeer(id.ID, peer)
-	<-peer.Done()
+
+	// Nodes get the same roster stream as clients so they can address peers.
+	rosterEvents, rosterCancel := s.agg.SubscribeRoster()
+	defer rosterCancel()
+	for _, nd := range s.agg.Roster() {
+		_ = peer.Notify(api.MethodNodeEvent, api.NodeEvent{Type: api.NodeEventAdded, Node: nd})
+	}
+	for {
+		select {
+		case <-peer.Done():
+			return
+		case ev, ok := <-rosterEvents:
+			if !ok {
+				<-peer.Done()
+				return
+			}
+			if err := peer.Notify(api.MethodNodeEvent, ev); err != nil {
+				<-peer.Done()
+				return
+			}
+		}
+	}
+}
+
+// openNodeChannel opens a relay channel from the opener node uplink to the
+// node targetID. relay.peer_opened is written to the target before the channel
+// exists: Notify writes synchronously under the peer's write lock and the relay
+// pumps start in addChannel, so the target reads it before any relayed frame.
+func (s *Server) openNodeChannel(openerID string, opener *api.Peer, targetID string) (any, error) {
+	if targetID == openerID {
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "cannot open a channel to self"}
+	}
+	s.relayMu.Lock()
+	target := s.nodePeers[targetID]
+	open := s.nodeOpening[opener]
+	for _, ch := range s.channels {
+		if ch.fromNode && ch.client == opener {
+			open++
+		}
+	}
+	if target == nil {
+		s.relayMu.Unlock()
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown node: " + targetID}
+	}
+	if open >= maxChannelsPerNode {
+		s.relayMu.Unlock()
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "too many open channels for this node"}
+	}
+	if s.nodeOpening == nil {
+		s.nodeOpening = map[*api.Peer]int{}
+	}
+	s.nodeOpening[opener]++ // reserved until the channel is added or the open fails
+	s.relayMu.Unlock()
+	defer func() {
+		s.relayMu.Lock()
+		if s.nodeOpening[opener]--; s.nodeOpening[opener] <= 0 {
+			delete(s.nodeOpening, opener)
+		}
+		s.relayMu.Unlock()
+	}()
+	chanID := "c" + strconv.FormatUint(s.nextChan.Add(1), 10)
+	if err := target.Notify(api.MethodRelayPeerOpened, api.RelayPeerOpenedParams{ChanID: chanID, FromNode: openerID}); err != nil {
+		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "notify target node: " + err.Error()}
+	}
+	s.addChannel(chanID, opener, target, true)
+	return api.RelayOpenResult{ChanID: chanID}, nil
 }
