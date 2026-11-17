@@ -1,11 +1,13 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/e2e"
@@ -21,6 +23,12 @@ type chanState struct {
 	stopStream   func() // ends the registry event stream; guarded by relayResponder.mu
 	decFails     int    // consecutive decrypt failures; read-loop only, reset on success
 	clientCBOR   atomic.Bool
+	// opener is the node the gateway named as this channel's opener
+	// (relay.peer_opened). Empty for client channels. With E2EE, channelPeer
+	// serves the channel as a peer channel only while the opening key matches
+	// that node's roster key.
+	opener  string
+	demoted atomic.Bool // a key mismatch for opener was logged
 }
 
 // decryptWedgeWarnAfter is the run of consecutive decrypt failures that signals a
@@ -39,22 +47,113 @@ func wedgeWarn(n *int) bool {
 // the Noise responder handshake per chan_id, decrypts requests, dispatches them
 // through the node's handlers, and seals the responses + notifications back.
 type relayResponder struct {
-	d        *Node
-	static   e2e.KeyPair
-	dispatch api.DispatchFunc
-	peer     atomic.Pointer[api.Peer]
+	d            *Node
+	static       e2e.KeyPair
+	dispatch     api.DispatchFunc // client channels
+	peerDispatch api.DispatchFunc // channels a verified peer node opened
+	peer         atomic.Pointer[api.Peer]
+	peers        *peerPool // channels this node opened on the same uplink
 
-	mu    sync.Mutex
-	chans map[string]*chanState
+	mu         sync.Mutex
+	chans      map[string]*chanState
+	peerOpened map[string]peerOpened // relay.peer_opened not yet consumed, by chan_id
 }
 
-func (d *Node) newRelayResponder() *relayResponder {
+// peerOpened is the gateway's statement that FromNode opened a channel, held
+// until that channel's first frame.
+type peerOpened struct {
+	from string
+	at   time.Time
+}
+
+// maxPendingPeerOpened bounds unconsumed relay.peer_opened records; past it the
+// oldest is dropped. pendingPeerOpenedTTL expires a record whose channel never
+// sent a frame. Losing a record only makes that channel a client channel.
+const (
+	maxPendingPeerOpened = 256
+	pendingPeerOpenedTTL = time.Minute
+)
+
+func (d *Node) newRelayResponder(peers *peerPool) *relayResponder {
 	return &relayResponder{
-		d:        d,
-		static:   d.identity,
-		dispatch: d.remoteDispatch(),
-		chans:    map[string]*chanState{},
+		d:            d,
+		peers:        peers,
+		static:       d.identity,
+		dispatch:     d.remoteDispatch(),
+		peerDispatch: d.peerDispatch(),
+		chans:        map[string]*chanState{},
+		peerOpened:   map[string]peerOpened{},
 	}
+}
+
+// notePeerOpened records that the gateway says from opened chanID. It runs on
+// the uplink read loop, before the channel's first frame.
+func (r *relayResponder) notePeerOpened(chanID, from string) {
+	if chanID == "" || from == "" {
+		return
+	}
+	now := time.Now()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var oldestID string
+	var oldest time.Time
+	for id, p := range r.peerOpened {
+		if now.Sub(p.at) > pendingPeerOpenedTTL {
+			delete(r.peerOpened, id)
+			continue
+		}
+		if oldestID == "" || p.at.Before(oldest) {
+			oldestID, oldest = id, p.at
+		}
+	}
+	if len(r.peerOpened) >= maxPendingPeerOpened {
+		delete(r.peerOpened, oldestID)
+	}
+	r.peerOpened[chanID] = peerOpened{from: from, at: now}
+}
+
+// takePeerOpened removes and returns the node the gateway named as chanID's
+// opener, or "" when there is no live record.
+func (r *relayResponder) takePeerOpened(chanID string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, ok := r.peerOpened[chanID]
+	if !ok {
+		return ""
+	}
+	delete(r.peerOpened, chanID)
+	if time.Since(p.at) > pendingPeerOpenedTTL {
+		return ""
+	}
+	return p.from
+}
+
+// peerKeyMatches reports whether key is nodeID's identity key in the roster.
+func (r *relayResponder) peerKeyMatches(nodeID string, key []byte) bool {
+	nd, ok := r.d.roster.get(nodeID)
+	if !ok || nd.IdentityPubKey == "" {
+		return false
+	}
+	want, err := base64.StdEncoding.DecodeString(nd.IdentityPubKey)
+	return err == nil && len(want) > 0 && bytes.Equal(want, key)
+}
+
+// channelPeer returns the peer node cs serves, or "" for a client channel. An
+// E2EE channel's key is checked against the roster on every request: a roster
+// key change for the opener demotes the live channel to client dispatch, and a
+// roster entry that arrives after the handshake promotes it.
+func (r *relayResponder) channelPeer(cs *chanState) string {
+	if cs.opener == "" {
+		return ""
+	}
+	if cs.clientStatic != nil && !r.peerKeyMatches(cs.opener, cs.clientStatic) {
+		if !cs.demoted.Swap(true) {
+			r.d.log.Warn("peer channel key does not match roster; serving as client channel", "chan", cs.ch.ID(), "node", cs.opener)
+		}
+		return ""
+	}
+	cs.demoted.Store(false)
+	return cs.opener
 }
 
 func (r *relayResponder) lookup(chanID string) *chanState {
@@ -69,6 +168,12 @@ func (r *relayResponder) onFrame(_ *api.Peer, f api.RelayFrame) {
 	peer := r.peer.Load()
 	if peer == nil {
 		return // setup race: peer not stored yet; the client re-establishes
+	}
+	// A channel this node opened carries the peer's msg2 and responses, which
+	// must not be taken for a new msg1 or a plaintext request.
+	if r.peers != nil && r.peers.owns(f.Route.ChanID) {
+		r.peers.onFrame(f)
+		return
 	}
 	if f.Method == api.MethodE2EHandshake {
 		r.handshake(peer, f)
@@ -98,6 +203,9 @@ func (r *relayResponder) onFrame(_ *api.Peer, f api.RelayFrame) {
 
 // handshake runs the Noise responder for a new channel and replies with msg2.
 func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
+	// Consume the gateway's peer_opened record whatever the outcome, so a failed
+	// handshake cannot leave it behind.
+	from := r.takePeerOpened(f.Route.ChanID)
 	msg1, err := api.HandshakeFromFrame(f)
 	if err != nil {
 		return
@@ -123,8 +231,11 @@ func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
 		r.d.log.Warn("rejected unauthorized client channel", "chan", f.Route.ChanID, "client", fp)
 		return
 	}
+	// The gateway names the opener. channelPeer also requires the opener's Noise
+	// key to be that node's roster key, and serves the channel as a client
+	// channel while it is not.
 	base, cancel := context.WithCancel(context.Background())
-	cs := &chanState{ch: api.NewChannel(f.Route.ChanID, sess), cancel: cancel, clientStatic: append([]byte(nil), clientStatic...)}
+	cs := &chanState{ch: api.NewChannel(f.Route.ChanID, sess), cancel: cancel, clientStatic: append([]byte(nil), clientStatic...), opener: from}
 	cn := &channelNotifier{r: r, cs: cs}
 	cs.ctx = api.WithNotifier(base, cn)
 	r.mu.Lock()
@@ -150,9 +261,19 @@ func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
 	// Only now, with msg2 on the wire, may sealed frames follow: the client cannot
 	// open one until it has finished the handshake. A gateway-relayed client has no
 	// other way to learn the session list — there is no accept hook on this path.
+	r.startStream(f.Route.ChanID, cs, cn)
+}
+
+// startStream streams the registry and connection broadcasts to a client
+// channel. A channel a node opened gets neither, even while channelPeer serves
+// it as a client channel: its opener only makes calls.
+func (r *relayResponder) startStream(chanID string, cs *chanState, cn *channelNotifier) {
+	if cs.opener != "" {
+		return
+	}
 	stop := r.d.streamRegistry(cn)
 	r.mu.Lock()
-	live := r.chans[f.Route.ChanID] == cs
+	live := r.chans[chanID] == cs
 	if live {
 		cs.stopStream = stop
 	}
@@ -163,35 +284,32 @@ func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
 }
 
 // createPlain lazily creates a plain (identity-cipher) channel for plaintext mode.
-// It mirrors the tail of handshake but skips Noise and locked-mode checks.
+// It mirrors the tail of handshake but skips Noise and locked-mode checks. With
+// no key to check, a gateway peer_opened statement alone makes it a peer channel.
 func (r *relayResponder) createPlain(chanID string) *chanState {
 	base, cancel := context.WithCancel(context.Background())
 	cs := &chanState{
 		ch:     api.NewPlainChannel(chanID),
 		cancel: cancel,
+		opener: r.takePeerOpened(chanID),
 	}
 	cn := &channelNotifier{r: r, cs: cs}
 	cs.ctx = api.WithNotifier(base, cn)
 	r.mu.Lock()
 	r.chans[chanID] = cs
 	r.mu.Unlock()
-	stop := r.d.streamRegistry(cn)
-	r.mu.Lock()
-	live := r.chans[chanID] == cs
-	if live {
-		cs.stopStream = stop
-	}
-	r.mu.Unlock()
-	if !live {
-		stop()
-	}
+	r.startStream(chanID, cs, cn)
 	return cs
 }
 
 // serve dispatches a decrypted request and seals the response back on the
 // channel in the request's encoding.
 func (r *relayResponder) serve(cs *chanState, enc api.Encoding, id *json.RawMessage, method string, params []byte) {
-	raw, rpcErr := api.Serve(cs.ctx, r.dispatch, enc, method, params)
+	ctx, dispatch := cs.ctx, r.dispatch
+	if p := r.channelPeer(cs); p != "" {
+		ctx, dispatch = withPeerNode(ctx, p), r.peerDispatch
+	}
+	raw, rpcErr := api.Serve(ctx, dispatch, enc, method, params)
 	peer := r.peer.Load()
 	if peer == nil {
 		return
@@ -217,6 +335,7 @@ func (r *relayResponder) closeAll() {
 		}
 		delete(r.chans, id)
 	}
+	clear(r.peerOpened)
 	r.mu.Unlock()
 	for _, stop := range stops {
 		stop()
@@ -227,6 +346,7 @@ func (r *relayResponder) closeChan(chanID string) {
 	r.mu.Lock()
 	cs := r.chans[chanID]
 	delete(r.chans, chanID)
+	delete(r.peerOpened, chanID) // relay.closed before the first frame
 	var stop func()
 	if cs != nil {
 		stop = cs.stopStream
@@ -241,7 +361,9 @@ func (r *relayResponder) closeChan(chanID string) {
 }
 
 // reevaluate drops live channels whose client is no longer authorized by the
-// current trust store. A nil/Disabled/local-disabled store closes nothing.
+// current trust store. A nil/Disabled/local-disabled store closes nothing. It
+// leaves opener alone: channelPeer re-checks a peer channel's key against the
+// roster on every request, which covers a roster key change whenever it happens.
 func (r *relayResponder) reevaluate() {
 	if r.d.rejectsChannels() {
 		r.mu.Lock()
@@ -280,6 +402,19 @@ func (r *relayResponder) reevaluate() {
 			r.closeChan(e.id)
 		}
 	}
+}
+
+type peerNodeKey struct{}
+
+func withPeerNode(ctx context.Context, nodeID string) context.Context {
+	return context.WithValue(ctx, peerNodeKey{}, nodeID)
+}
+
+// peerNodeFrom returns the node that opened the channel a request arrived on,
+// when that channel is a verified peer channel.
+func peerNodeFrom(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(peerNodeKey{}).(string)
+	return id, ok && id != ""
 }
 
 // channelNotifier seals node->client notifications (session.event, transcript.delta,
@@ -324,4 +459,10 @@ func (d *Node) RelayChannelCountForTest() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.chans)
+}
+
+func (r *relayResponder) pendingPeerCountForTest() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.peerOpened)
 }

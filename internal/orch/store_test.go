@@ -3,6 +3,7 @@ package orch_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -46,6 +47,7 @@ func TestInsertGetRoundTrip(t *testing.T) {
 	in.Kind = api.MessageInteraction
 	in.Child = &api.Actor{Node: "home", Key: "claude:a"}
 	in.Interaction = &session.Interaction{Kind: session.InteractionPermission, ToolName: "Bash"}
+	in.FromSessionID, in.FromLabel = "home:%3", "worker"
 	got, err := s.Insert(ctx, in)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +59,8 @@ func TestInsertGetRoundTrip(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("Get: ok=%v err=%v", ok, err)
 	}
-	if back.Kind != in.Kind || back.From != in.From || back.To != in.To || back.Child == nil || *back.Child != *in.Child || back.State != in.State {
+	if back.Kind != in.Kind || back.From != in.From || back.To != in.To || back.Child == nil || *back.Child != *in.Child || back.State != in.State ||
+		back.FromSessionID != in.FromSessionID || back.FromLabel != in.FromLabel {
 		t.Fatalf("round trip mismatch: %+v", back)
 	}
 	if back.Interaction == nil || back.Interaction.Kind != session.InteractionPermission || back.Interaction.ToolName != "Bash" {
@@ -225,7 +228,7 @@ func TestExpireLinksKeepsLiveAndFresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	cutoff := time.Unix(1_700_000_000, 0).Add(3 * time.Millisecond)
-	n, err := s.ExpireLinks(ctx, cutoff, func(c api.Actor) bool { return c.Key == "claude:live" })
+	n, err := s.ExpireLinks(ctx, cutoff, func(c api.Actor) bool { return c.Key == "claude:live" }, func(string) bool { return true })
 	if err != nil || n != 1 {
 		t.Fatalf("ExpireLinks = %d, %v", n, err)
 	}
@@ -238,6 +241,36 @@ func TestExpireLinksKeepsLiveAndFresh(t *testing.T) {
 	}
 }
 
+func TestExpireLinksKeepsLiveRemoteMirror(t *testing.T) {
+	s, _ := newTestStore(t)
+	s.SetNodeID("n")
+	ctx := context.Background()
+	parent := api.Actor{Node: "n", Key: "claude:p"}
+	for _, l := range []api.Link{
+		{Child: api.Actor{Node: "n", Key: "claude:local"}, Parent: parent},
+		{Child: api.Actor{Node: "m", Key: "claude:running"}, Parent: parent},
+		{Child: api.Actor{Node: "m", Key: "claude:ended"}, Parent: parent, EndedBy: "self"},
+	} {
+		if err := s.PutLink(ctx, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := s.ExpireLinks(ctx, time.Unix(1_800_000_000, 0), func(api.Actor) bool { return false }, func(string) bool { return true })
+	if err != nil || n != 2 {
+		t.Fatalf("ExpireLinks = %d, %v", n, err)
+	}
+	links, err := s.Links(ctx)
+	if err != nil || len(links) != 1 || links[0].Child.Key != "claude:running" {
+		t.Fatalf("links = %+v err=%v", links, err)
+	}
+
+	// m was not seen for the whole retention: its mirror goes too.
+	n, err = s.ExpireLinks(ctx, time.Unix(1_800_000_000, 0), func(api.Actor) bool { return false }, func(string) bool { return false })
+	if err != nil || n != 1 {
+		t.Fatalf("ExpireLinks for an unseen node = %d, %v", n, err)
+	}
+}
+
 func TestFailQueuedOnlyQueued(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
@@ -245,9 +278,9 @@ func TestFailQueuedOnlyQueued(t *testing.T) {
 	d := queued("claude:c")
 	d.State = api.MessageDelivered
 	dm, _ := s.Insert(ctx, d)
-	n, err := s.FailQueued(ctx, api.Actor{Node: "n1", Key: "claude:c"})
-	if err != nil || n != 1 {
-		t.Fatalf("FailQueued = %d, %v", n, err)
+	failed, err := s.FailQueued(ctx, api.Actor{Node: "n1", Key: "claude:c"})
+	if err != nil || len(failed) != 1 || failed[0].State != api.MessageFailed {
+		t.Fatalf("FailQueued = %+v, %v", failed, err)
 	}
 	got, _, _ := s.Get(ctx, dm.ID)
 	if got.State != api.MessageDelivered {
@@ -475,6 +508,25 @@ func TestInsertAssignsNodeQualifiedID(t *testing.T) {
 	}
 }
 
+func TestReceiveKeepsSender(t *testing.T) {
+	s, _ := newTestStore(t)
+	s.SetNodeID("home")
+	ctx := context.Background()
+	at := time.Unix(1_700_000_000, 0)
+	in := api.Message{
+		ID: "b:m-00000001", Kind: api.MessageText,
+		From: api.Actor{Node: "b", Key: "opencode:x"}, FromSessionID: "b:opencode:x", FromLabel: "planner",
+		To: api.Actor{Node: "home", Key: "claude:a"}, Body: "hi", State: api.MessageQueued, CreatedAt: at, UpdatedAt: at,
+	}
+	if added, err := s.Receive(ctx, in); err != nil || !added {
+		t.Fatalf("Receive: added=%v err=%v", added, err)
+	}
+	back, ok, err := s.Get(ctx, in.ID)
+	if err != nil || !ok || back.FromSessionID != in.FromSessionID || back.FromLabel != in.FromLabel {
+		t.Fatalf("back = %+v ok=%v err=%v", back, ok, err)
+	}
+}
+
 func TestReleaseInteractionNeedsSameActor(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
@@ -554,40 +606,6 @@ func TestUnrepliedTaskMatchesTheChildNode(t *testing.T) {
 	}
 }
 
-func TestRequestIndexesAreScopedToNode(t *testing.T) {
-	s, _ := newTestStore(t)
-	ctx := t.Context()
-	req := orch.Request{ID: "r1", Hash: "h1"}
-	m := queued("claude:b")
-	m.From = api.Actor{Node: "n1", Key: "claude:a"}
-	first, err := s.InsertRequest(ctx, m, req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.From.Node = "n2"
-	second, err := s.InsertRequest(ctx, m, req)
-	if err != nil {
-		t.Fatalf("another node's actor with the same key and request_id: %v", err)
-	}
-	got, _, ok, err := s.MessageByRequest(ctx, api.Actor{Node: "n2", Key: "claude:a"}, "r1")
-	if err != nil || !ok || got.ID != second.ID || got.ID == first.ID {
-		t.Fatalf("got %+v ok=%v err=%v", got, ok, err)
-	}
-
-	child := api.Actor{Node: "n1", Key: "codex:c"}
-	for _, node := range []string{"n1", "n2"} {
-		child.Key = "codex:" + node
-		l := api.Link{Child: child, Parent: api.Actor{Node: node, Key: "claude:p"}}
-		if err := s.LinkSpawned(ctx, l, api.Message{}, req); err != nil {
-			t.Fatalf("%s: %v", node, err)
-		}
-	}
-	sl, ok, err := s.LinkByRequest(ctx, api.Actor{Node: "n2", Key: "claude:p"}, "r1")
-	if err != nil || !ok || sl.Link.Child.Key != "codex:n2" {
-		t.Fatalf("link %+v ok=%v err=%v", sl, ok, err)
-	}
-}
-
 func TestLinksWithTheSameKeyOnTwoNodesCoexist(t *testing.T) {
 	s, sqlDB := newTestStore(t)
 	s.SetNodeID("n1")
@@ -622,6 +640,28 @@ func TestLinksWithTheSameKeyOnTwoNodesCoexist(t *testing.T) {
 	fresh.SetNodeID("n1")
 	if l, ok, _ := fresh.Link(ctx, remote.Child); !ok || l.EndedBy != "self" {
 		t.Fatalf("reloaded remote link = %+v ok=%v", l, ok)
+	}
+}
+
+func TestQueuedKeepsArrivalOrder(t *testing.T) {
+	s, _ := newTestStore(t)
+	s.SetNodeID("n1")
+	ctx := context.Background()
+	to := api.Actor{Node: "n1", Key: "claude:a"}
+	base := time.Unix(1_700_000_000, 0)
+	// The second node's clock runs behind: its later message has an earlier time.
+	for i, m := range []api.Message{
+		{ID: "n2:m-00000001", CreatedAt: base.Add(10 * time.Second)},
+		{ID: "n3:m-00000002", CreatedAt: base},
+	} {
+		m.Kind, m.From, m.To, m.Body, m.State, m.UpdatedAt = api.MessageText, api.Actor{Node: "n2", Key: "claude:w"}, to, fmt.Sprint(i), api.MessageQueued, m.CreatedAt
+		if _, err := s.Receive(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.Queued(ctx, to)
+	if err != nil || len(got) != 2 || got[0].ID != "n2:m-00000001" || got[1].ID != "n3:m-00000002" {
+		t.Fatalf("queued = %+v err=%v, want arrival order", got, err)
 	}
 }
 

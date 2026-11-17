@@ -46,25 +46,38 @@ func (d *Node) ConnectGateway(ctx context.Context, url, token string, httpClient
 // relay responder that terminates channels from clients; the gateway can only
 // issue node.identify, all client requests travel through relay frames.
 func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *http.Client) (connected bool) {
-	resp := d.newRelayResponder()
+	pool := d.newPeerPool()
+	resp := d.newRelayResponder(pool)
 	peer, err := api.DialWSPeer(ctx, url, token, httpClient, api.PeerOptions{
 		Dispatch:     d.uplinkDispatch(),
-		OnNotify:     d.onGatewayNotify,
+		OnNotify:     d.uplinkNotify(resp),
 		OnRelayFrame: resp.onFrame,
 	})
 	if err != nil {
+		pool.closeAll()
 		if ctx.Err() == nil {
 			d.log.Warn("gateway uplink dial failed", "url", url, "err", err)
 		}
 		return false
 	}
 	resp.peer.Store(peer)
+	pool.peer.Store(peer)
 	d.activeResponder.Store(resp)
 	d.activeUplink.Store(peer)
-	defer peer.Close()
-	defer resp.closeAll()
-	defer d.activeResponder.CompareAndSwap(resp, nil)
-	defer d.activeUplink.CompareAndSwap(peer, nil)
+	d.peers.Store(pool)
+	pool.watchRoster()
+	defer func() {
+		d.activeUplink.CompareAndSwap(peer, nil)
+		d.activeResponder.CompareAndSwap(resp, nil)
+		d.peers.CompareAndSwap(pool, nil)
+		pool.closeAll()
+		resp.closeAll()
+		peer.Close()
+		// Reset only once the read loop has exited, so a late node.event cannot
+		// repopulate the roster of a closed uplink.
+		<-peer.Done()
+		d.roster.reset()
+	}()
 	d.log.Info("gateway uplink established", "url", url)
 	// Wire the push egress for this uplink unconditionally. The store gate is
 	// enforced at delivery time (handlePushTest / StartPush); the store may be set

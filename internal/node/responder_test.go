@@ -3,10 +3,13 @@ package node
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -42,7 +45,7 @@ func e2eUplinkPair(t *testing.T, d *Node, identify func(gw *api.Peer)) (cch *api
 	kpClient, _ := e2e.GenerateKeyPair()
 	clientConn, nodeConn := net.Pipe()
 
-	resp = d.newRelayResponder()
+	resp = d.newRelayResponder(nil)
 	nodePeer := api.NewPeer(nodeConn, api.PeerOptions{Dispatch: d.uplinkDispatch(), OnRelayFrame: resp.onFrame})
 	resp.peer.Store(nodePeer)
 
@@ -242,14 +245,14 @@ func buildLockedResponder(t *testing.T, authorizedClientPub []byte) *relayRespon
 		t.Fatalf("Ingest: %v", err)
 	}
 	d.trust.Store(ss)
-	return d.newRelayResponder()
+	return d.newRelayResponder(nil)
 }
 
 // buildOpenResponder returns a relayResponder with no trust store (open/TOFU mode).
 func buildOpenResponder(t *testing.T) *relayResponder {
 	t.Helper()
 	d := newE2ETestNode(t)
-	return d.newRelayResponder()
+	return d.newRelayResponder(nil)
 }
 
 // runClientHandshake drives a Noise IK handshake into r and reports whether a
@@ -340,7 +343,7 @@ func buildDisabledLockedResponder(t *testing.T, authorizedClientPub []byte) *rel
 		t.Fatalf("Disable: %v", err)
 	}
 	d.trust.Store(ss)
-	return d.newRelayResponder()
+	return d.newRelayResponder(nil)
 }
 
 func TestResponderDisabledStoreAcceptsAll(t *testing.T) {
@@ -359,7 +362,7 @@ func TestResponderPlaintextChannelNoHandshake(t *testing.T) {
 		return params, nil
 	})
 
-	r := d.newRelayResponder()
+	r := d.newRelayResponder(nil)
 
 	clientConn, nodeConn := net.Pipe()
 	fromNode := make(chan api.RelayFrame, 8)
@@ -668,5 +671,314 @@ func TestNodeIdentifyToleratesMalformedParams(t *testing.T) {
 	}
 	if f := clientIdentifyThenEmit(t, cch, client, fromNode, nil); f.Enc != api.EncodingCBOR {
 		t.Fatal("terminal.output after malformed identify: want CBOR unchanged")
+	}
+}
+
+// rosterKey puts id in d's roster as online with the given identity key.
+func rosterKey(d *Node, id string, pub []byte) {
+	d.roster.apply(api.NodeEvent{Type: api.NodeEventAdded, Node: api.NodeDescriptor{
+		ID: id, Online: true, IdentityPubKey: base64.StdEncoding.EncodeToString(pub),
+	}})
+}
+
+// gatewayUplink wires r to a fake gateway over net.Pipe the way runUplink does
+// (gateway notifications and relay frames on one read loop) and returns the
+// gateway end plus the frames the node sends back.
+func gatewayUplink(t *testing.T, r *relayResponder) (gw *api.Peer, fromNode chan api.RelayFrame) {
+	t.Helper()
+	gwConn, nodeConn := net.Pipe()
+	fromNode = make(chan api.RelayFrame, 32)
+	gw = api.NewPeer(gwConn, api.PeerOptions{OnRelayFrame: func(_ *api.Peer, f api.RelayFrame) { fromNode <- f }})
+	nodePeer := api.NewPeer(nodeConn, api.PeerOptions{
+		Dispatch:     r.d.uplinkDispatch(),
+		OnNotify:     r.d.uplinkNotify(r),
+		OnRelayFrame: r.onFrame,
+	})
+	r.peer.Store(nodePeer)
+	t.Cleanup(func() { gw.Close(); nodePeer.Close(); r.closeAll() })
+	return gw, fromNode
+}
+
+// announcePeer sends relay.peer_opened for chanID from the fake gateway.
+func announcePeer(t *testing.T, gw *api.Peer, chanID, fromNode string) {
+	t.Helper()
+	if err := gw.Notify(api.MethodRelayPeerOpened, api.RelayPeerOpenedParams{ChanID: chanID, FromNode: fromNode}); err != nil {
+		t.Fatalf("notify peer_opened: %v", err)
+	}
+}
+
+// handshakeOver completes a Noise handshake on chanID through gw as clientKP.
+func handshakeOver(t *testing.T, r *relayResponder, gw *api.Peer, fromNode chan api.RelayFrame, chanID string, clientKP e2e.KeyPair) *api.Channel {
+	t.Helper()
+	init, msg1, err := e2e.NewInitiator(clientKP, r.static.Public, api.ChannelPrologue(r.d.id, chanID))
+	if err != nil {
+		t.Fatalf("NewInitiator: %v", err)
+	}
+	hf, _ := api.MarshalHandshakeFrame(chanID, msg1)
+	if err := gw.SendRawFrame(api.EncodingJSON, hf); err != nil {
+		t.Fatalf("send handshake: %v", err)
+	}
+	select {
+	case f := <-fromNode:
+		msg2, err := api.HandshakeFromFrame(f)
+		if err != nil {
+			t.Fatalf("HandshakeFromFrame: %v", err)
+		}
+		sess, err := init.Finish(msg2)
+		if err != nil {
+			t.Fatalf("Finish: %v", err)
+		}
+		return api.NewChannel(chanID, sess)
+	case <-time.After(2 * time.Second):
+		t.Fatal("no handshake reply from node")
+	}
+	return nil
+}
+
+// callOver sends one request on ch and returns its result or RPC error,
+// skipping (but opening, to keep the nonce in sync) notification frames.
+func callOver(t *testing.T, ch *api.Channel, gw *api.Peer, fromNode chan api.RelayFrame, nodeID, method string, params json.RawMessage) (json.RawMessage, *api.RPCError) {
+	t.Helper()
+	id := json.RawMessage("77")
+	req, err := ch.SealRequestFrame(api.EncodingJSON, &id, method, nodeID, params)
+	if err != nil {
+		t.Fatalf("SealRequestFrame: %v", err)
+	}
+	if err := gw.SendRawFrame(api.EncodingJSON, req); err != nil {
+		t.Fatalf("send req: %v", err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case f := <-fromNode:
+			if f.Method != "" {
+				if _, err := ch.OpenParams(f); err != nil {
+					t.Fatalf("open notification %q: %v", f.Method, err)
+				}
+				continue
+			}
+			res, rpcErr, err := ch.OpenResponse(f)
+			if err != nil {
+				t.Fatalf("OpenResponse: %v", err)
+			}
+			return res, rpcErr
+		case <-deadline:
+			t.Fatalf("no response to %s", method)
+		}
+	}
+}
+
+func isMethodNotFound(err error) bool {
+	var rpcErr *api.RPCError
+	return errors.As(err, &rpcErr) && rpcErr.Code == api.CodeMethodNotFound
+}
+
+func TestPeerOpenedChannelGetsPeerDispatch(t *testing.T) {
+	forModes(t, func(t *testing.T, e2ee bool) {
+		a, _ := twoNodes(t, e2ee)
+		err := a.peers.Load().call(peerCtx(t), "b", api.MethodOrchSessionCurrent, api.CallerParams{}, nil)
+		if isMethodNotFound(err) {
+			t.Fatalf("orch.session.current over a node-opened channel: %v", err)
+		}
+		// lock.* and server.stop stay local-only on peer channels.
+		for _, m := range []string{"lock.status", api.MethodServerStop} {
+			if err := a.peers.Load().call(peerCtx(t), "b", m, nil, nil); !isMethodNotFound(err) {
+				t.Fatalf("%s over a node-opened channel: err = %v, want method not found", m, err)
+			}
+		}
+	})
+}
+
+func TestClientChannelBlocksOrch(t *testing.T) {
+	d := newE2ETestNode(t)
+	cch, client, fromNode, cleanup := e2eNodePair(t, d)
+	defer cleanup()
+	for _, m := range []string{api.MethodOrchSessionList, api.MethodOrchMessageSend, api.MethodOrchInteractionRespond, api.MethodOrchPeerDeliver} {
+		_, rpcErr := callOver(t, cch, client, fromNode, d.id, m, json.RawMessage(`{}`))
+		if rpcErr == nil || rpcErr.Code != api.CodeMethodNotFound {
+			t.Fatalf("%s over a client channel: rpcErr = %v, want method not found", m, rpcErr)
+		}
+	}
+}
+
+func TestClientChannelServesMessageList(t *testing.T) {
+	d := newE2ETestNode(t)
+	cch, client, fromNode, cleanup := e2eNodePair(t, d)
+	defer cleanup()
+	_, rpcErr := callOver(t, cch, client, fromNode, d.id, api.MethodMessageList, json.RawMessage(`{}`))
+	if rpcErr != nil && rpcErr.Code == api.CodeMethodNotFound {
+		t.Fatalf("message.list over a client channel: rpcErr = %v", rpcErr)
+	}
+}
+
+func TestPeerOpenedKeyMismatchFallsBack(t *testing.T) {
+	d := newE2ETestNode(t)
+	d.SetE2EE(true)
+	r := d.newRelayResponder(nil)
+	gw, fromNode := gatewayUplink(t, r)
+	rosterKey(d, "b", mustKeyPair(t).Public) // b's roster key is not the opener's key
+
+	announcePeer(t, gw, "c1", "b")
+	ch := handshakeOver(t, r, gw, fromNode, "c1", mustKeyPair(t))
+	cs := r.lookup("c1")
+	if cs == nil {
+		t.Fatal("key mismatch must fall back to a client channel, not drop it")
+	}
+	if r.channelPeer(cs) != "" {
+		t.Fatal("key mismatch must serve the channel as a client channel")
+	}
+	if _, rpcErr := callOver(t, ch, gw, fromNode, d.id, api.MethodOrchSessionCurrent, json.RawMessage(`{}`)); rpcErr == nil || rpcErr.Code != api.CodeMethodNotFound {
+		t.Fatalf("orch.session.current after key mismatch: rpcErr = %v, want method not found", rpcErr)
+	}
+	if r.pendingPeerCountForTest() != 0 {
+		t.Fatal("peer_opened record must be consumed by the handshake")
+	}
+
+	// Contrast: the matching key does get peer dispatch.
+	bKP := mustKeyPair(t)
+	rosterKey(d, "b", bKP.Public)
+	announcePeer(t, gw, "c2", "b")
+	ch2 := handshakeOver(t, r, gw, fromNode, "c2", bKP)
+	if cs := r.lookup("c2"); cs == nil || r.channelPeer(cs) != "b" {
+		t.Fatalf("matching key: chan state = %+v, want a peer channel from b", cs)
+	}
+	if _, rpcErr := callOver(t, ch2, gw, fromNode, d.id, api.MethodOrchSessionCurrent, json.RawMessage(`{}`)); rpcErr != nil && rpcErr.Code == api.CodeMethodNotFound {
+		t.Fatalf("orch.session.current with matching key: %v", rpcErr)
+	}
+
+	// The roster key for b changes: the live channel loses peer dispatch.
+	rosterKey(d, "b", mustKeyPair(t).Public)
+	if _, rpcErr := callOver(t, ch2, gw, fromNode, d.id, api.MethodOrchSessionCurrent, json.RawMessage(`{}`)); rpcErr == nil || rpcErr.Code != api.CodeMethodNotFound {
+		t.Fatalf("orch.session.current after roster key change: rpcErr = %v, want method not found", rpcErr)
+	}
+}
+
+func TestPeerOpenedLockedUnauthorizedRejected(t *testing.T) {
+	bKP := mustKeyPair(t)
+	r := buildLockedResponder(t, mustKeyPair(t).Public) // b's key is not authorized
+	rosterKey(r.d, "b", bKP.Public)
+	r.notePeerOpened("enforce-test-chan", "b")
+	if runClientHandshake(t, r, bKP) {
+		t.Fatal("locked store without the opener's key must reject the channel")
+	}
+	if r.pendingPeerCountForTest() != 0 {
+		t.Fatal("rejected handshake must still consume the peer_opened record")
+	}
+}
+
+func TestPeerOpenedPlaintext(t *testing.T) {
+	d := newE2ETestNode(t) // plaintext
+	d.server.Handle("test.peer", func(ctx context.Context, _ json.RawMessage) (any, error) {
+		id, ok := peerNodeFrom(ctx)
+		return map[string]any{"id": id, "ok": ok}, nil
+	})
+	r := d.newRelayResponder(nil)
+	gw, fromNode := gatewayUplink(t, r)
+
+	announcePeer(t, gw, "p1", "b")
+	res, rpcErr := callOver(t, api.NewPlainChannel("p1"), gw, fromNode, d.id, "test.peer", nil)
+	if rpcErr != nil {
+		t.Fatalf("test.peer: %v", rpcErr)
+	}
+	if string(res) != `{"id":"b","ok":true}` {
+		t.Fatalf("peerNodeFrom = %s, want b", res)
+	}
+
+	// A client channel (no peer_opened) carries no peer node.
+	res, rpcErr = callOver(t, api.NewPlainChannel("p2"), gw, fromNode, d.id, "test.peer", nil)
+	if rpcErr != nil {
+		t.Fatalf("test.peer: %v", rpcErr)
+	}
+	if string(res) != `{"id":"","ok":false}` {
+		t.Fatalf("client channel peerNodeFrom = %s, want none", res)
+	}
+}
+
+func TestPeerOpenedRecordsDoNotLeak(t *testing.T) {
+	d := newE2ETestNode(t)
+	r := d.newRelayResponder(nil)
+	r.notePeerOpened("x", "b")
+	r.closeChan("x") // relay.closed before any frame
+	if n := r.pendingPeerCountForTest(); n != 0 {
+		t.Fatalf("pending after close = %d, want 0", n)
+	}
+	for i := 0; i < maxPendingPeerOpened+10; i++ {
+		r.notePeerOpened("c"+strconv.Itoa(i), "b")
+	}
+	if n := r.pendingPeerCountForTest(); n > maxPendingPeerOpened {
+		t.Fatalf("pending = %d, want <= %d", n, maxPendingPeerOpened)
+	}
+}
+
+func TestPeerChannelGetsNoRegistryStream(t *testing.T) {
+	d := newE2ETestNode(t)
+	d.SetE2EE(true)
+	r := d.newRelayResponder(nil)
+	gw, fromNode := gatewayUplink(t, r)
+	bKP := mustKeyPair(t)
+	rosterKey(d, "b", bKP.Public)
+
+	cch := handshakeOver(t, r, gw, fromNode, "c1", mustKeyPair(t))
+	announcePeer(t, gw, "p1", "b")
+	handshakeOver(t, r, gw, fromNode, "p1", bKP)
+	if cs := r.lookup("p1"); cs == nil || r.channelPeer(cs) != "b" {
+		t.Fatalf("p1 = %+v, want a peer channel from b", cs)
+	}
+
+	d.reg.ReconcileSessions("claude", discovered("%1"))
+	d.notifyProjectsChanged()
+
+	var gotEvent, gotProjects bool
+	var onPeer []string
+	deadline := time.After(2 * time.Second)
+	for !gotEvent || !gotProjects {
+		select {
+		case f := <-fromNode:
+			if f.Route.ChanID != "c1" {
+				onPeer = append(onPeer, f.Method)
+				continue
+			}
+			if _, err := cch.OpenParams(f); err != nil {
+				t.Fatalf("open %q: %v", f.Method, err)
+			}
+			gotEvent = gotEvent || f.Method == api.MethodSessionEvent
+			gotProjects = gotProjects || f.Method == api.MethodProjectChanged
+		case <-deadline:
+			t.Fatalf("client channel: session.event=%v project.changed=%v", gotEvent, gotProjects)
+		}
+	}
+	settle := time.After(200 * time.Millisecond)
+	for done := false; !done; {
+		select {
+		case f := <-fromNode:
+			if f.Route.ChanID != "c1" {
+				onPeer = append(onPeer, f.Method)
+			}
+		case <-settle:
+			done = true
+		}
+	}
+	if len(onPeer) != 0 {
+		t.Fatalf("peer channel got notifications %v", onPeer)
+	}
+}
+
+func TestPeerChannelPromotedWhenRosterCatchesUp(t *testing.T) {
+	d := newE2ETestNode(t)
+	d.SetE2EE(true)
+	r := d.newRelayResponder(nil)
+	gw, fromNode := gatewayUplink(t, r)
+	bKP := mustKeyPair(t)
+
+	// b is not in the roster yet when its channel is opened.
+	announcePeer(t, gw, "p1", "b")
+	ch := handshakeOver(t, r, gw, fromNode, "p1", bKP)
+	if _, rpcErr := callOver(t, ch, gw, fromNode, d.id, api.MethodOrchSessionCurrent, json.RawMessage(`{}`)); rpcErr == nil || rpcErr.Code != api.CodeMethodNotFound {
+		t.Fatalf("orch.session.current before b is in the roster: rpcErr = %v, want method not found", rpcErr)
+	}
+
+	rosterKey(d, "b", bKP.Public)
+	if _, rpcErr := callOver(t, ch, gw, fromNode, d.id, api.MethodOrchSessionCurrent, json.RawMessage(`{}`)); rpcErr != nil && rpcErr.Code == api.CodeMethodNotFound {
+		t.Fatalf("orch.session.current after b joins the roster: %v", rpcErr)
 	}
 }

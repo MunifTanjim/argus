@@ -19,6 +19,14 @@ func TestWithOriginCompositesParentSessionID(t *testing.T) {
 	}
 }
 
+func TestWithOriginKeepsRemoteParentSessionID(t *testing.T) {
+	parent := &session.ParentRef{Node: "n2", Key: "claude:p", SessionID: "n2:argus:%1"}
+	got := withOrigin(session.Session{ID: "local1", Parent: parent}, "n1", "n1-box")
+	if got.Parent.SessionID != "n2:argus:%1" {
+		t.Errorf("Parent.SessionID = %q", got.Parent.SessionID)
+	}
+}
+
 func TestWithOriginStampsCompositeAndNode(t *testing.T) {
 	s := session.Session{ID: "local1", Offline: true}
 	got := withOrigin(s, "n1", "n1-box")

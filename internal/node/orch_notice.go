@@ -131,7 +131,8 @@ func (d *Node) orchNotices(ctx context.Context, snap []session.Session) {
 }
 
 // interactionMessages returns the sig to remember; seen stops a re-notice of a prompt
-// the parent answered that has not cleared yet.
+// the parent answered that has not cleared yet. The copy stored here is the
+// one a respond claims, also when the parent is on another node.
 func (d *Node) interactionMessages(ctx context.Context, s session.Session, link api.Link, seen string) string {
 	key := actorKey(s)
 	cur := pendingSig(s)
@@ -153,7 +154,7 @@ func (d *Node) interactionMessages(ctx context.Context, s session.Session, link 
 		return cur
 	}
 	id := orch.NewID(d.id)
-	_, err = d.orch.Insert(ctx, api.Message{
+	_, err = d.insertMessage(ctx, api.Message{
 		ID: id, Kind: api.MessageInteraction,
 		From: api.Actor{Node: d.id, Key: api.ActorArgus}, To: link.Parent, Child: &api.Actor{Node: d.id, Key: key},
 		Interaction: s.Interaction, Body: renderInteraction(s, d.compositeID(s), s.Interaction),
@@ -168,14 +169,29 @@ func (d *Node) interactionMessages(ctx context.Context, s session.Session, link 
 }
 
 // withdrawInteraction tells the parent with ended when it already saw the message.
+// A parent on another node is sent the withdraw, as only its node knows whether
+// it saw the notice.
 func (d *Node) withdrawInteraction(ctx context.Context, n api.Message, ended string) {
-	ok, err := d.withdrawLocal(ctx, n, ended)
+	if n.To.Node == d.id {
+		ok, err := d.withdrawLocal(ctx, n, ended)
+		if err != nil {
+			d.log.Warn("orch: withdraw interaction failed", "id", n.ID, "err", err)
+		}
+		if ok {
+			d.orchChanged()
+		}
+		return
+	}
+	ok, err := d.orch.Transition(ctx, n.ID, n.State, api.MessageWithdrawn)
 	if err != nil {
 		d.log.Warn("orch: withdraw interaction failed", "id", n.ID, "err", err)
+		return
 	}
-	if ok {
-		d.orchChanged()
+	if !ok {
+		return
 	}
+	d.orchChanged()
+	d.withdrawRemote(ctx, n, ended)
 }
 
 // withdrawLocal withdraws the open message m to an actor on this node, and
@@ -199,6 +215,18 @@ func (d *Node) withdrawLocal(ctx context.Context, m api.Message, ended string) (
 	return false, nil
 }
 
+// withdrawRemote drops the notice's deliver while it is still queued, so the
+// parent never sees it open. The withdraw is queued behind it either way: a
+// deliver already in flight lands, and the withdraw then closes it.
+func (d *Node) withdrawRemote(ctx context.Context, n api.Message, ended string) {
+	if _, err := d.orch.DropDeliver(ctx, n.To.Node, n.ID); err != nil {
+		d.log.Warn("orch: drop queued interaction failed", "id", n.ID, "node", n.To.Node, "err", err)
+	}
+	if err := d.orch.Enqueue(ctx, n.To.Node, api.MethodOrchPeerWithdraw, api.OrchPeerWithdrawParams{MessageID: n.ID, Ended: ended}); err != nil {
+		d.log.Warn("orch: queue withdraw failed", "id", n.ID, "node", n.To.Node, "err", err)
+	}
+}
+
 func (d *Node) turnEnded(ctx context.Context, s session.Session, link api.Link) {
 	key := actorKey(s)
 	task, ok, err := d.orch.UnrepliedTask(ctx, api.Actor{Node: d.id, Key: key})
@@ -215,7 +243,7 @@ func (d *Node) turnEnded(ctx context.Context, s session.Session, link api.Link) 
 	if err != nil {
 		d.log.Warn("orch: read transcript failed", "child", key, "err", err)
 	}
-	_, err = d.orch.Insert(ctx, api.Message{
+	_, err = d.insertMessage(ctx, api.Message{
 		Kind: api.MessageTurnEnded, From: api.Actor{Node: d.id, Key: api.ActorArgus}, To: link.Parent,
 		Child: &api.Actor{Node: d.id, Key: key}, Body: renderTurnEnded(s, d.compositeID(s), task.ID, lastAssistantText(view.Entries)),
 		State: api.MessageQueued,

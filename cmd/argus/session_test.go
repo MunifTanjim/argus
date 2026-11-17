@@ -190,16 +190,39 @@ func TestSessionListTable(t *testing.T) {
 	}
 }
 
+func TestSessionListAsksForAllNodes(t *testing.T) {
+	f := &sessionFake{result: api.OrchListResult{}}
+	if _, err := runSession(t, f, "list"); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := f.params.(api.OrchListParams); !p.All {
+		t.Errorf("params = %+v", f.params)
+	}
+}
+
 func TestSessionListJSONPrintsResult(t *testing.T) {
 	f := &sessionFake{result: api.OrchListResult{
-		Sessions: []session.Session{{ID: "n1:a"}},
+		Sessions:    []session.Session{{ID: "n1:a"}},
+		Unreachable: []string{"n2"},
 	}}
 	out, err := runSession(t, f, "list", "--json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, `"sessions"`) || !strings.Contains(out, `"n1:a"`) {
+	if !strings.Contains(out, `"unreachable"`) || !strings.Contains(out, `"n2"`) || !strings.Contains(out, `"sessions"`) {
 		t.Fatalf("out = %q", out)
+	}
+}
+
+func TestSessionListWarnsOnUnreachable(t *testing.T) {
+	f := &sessionFake{result: api.OrchListResult{Unreachable: []string{"n2", "n3"}}}
+	var err error
+	_, stderr := captureOutput(t, func() { _, err = runSession(t, f, "list") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr, "n2, n3") {
+		t.Fatalf("stderr = %q", stderr)
 	}
 }
 
@@ -216,5 +239,27 @@ func TestSessionRenamePrintsName(t *testing.T) {
 	f = &sessionFake{result: api.SessionRenameResult{Name: "Later", Applied: false}}
 	if out, err = runSession(t, f, "rename", "n1:s2", "Later"); err != nil || out != "Later (the agent applies it later)\n" {
 		t.Errorf("pending out = %q err = %v", out, err)
+	}
+}
+
+func TestSessionSpawnNodeFlag(t *testing.T) {
+	f := &sessionFake{result: api.OrchSpawnResult{SessionID: "b:s2"}}
+	if _, err := runSession(t, f, "spawn", "--agent", "claude", "--node", "b"); err != nil {
+		t.Fatal(err)
+	}
+	if p := f.params.(api.OrchSpawnParams); p.Node != "b" {
+		t.Errorf("spawn params = %+v", p)
+	}
+}
+
+func TestSessionKillWarnsOnNotKilled(t *testing.T) {
+	f := &sessionFake{result: api.OrchKillResult{Killed: []string{"n1:s2"}, NotKilled: []string{"n2:s9"}}}
+	var err error
+	_, stderr := captureOutput(t, func() { _, err = runSession(t, f, "kill", "n1:s2") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr, "n2:s9") {
+		t.Fatalf("stderr = %q", stderr)
 	}
 }

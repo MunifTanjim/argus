@@ -481,6 +481,24 @@ func ResetTriggeredPullIntervalForTest() {
 	setTriggeredPullIntervalForTest(DefaultTriggeredPullInterval)
 }
 
+// uplinkNotify returns the OnNotify handler for one uplink. relay.peer_opened goes
+// straight to that uplink's responder, not via activeResponder: api.Peer calls
+// OnNotify synchronously on the read loop, the same loop that delivers relay
+// frames, so the record is stored before the gateway's next frame (the channel's
+// first) is processed — including frames that arrive before runUplink publishes
+// activeResponder. Everything else goes to onGatewayNotify.
+func (d *Node) uplinkNotify(r *relayResponder) func(api.Notification) {
+	return func(n api.Notification) {
+		if n.Method == api.MethodRelayPeerOpened {
+			if p, err := api.Decode[api.RelayPeerOpenedParams](n.Params); err == nil {
+				r.notePeerOpened(p.ChanID, p.FromNode)
+			}
+			return
+		}
+		d.onGatewayNotify(n)
+	}
+}
+
 // onGatewayNotify handles gateway→node notifications: a dropped relay channel,
 // and a hint that the trust log moved; everything else is ignored.
 //
@@ -494,6 +512,15 @@ func (d *Node) onGatewayNotify(n api.Notification) {
 			if r := d.activeResponder.Load(); r != nil {
 				r.closeChan(p.ChanID)
 			}
+			if pool := d.peers.Load(); pool != nil {
+				pool.closeChan(p.ChanID)
+			}
+		}
+		return
+	}
+	if n.Method == api.MethodNodeEvent {
+		if ev, err := api.Decode[api.NodeEvent](n.Params); err == nil {
+			d.roster.apply(ev)
 		}
 		return
 	}

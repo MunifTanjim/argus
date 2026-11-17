@@ -31,7 +31,7 @@ type mcpProp struct {
 func required(name, kind string) mcpProp { return mcpProp{name: name, kind: kind, required: true} }
 func optional(name, kind string) mcpProp { return mcpProp{name: name, kind: kind} }
 
-const idNote = "IDs are composite, like home:argus:%3 (node id, then session id)."
+const idNote = "IDs are composite, like home:argus:%3 (node id, then session id). An ID can belong to any connected node, and the call goes to that node."
 
 const requestNote = "request_id is optional: a retry with the same request_id returns the first result instead of acting again, and a request_id reused with different parameters is an error."
 
@@ -119,10 +119,10 @@ func mcpTools() []mcpTool {
 		{
 			Tool: mcphttp.Tool{
 				Name:        "list_sessions",
-				Description: "List every session known to this node, agent and shell sessions alike, with composite IDs, agent, name, status, working directory, and parent. Use it to find the session to message. " + idNote,
+				Description: "List every session on every online node (the result's unreachable lists nodes that did not answer), agent and shell sessions alike, with composite IDs, agent, name, status, working directory, and parent. Use it to find the session to message. " + idNote,
 			},
-			run: func(_ context.Context, d *Node, _ callerRef, _ json.RawMessage) (any, error) {
-				return api.OrchListResult{Sessions: d.list()}, nil
+			run: func(ctx context.Context, d *Node, _ callerRef, _ json.RawMessage) (any, error) {
+				return d.listAll(ctx), nil
 			},
 		},
 		{
@@ -140,13 +140,14 @@ func mcpTools() []mcpTool {
 				Name: "spawn_session",
 				Description: "Start a new agent session in a working directory. Prefer your native subagent tool when it can do the task. Use spawn_session when the task needs a different agent, or when the user asks for an argus session. " +
 					"agent is the agent to run; cwd is an absolute directory path and is required. name and model are optional. " +
+					"node is the ID or label of the node to start it on; it defaults to your own node, and cwd and agent refer to that node. " +
 					"If prompt is given, it is delivered to the new session as a task message from you, and the new session reports back to you with the reply_to_message tool; the result's task_id is the ID of that task message. The new session becomes your child: you can answer its questions with respond_to_interaction (its permission prompts and plans go to the user) and stop it with kill_session. " +
 					asyncNote + " The result's session_id is composite. " + requestNote + " " + idNote,
 			},
 			props: []mcpProp{
 				{name: "agent", kind: "string", required: true, enum: orchestratedAgents}, required("cwd", "string"),
 				optional("name", "string"), optional("model", "string"), optional("prompt", "string"),
-				optional("request_id", "string"),
+				optional("request_id", "string"), optional("node", "string"),
 			}, needsCaller: true, needsOrch: true,
 			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p api.OrchSpawnParams) (any, error) {
 				res, err := d.spawnFor(ctx, caller, p)
@@ -211,8 +212,8 @@ func mcpTools() []mcpTool {
 				Description: "Return the text of the session's latest answer: the assistant text after its last user message. " + idNote,
 			},
 			props: []mcpProp{required("session_id", "string")},
-			run: withArgs(func(_ context.Context, d *Node, _ callerRef, p api.OrchTargetParams) (any, error) {
-				return d.output(p.SessionID)
+			run: withArgs(func(ctx context.Context, d *Node, _ callerRef, p api.OrchTargetParams) (any, error) {
+				return d.output(ctx, p.SessionID)
 			}),
 		},
 		{
@@ -221,14 +222,14 @@ func mcpTools() []mcpTool {
 				Description: "Return the session's transcript entries (user, assistant text, and tool activity). last limits the result to the final N entries; omit it for all. " + idNote,
 			},
 			props: []mcpProp{required("session_id", "string"), optional("last", "integer")},
-			run: withArgs(func(_ context.Context, d *Node, _ callerRef, p api.OrchTranscriptParams) (any, error) {
-				return d.transcript(p.SessionID, p.Last)
+			run: withArgs(func(ctx context.Context, d *Node, _ callerRef, p api.OrchTranscriptParams) (any, error) {
+				return d.transcript(ctx, p.SessionID, p.Last)
 			}),
 		},
 		{
 			Tool: mcphttp.Tool{
 				Name:        "kill_session",
-				Description: "Stop an agent session and fail its queued messages. The session's own children, and their children, are stopped too. Allowed on a session you spawned or on yourself. The result's killed lists every stopped session, deepest first. " + idNote,
+				Description: "Stop an agent session and fail its queued messages. The session's own children, and their children, are stopped too. Allowed on a session you spawned or on yourself. The result's killed lists every stopped session, deepest first; not_killed lists descendants on other nodes that could not be reached or stopped. " + idNote,
 			},
 			props: []mcpProp{required("session_id", "string")}, needsCaller: true, needsOrch: true,
 			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p api.OrchTargetParams) (any, error) {

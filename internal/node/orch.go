@@ -72,6 +72,7 @@ func (d *Node) SetOrchStore(s *orch.Store) {
 		s.SetNodeID(d.id)
 	}
 	d.orchCleared = map[string]bool{}
+	d.orchRekeyFailed = map[string]bool{}
 	d.orchPrev = map[string]session.Status{}
 	d.orchWorked = map[string]bool{}
 	d.orchLive = map[string]bool{}
@@ -83,6 +84,7 @@ func (d *Node) SetOrchStore(s *orch.Store) {
 	d.orchSigs = map[string]string{}
 	d.orchParents = map[string]session.ParentRef{}
 	d.orchKickCh = make(chan struct{}, 1)
+	d.outboxEvery = outboxRetryEvery
 }
 
 // actorKey is "" until the agent session id is known: a pane id is only a
@@ -123,15 +125,32 @@ func (d *Node) orchKick() {
 func (d *Node) orchChanged() { d.notifyConns(api.MethodMessageChanged) }
 
 // killTree kills target and the live sessions below it in the parent links,
-// deepest first, and returns the composite IDs it killed. A failed kill does
-// not stop the others, and a disconnecting caller does not stop the tree.
-func (d *Node) killTree(ctx context.Context, target session.Session, by string) ([]string, error) {
+// deepest first, and returns the composite IDs it killed. Each child on another
+// node is killed there with its subtree, in parallel and before any local
+// session; one that cannot be reached or killed is returned in notKilled. A
+// failed kill does not stop the others, and a disconnecting caller does not
+// stop the tree.
+func (d *Node) killTree(ctx context.Context, target session.Session, by string) (killed, notKilled []string, err error) {
 	ctx = context.WithoutCancel(ctx)
-	below, err := d.descendants(ctx, target)
+	below, remote, err := d.descendants(ctx, target)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var killed []string
+	results := make([]api.OrchKillResult, len(remote))
+	remoteErrs := make([]error, len(remote))
+	var wg sync.WaitGroup
+	for i, l := range remote {
+		wg.Go(func() { results[i], remoteErrs[i] = d.killRemoteChild(ctx, l) })
+	}
+	wg.Wait()
+	for i, l := range remote {
+		killed = append(killed, results[i].Killed...)
+		notKilled = append(notKilled, results[i].NotKilled...)
+		if err := remoteErrs[i]; err != nil {
+			d.log.Warn("orch: kill remote child failed", "node", l.Child.Node, "child", l.Child.Key, "err", err)
+			notKilled = append(notKilled, remoteChildID(l))
+		}
+	}
 	var errs []error
 	kill := func(s session.Session, by string) {
 		if err := d.killSession(ctx, s); err != nil {
@@ -145,18 +164,61 @@ func (d *Node) killTree(ctx context.Context, target session.Session, by string) 
 		kill(s, "ancestor")
 	}
 	kill(target, by)
-	return killed, errors.Join(errs...)
+	return killed, notKilled, errors.Join(errs...)
+}
+
+// remoteChildID names a child on another node by its composite session ID, or
+// by its node and actor key when the mirror predates session IDs.
+func remoteChildID(l api.Link) string {
+	if l.ChildSessionID != "" {
+		return l.ChildSessionID
+	}
+	return actorID(l.Child)
+}
+
+// killRemoteChild asks the child's node to kill it and its subtree as a child
+// of a session this node is killing, and records the mirror as ended. The
+// child's node also pushes link_ended; both set the same ended_by.
+func (d *Node) killRemoteChild(ctx context.Context, l api.Link) (api.OrchKillResult, error) {
+	if l.ChildSessionID == "" {
+		return api.OrchKillResult{}, errors.New("the link mirror has no session id for the child")
+	}
+	caller := callerRef{Actor: l.Parent}
+	if p, ok := d.sessionForKey(l.Parent.Key); ok {
+		caller = d.localCallerRef(p)
+	}
+	params := api.OrchKillParams{
+		OrchTargetParams: api.OrchTargetParams{Caller: caller.remote(), SessionID: l.ChildSessionID},
+		Ancestor:         true,
+		ChildKey:         l.Child.Key,
+	}
+	by := "ancestor"
+	var res api.OrchKillResult
+	if err := d.forward(ctx, l.Child.Node, api.MethodOrchSessionKill, params, &res); err != nil {
+		var rpcErr *api.RPCError
+		if !errors.As(err, &rpcErr) || rpcErr.Code != api.CodeUnknownSession {
+			return api.OrchKillResult{}, err
+		}
+		// The child ended on its own before its node told this one.
+		by, res = "self", api.OrchKillResult{}
+	}
+	if err := d.orch.SetEndedBy(ctx, l.Child, by); err != nil {
+		d.log.Warn("orch: record ended-by failed", "key", l.Child.Key, "err", err)
+	}
+	return res, nil
 }
 
 // descendants returns the live local sessions below root in the parent links,
-// each after its own descendants.
-func (d *Node) descendants(ctx context.Context, root session.Session) ([]session.Session, error) {
+// each after its own descendants, and the links to the children on other nodes
+// that have not ended. A remote child's own subtree is its node's to walk.
+func (d *Node) descendants(ctx context.Context, root session.Session) ([]session.Session, []api.Link, error) {
 	key := actorKey(root)
 	if d.orch == nil || key == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	seen := map[api.Actor]bool{{Node: d.id, Key: key}: true}
 	var out []session.Session
+	var remote []api.Link
 	var walk func(parentKey string) error
 	walk = func(parentKey string) error {
 		links, err := d.orch.Children(ctx, api.Actor{Node: d.id, Key: parentKey})
@@ -164,10 +226,16 @@ func (d *Node) descendants(ctx context.Context, root session.Session) ([]session
 			return err
 		}
 		for _, l := range links {
-			if l.Child.Node != d.id || seen[l.Child] {
+			if seen[l.Child] {
 				continue
 			}
 			seen[l.Child] = true
+			if l.Child.Node != d.id {
+				if l.Parent.Node == d.id && l.EndedBy == "" {
+					remote = append(remote, l)
+				}
+				continue
+			}
 			if err := walk(l.Child.Key); err != nil {
 				return err
 			}
@@ -177,7 +245,8 @@ func (d *Node) descendants(ctx context.Context, root session.Session) ([]session
 		}
 		return nil
 	}
-	return out, walk(key)
+	err := walk(key)
+	return out, remote, err
 }
 
 func (d *Node) orchEnded(ctx context.Context, s session.Session, by string) {
@@ -193,8 +262,19 @@ func (d *Node) orchEnded(ctx context.Context, s session.Session, by string) {
 	if err := d.orch.SetEndedBy(ctx, api.Actor{Node: d.id, Key: key}, by); err != nil {
 		d.log.Warn("orch: record ended-by failed", "key", key, "err", err)
 	}
-	if _, err := d.orch.FailQueued(ctx, api.Actor{Node: d.id, Key: key}); err != nil {
+	if err := d.endParent(ctx, key); err != nil {
+		d.log.Warn("orch: queue parent_ended failed", "key", key, "err", err)
+	}
+	// The parent's node keeps a mirror of the link.
+	if l, ok, err := d.orch.Link(ctx, api.Actor{Node: d.id, Key: key}); err == nil && ok && l.Parent.Node != d.id {
+		if err := d.orch.Enqueue(ctx, l.Parent.Node, api.MethodOrchPeerLinkEnded, api.OrchPeerLinkEndedParams{ChildKey: key, EndedBy: by}); err != nil {
+			d.log.Warn("orch: queue link_ended failed", "key", key, "node", l.Parent.Node, "err", err)
+		}
+	}
+	if failed, err := d.orch.FailQueued(ctx, api.Actor{Node: d.id, Key: key}); err != nil {
 		d.log.Warn("orch: fail queued failed", "key", key, "err", err)
+	} else {
+		d.pushStates(ctx, failed, api.MessageFailed)
 	}
 	open, err := d.orch.OpenInteractions(ctx, api.Actor{Node: d.id, Key: key})
 	if err != nil {
@@ -260,7 +340,11 @@ func (d *Node) orchPass(ctx context.Context) {
 		if _, err := d.orch.Expire(ctx, cutoff); err != nil {
 			d.log.Warn("orch: expire failed", "err", err)
 		}
-		if _, err := d.orch.ExpireLinks(ctx, cutoff, func(c api.Actor) bool { return c.Node == d.id && d.orchLive[c.Key] }); err != nil {
+		if _, err := d.orch.ExpireOutbox(ctx, cutoff); err != nil {
+			d.log.Warn("orch: expire outbox failed", "err", err)
+		}
+		seen := func(node string) bool { return d.roster.seenWithin(node, orchRetention, time.Now()) }
+		if _, err := d.orch.ExpireLinks(ctx, cutoff, func(c api.Actor) bool { return c.Node == d.id && d.orchLive[c.Key] }, seen); err != nil {
 			d.log.Warn("orch: expire links failed", "err", err)
 		}
 	}
@@ -287,37 +371,107 @@ func (d *Node) orchFailGone(ctx context.Context, snap []session.Session) {
 		if now.Sub(since) < d.orchGoneGrace {
 			continue
 		}
-		n, err := d.orch.FailQueued(ctx, api.Actor{Node: d.id, Key: key})
+		if err := d.endRemoteLink(ctx, key); err != nil {
+			d.log.Warn("orch: end link of gone child failed", "key", key, "err", err)
+			continue
+		}
+		if err := d.endParent(ctx, key); err != nil {
+			d.log.Warn("orch: end links of gone parent failed", "key", key, "err", err)
+			continue
+		}
+		failed, err := d.orch.FailQueued(ctx, api.Actor{Node: d.id, Key: key})
 		if err != nil {
 			d.log.Warn("orch: fail queued failed", "key", key, "err", err)
 			continue
 		}
+		d.pushStates(ctx, failed, api.MessageFailed)
 		delete(d.orchGone, key)
 		delete(d.orchHeld, key)
-		if n > 0 {
+		if len(failed) > 0 {
 			d.orchChanged()
 		}
 	}
 	d.orchLive = live
 }
 
-// orchSeedGone marks the recipients on this node that ended while the node was
-// down, once startup discovery has settled.
-func (d *Node) orchSeedGone(ctx context.Context, live map[string]bool, now time.Time) {
-	if d.orchSeeded {
-		return
+// endRemoteLink records that the child key, gone from this node, ended by
+// itself, and tells its parent's node once: a link already ended is left as is.
+func (d *Node) endRemoteLink(ctx context.Context, key string) error {
+	l, ok, err := d.orch.Link(ctx, api.Actor{Node: d.id, Key: key})
+	if err != nil || !ok || l.Child.Node != d.id || l.Parent.Node == d.id || l.EndedBy != "" {
+		return err
 	}
+	if err := d.orch.Enqueue(ctx, l.Parent.Node, api.MethodOrchPeerLinkEnded, api.OrchPeerLinkEndedParams{ChildKey: key, EndedBy: "self"}); err != nil {
+		return err
+	}
+	return d.orch.SetEndedBy(ctx, api.Actor{Node: d.id, Key: key}, "self")
+}
+
+// endParent tells each other node with a child of the parent key, gone from
+// this node, that the parent ended, once: the mirror links record it.
+func (d *Node) endParent(ctx context.Context, key string) error {
+	links, err := d.orch.Children(ctx, api.Actor{Node: d.id, Key: key})
+	if err != nil {
+		return err
+	}
+	sent := map[string]bool{}
+	for _, l := range links {
+		if l.Parent.Node != d.id || l.Child.Node == d.id || l.ParentEnded || sent[l.Child.Node] {
+			continue
+		}
+		if err := d.orch.Enqueue(ctx, l.Child.Node, api.MethodOrchPeerParentEnded, api.OrchPeerParentEndedParams{ParentKey: key}); err != nil {
+			return err
+		}
+		sent[l.Child.Node] = true
+	}
+	if len(sent) == 0 {
+		return nil
+	}
+	return d.orch.SetParentEnded(ctx, d.id, key)
+}
+
+// orchSeedGone marks the recipients on this node that ended while the node was
+// down, and the parents whose end the child's node was not told, once startup
+// discovery has settled. Later it marks the recipients of the messages peers
+// queued for keys that are not live.
+func (d *Node) orchSeedGone(ctx context.Context, live map[string]bool, now time.Time) {
 	select {
 	case <-d.orchSettled:
 	default:
 		return
 	}
+	if d.orchSeeded && !d.orchRecheck.Swap(false) {
+		return
+	}
+	if !d.orchSeeded {
+		d.orchRecheck.Store(false)
+	}
 	keys, err := d.orch.QueuedRecipients(ctx, d.id)
 	if err != nil {
+		if d.orchSeeded {
+			d.orchRecheck.Store(true)
+		}
 		d.log.Warn("orch: list recipients failed", "err", err)
 		return
 	}
-	d.orchSeeded = true
+	if !d.orchSeeded {
+		links, err := d.orch.Links(ctx)
+		if err != nil {
+			d.log.Warn("orch: list links failed", "err", err)
+			return
+		}
+		// Seeded only after both reads: a read error retries on the next tick, so
+		// no child that ended while the node was down stays unreported.
+		d.orchSeeded = true
+		for _, l := range links {
+			if l.Child.Node == d.id && l.Parent.Node != d.id && l.EndedBy == "" {
+				keys = append(keys, l.Child.Key)
+			}
+			if l.Parent.Node == d.id && l.Child.Node != d.id && !l.ParentEnded {
+				keys = append(keys, l.Parent.Key)
+			}
+		}
+	}
 	d.markGone(slices.Values(keys), live, now)
 }
 
@@ -384,12 +538,56 @@ func (d *Node) orchRekey(ctx context.Context, snap []session.Session) {
 			continue
 		}
 		if err := d.orch.Rekey(ctx, from, to); err != nil {
-			d.log.Warn("orch: rekey failed", "from", from, "to", to, "err", err)
+			// The pass retries every second; say it once per pair.
+			if !d.orchRekeyFailed[pair] {
+				d.log.Warn("orch: rekey failed; retrying", "from", from, "to", to, "err", err)
+				d.orchRekeyFailed[pair] = true
+			}
 			continue
 		}
+		delete(d.orchRekeyFailed, pair)
 		d.orchChanged()
+		// A retry finds the links under the new key; Rekey and the receivers are idempotent.
+		if err := d.pushRekey(ctx, from, to); err != nil {
+			d.log.Warn("orch: queue rekey failed", "from", from, "to", to, "err", err)
+			continue
+		}
 		d.orchCleared[pair] = true
 	}
+}
+
+// pushRekey queues the rekey of from to to for each other node with a link to
+// to, or with a stored message exchanged with it, after the pushes already
+// queued there: a deliver queued earlier under from is rewritten in the outbox
+// by Rekey, and lands before the rekey.
+func (d *Node) pushRekey(ctx context.Context, from, to string) error {
+	links, err := d.orch.Children(ctx, api.Actor{Node: d.id, Key: to})
+	if err != nil {
+		return err
+	}
+	if l, ok, err := d.orch.Link(ctx, api.Actor{Node: d.id, Key: to}); err != nil {
+		return err
+	} else if ok {
+		links = append(links, l)
+	}
+	nodes, err := d.orch.MessagePeers(ctx, api.Actor{Node: d.id, Key: to})
+	if err != nil {
+		return err
+	}
+	for _, l := range links {
+		nodes = append(nodes, l.Child.Node, l.Parent.Node)
+	}
+	seen := map[string]bool{d.id: true}
+	for _, node := range nodes {
+		if seen[node] {
+			continue
+		}
+		seen[node] = true
+		if err := d.orch.Enqueue(ctx, node, api.MethodOrchPeerRekey, api.OrchPeerRekeyParams{OldKey: from, NewKey: to}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // orchDeliver sends each recipient its next queued message. A recipient that
@@ -434,7 +632,7 @@ func (d *Node) orchDeliver(ctx context.Context, snap []session.Session) {
 		}
 		ds := make([]orch.Delivery, len(batch))
 		for i, m := range batch {
-			ds[i] = d.delivery(m)
+			ds[i] = d.delivery(ctx, m)
 		}
 		jobs = append(jobs, job{key: key, s: s, batch: batch, text: orch.RenderPrompt(ds)})
 	}
@@ -475,8 +673,10 @@ func (d *Node) orchDeliver(ctx context.Context, snap []session.Session) {
 			continue
 		}
 		for _, m := range j.batch {
-			if _, err := d.orch.Transition(ctx, m.ID, api.MessageQueued, api.MessageDelivered); err != nil {
+			if ok, err := d.orch.Transition(ctx, m.ID, api.MessageQueued, api.MessageDelivered); err != nil {
 				d.log.Warn("orch: mark delivered failed", "id", m.ID, "err", err)
+			} else if ok {
+				d.pushState(ctx, m, api.MessageDelivered)
 			}
 		}
 		d.orchChanged()
@@ -515,18 +715,60 @@ func nextBatch(self string, queued []api.Message) []api.Message {
 	return batch
 }
 
-func (d *Node) delivery(m api.Message) orch.Delivery {
+func (d *Node) delivery(ctx context.Context, m api.Message) orch.Delivery {
 	dl := orch.Delivery{Msg: m}
 	dl.From, dl.FromSession = d.senderLabel(m.From)
+	if m.From.Node != d.id && !reservedKey(m.From.Key) {
+		// This node cannot look up a session on another node, so it uses what
+		// the creating node recorded, and the link for older messages.
+		if m.FromLabel != "" {
+			dl.From = m.FromLabel
+		}
+		dl.FromSession = m.FromSessionID
+		if dl.FromSession == "" {
+			dl.FromSession = d.remoteSessionID(ctx, m)
+		}
+	}
 	if m.Child != nil {
-		dl.Child, dl.ChildSession = d.senderLabel(*m.Child)
+		child, childSession := d.childActor(ctx, *m.Child)
+		dl.Child, dl.ChildSession = d.senderLabel(child)
+		if child.Node != d.id {
+			dl.ChildSession = childSession
+		}
 	}
 	return dl
 }
 
-// reservedKey reports whether key names the owner or argus rather than a session.
-func reservedKey(key string) bool {
-	return key == api.ActorOwner || key == api.ActorArgus
+// remoteSessionID is the composite session ID of m's sender on another node,
+// as its link with m's recipient recorded it, or "" when unknown.
+func (d *Node) remoteSessionID(ctx context.Context, m api.Message) string {
+	if l, ok, err := d.orch.Link(ctx, m.From); err == nil && ok {
+		return l.ChildSessionID
+	}
+	if l, ok, err := d.orch.Link(ctx, m.To); err == nil && ok && l.Parent == m.From {
+		return l.ParentSessionID
+	}
+	return ""
+}
+
+// childActor is the child a notice is about, with its composite session ID
+// when the child is on another node, as its link recorded it.
+func (d *Node) childActor(ctx context.Context, child api.Actor) (api.Actor, string) {
+	if l, ok, err := d.orch.Link(ctx, child); err == nil && ok {
+		return l.Child, l.ChildSessionID
+	}
+	return child, ""
+}
+
+// insertMessage stores m and, when its recipient is on another node, queues
+// its deliver to that node in the same transaction.
+func (d *Node) insertMessage(ctx context.Context, m api.Message) (api.Message, error) {
+	if m.To.Node == d.id {
+		return d.orch.Insert(ctx, m)
+	}
+	return d.orch.InsertAndEnqueue(ctx, m, m.To.Node, api.MethodOrchPeerDeliver, func(m api.Message) any {
+		return api.OrchPeerDeliverParams{Message: m}
+	})
 }
 
 func (d *Node) deliver(ctx context.Context, s session.Session, text string) error {
