@@ -253,7 +253,7 @@ func TestTrustLogPushSyncAndChanged(t *testing.T) {
 				return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
 			},
 			OnNotify: func(n api.Notification) {
-				if got != nil {
+				if got != nil && n.Method != api.MethodNodeEvent {
 					got <- n
 				}
 			},

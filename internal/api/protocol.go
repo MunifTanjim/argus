@@ -117,6 +117,9 @@ const (
 	// relay.closed tells the node the gateway dropped a channel (client gone), so
 	// the node can free what the channel holds.
 	MethodRelayClosed = "relay.closed" // gateway->node notification: RelayCloseParams
+	// relay.peer_opened tells a node that another node opened a channel to it,
+	// sent before the channel's first relayed frame.
+	MethodRelayPeerOpened = "relay.peer_opened" // gateway->node notification: RelayPeerOpenedParams
 	// Trust-log distribution (locked mode). Cleartext, self-authenticating chain
 	// bytes the blind gateway relays but cannot forge/roll back.
 	MethodTrustLogSync = "trustlog.sync" // request: TrustLogSyncParams; result: TrustLogSyncResult (offer: known hashes; gateway set-subtracts diff)
@@ -1197,6 +1200,12 @@ type RelayOpenResult struct {
 // RelayCloseParams tears down an E2E channel the client owns.
 type RelayCloseParams struct {
 	ChanID string `json:"chan_id"`
+}
+
+// RelayPeerOpenedParams names the node that opened ChanID to the receiving node.
+type RelayPeerOpenedParams struct {
+	ChanID   string `json:"chan_id"`
+	FromNode string `json:"from_node"`
 }
 
 // TrustLogSyncParams states what the caller holds. Known lists the hash of every
