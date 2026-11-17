@@ -112,3 +112,28 @@ OpenCode needs no hooks.
 Codex needs no hooks. Argus connects to Codex's background app-server daemon,
 which `codex` starts automatically. Sessions started with `codex --no-daemon` are
 not visible to Argus.
+
+### Agent tools
+
+Argus gives Claude Code, Codex, and OpenCode a set of MCP tools. With these
+tools, an agent can start other agent sessions, send messages to them, read
+their output, answer their prompts, and stop them. Antigravity does not get the
+tools.
+
+The node serves the tools on `127.0.0.1`, on the port that
+[`mcp.port`](/getting-started/configuration#agent-tools) sets. Each request
+must carry a token that Argus creates on first use. When Argus starts, it
+writes the server address and the token into the config of each agent:
+
+- Claude Code: the settings of the Argus plugin. Argus also adds an allow rule
+  for the tools to the Claude Code `settings.json`.
+- Codex: the `[mcp_servers.argus]` table in the Codex `config.toml`.
+- OpenCode: the `argus` server and an allow rule for its tools in the global
+  OpenCode config.
+
+Any local user who can read the token can start agents as you. Before Argus
+writes the token, it removes the group and other permissions from the Codex and
+OpenCode config files.
+
+Claude Code gets the tools when a session starts, and Codex gets them at once.
+OpenCode gets them when its server starts again.

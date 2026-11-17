@@ -230,6 +230,19 @@ between handlers. For example, `sessions.capture` returns
 `-32600 unknown session <id>`. A client must not depend on the code to tell
 these errors apart. The `message` text is the only detail.
 
+Three exceptions exist:
+
+- The `orch.*` methods return code `4404` (`CodeUnknownSession`) and the
+  text `unknown session: <id>` when the target session does not exist on the
+  node. A node uses this code to tell a missing session from a transport
+  failure.
+- Before the node finishes its startup discovery, a missing target returns
+  code `4503` (`CodeNotReady`) instead, because the session can still appear.
+  The caller retries later.
+- The peer-only methods return code `4422` (`CodePushRejected`) for a push
+  that a retry cannot fix. The sending node drops the item from its outbox.
+  See [Outbox](#outbox).
+
 ### Keepalive
 
 `ping` is a request with no params and a `null` result. The peer answers it
@@ -494,6 +507,27 @@ the node is `online` again.
 
 `relay.close` returns `null`, even for a channel that the caller does not own.
 
+### Channels opened by a node
+
+A node can open a channel to another node through the gateway. The node
+sends `relay.open` and `relay.close` on its uplink with the same params as a
+client. Other nodes use these channels for the `orch.*` methods (see
+[Cross-node orchestration](#cross-node-orchestration)).
+
+- Before the first relayed frame, the gateway sends the target node a
+  `relay.peer_opened` notification with `{ chan_id, from_node }`. It names the
+  node that opened the channel.
+- The gateway sends `relay.closed` to both ends of a node-opened channel.
+- A node holds at most 64 channels that it opened. The next `relay.open`
+  fails with `-32600 too many open channels for this node`.
+- A node peer receives `node.event` roster events, like a client. A node uses
+  them to find the node IDs, labels, and identity keys of its peers.
+- `relay.open` fails with `-32600 unknown node: <id>` if the target node has
+  no live uplink.
+
+The channel is a normal relay channel. In E2EE mode, the opener runs the Noise
+handshake as the initiator.
+
 ## End-to-end encryption
 
 In E2EE mode, each relay channel is a Noise session between the client and the
@@ -628,8 +662,8 @@ Local session ids have these forms:
 
 The client makes these ids composite:
 
-- `id` and `workspace_id` of each session, in `sessions.list`,
-  `sessions.refresh`, and `session.event`
+- `id`, `workspace_id`, and `parent.session_id` of each session, in
+  `sessions.list`, `sessions.refresh`, and `session.event`
 - `id` of each project and workspace in `project.list`
 - `session_id` in the results of `sessions.spawn` and `sessions.resume`
 - `workspace_id` in the result of `workspace.create`
@@ -649,7 +683,7 @@ The client picks the node for each call:
 | ---- | ------- |
 | All nodes; merge results | `sessions.list`, `sessions.refresh`, `sessions.historyProjects`, `project.list`, `terminal.list` |
 | All nodes; success if one node succeeds | `push.register`, `push.unregister`, `push.test`, `push.setPause` |
-| Node from composite `session_id` | `sessions.transcriptView`, `sessions.toolDetail`, `sessions.capture`, `sessions.input`, `sessions.key`, `sessions.respond`, `sessions.kill`, `sessions.focus`, `session.rename`, `session.prompt.complete`, `sessions.tasks`, `sessions.changedFiles`, `sessions.fileDiff`, `sessions.commits`, `sessions.commitFiles`, `transcript.subscribe`, `terminal.open` with `session_id` |
+| Node from composite `session_id` | `sessions.transcriptView`, `sessions.toolDetail`, `sessions.capture`, `sessions.input`, `sessions.key`, `sessions.respond`, `sessions.kill`, `session.descendant.count`, `sessions.focus`, `session.rename`, `session.prompt.complete`, `sessions.tasks`, `sessions.changedFiles`, `sessions.fileDiff`, `sessions.commits`, `sessions.commitFiles`, `transcript.subscribe`, `terminal.open` with `session_id` |
 | Node from composite `terminal_id` | `terminal.kill`, `terminal.rename`, `terminal.open` with `terminal_id` |
 | Node from composite `workspace_id` | `workspace.changedFiles`, `workspace.diff`, `workspace.listDir`, `workspace.readFile`, `workspace.commits`, `workspace.commitFiles`, `workspace.remove`, `workspace.setTarget`, `workspace.runSetup`, `workspace.setupLog` |
 | Node from composite `project_id` | `workspace.create`, `project.rename`, `project.setHidden`, `project.setPinned`, `project.forget`, `project.branches`, `project.prs`, `project.issues` |
@@ -683,6 +717,121 @@ node is removed, it sends `removed` events. The next real `session.event` from
 the node sets `offline` back to `false`. While a node is offline, calls to it
 fail in the client without a request.
 
+## Cross-node orchestration
+
+The agent tools (`argus session ...` and the MCP tools) call the `orch.*`
+methods on the local node. A node routes a call to another node when the target
+session or the `node` param names one. This section describes the node-to-node
+part. A node needs `capabilities.cross_node_orch` (a protocol version, at
+least `1`) to accept these calls. Version `2` adds `orch.peer.state`.
+
+### Peer channels
+
+A node calls another node on a channel that it opened with `relay.open` (see
+[Channels opened by a node](#channels-opened-by-a-node)). The receiving node
+serves `orch.*` on the channel only if both conditions hold:
+
+- The gateway named the opener in `relay.peer_opened`.
+- In E2EE mode, the key of the Noise handshake equals the `identity_pubkey` of
+  that node in the roster. In locked mode, the trust log also authorizes the
+  key.
+
+In locked mode, the opening node also checks the key of the target before it
+opens the channel. It refuses a target whose roster `identity_pubkey` the trust
+log does not authorize, because the gateway supplies the roster.
+
+In E2EE mode without locked mode, the roster that holds the `identity_pubkey`
+comes from the gateway. The checks then protect against other clients, but not
+against the gateway itself, as for client channels. Only locked mode makes the
+key independent of the gateway.
+
+In plaintext mode, the node trusts the statement of the gateway. A channel
+that fails the checks is a client channel. A client channel does not serve the
+peer-only methods below, and it cannot send `CallerInfo.remote`. The node logs
+a warning when it serves a node-opened channel as a client channel.
+
+A peer channel carries only calls and their responses. The node does not send
+it the `session.event` stream or the connection broadcasts that a client
+channel gets.
+
+### Caller identity
+
+```ts
+CallerInfo {
+  pid:     number
+  env?:    { [name: string]: string }   // the local agent's identity variables
+  remote?: RemoteCaller                 // a caller on another node
+}
+
+RemoteCaller {
+  actor:      Actor    // the caller, as its own node states it
+  session_id: string   // composite id of the caller session
+  label:      string   // the label of the caller session
+}
+```
+
+- A call on a peer channel must set `remote`.
+- A peer channel rejects a call that carries a local `pid` or `env` identity.
+- Only the peer channel of the node that `actor.node` names can send `remote`.
+- `remote.actor.key` must not be `owner` or `argus`. The node rejects these
+  reserved keys.
+- A non-empty `remote.session_id` must start with `<actor.node>:`.
+
+Caller identity tells cooperating agents apart. It is not a security
+boundary: a local process can set the identity variables or the MCP `_meta`
+values of another session. Such a process can already reach the node socket
+or read the MCP token, which give it the same access.
+
+### Calls that cross nodes
+
+The call methods keep their local names. Their params and results gain these
+fields:
+
+| Method | Change |
+| ------ | ------ |
+| `orch.session.list` | Param `all: boolean`. With `all`, the node returns the sessions of every online node. The result is `OrchListResult { sessions, unreachable? }`. `unreachable` lists the nodes whose sessions are missing: nodes that did not answer, and offline nodes that are still in the gateway roster. |
+| `orch.session.spawn` | Param `node: string`, an id or a label. Empty means the local node. An ambiguous label fails. The result field `child_key` is internal: the node sets it only for a caller on another node, so that node can record the link. |
+| `orch.session.kill` | The result is `OrchKillResult { killed, not_killed? }`. `not_killed` lists descendants on other nodes that the node could not reach or kill. A parent on another node also sends `child_key`, the child's actor key, so the child's node finds the child even after it moved to a new pane. |
+
+All ids in params and results are composite (`<node>:<id>`).
+
+`argus session list --json` prints the `OrchListResult` object,
+`{ sessions, unreachable? }`, not a bare array of sessions.
+
+### Peer-only methods
+
+A node sends these methods to another node on a peer channel. The receiver
+accepts them only from a peer channel, and only about actors of the sending
+node. Every method is idempotent. A retry after a lost reply does no harm. All
+six return `null`.
+
+| Method | Params | Meaning |
+| ------ | ------ | ------- |
+| `orch.peer.deliver` | `{ message: Message }` | Deliver a message that the sender created. The message keeps its id and timestamps. |
+| `orch.peer.withdraw` | `{ message_id, ended?, answered_by?: Actor }` | Withdraw an open message that the sender created. `ended` is the body of the `interaction_ended` message that the receiver gives the recipient when it already delivered the message. `answered_by` (an actor of the receiver) means that actor answered the interaction: the receiver marks its copy answered and gives no `interaction_ended` message. |
+| `orch.peer.link_ended` | `{ child_key, ended_by }` | Record how a child on the sending node ended. |
+| `orch.peer.parent_ended` | `{ parent_key }` | Record that a parent on the sending node ended. The receiver shows the parent as gone and refuses replies to it. |
+| `orch.peer.rekey` | `{ old_key, new_key }` | Move an actor of the sending node to a new key. The keys must not be reserved. |
+| `orch.peer.state` | `{ message_id, state }` | Report that the sender's copy of a message the receiver created is now `delivered`, `replied`, or `failed`. The receiver moves its message forward only, and ignores an unknown message. Needs version `2`. |
+
+### Outbox
+
+A node queues messages and notices, withdraws, link and parent ends, and rekeys
+for another node that is offline. It sends them in order when the node returns.
+
+- The node sends items only to a node with `capabilities.cross_node_orch`.
+  For other nodes, it keeps the items queued. An item whose method needs a
+  higher version than the peer speaks is dropped.
+- If the peer rejects an item with code `4422`, or does not know the method
+  (`-32601`), the node drops the item and logs it. The peer uses `4422` for a
+  push that a retry cannot fix, for example a push about an actor of another
+  node.
+- For any other error reply, the node keeps the item and retries it later.
+  After 10 error replies, the node parks the item: it keeps it but skips it,
+  so the items behind it flow, and logs it once. An offline peer or a
+  timeout does not count.
+- Items expire after 7 days.
+
 ## Features
 
 ### Sessions
@@ -715,7 +864,9 @@ fail with `unknown session: <id>`.
 `sessions.kill` kills the tmux pane of the session. For a headless agent
 (opencode, codex), it also removes the session, with or without a viewer
 pane. For Claude Code without a pane, Claude Code stops its running turn and
-exits.
+exits. The kill also kills the live sessions below the session in the parent
+links, deepest first, with `ended_by` `"ancestor"`. `session.descendant.count`
+returns how many sessions that is.
 
 `session.rename` renames a session through the agent's own rename feature
 (opencode's session title, codex's thread name, Claude's rename), so the new
@@ -1147,10 +1298,11 @@ are standard base64 strings in JSON and byte strings in CBOR.
 | `server.restart`      | request            | gateway, node    | `{ node_id?: string }`  | `null`                                |
 | `server.stop`         | request            | gateway, node    | none                    | `null`                                |
 | `nodes.list`          | request            | gateway          | none                    | `{ nodes: NodeDescriptor[] }`         |
-| `node.event`          | notification       | gateway → client | `NodeEvent`             | —                                     |
-| `relay.open`          | request            | gateway          | `{ node_id: string }`   | `{ chan_id: string }`                 |
-| `relay.close`         | request            | gateway          | `{ chan_id: string }`   | `null`                                |
+| `node.event`          | notification       | gateway → client or node | `NodeEvent`             | —                                     |
+| `relay.open`          | request            | gateway (client or node) | `{ node_id: string }` | `{ chan_id: string }`                 |
+| `relay.close`         | request            | gateway (client or node) | `{ chan_id: string }` | `null`                                |
 | `relay.closed`        | notification       | gateway → node   | `{ chan_id: string }`   | —                                     |
+| `relay.peer_opened`   | notification       | gateway → node   | `{ chan_id: string, from_node: string }` | —                    |
 | `e2e.handshake`       | relay notification | client ↔ node    | Noise message in `body` | —                                     |
 
 ```ts
@@ -1166,10 +1318,11 @@ IdentifyResult {
 }
 
 Capabilities {
-  spawn_session: boolean   // the node can spawn sessions (tmux present)
-  terminal:      boolean   // the node can run persistent terminals
-  host_wakelock: boolean   // the node serves host.setWakelock
-  cbor:          boolean   // the side accepts CBOR frames
+  spawn_session:   boolean   // the node can spawn sessions (tmux present)
+  terminal:        boolean   // the node can run persistent terminals
+  host_wakelock:   boolean   // the node serves host.setWakelock
+  cbor:            boolean   // the side accepts CBOR frames
+  cross_node_orch: number    // the node-to-node orch protocol version; 0 means none (see Cross-node orchestration)
 }
 
 ServerInfo {
@@ -1256,27 +1409,38 @@ are `-32603`.
 All methods in this table are served by the node. The node serves them on the
 unix socket and on relay channels.
 
-| Method                    | Kind         | Params                           | Result                          |
-| ------------------------- | ------------ | -------------------------------- | ------------------------------- |
-| `sessions.list`           | request      | none                             | `Session[]`                     |
-| `sessions.refresh`        | request      | none                             | `Session[]` (after a rescan)    |
-| `session.event`           | notification | `{ type, session: Session }`     | —                               |
-| `sessions.capture`        | request      | `SessionRef`                     | `{ screen: string }`            |
-| `sessions.input`          | request      | `InputParams`                    | `null`                          |
-| `sessions.key`            | request      | `{ session_id, keys: string[] }` | `null`                          |
-| `sessions.respond`        | request      | `RespondParams`                  | `null`                          |
-| `sessions.spawn`          | request      | `SpawnParams`                    | `{ session_id, pane_id }`       |
-| `sessions.resume`         | request      | `ResumeParams`                   | `{ session_id }`                |
-| `sessions.kill`           | request      | `SessionRef`                     | `null`                          |
-| `sessions.focus`          | request      | `SessionRef`                     | `null`                          |
-| `session.rename`          | request      | `{ session_id, name }`           | `{ name, applied }`             |
-| `agents.list`             | request      | `{ node_id? }`                   | `{ agents: AgentInfo[] }`       |
-| `agent.model.list`        | request      | `{ node_id?, agent }`            | `{ models: ModelInfo[] }`       |
-| `session.prompt.complete` | request      | `{ session_id, trigger }`        | `{ items: PromptCompletion[] }` |
-| `host.completeDir`        | request      | `{ node_id?, path }`             | `{ home, paths: string[] }`     |
-| `sessions.tasks`          | request      | `SessionRef`                     | `{ tasks: Task[] }`             |
-| `tasks.changed`           | notification | `{ sub_id, session_id }`         | —                               |
-| `sessions.exportBundle`   | request      | `ExportBundleParams`             | `{ filename, data: bytes }`     |
+| Method                     | Kind         | Params                           | Result                          |
+| ------------------------- -| ------------ | -------------------------------- | ------------------------------- |
+| `sessions.list`            | request      | none                             | `Session[]`                     |
+| `sessions.refresh`         | request      | none                             | `Session[]` (after a rescan)    |
+| `session.event`            | notification | `{ type, session: Session }`     | —                               |
+| `sessions.capture`         | request      | `SessionRef`                     | `{ screen: string }`            |
+| `sessions.input`           | request      | `InputParams`                    | `null`                          |
+| `sessions.key`             | request      | `{ session_id, keys: string[] }` | `null`                          |
+| `sessions.respond`         | request      | `RespondParams`                  | `null`                          |
+| `sessions.spawn`           | request      | `SpawnParams`                    | `{ session_id, pane_id }`       |
+| `sessions.resume`          | request      | `ResumeParams`                   | `{ session_id }`                |
+| `sessions.kill`            | request      | `SessionRef`                     | `SessionKillResult`             |
+| `session.descendant.count` | request      | `SessionRef`                     | `{ count }`                     |
+| `sessions.focus`           | request      | `SessionRef`                     | `null`                          |
+| `session.rename`           | request      | `{ session_id, name }`           | `{ name, applied }`             |
+| `agents.list`              | request      | `{ node_id? }`                   | `{ agents: AgentInfo[] }`       |
+| `agent.model.list`         | request      | `{ node_id?, agent }`            | `{ models: ModelInfo[] }`       |
+| `session.prompt.complete`  | request      | `{ session_id, trigger }`        | `{ items: PromptCompletion[] }` |
+| `host.completeDir`         | request      | `{ node_id?, path }`             | `{ home, paths: string[] }`     |
+| `sessions.tasks`           | request      | `SessionRef`                     | `{ tasks: Task[] }`             |
+| `tasks.changed`            | notification | `{ sub_id, session_id }`         | —                               |
+| `sessions.exportBundle`    | request      | `ExportBundleParams`             | `{ filename, data: bytes }`     |
+
+```ts
+SessionKillResult {
+  not_killed?: string[]   // descendants on other nodes that the node could not reach or kill
+}
+```
+
+`sessions.kill` fails with `-32600 unknown session <id>` for an unknown
+session. The session and its local descendants are dead when the call returns,
+even if `not_killed` is not empty.
 
 For a headless agent (opencode, codex), `pane_id` in the `sessions.spawn` result is
 an empty string. For `sessions.spawn`, a `cwd` of `~` or one that starts with
@@ -1393,6 +1557,82 @@ ExportBundleParams {
   metadata:        BundleMetadata   // written into the bundle manifest
 }
 ```
+
+### Messages
+
+Agent sessions send messages to each other through the agent tools. The owner
+reads these messages and sends messages of their own. All methods in this table
+are served by the node, on the unix socket and on relay channels.
+
+| Method            | Kind         | Params            | Result                                   |
+| ----------------- | ------------ | ----------------- | ---------------------------------------- |
+| `message.list`    | request      | none              | `{ messages: Message[], links: Link[] }` |
+| `message.send`    | request      | `OwnerSendParams` | `{ message_id }`                         |
+| `message.changed` | notification | none              | —                                        |
+
+```ts
+OwnerSendParams {
+  session_id?: string   // local id of the recipient; required without reply_to
+  text:        string
+  reply_to?:   string   // id of a message to the owner
+}
+
+Message {
+  id:           string            // node id, ":m-", and 16 hex characters, e.g. "home:m-7f3a09c1b2d4e6f8"
+  kind:         "text" | "task" | "reply" | "interaction" | "turn_ended" | "interaction_ended"
+  from, to:     Actor
+  from_session_id?: string        // composite session id of a session sender, recorded at creation
+  from_label?:  string            // label of a session sender, recorded at creation
+  body:         string
+  reply_to?:    string
+  child?:       Actor             // interaction, turn_ended, interaction_ended: the child the message is about
+  interaction?: Interaction       // interaction messages
+  state:        "queued" | "delivered" | "replied" | "withdrawn" | "failed"
+  answered_by?: Actor             // interaction messages: the actor that answered
+  created_at, updated_at: string  // RFC 3339
+}
+
+Link {
+  child, parent:      Actor
+  task_id?:           string
+  ended_by?:          "owner" | "parent" | "self" | "ancestor"
+  child_session_id?:  string    // composite session id of the child, recorded at spawn
+  parent_session_id?: string    // composite session id of a parent on another node, recorded at spawn
+  parent_ended?:      boolean   // a parent on another node ended
+}
+
+Actor {
+  node: string
+  key:  string   // "<agent>:<agent_session_id>", "owner", or "argus"
+}
+```
+
+`message.list` returns the 500 newest messages. The node sends
+`message.changed` after any change to the messages or links. A client then
+calls `message.list` again.
+
+The node of the sender owns every message: a send, a reply, or a notice. A
+message to an actor on another node is stored on the sender's node and
+delivered to the recipient's node through the outbox. The recipient's node
+keeps a copy and reports `delivered`, `replied`, and `failed` back with
+`orch.peer.state`.
+
+A message id is local to the node that created it. A bare id from an older
+node (`m-7f3a09c1`) resolves on the local node only. A reply to a message from
+another node uses the full id, and the node sends the reply to the node that
+created the message.
+
+`message.send` fails if the recipient is not running, or if the sender of
+`reply_to` is not running. A queued message fails when its recipient ends.
+
+Delivery is at least once. The node types a message into the prompt, then
+marks it `delivered`. If the node fails between the two steps, for example on
+a database error, it types the message again on its next pass.
+
+A parent answers only the questions of its children, with
+`orch.interaction.respond`: `answers`, or `behavior: "deny"` to decline. A
+permission prompt or a plan always goes to the user: the child's own session
+asks the user, and the parent's `interaction` message says so.
 
 ### Transcripts and history
 
@@ -1755,8 +1995,16 @@ Session {
   interaction?:       Interaction     // present only while the session waits for input
   subagents?:         RunningSubagent[] // its subagents running now
   shells?:            RunningShell[]  // its background shells running now
+  parent?:            ParentRef       // the session that started this one through the agent tools
   node_id?, node_label?: string       // added by the client
   offline?:           boolean         // added by the client
+}
+
+ParentRef {
+  node:        string
+  key:         string                 // the actor key of the parent
+  session_id?: string                 // the running session with key, if there is one; composite for a parent on another node, bare for a local parent
+  gone?:       boolean                // the parent is not running; for a parent on another node, the link ended
 }
 
 RunningSubagent {
@@ -1870,11 +2118,26 @@ Entry {
   // system / compact / shell
   summary?, label?, detail?: string
   isError?:            boolean
+  // user only: the entry's <argus-message> block, parsed (one per entry)
+  argusMessages?: {
+    id:     string
+    kind:   "text" | "task" | "reply" | "interaction" | "turn_ended" | "interaction_ended" | string
+    from?, session?, replyTo?, child?, childSession?: string
+    body:   string
+  }[]
 }
 ```
 
 `Entry` never carries `toolInput` or `result` on the wire. Use
 `sessions.toolDetail` or `sessions.historyToolDetail` to get them.
+
+`argusMessages` is set on a user entry whose prompt argus delivered. A
+prompt that holds several messages becomes one user entry per message, so the
+list holds one message. `text` keeps that message's raw block, so a client
+that does not know the field shows the block as before. The agent's footer
+after the blocks is dropped. For an `interaction`, `turn_ended`, or
+`interaction_ended` message, `child` and `childSession` name the session the
+message is about. The agent `get_session_transcript` tool leaves the field out.
 
 The numbers on `turn_end` come from the agent's own logs; the node does not
 count tokens.
