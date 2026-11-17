@@ -129,11 +129,14 @@ func sessionList(dial callerFor) *cobra.Command {
 		"  argus session list", cobra.NoArgs, nil,
 		func(cmd *cobra.Command, call caller, _ []string, asJSON bool) error {
 			var res api.OrchListResult
-			if err := call(api.MethodOrchSessionList, api.CallerParams{Caller: callerInfo()}, &res); err != nil {
+			if err := call(api.MethodOrchSessionList, api.OrchListParams{Caller: callerInfo(), All: true}, &res); err != nil {
 				return err
 			}
 			if asJSON {
 				return printJSON(res)
+			}
+			if len(res.Unreachable) > 0 {
+				warn("unreachable nodes, their sessions are not listed: " + strings.Join(res.Unreachable, ", "))
 			}
 			rows := make([][]string, 0, len(res.Sessions))
 			for _, s := range res.Sessions {
@@ -188,7 +191,7 @@ func firstLine(s string) string {
 
 func sessionSpawn(dial callerFor) *cobra.Command {
 	var p api.OrchSpawnParams
-	return sessionSub(dial, "spawn --agent <agent> [--cwd <dir>] [--name <name>] [--model <model>] [--prompt <text>] [--request-id <id>]",
+	return sessionSub(dial, "spawn --agent <agent> [--cwd <dir>] [--name <name>] [--model <model>] [--node <id|label>] [--prompt <text>] [--request-id <id>]",
 		"Start a new agent session as your child",
 		`  argus session spawn --agent claude --cwd /path/to/repo --name reviewer --prompt "Review the diff on this branch"`,
 		cobra.NoArgs,
@@ -207,6 +210,7 @@ task needs a different agent, or when the user asks for an argus session.`
 			f.StringVar(&p.Cwd, "cwd", "", "working directory (default: the current directory)")
 			f.StringVar(&p.Name, "name", "", "session name")
 			f.StringVar(&p.Model, "model", "", "model to use")
+			f.StringVar(&p.Node, "node", "", "ID or label of the node to start it on (default: this node); cwd refers to that node")
 			f.StringVar(&p.Prompt, "prompt", "", "task for the new session, sent as its task message")
 			f.StringVar(&p.RequestID, "request-id", "", requestIDUsage)
 			_ = cmd.MarkFlagRequired("agent")
@@ -393,6 +397,9 @@ func sessionKill(dial callerFor) *cobra.Command {
 			}
 			for _, id := range res.Killed {
 				shell.StdOutF("%s\n", id)
+			}
+			if len(res.NotKilled) > 0 {
+				warn("not killed, unreachable or failed: " + strings.Join(res.NotKilled, ", "))
 			}
 			return nil
 		})

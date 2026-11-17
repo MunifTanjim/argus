@@ -11,6 +11,15 @@ import (
 type CallerInfo struct {
 	PID int               `json:"pid"`
 	Env map[string]string `json:"env,omitempty"` // only the adapters' caller identity variables
+	// Remote names a caller on another node; only that node's peer channel may send it.
+	Remote *RemoteCaller `json:"remote,omitempty"`
+}
+
+// RemoteCaller is an agent session on another node, as that node states it.
+type RemoteCaller struct {
+	Actor     Actor  `json:"actor"`
+	SessionID string `json:"session_id"` // composite
+	Label     string `json:"label"`
 }
 
 var ErrNoCaller = errors.New("not running inside an argus agent session")
@@ -18,7 +27,7 @@ var ErrNoCaller = errors.New("not running inside an argus agent session")
 // Method names for orch.* calls. IDs in their params and results are composite.
 const (
 	MethodOrchSessionCurrent     = "orch.session.current"     // request: CallerParams; result: session.Session
-	MethodOrchSessionList        = "orch.session.list"        // request: CallerParams; result: OrchListResult
+	MethodOrchSessionList        = "orch.session.list"        // request: OrchListParams; result: OrchListResult
 	MethodOrchSessionGet         = "orch.session.get"         // request: OrchTargetParams; result: OrchGetResult
 	MethodOrchSessionSpawn       = "orch.session.spawn"       // request: OrchSpawnParams; result: OrchSpawnResult
 	MethodOrchMessageSend        = "orch.message.send"        // request: OrchSendParams; result: OrchSendResult
@@ -26,16 +35,78 @@ const (
 	MethodOrchInteractionRespond = "orch.interaction.respond" // request: OrchRespondParams; result: nil
 	MethodOrchSessionOutput      = "orch.session.output"      // request: OrchTargetParams; result: OrchOutputResult
 	MethodOrchSessionTranscript  = "orch.session.transcript"  // request: OrchTranscriptParams; result: OrchTranscriptResult
-	MethodOrchSessionKill        = "orch.session.kill"        // request: OrchTargetParams; result: OrchKillResult
+	MethodOrchSessionKill        = "orch.session.kill"        // request: OrchKillParams; result: OrchKillResult
 	MethodOrchSessionRename      = "orch.session.rename"      // request: OrchRenameParams; result: SessionRenameResult
 )
+
+// Methods one node pushes to another over its peer channel; a node accepts
+// them only from a peer node, and only about that node's own actors. Each is
+// idempotent, so a push retried after a lost reply is harmless.
+const (
+	MethodOrchPeerDeliver   = "orch.peer.deliver"    // request: OrchPeerDeliverParams; result: nil
+	MethodOrchPeerWithdraw  = "orch.peer.withdraw"   // request: OrchPeerWithdrawParams; result: nil
+	MethodOrchPeerLinkEnded = "orch.peer.link_ended" // request: OrchPeerLinkEndedParams; result: nil
+	MethodOrchPeerRekey     = "orch.peer.rekey"      // request: OrchPeerRekeyParams; result: nil
+	// request: OrchPeerParentEndedParams; result: nil
+	MethodOrchPeerParentEnded = "orch.peer.parent_ended"
+	// request: OrchPeerStateParams; result: nil. Needs cross_node_orch 2.
+	MethodOrchPeerState = "orch.peer.state"
+)
+
+// OrchPeerDeliverParams carries a message the sending node created, with its ID and timestamps.
+type OrchPeerDeliverParams struct {
+	Message Message `json:"message"`
+}
+
+// OrchPeerWithdrawParams withdraws an open message the sending node created.
+// Ended is the interaction_ended message the receiver gives the recipient when it
+// already delivered the message. AnsweredBy, when set, names the actor on the
+// receiving node that answered the interaction: the receiver marks its copy
+// answered by that actor and gives no interaction_ended message.
+type OrchPeerWithdrawParams struct {
+	MessageID  string `json:"message_id"`
+	Ended      string `json:"ended,omitempty"`
+	AnsweredBy *Actor `json:"answered_by,omitempty"`
+}
+
+// OrchPeerStateParams moves the sending node's copy of a message to State:
+// delivered, replied, or failed. The receiver created the message.
+type OrchPeerStateParams struct {
+	MessageID string       `json:"message_id"`
+	State     MessageState `json:"state"`
+}
+
+// OrchPeerParentEndedParams records that a parent on the sending node ended.
+type OrchPeerParentEndedParams struct {
+	ParentKey string `json:"parent_key"`
+}
+
+// OrchPeerLinkEndedParams records how a child on the sending node ended.
+type OrchPeerLinkEndedParams struct {
+	ChildKey string `json:"child_key"`
+	EndedBy  string `json:"ended_by"`
+}
+
+// OrchPeerRekeyParams moves an actor of the sending node to a new key.
+type OrchPeerRekeyParams struct {
+	OldKey string `json:"old_key"`
+	NewKey string `json:"new_key"`
+}
 
 type CallerParams struct {
 	Caller CallerInfo `json:"caller"`
 }
 
+type OrchListParams struct {
+	Caller CallerInfo `json:"caller"`
+	// All asks for the sessions of every online node, not only this one.
+	All bool `json:"all,omitempty"`
+}
+
 type OrchListResult struct {
 	Sessions []session.Session `json:"sessions"`
+	// Unreachable is the IDs of nodes whose sessions are missing from Sessions.
+	Unreachable []string `json:"unreachable,omitempty"`
 }
 
 type OrchTargetParams struct {
@@ -57,11 +128,16 @@ type OrchSpawnParams struct {
 	Prompt string     `json:"prompt,omitempty"`
 	// RequestID makes a retry return the first result instead of spawning again.
 	RequestID string `json:"request_id,omitempty"`
+	// Node is the ID or label of the node to spawn on; empty means this node.
+	Node string `json:"node,omitempty"`
 }
 
 type OrchSpawnResult struct {
 	SessionID string `json:"session_id"`
 	TaskID    string `json:"task_id,omitempty"`
+	// ChildKey is the child's actor key, sent only to a caller on another node
+	// so that node can mirror the link.
+	ChildKey string `json:"child_key,omitempty"`
 }
 
 type OrchSendParams struct {
@@ -96,10 +172,22 @@ type OrchRenameParams struct {
 	Name      string `json:"name"`
 }
 
+// OrchKillParams is a kill request. Ancestor is honored only from a peer node
+// killing a child of a session it is killing: the child ends by "ancestor".
+type OrchKillParams struct {
+	OrchTargetParams
+	Ancestor bool `json:"ancestor,omitempty"`
+	// ChildKey names the target by its actor key, so a child that moved to a
+	// new pane is still found. A parent on another node sets it.
+	ChildKey string `json:"child_key,omitempty"`
+}
+
 // OrchKillResult lists the composite IDs of the killed sessions: the target's
-// live descendants, deepest first, then the target.
+// live descendants, deepest first, then the target. NotKilled lists the
+// descendants on other nodes that could not be reached or killed.
 type OrchKillResult struct {
-	Killed []string `json:"killed"`
+	Killed    []string `json:"killed"`
+	NotKilled []string `json:"not_killed,omitempty"`
 }
 
 type OrchOutputResult struct {

@@ -55,7 +55,7 @@ func TestTerminalWireShape(t *testing.T) {
 		t.Errorf("Terminal = %s\nwant %s", b, want)
 	}
 	b, _ = json.Marshal(NodeCapabilities{SpawnSession: true, Terminal: true, HostWakelock: true})
-	if string(b) != `{"spawn_session":true,"terminal":true,"host_wakelock":true,"cbor":false}` {
+	if string(b) != `{"spawn_session":true,"terminal":true,"host_wakelock":true,"cbor":false,"cross_node_orch":0}` {
 		t.Errorf("NodeCapabilities = %s", b)
 	}
 	b, _ = json.Marshal(TerminalOpenParams{TermID: "t1", TerminalID: "@1", Cols: 80, Rows: 24})
@@ -113,7 +113,7 @@ func TestNodeCapabilitiesKeepUnknownKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := string(b), `{"cbor":false,"future_cap":{"level":2},"host_wakelock":true,"spawn_session":true,"terminal":false}`; got != want {
+	if got, want := string(b), `{"cbor":false,"cross_node_orch":0,"future_cap":{"level":2},"host_wakelock":true,"spawn_session":true,"terminal":false}`; got != want {
 		t.Fatalf("got %s, want %s", got, want)
 	}
 }
@@ -139,7 +139,8 @@ func TestOrchMethodsArePrefixed(t *testing.T) {
 	methods := []string{
 		MethodOrchSessionCurrent, MethodOrchSessionList, MethodOrchSessionGet, MethodOrchSessionSpawn, MethodOrchMessageSend,
 		MethodOrchMessageReply, MethodOrchInteractionRespond, MethodOrchSessionOutput, MethodOrchSessionTranscript, MethodOrchSessionKill,
-		MethodOrchSessionRename,
+		MethodOrchSessionRename, MethodOrchPeerDeliver, MethodOrchPeerWithdraw, MethodOrchPeerLinkEnded, MethodOrchPeerParentEnded,
+		MethodOrchPeerRekey,
 	}
 	for _, m := range methods {
 		if !strings.HasPrefix(m, "orch.") {
@@ -167,7 +168,7 @@ func TestSessionParentJSON(t *testing.T) {
 
 func TestMessageJSONOmitsEmptyActors(t *testing.T) {
 	b, _ := json.Marshal(Message{ID: "a:m-00000001", Kind: MessageText})
-	for _, k := range []string{`"child"`, `"answered_by"`} {
+	for _, k := range []string{`"child"`, `"answered_by"`, `"from_session_id"`} {
 		if strings.Contains(string(b), k) {
 			t.Fatalf("%s present in %s", k, b)
 		}

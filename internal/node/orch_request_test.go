@@ -175,3 +175,54 @@ func TestSendRequestIDIsScopedToSender(t *testing.T) {
 		t.Fatalf("m1=%+v m2=%+v err=%v", m1, m2, err)
 	}
 }
+
+func TestSendRequestIDNotSharedAcrossNodes(t *testing.T) {
+	d, _ := deliverNode(t)
+	a := apiSession(d, "a", session.StatusWorking, nil)
+	b := apiSession(d, "b", session.StatusWorking, nil)
+	local, err := d.send(t.Context(), d.localCallerRef(a), b.ID, "q", "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote, err := d.callerFrom(withPeerNode(t.Context(), "c"), remoteCaller("c", "opencode:a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := d.send(t.Context(), remote, b.ID, "q", "r1")
+	if err != nil || other == local {
+		t.Fatalf("local=%+v remote=%+v err=%v", local, other, err)
+	}
+	m, ok, err := d.orch.Get(t.Context(), other.MessageID)
+	if err != nil || !ok || m.From != remote.Actor {
+		t.Fatalf("remote message = %+v ok=%v err=%v", m, ok, err)
+	}
+	if again, err := d.send(t.Context(), remote, b.ID, "q", "r1"); err != nil || again != other {
+		t.Fatalf("remote retry = %+v err=%v, want %+v", again, err, other)
+	}
+}
+
+func TestSpawnRequestIDNotSharedAcrossNodes(t *testing.T) {
+	d, fs, caller := spawnNode(t, true)
+	n := countSpawns(d, nil)
+	p := api.OrchSpawnParams{Caller: caller, Agent: "fake", Cwd: t.TempDir(), Prompt: "build it", RequestID: "r1"}
+	local, err := spawnRequest(t, d, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote, err := d.callerFrom(withPeerNode(t.Context(), "c"), remoteCaller("c", "claude:p1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs.id = "ses_y"
+	p.Caller = api.CallerInfo{}
+	other, err := d.spawnFor(t.Context(), remote, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.Load() != 2 || other.TaskID == local.TaskID || other.SessionID == local.SessionID || other.ChildKey == "" {
+		t.Fatalf("local=%+v remote=%+v spawns=%d", local, other, n.Load())
+	}
+	if again, err := d.spawnFor(t.Context(), remote, p); err != nil || again != other || n.Load() != 2 {
+		t.Fatalf("remote retry = %+v err=%v spawns=%d, want %+v", again, err, n.Load(), other)
+	}
+}

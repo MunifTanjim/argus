@@ -281,9 +281,10 @@ type ParentRef struct {
 	Gone      bool   `json:"gone,omitempty"`
 }
 
-// Composite returns p with its session ID prefixed by nodeID.
+// Composite returns p with a session ID of node nodeID prefixed by nodeID. A
+// parent on another node already carries its composite session ID.
 func (p *ParentRef) Composite(nodeID string) *ParentRef {
-	if p == nil || p.SessionID == "" {
+	if p == nil || p.SessionID == "" || p.Node != nodeID {
 		return p
 	}
 	c := *p

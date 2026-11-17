@@ -43,7 +43,7 @@ const (
 	// Probed live per call.
 	MethodAgentsList             = "agents.list"              // request: AgentsListParams; result: AgentsListResult
 	MethodAgentModelList         = "agent.model.list"         // request: AgentModelListParams; result: AgentModelListResult
-	MethodSessionKill            = "sessions.kill"            // request: SessionRef; result: nil (kills the tmux pane, or dismisses a paneless presence card)
+	MethodSessionKill            = "sessions.kill"            // request: SessionRef; result: SessionKillResult (kills the tmux pane, or dismisses a paneless presence card)
 	MethodSessionFocus           = "sessions.focus"           // request: SessionRef; result: nil (focus the session's tmux pane on its owning node)
 	MethodSessionRename          = "session.rename"           // request: SessionRenameParams; result: SessionRenameResult
 	MethodSessionPromptComplete  = "session.prompt.complete"  // request: PromptCompleteParams; result: PromptCompleteResult
@@ -590,6 +590,9 @@ type NodeCapabilities struct {
 	HostWakelock bool `json:"host_wakelock"`
 	// CBOR reports whether the node accepts CBOR frames.
 	CBOR bool `json:"cbor"`
+	// CrossNodeOrch is the version of the node-to-node orch protocol the node
+	// speaks; 0 means none. Version 2 adds orch.peer.state.
+	CrossNodeOrch int `json:"cross_node_orch"`
 
 	// unknown keeps the keys this build does not know, so a gateway relays the
 	// capabilities of a newer node unchanged.
@@ -1037,6 +1040,12 @@ type RPCError struct {
 
 func (e *RPCError) Error() string { return e.Message }
 
+// SessionKillResult lists the descendants on other nodes that could not be
+// reached or killed; the session and its local descendants were killed.
+type SessionKillResult struct {
+	NotKilled []string `json:"not_killed,omitempty"`
+}
+
 // Standard JSON-RPC error codes used by argus.
 const (
 	CodeParseError     = -32700
@@ -1052,6 +1061,15 @@ const (
 	// The gateway has already pruned it; the client should fetch a fresh endpoint
 	// rather than re-register the dead one.
 	CodePushGone = 410
+	// CodeUnknownSession marks a call whose target session the node does not hold.
+	CodeUnknownSession = 4404
+	// CodeNotReady marks a call that came before the node finished its startup
+	// discovery, so a missing target can still appear. The caller retries.
+	CodeNotReady = 4503
+	// CodePushRejected marks a node-to-node push that the receiver refuses
+	// for good, for example a bad sender or a malformed message. The sender
+	// drops it. Every other error reply is transient, and the sender retries.
+	CodePushRejected = 4422
 )
 
 // TranscriptSubscribeParams opens a subscription. AgentID selects a subagent

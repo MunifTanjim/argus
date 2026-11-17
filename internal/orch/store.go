@@ -40,10 +40,12 @@ type Store struct {
 	// orch_link loaded on first Link; nil until then.
 	linksMu sync.Mutex
 	links   map[api.Actor]api.Link
+
+	enqueued chan struct{} // signaled, without blocking, by Enqueue
 }
 
 func NewStore(db *sql.DB, now func() time.Time) *Store {
-	return &Store{db: db, q: gen.New(db), now: now}
+	return &Store{db: db, q: gen.New(db), now: now, enqueued: make(chan struct{}, 1)}
 }
 
 // SetNodeID sets the node ID that prefixes message IDs assigned by Insert.
@@ -92,6 +94,8 @@ func (s *Store) insert(ctx context.Context, q *gen.Queries, m api.Message, req R
 		Kind:           string(m.Kind),
 		FromNode:       m.From.Node,
 		FromKey:        m.From.Key,
+		FromSessionID:  m.FromSessionID,
+		FromLabel:      m.FromLabel,
 		ToNode:         m.To.Node,
 		ToKey:          m.To.Key,
 		Body:           m.Body,
@@ -111,6 +115,41 @@ func (s *Store) insert(ctx context.Context, q *gen.Queries, m api.Message, req R
 		return api.Message{}, fmt.Errorf("orch: insert: %w", err)
 	}
 	return m, nil
+}
+
+// Receive stores a message another node created, keeping its ID and
+// timestamps, and reports whether it was new: a message with the same ID is left as is.
+func (s *Store) Receive(ctx context.Context, m api.Message) (bool, error) {
+	interaction, err := encodeInteraction(m)
+	if err != nil {
+		return false, err
+	}
+	childNode, childKey := actorCols(m.Child)
+	answeredNode, answeredKey := actorCols(m.AnsweredBy)
+	n, err := s.q.ReceiveOrchMessage(ctx, gen.ReceiveOrchMessageParams{
+		ID:             m.ID,
+		Kind:           string(m.Kind),
+		FromNode:       m.From.Node,
+		FromKey:        m.From.Key,
+		FromSessionID:  m.FromSessionID,
+		FromLabel:      m.FromLabel,
+		ToNode:         m.To.Node,
+		ToKey:          m.To.Key,
+		Body:           m.Body,
+		ReplyTo:        m.ReplyTo,
+		ChildNode:      childNode,
+		ChildKey:       childKey,
+		Interaction:    interaction,
+		State:          string(m.State),
+		AnsweredByNode: answeredNode,
+		AnsweredByKey:  answeredKey,
+		CreatedAt:      m.CreatedAt.UnixNano(),
+		UpdatedAt:      m.UpdatedAt.UnixNano(),
+	})
+	if err != nil {
+		return false, fmt.Errorf("orch: receive: %w", err)
+	}
+	return n > 0, nil
 }
 
 // actorCols splits an optional actor into its node and key columns.
@@ -244,14 +283,36 @@ func (s *Store) ReleaseInteraction(ctx context.Context, id string, by api.Actor,
 	return n > 0, err
 }
 
-// FailQueued marks the queued messages for to failed and returns how many.
-// Argus notices stay queued: a parent that comes back still gets them.
-func (s *Store) FailQueued(ctx context.Context, to api.Actor) (int64, error) {
-	return s.q.FailQueuedOrchMessages(ctx, gen.FailQueuedOrchMessagesParams{
+// FailQueued marks the queued messages for to failed and returns them. Argus
+// notices stay queued: a parent that comes back still gets them.
+func (s *Store) FailQueued(ctx context.Context, to api.Actor) ([]api.Message, error) {
+	// One statement fails and returns the same rows, so a delivery in between
+	// cannot be reported as failed.
+	return many(s.q.FailQueuedOrchMessages(ctx, gen.FailQueuedOrchMessagesParams{
 		UpdatedAt: s.now().UnixNano(),
 		ToNode:    to.Node,
 		ToKey:     to.Key,
-	})
+	}))
+}
+
+// advanceFrom lists the states a message may move to each state from, so a
+// state reported by another node only moves a message forward.
+var advanceFrom = map[api.MessageState][]api.MessageState{
+	api.MessageDelivered: {api.MessageQueued},
+	api.MessageReplied:   {api.MessageQueued, api.MessageDelivered},
+	api.MessageFailed:    {api.MessageQueued},
+}
+
+// Advance moves message id to st when that is a forward move, and reports
+// whether it moved.
+func (s *Store) Advance(ctx context.Context, id string, st api.MessageState) (bool, error) {
+	for _, from := range advanceFrom[st] {
+		ok, err := s.Transition(ctx, id, from, st)
+		if err != nil || ok {
+			return ok, err
+		}
+	}
+	return false, nil
 }
 
 // OpenInteractions returns interaction messages about child that are queued or delivered.
@@ -273,7 +334,8 @@ func (s *Store) List(ctx context.Context, limit int) ([]api.Message, error) {
 }
 
 // Rekey moves this node's actor oldKey to newKey in every message and link,
-// atomically. An actor of another node with the same key is left as is.
+// and in the delivers queued for other nodes, atomically. An actor of another
+// node with the same key is left as is.
 func (s *Store) Rekey(ctx context.Context, oldKey, newKey string) error {
 	s.nodeMu.RLock()
 	self := s.nodeID
@@ -281,7 +343,15 @@ func (s *Store) Rekey(ctx context.Context, oldKey, newKey string) error {
 	s.linksMu.Lock()
 	defer s.linksMu.Unlock()
 	err := s.inTx(ctx, "rekey", func(q *gen.Queries) error {
-		return rekeyNodeRows(ctx, q, self, oldKey, newKey)
+		return firstErr(
+			func() error { return rekeyNodeRows(ctx, q, self, oldKey, newKey) },
+			func() error {
+				return q.RekeyOrchOutboxSender(ctx, gen.RekeyOrchOutboxSenderParams{NewKey: newKey, Node: self, OldKey: oldKey})
+			},
+			func() error {
+				return q.RekeyOrchOutboxChild(ctx, gen.RekeyOrchOutboxChildParams{NewKey: newKey, Node: self, OldKey: oldKey})
+			},
+		)
 	})
 	if err != nil {
 		return err
@@ -309,6 +379,27 @@ func rekeyNodeRows(ctx context.Context, q *gen.Queries, node, oldKey, newKey str
 			return q.RekeyOrchNodeLinkParent(ctx, gen.RekeyOrchNodeLinkParentParams{NewKey: newKey, Node: node, OldKey: oldKey})
 		},
 	)
+}
+
+// RekeyNode replaces oldKey with newKey for the actors of node in every
+// message and link, and in the delivers queued for node, atomically. A child is
+// rekeyed when it is an actor of node.
+func (s *Store) RekeyNode(ctx context.Context, node, oldKey, newKey string) error {
+	s.linksMu.Lock()
+	defer s.linksMu.Unlock()
+	err := s.inTx(ctx, "rekey", func(q *gen.Queries) error {
+		return firstErr(
+			func() error { return rekeyNodeRows(ctx, q, node, oldKey, newKey) },
+			func() error {
+				return q.RekeyOrchOutboxRecipient(ctx, gen.RekeyOrchOutboxRecipientParams{NewKey: newKey, Node: node, OldKey: oldKey})
+			},
+		)
+	})
+	if err != nil {
+		return err
+	}
+	s.rekeyLinks(oldKey, newKey, func(p api.Actor) bool { return p.Node == node })
+	return nil
 }
 
 // inTx runs fn in one transaction and commits when fn succeeds.
@@ -360,8 +451,13 @@ func (s *Store) Expire(ctx context.Context, before time.Time) (int64, error) {
 }
 
 // ExpireLinks deletes the links created before the cutoff whose child is not
-// live, and returns how many.
-func (s *Store) ExpireLinks(ctx context.Context, before time.Time, live func(child api.Actor) bool) (int, error) {
+// live, and returns how many. live knows only this node's sessions, so a link to
+// a child on another node is kept until that child has ended, or until seen
+// reports that the child's node was not seen for the retention.
+func (s *Store) ExpireLinks(ctx context.Context, before time.Time, live func(child api.Actor) bool, seen func(node string) bool) (int, error) {
+	s.nodeMu.RLock()
+	self := s.nodeID
+	s.nodeMu.RUnlock()
 	s.linksMu.Lock()
 	defer s.linksMu.Unlock()
 	rows, err := s.q.ListOrchLinks(ctx)
@@ -372,6 +468,9 @@ func (s *Store) ExpireLinks(ctx context.Context, before time.Time, live func(chi
 	for _, r := range rows {
 		child := api.Actor{Node: r.ChildNode, Key: r.ChildKey}
 		if r.CreatedAt >= before.UnixNano() || live(child) {
+			continue
+		}
+		if self != "" && r.ChildNode != "" && r.ChildNode != self && r.EndedBy == "" && seen(r.ChildNode) {
 			continue
 		}
 		if err := s.q.DeleteOrchLink(ctx, gen.DeleteOrchLinkParams{ChildNode: r.ChildNode, ChildKey: r.ChildKey}); err != nil {
@@ -442,16 +541,18 @@ func (s *Store) LinkByRequest(ctx context.Context, parent api.Actor, requestID s
 
 func (s *Store) putLink(ctx context.Context, q *gen.Queries, l api.Link, req Request) error {
 	return q.PutOrchLink(ctx, gen.PutOrchLinkParams{
-		ChildKey:       l.Child.Key,
-		ChildNode:      l.Child.Node,
-		ParentNode:     l.Parent.Node,
-		ParentKey:      l.Parent.Key,
-		TaskID:         l.TaskID,
-		EndedBy:        l.EndedBy,
-		RequestID:      req.ID,
-		RequestHash:    req.Hash,
-		ChildSessionID: l.ChildSessionID,
-		CreatedAt:      s.now().UnixNano(),
+		ChildKey:        l.Child.Key,
+		ChildNode:       l.Child.Node,
+		ParentNode:      l.Parent.Node,
+		ParentKey:       l.Parent.Key,
+		TaskID:          l.TaskID,
+		EndedBy:         l.EndedBy,
+		RequestID:       req.ID,
+		RequestHash:     req.Hash,
+		ChildSessionID:  l.ChildSessionID,
+		ParentSessionID: l.ParentSessionID,
+		ParentEnded:     boolInt(l.ParentEnded),
+		CreatedAt:       s.now().UnixNano(),
 	})
 }
 
@@ -540,14 +641,40 @@ func (s *Store) SetEndedBy(ctx context.Context, child api.Actor, by string) erro
 	return err
 }
 
+// SetParentEnded marks every link whose parent is parentKey on parentNode as
+// having an ended parent.
+func (s *Store) SetParentEnded(ctx context.Context, parentNode, parentKey string) error {
+	s.linksMu.Lock()
+	defer s.linksMu.Unlock()
+	if err := s.q.SetOrchLinksParentEnded(ctx, gen.SetOrchLinksParentEndedParams{ParentNode: parentNode, ParentKey: parentKey}); err != nil {
+		return err
+	}
+	for k, l := range s.links {
+		if l.Parent.Node == parentNode && l.Parent.Key == parentKey {
+			l.ParentEnded = true
+			s.links[k] = l
+		}
+	}
+	return nil
+}
+
 func toLink(r gen.OrchLink) api.Link {
 	return api.Link{
-		Child:          api.Actor{Node: r.ChildNode, Key: r.ChildKey},
-		Parent:         api.Actor{Node: r.ParentNode, Key: r.ParentKey},
-		TaskID:         r.TaskID,
-		EndedBy:        r.EndedBy,
-		ChildSessionID: r.ChildSessionID,
+		Child:           api.Actor{Node: r.ChildNode, Key: r.ChildKey},
+		Parent:          api.Actor{Node: r.ParentNode, Key: r.ParentKey},
+		TaskID:          r.TaskID,
+		EndedBy:         r.EndedBy,
+		ChildSessionID:  r.ChildSessionID,
+		ParentSessionID: r.ParentSessionID,
+		ParentEnded:     r.ParentEnded != 0,
 	}
+}
+
+func boolInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func one(row gen.OrchMessage, err error) (api.Message, bool, error) {
@@ -581,17 +708,19 @@ func many(rows []gen.OrchMessage, err error) ([]api.Message, error) {
 
 func toMessage(r gen.OrchMessage) (api.Message, error) {
 	m := api.Message{
-		ID:         r.ID,
-		Kind:       api.MessageKind(r.Kind),
-		From:       api.Actor{Node: r.FromNode, Key: r.FromKey},
-		To:         api.Actor{Node: r.ToNode, Key: r.ToKey},
-		Body:       r.Body,
-		ReplyTo:    r.ReplyTo,
-		Child:      colsActor(r.ChildNode, r.ChildKey),
-		State:      api.MessageState(r.State),
-		AnsweredBy: colsActor(r.AnsweredByNode, r.AnsweredByKey),
-		CreatedAt:  time.Unix(0, r.CreatedAt),
-		UpdatedAt:  time.Unix(0, r.UpdatedAt),
+		ID:            r.ID,
+		Kind:          api.MessageKind(r.Kind),
+		From:          api.Actor{Node: r.FromNode, Key: r.FromKey},
+		FromSessionID: r.FromSessionID,
+		FromLabel:     r.FromLabel,
+		To:            api.Actor{Node: r.ToNode, Key: r.ToKey},
+		Body:          r.Body,
+		ReplyTo:       r.ReplyTo,
+		Child:         colsActor(r.ChildNode, r.ChildKey),
+		State:         api.MessageState(r.State),
+		AnsweredBy:    colsActor(r.AnsweredByNode, r.AnsweredByKey),
+		CreatedAt:     time.Unix(0, r.CreatedAt),
+		UpdatedAt:     time.Unix(0, r.UpdatedAt),
 	}
 	if r.Interaction != "" {
 		var in session.Interaction
@@ -601,6 +730,12 @@ func toMessage(r gen.OrchMessage) (api.Message, error) {
 		m.Interaction = &in
 	}
 	return m, nil
+}
+
+// MessagePeers returns the other nodes that exchanged a stored message with
+// the actor a of this store's node.
+func (s *Store) MessagePeers(ctx context.Context, a api.Actor) ([]string, error) {
+	return s.q.OrchMessagePeerNodes(ctx, gen.OrchMessagePeerNodesParams{Node: a.Node, Key: a.Key})
 }
 
 // ReplyTo stores the reply m to the message origID and marks origID replied,

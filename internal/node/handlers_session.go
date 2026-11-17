@@ -67,6 +67,12 @@ func (d *Node) parentRef(s session.Session) *session.ParentRef {
 		return nil
 	}
 	ref := &session.ParentRef{Node: link.Parent.Node, Key: link.Parent.Key}
+	if link.Parent.Node != d.id {
+		// The parent's node is not asked: the link's session ID stands, and it
+		// is gone once the link ended or the parent's node said the parent ended.
+		ref.SessionID, ref.Gone = link.ParentSessionID, link.EndedBy != "" || link.ParentEnded
+		return ref
+	}
 	if p, live := d.sessionForKey(link.Parent.Key); live {
 		ref.SessionID = p.ID
 	} else {
@@ -780,8 +786,14 @@ func (d *Node) handleSessionKill(ctx context.Context, params json.RawMessage) (a
 	if !ok {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session " + p.SessionID}
 	}
-	_, err = d.killTree(ctx, s, "owner")
-	return nil, err
+	_, notKilled, err := d.killTree(ctx, s, "owner")
+	if err != nil {
+		return nil, err
+	}
+	if len(notKilled) > 0 {
+		d.log.Warn("orch: owner kill left children on other nodes", "session", s.ID, "not_killed", notKilled)
+	}
+	return api.SessionKillResult{NotKilled: notKilled}, nil
 }
 
 func (d *Node) handleSessionDescendantCount(ctx context.Context, params json.RawMessage) (any, error) {
@@ -793,11 +805,12 @@ func (d *Node) handleSessionDescendantCount(ctx context.Context, params json.Raw
 	if !ok {
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown session " + p.SessionID}
 	}
-	below, err := d.descendants(ctx, s)
+	below, remote, err := d.descendants(ctx, s)
 	if err != nil {
 		return nil, err
 	}
-	return api.DescendantCountResult{Count: len(below)}, nil
+	// A remote child counts alone: its own subtree is on its node.
+	return api.DescendantCountResult{Count: len(below) + len(remote)}, nil
 }
 
 func (d *Node) killSession(ctx context.Context, s session.Session) error {

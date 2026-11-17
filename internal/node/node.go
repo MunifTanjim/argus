@@ -80,6 +80,8 @@ type Node struct {
 
 	activeResponder atomic.Pointer[relayResponder]
 	activeUplink    atomic.Pointer[api.Peer] // current gateway uplink peer for event-triggered pulls
+	peers           atomic.Pointer[peerPool] // channels to peer nodes on the current uplink; nil when down
+	roster          *peerRoster              // gateway roster mirror, never nil
 
 	// trustPullTrigger rate-limits pulls a gateway trustlog.changed hint can
 	// provoke, so one untrusted notification amplifies into at most one pull/window.
@@ -113,17 +115,19 @@ type Node struct {
 	instanceID string                                                                                 // tells mods this node process from a restarted one
 	spawnFn    func(ctx context.Context, p api.SpawnParams, presetID string) (api.SpawnResult, error) // seam for tests; defaults to (*Node).spawn
 
-	orch          *orch.Store     // nil = orch.* and message.* disabled
-	orchCleared   map[string]bool // "<from> <to>" /clear rekeys already applied
-	orchPrev      map[string]session.Status
-	orchWorked    map[string]bool      // session id -> reported working since the last pass
-	orchLive      map[string]bool      // actor keys live at the last pass
-	orchGone      map[string]time.Time // actor key -> when it was first seen gone
-	orchGoneGrace time.Duration
-	orchSettled   chan struct{} // closed once startup discovery has settled
-	orchSettleOne *sync.Once    // closes orchSettled
-	orchSeeded    bool
-	orchHeld      map[string]time.Time // actor key -> when its delivery hold ends
+	orch            *orch.Store     // nil = orch.* and message.* disabled
+	orchCleared     map[string]bool // "<from> <to>" /clear rekeys already applied
+	orchRekeyFailed map[string]bool // "<from> <to>" rekeys whose failure was logged
+	orchPrev        map[string]session.Status
+	orchWorked      map[string]bool      // session id -> reported working since the last pass
+	orchLive        map[string]bool      // actor keys live at the last pass
+	orchGone        map[string]time.Time // actor key -> when it was first seen gone
+	orchGoneGrace   time.Duration
+	orchSettled     chan struct{} // closed once startup discovery has settled
+	orchSettleOne   *sync.Once    // closes orchSettled
+	orchSeeded      bool
+	orchRecheck     atomic.Bool          // a peer queued a message: check its recipient is live
+	orchHeld        map[string]time.Time // actor key -> when its delivery hold ends
 	// deliverFn types a delivery into a session; tests replace it.
 	deliverFn func(ctx context.Context, s session.Session, text string) error
 	// paneProbe reports a pane session's last client activity and its screen;
@@ -135,6 +139,9 @@ type Node struct {
 	orchExpiredAt time.Time
 	orchRequests  requestLocks
 	ownerSinks    atomic.Pointer[[]push.Sink] // Immediate then Delayed sinks, set by StartPush
+
+	outboxEvery time.Duration                                                           // retry period of the outbox flush
+	outboxSend  func(ctx context.Context, node, method string, p json.RawMessage) error // seam for tests; defaults to the peer pool
 
 	pendingMu sync.Mutex
 	pending   map[string]*pendingDecision // request id -> parked PermissionRequest
@@ -341,6 +348,18 @@ func (d *Node) remoteDispatch() api.DispatchFunc {
 	}
 }
 
+// peerDispatch serves channels another node opened (chanState.opener set): it
+// is remoteDispatch plus orch.*. lock.* and server.stop stay local-only.
+func (d *Node) peerDispatch() api.DispatchFunc {
+	full := d.server.DispatchFunc()
+	return func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+		if strings.HasPrefix(method, "lock.") || method == api.MethodServerStop {
+			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+		}
+		return full(ctx, method, params)
+	}
+}
+
 // uplinkDispatch answers only node.identify and ping. Ping must pass so the gateway's
 // keepalive probe is not counted a failure that tears the uplink down.
 func (d *Node) uplinkDispatch() api.DispatchFunc {
@@ -472,6 +491,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	wakelock := host.NewWakelock("")
 	caps.HostWakelock = wakelock.Supported()
 	caps.CBOR = true
+	caps.CrossNodeOrch = crossNodeOrchVersion
 
 	d := &Node{
 		reg: reg, clients: clients, id: hostname, label: hostname,
@@ -492,6 +512,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 		sessionTerms: map[string]*term{},
 		resuming:     map[string]string{},
 	}
+	d.roster = newPeerRoster(func() string { return d.id })
 	d.notifier = push.NewOSNotifier(nil, nil)
 	d.scripts = wsscript.NewRunner(d.notifyProjectsChanged)
 	d.revealFn = func(ctx context.Context, c *tmux.Client, paneID string) error {
@@ -622,6 +643,7 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 
 	if d.orch != nil {
 		go d.orchLoop(ctx)
+		go d.outboxLoop(ctx)
 	}
 
 	return d.server.ServeContext(ctx, l)

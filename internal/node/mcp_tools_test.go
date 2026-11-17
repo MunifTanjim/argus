@@ -402,6 +402,27 @@ func TestMCPTranscriptOmitsArgusMessages(t *testing.T) {
 	}
 }
 
+func TestMCPSpawnSchemaHasNode(t *testing.T) {
+	_, b := toolNode(t)
+	if got := propSchema(t, b, "spawn_session", "node"); got != `{"type":"string"}` {
+		t.Fatalf("node = %s", got)
+	}
+	for _, r := range toolSchema(t, b, "spawn_session")["required"].([]any) {
+		if r == "node" {
+			t.Fatal("node is required")
+		}
+	}
+}
+
+func TestMCPIDNoteMentionsNodes(t *testing.T) {
+	_, b := toolNode(t)
+	for _, tool := range b.Tools() {
+		if strings.Contains(tool.Description, "IDs are composite") && !strings.Contains(tool.Description, "any connected node") {
+			t.Errorf("%s: description lacks \"any connected node\"", tool.Name)
+		}
+	}
+}
+
 // oldToolName matches a tool name from before the rename, as text that names a
 // tool: in backticks, or as "the <name> tool", or after "with" or "Use".
 var oldToolName = regexp.MustCompile("`(whoami|list|show|spawn|send|reply|respond|output|transcript|kill|rename)`|\\b(whoami|list|show|spawn|send|reply|respond|output|transcript|kill|rename) tool\\b|\\b(with|Use) (whoami|list|show|spawn|send|reply|respond|output|transcript|kill|rename)\\b")

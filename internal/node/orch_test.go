@@ -169,7 +169,7 @@ func TestWithCapsStampsParent(t *testing.T) {
 
 func TestRemoteDispatchRejectsOrch(t *testing.T) {
 	d, _ := orchNode(t)
-	for _, m := range []string{api.MethodOrchSessionCurrent, api.MethodOrchMessageSend, api.MethodOrchInteractionRespond} {
+	for _, m := range []string{api.MethodOrchSessionCurrent, api.MethodOrchMessageSend, api.MethodOrchInteractionRespond, api.MethodOrchPeerDeliver} {
 		_, err := d.remoteDispatch()(context.Background(), m, nil)
 		rpcErr, ok := err.(*api.RPCError)
 		if !ok || rpcErr.Code != api.CodeMethodNotFound {
@@ -242,5 +242,26 @@ func TestOrchRepublishesChildWhenParentChanges(t *testing.T) {
 	d.orchPass(ctx)
 	if !republished() {
 		t.Fatal("child not republished after the parent came back")
+	}
+}
+
+func TestRekeyReachesNodesThatExchangedMessages(t *testing.T) {
+	d, store := orchNode(t)
+	d.SetIdentity("a", "")
+	store.SetNodeID("a")
+	hookSession(d, "%3", "c1")
+	if _, err := store.Receive(t.Context(), api.Message{
+		ID: "b:m-0000000000000001", Kind: api.MessageText, From: api.Actor{Node: "b", Key: "claude:w"},
+		To: api.Actor{Node: "a", Key: "claude:c1"}, Body: "hi", State: api.MessageDelivered,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	d.orchPass(t.Context())
+	clearSession(d, "%3", "c2")
+	d.orchPass(t.Context())
+	items, err := store.Pending(t.Context(), "b", 10)
+	if err != nil || len(items) != 1 || items[0].Method != api.MethodOrchPeerRekey {
+		t.Fatalf("b's outbox = %+v err=%v, want the rekey", items, err)
 	}
 }

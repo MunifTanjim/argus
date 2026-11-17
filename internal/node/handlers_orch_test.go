@@ -85,7 +85,7 @@ func TestAgentShowDisabledWithoutOrch(t *testing.T) {
 func TestLocalTargetForeignNode(t *testing.T) {
 	d := homeNode()
 	_, err := d.localTarget("other:argus:%3")
-	if err == nil || !strings.Contains(err.Error(), "cross-machine") {
+	if err == nil || !strings.Contains(err.Error(), "on node other, which is not connected") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -506,6 +506,18 @@ func TestMessageLookupBareLegacyID(t *testing.T) {
 	}
 	if _, ok, _ := d.message(ctx, "other:m-1a2b3c4d"); ok {
 		t.Fatal("foreign-qualified ID resolved")
+	}
+}
+
+func TestLocalTargetBeforeSettleReturnsNotReady(t *testing.T) {
+	d, _ := orchNode(t)
+	var rpcErr *api.RPCError
+	if _, err := d.localTarget("nope"); !errors.As(err, &rpcErr) || rpcErr.Code != api.CodeNotReady {
+		t.Fatalf("before settle: err = %v", err)
+	}
+	d.markOrchSettled()
+	if _, err := d.localTarget("nope"); !errors.As(err, &rpcErr) || rpcErr.Code != api.CodeUnknownSession {
+		t.Fatalf("after settle: err = %v", err)
 	}
 }
 
