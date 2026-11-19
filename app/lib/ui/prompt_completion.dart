@@ -7,7 +7,7 @@ import 'theme.dart';
 
 /// The characters that open the agent's completion menu.
 String promptTriggers(String agent) => switch (agent) {
-      'claude' || 'antigravity' => '/',
+      'claude' || 'antigravity' || 'pi' => '/',
       'codex' => r'/$',
       'opencode' => '/@',
       _ => '',

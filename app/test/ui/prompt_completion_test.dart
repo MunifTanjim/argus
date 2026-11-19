@@ -39,7 +39,7 @@ void main() {
       'antigravity': '/',
       'codex': r'/$',
       'opencode': '/@',
-      'pi': '',
+      'pi': '/',
     }.entries) {
       expect(promptTriggers(agent), want, reason: agent);
     }
