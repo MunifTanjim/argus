@@ -221,6 +221,7 @@ func TestNoServerClassification(t *testing.T) {
 		{"no server running on /tmp/tmux-501/argus", true},
 		{"error connecting to /tmp/tmux-501/argus", true},
 		{"no current session", true},
+		{"no current target", true},
 		{"server exited unexpectedly", true},
 		{"can't find session: work", false},
 		{"", false},

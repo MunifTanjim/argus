@@ -113,6 +113,9 @@ func noServer(err error) bool {
 	return strings.Contains(s, "no server running") ||
 		strings.Contains(s, "error connecting") ||
 		strings.Contains(s, "no current session") ||
+		// A server with zero sessions (the last one was just killed and the
+		// server has not exited yet) answers an untargeted command with this.
+		strings.Contains(s, "no current target") ||
 		// A command that reaches the server as it exits (e.g. right after the last
 		// session is killed) sees this; the server is gone, so treat it as empty.
 		serverExited(err)
