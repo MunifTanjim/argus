@@ -148,15 +148,16 @@ func (m model) workspaceOf(wsID string) (api.ProjectNode, api.WorkspaceNode, boo
 // sectionHeader renders a section's header, or "" when it has none: host
 // sections show headers only on a gateway, as before group-by existed.
 func (m model) sectionHeader(sec sectionInfo) string {
+	title := strings.ToUpper(sec.title)
 	switch {
 	case sec.needsYou:
-		return sec.icon.Render() + " " + lipgloss.NewStyle().Bold(true).Foreground(sec.icon.Color).Render(sec.title)
+		return sec.icon.Render() + " " + lipgloss.NewStyle().Bold(true).Foreground(sec.icon.Color).Render(title)
 	case m.byHost() && !m.grouped():
 		return ""
 	}
-	h := sec.icon.Render() + " " + StyleSecondaryBold.Render(sec.title)
+	h := sec.icon.Render() + " " + StyleSecondaryBold.Render(title)
 	if m.sectionOffline(sec) {
-		h += dimStyle.Render("  (offline)")
+		h += dimStyle.Render("  (OFFLINE)")
 	}
 	return h
 }
