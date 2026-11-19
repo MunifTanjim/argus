@@ -37,13 +37,17 @@ func commandTable() string {
 		}
 	}
 	var b strings.Builder
-	b.WriteString("| Command | Sections | Built-in keys | Default mappings |\n|---|---|---|---|\n")
+	b.WriteString("| Command | Action | Sections | Built-in keys | Default mappings |\n|---|---|---|---|---|\n")
 	for _, name := range slices.Sorted(maps.Keys(rows)) {
 		r := rows[name]
 		slices.Sort(r.sections)
 		slices.Sort(r.builtin)
 		slices.Sort(r.mapped)
-		b.WriteString("| `" + name + "` | " + strings.Join(r.sections, ", ") + " | " + strings.Join(r.builtin, " ") + " | " + strings.Join(r.mapped, " ") + " |\n")
+		act := ""
+		if a := actionFor(name); a != "" {
+			act = "`" + a + "`"
+		}
+		b.WriteString("| `" + name + "` | " + act + " | " + strings.Join(r.sections, ", ") + " | " + strings.Join(r.builtin, " ") + " | " + strings.Join(r.mapped, " ") + " |\n")
 	}
 	return b.String()
 }
