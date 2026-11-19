@@ -16,7 +16,7 @@ import (
 // promptTriggers are the characters that open the agent's completion menu.
 func promptTriggers(agent string) string {
 	switch agent {
-	case "claude", "antigravity":
+	case "claude", "antigravity", "pi":
 		return "/"
 	case "codex":
 		return "/$"

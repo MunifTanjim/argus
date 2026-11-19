@@ -55,7 +55,7 @@ func TestApplyCompletion(t *testing.T) {
 }
 
 func TestPromptTriggers(t *testing.T) {
-	for agent, want := range map[string]string{"claude": "/", "antigravity": "/", "codex": "/$", "opencode": "/@", "pi": ""} {
+	for agent, want := range map[string]string{"claude": "/", "antigravity": "/", "codex": "/$", "opencode": "/@", "pi": "/"} {
 		if got := promptTriggers(agent); got != want {
 			t.Errorf("promptTriggers(%q) = %q, want %q", agent, got, want)
 		}
@@ -184,7 +184,7 @@ func TestPromptMenuFetchesOnNewTrigger(t *testing.T) {
 	if m.dock.completeSeq != 1 {
 		t.Errorf("typing after the trigger fetched again: seq = %d", m.dock.completeSeq)
 	}
-	if m = typeKeys(menuModel("pi"), "/"); m.dock.completeSeq != 0 {
+	if m = typeKeys(menuModel("unknown"), "/"); m.dock.completeSeq != 0 {
 		t.Error("an agent without triggers fetched completions")
 	}
 }
