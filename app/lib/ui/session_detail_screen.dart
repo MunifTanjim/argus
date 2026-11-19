@@ -251,6 +251,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                 Text(statusGlyph(live.status),
                     style: TextStyle(
                         fontFamily: 'monospace',
+                        fontSize: 16,
                         color: sessionColor(live))),
                 const SizedBox(width: 8),
                 Flexible(
