@@ -4,7 +4,9 @@ package pi
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -130,5 +132,48 @@ func TestLiveSupervisedSession(t *testing.T) {
 		if s.AgentSessionID == id {
 			t.Fatalf("session still listed: %+v", s)
 		}
+	}
+}
+
+// Run with: go test ./internal/adapter/pi/ -tags pi_live -run TestLiveCompletions -v
+func TestLiveCompletions(t *testing.T) {
+	if _, err := exec.LookPath(piBin); err != nil {
+		t.Skipf("pi binary not available: %v", err)
+	}
+	agentDir := t.TempDir()
+	writeFile := func(rel, body string) {
+		path := filepath.Join(agentDir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("prompts/zz-live.md", "---\ndescription: Live template\n---\nSay hi.\n")
+	writeFile("skills/zz-skill/SKILL.md", "---\nname: zz-skill\ndescription: Live skill\n---\nDo nothing.\n")
+	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
+
+	useRealRelay(t)
+	d := newDiscoverer(registry.New(), nil)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	id, err := d.spawnSession(ctx, t.TempDir(), adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatalf("spawnSession: %v", err)
+	}
+	got, err := d.completions(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("completions: %+v", got)
+	want := map[string]string{"compact": adapter.CompactCompletion.Description, "new": newCompletion.Description, "zz-live": "Live template", "skill:zz-skill": "Live skill"}
+	for _, it := range got {
+		if desc, ok := want[it.Name]; ok && desc == it.Description {
+			delete(want, it.Name)
+		}
+	}
+	if len(want) > 0 {
+		t.Fatalf("missing or wrong: %v", want)
 	}
 }

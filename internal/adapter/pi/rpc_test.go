@@ -34,6 +34,10 @@ type fakePi struct {
 	// quietState answers get_state without the interleaved event, so nothing
 	// pushes the card between two get_state calls.
 	quietState bool
+	commands   []map[string]any // get_commands answer
+	// commandsReply is "fail" (an error answer), "silent" (no answer), or
+	// empty (the commands).
+	commandsReply string
 
 	mu      sync.Mutex
 	gotUI   []map[string]any
@@ -110,6 +114,20 @@ func (f *fakePi) run(stdin io.Reader, stdout io.WriteCloser) {
 			f.mu.Unlock()
 			enc.Encode(map[string]any{"id": rec["id"], "type": "response", "command": "new_session", "success": true,
 				"data": map[string]any{"cancelled": cancelled}})
+		case "get_commands":
+			f.mu.Lock()
+			f.calls = append(f.calls, rec)
+			cmds, reply := f.commands, f.commandsReply
+			f.mu.Unlock()
+			if reply == "silent" {
+				break
+			}
+			if reply == "fail" {
+				enc.Encode(map[string]any{"id": rec["id"], "type": "response", "command": "get_commands", "success": false, "error": "Unknown command: get_commands"})
+				break
+			}
+			enc.Encode(map[string]any{"id": rec["id"], "type": "response", "command": "get_commands", "success": true,
+				"data": map[string]any{"commands": cmds}})
 		case "fail_me":
 			enc.Encode(map[string]any{"id": rec["id"], "type": "response", "command": "fail_me", "success": false, "error": "nope"})
 		case "prompt":
