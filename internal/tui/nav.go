@@ -55,9 +55,26 @@ func (l itemLines) span(i int) rowSpan {
 	return rowSpan{}
 }
 
+// lead returns the first line of the text between item i and the item before
+// it, such as a section header. Scrolling up to i shows as much of that text as
+// fits.
+func (l itemLines) lead(i int) int {
+	top := 0
+	for _, s := range l.spans {
+		if s.index == i {
+			return top
+		}
+		top = s.bottom
+	}
+	return top
+}
+
 func (l itemLines) scroll(c *ctx, cursor, avail int) int {
 	sp := l.span(cursor)
 	start, end := sp.top, sp.bottom
+	if avail > 0 {
+		start = max(l.lead(cursor), min(start, end-avail))
+	}
 	var saved map[string]int
 	if c != nil && c.m != nil {
 		saved = c.m.listScroll
