@@ -38,7 +38,7 @@ func indexOf(t *testing.T, hay, needle string) int {
 
 // hostHeader is a group header: the node icon starts the line, where a card
 // line starts with its border.
-func hostHeader(node string) string { return "\n" + Icon.Node.Glyph + " " + node }
+func hostHeader(node string) string { return "\n" + Icon.Node.Glyph + " " + strings.ToUpper(node) }
 
 func TestListViewGroupsByHost(t *testing.T) {
 	m := modelWith(
@@ -109,7 +109,7 @@ func TestListViewNeedsYouSection(t *testing.T) {
 		nodeSession("beta:wait", "beta", "beta", session.StatusAwaitingInput),
 	)
 	out := ansi.Strip(paneView(m))
-	ny := indexOf(t, out, "Needs you")
+	ny := indexOf(t, out, "NEEDS YOU")
 	ha := indexOf(t, out, hostHeader("alpha"))
 	// "Needs you" precedes the per-host group headers.
 	if ny >= ha {
@@ -133,7 +133,7 @@ func TestOfflineGroupAndCard(t *testing.T) {
 	m := modelWith(off)
 	out := ansi.Strip(paneView(m))
 
-	if !strings.Contains(out, hostHeader("home")) || !strings.Contains(out, "(offline)") {
+	if !strings.Contains(out, hostHeader("home")) || !strings.Contains(out, "(OFFLINE)") {
 		t.Fatalf("offline node header should be flagged:\n%s", out)
 	}
 	if !strings.Contains(out, "(node offline)") {

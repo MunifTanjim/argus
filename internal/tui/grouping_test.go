@@ -154,7 +154,7 @@ func TestProjectSectionsRender(t *testing.T) {
 		gs("b:1", "beta", "b:w1", "", session.StatusIdle),
 	)
 	out := ansi.Strip(paneView(m))
-	if strings.Count(out, "\n"+Icon.Repo.Glyph+" argus") != 1 {
+	if strings.Count(out, "\n"+Icon.Repo.Glyph+" ARGUS") != 1 {
 		t.Fatalf("one merged argus header expected:\n%s", out)
 	}
 	if strings.Contains(out, hostHeader("alpha")) || strings.Contains(out, hostHeader("beta")) {
@@ -171,7 +171,7 @@ func TestProjectSectionsRender(t *testing.T) {
 func TestNonHostSectionsHaveHeadersWithoutGateway(t *testing.T) {
 	m := groupedModel(groupByProject, gs("s1", "", "a:w1", "", session.StatusIdle))
 	out := ansi.Strip(paneView(m))
-	if !strings.Contains(out, "\n"+Icon.Repo.Glyph+" argus") {
+	if !strings.Contains(out, "\n"+Icon.Repo.Glyph+" ARGUS") {
 		t.Fatalf("project header expected without a gateway:\n%s", out)
 	}
 	if strings.Contains(out, Icon.Node.Glyph) {
@@ -182,7 +182,7 @@ func TestNonHostSectionsHaveHeadersWithoutGateway(t *testing.T) {
 func TestHostSectionCardsOmitHost(t *testing.T) {
 	m := groupedModel(groupByHost, gs("a:1", "alpha", "", "", session.StatusIdle))
 	out := ansi.Strip(paneView(m))
-	if strings.Count(out, Icon.Node.Glyph+" alpha") != 1 {
+	if strings.Count(out, Icon.Node.Glyph+" ALPHA") != 1 {
 		t.Fatalf("only the host header names alpha:\n%s", out)
 	}
 }
@@ -196,7 +196,7 @@ func TestLocalSectionAfterNeedsYouKeepsHeader(t *testing.T) {
 		gs("s2", "", "", "", session.StatusIdle),
 	)
 	out := ansi.Strip(paneView(m))
-	ny := indexOf(t, out, "Needs you")
+	ny := indexOf(t, out, "NEEDS YOU")
 	if local := indexOf(t, out, hostHeader("local")); local < ny {
 		t.Fatalf("the local header should follow Needs you:\n%s", out)
 	}
@@ -207,7 +207,7 @@ func TestOfflineNonHostSection(t *testing.T) {
 	off.Offline = true
 	m := groupedModel(groupByAgent, off)
 	out := ansi.Strip(paneView(m))
-	if !strings.Contains(out, "\n"+glyphRobotSolid+" Claude  (offline)") {
+	if !strings.Contains(out, "\n"+glyphRobotSolid+" CLAUDE  (OFFLINE)") {
 		t.Fatalf("an all-offline section should be flagged:\n%s", out)
 	}
 }
@@ -272,15 +272,15 @@ func TestSectionHeaderIcons(t *testing.T) {
 		want     []string
 	}{
 		{"needs you", groupByHost, []session.Session{gs("s1", "", "", "", session.StatusAwaitingInput)},
-			[]string{statusGlyph(session.StatusAwaitingInput) + " Needs you"}},
+			[]string{statusGlyph(session.StatusAwaitingInput) + " NEEDS YOU"}},
 		{"project and other", groupByProject, []session.Session{gs("s1", "", "a:w1", "", idle), gs("s2", "", "", "", idle)},
-			[]string{Icon.Repo.Glyph + " argus", Icon.Repo.Glyph + " other"}},
+			[]string{Icon.Repo.Glyph + " ARGUS", Icon.Repo.Glyph + " OTHER"}},
 		{"main workspace and worktree", groupByWorkspace, []session.Session{gs("s1", "", "a:w1", "", idle), gs("s2", "", "a:w2", "", idle)},
-			[]string{Icon.Folder.Glyph + " argus / argus", Icon.Branch.Glyph + " argus / argus-feat"}},
+			[]string{Icon.Folder.Glyph + " ARGUS / ARGUS", Icon.Branch.Glyph + " ARGUS / ARGUS-FEAT"}},
 		{"agent and other", groupByAgent, []session.Session{gs("s1", "", "", "claude", idle), gs("s2", "", "", "", idle)},
-			[]string{glyphRobotSolid + " Claude", glyphRobotSolid + " other"}},
+			[]string{glyphRobotSolid + " CLAUDE", glyphRobotSolid + " OTHER"}},
 		{"status", groupByStatus, []session.Session{gs("s1", "", "", "", idle), gs("s2", "", "", "", session.StatusWorking)},
-			[]string{statusGlyph(session.StatusWorking) + " working", statusGlyph(idle) + " idle"}},
+			[]string{statusGlyph(session.StatusWorking) + " WORKING", statusGlyph(idle) + " IDLE"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
