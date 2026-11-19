@@ -45,8 +45,8 @@ type foreignSession struct {
 	server       session.TmuxServer
 	paneID       string
 	lastSeen     time.Time
-	shellWaits   map[string]chan beaconShellReady // intent_shell id -> its answer
-	dialogs      []string                         // titles of other extensions' dialogs open in pi
+	waits        map[string]chan []byte // request id -> the gate's reply line
+	dialogs      []string               // titles of other extensions' dialogs open in pi
 	disconnected bool
 }
 
@@ -94,8 +94,8 @@ func (d *discoverer) serveBeacon(conn net.Conn) {
 			d.foreignUIRequest(id, line)
 		case "ui_settled":
 			d.foreignUISettled(id, line)
-		case "shell_ready":
-			d.foreignShellReady(id, line)
+		case "shell_ready", "commands":
+			d.foreignReply(id, line)
 		case "heartbeat":
 			if fs := d.lookupForeign(id); fs != nil {
 				fs.mu.Lock()
@@ -436,7 +436,6 @@ func (d *discoverer) foreignUISettled(id string, line []byte) {
 var shellReadyTimeout = 2 * time.Second
 
 type beaconShellReady struct {
-	ID     string `json:"id"`
 	OK     bool   `json:"ok"`
 	Reason string `json:"reason"`
 }
@@ -446,58 +445,95 @@ type beaconShellReady struct {
 // Enter in the session's pane to submit. pi offers extensions no way to submit
 // it themselves. A session without a pane fails with noPane.
 func (d *discoverer) stageForeign(ctx context.Context, fs *foreignSession, text string, noPane error) error {
-	reqID := d.nextID()
-	ready := make(chan beaconShellReady, 1)
 	fs.mu.Lock()
-	if fs.paneID == "" {
-		fs.mu.Unlock()
+	paneID, busy := fs.paneID, len(fs.dialogs) > 0
+	fs.mu.Unlock()
+	if paneID == "" {
 		return fmt.Errorf("pi: %w", noPane)
 	}
-	if len(fs.dialogs) > 0 {
-		fs.mu.Unlock()
+	if busy {
 		return fmt.Errorf("pi: %w", api.ErrSessionBusy)
 	}
-	if fs.shellWaits == nil {
-		fs.shellWaits = map[string]chan beaconShellReady{}
+	line, err := d.beaconAsk(ctx, fs, map[string]any{"type": "intent_shell", "text": text}, shellReadyTimeout)
+	if errors.Is(err, errNoBeaconReply) {
+		return errors.New("pi: the session did not take the command; reload it (/reload) to load the current Argus gate")
 	}
-	fs.shellWaits[reqID] = ready
-	fs.mu.Unlock()
-	defer func() {
-		fs.mu.Lock()
-		delete(fs.shellWaits, reqID)
-		fs.mu.Unlock()
-	}()
-	if err := d.beaconSend(fs, map[string]any{"type": "intent_shell", "id": reqID, "text": text}); err != nil {
+	if err != nil {
 		return err
 	}
-	select {
-	case r := <-ready:
-		if !r.OK {
-			return fmt.Errorf("pi: %s", r.Reason)
-		}
-	case <-time.After(shellReadyTimeout):
-		return errors.New("pi: the session did not take the command; reload it (/reload) to load the current Argus gate")
-	case <-ctx.Done():
-		return ctx.Err()
+	var r beaconShellReady
+	if err := json.Unmarshal(line, &r); err != nil {
+		return fmt.Errorf("pi: malformed shell_ready reply: %w", err)
+	}
+	if !r.OK {
+		return fmt.Errorf("pi: %s", r.Reason)
 	}
 	return nil
 }
 
-func (d *discoverer) foreignShellReady(id string, line []byte) {
+// foreignCommands asks the gate for pi's commands. No answer gives nil, so
+// the menu still offers the built-ins.
+func (d *discoverer) foreignCommands(ctx context.Context, fs *foreignSession) []piCommand {
+	line, err := d.beaconAsk(ctx, fs, map[string]any{"type": "get_commands"}, commandsTimeout)
+	if err != nil {
+		return nil
+	}
+	var r struct {
+		Commands []piCommand `json:"commands"`
+	}
+	_ = json.Unmarshal(line, &r)
+	return r.Commands
+}
+
+var errNoBeaconReply = errors.New("pi: no reply from the gate")
+
+// beaconAsk sends msg under a fresh id and waits for the gate's reply line
+// carrying that id.
+func (d *discoverer) beaconAsk(ctx context.Context, fs *foreignSession, msg map[string]any, timeout time.Duration) ([]byte, error) {
+	reqID := d.nextID()
+	reply := make(chan []byte, 1)
+	fs.mu.Lock()
+	if fs.waits == nil {
+		fs.waits = map[string]chan []byte{}
+	}
+	fs.waits[reqID] = reply
+	fs.mu.Unlock()
+	defer func() {
+		fs.mu.Lock()
+		delete(fs.waits, reqID)
+		fs.mu.Unlock()
+	}()
+	msg["id"] = reqID
+	if err := d.beaconSend(fs, msg); err != nil {
+		return nil, err
+	}
+	select {
+	case line := <-reply:
+		return line, nil
+	case <-time.After(timeout):
+		return nil, errNoBeaconReply
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (d *discoverer) foreignReply(id string, line []byte) {
 	fs := d.lookupForeign(id)
 	if fs == nil {
 		return
 	}
-	var r beaconShellReady
+	var r struct {
+		ID string `json:"id"`
+	}
 	if json.Unmarshal(line, &r) != nil {
 		return
 	}
 	fs.mu.Lock()
-	ready := fs.shellWaits[r.ID]
+	reply := fs.waits[r.ID]
 	fs.mu.Unlock()
-	if ready != nil {
+	if reply != nil {
 		select {
-		case ready <- r:
+		case reply <- slices.Clone(line):
 		default:
 		}
 	}

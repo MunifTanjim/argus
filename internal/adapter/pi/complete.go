@@ -44,6 +44,13 @@ func (d *discoverer) completions(ctx context.Context, id string) ([]api.PromptCo
 	if p := d.get(id); p != nil {
 		return withBuiltins(true, d.ownedCommands(ctx, p)), nil
 	}
+	if fs := d.lookupForeign(id); fs != nil {
+		// A foreign session runs /new only from pi's editor, through its pane.
+		fs.mu.Lock()
+		hasPane := fs.paneID != ""
+		fs.mu.Unlock()
+		return withBuiltins(hasPane, d.foreignCommands(ctx, fs)), nil
+	}
 	return nil, fmt.Errorf("pi: unknown session %s", id)
 }
 
