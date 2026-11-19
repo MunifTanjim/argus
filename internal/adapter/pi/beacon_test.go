@@ -1101,3 +1101,55 @@ func TestBeaconStreamingDialogSettledInPiResumesWorking(t *testing.T) {
 		t.Fatalf("interaction = %+v, want none", s.Interaction)
 	}
 }
+
+func completeAsync(d *discoverer, id string) <-chan []api.PromptCompletion {
+	done := make(chan []api.PromptCompletion, 1)
+	go func() {
+		got, _ := d.completions(context.Background(), id)
+		done <- got
+	}()
+	return done
+}
+
+func TestBeaconCommandsRoundTrip(t *testing.T) {
+	d, fb := shellBeacon(t)
+	done := completeAsync(d, "for-sh")
+	req := fb.waitFor(t, "get_commands")
+	fb.send(map[string]any{"type": "commands", "id": req["id"], "commands": []map[string]any{{"name": "fix-tests", "description": "Fix"}}})
+	got := <-done
+	if names := completionNames(got); !slices.Equal(names, []string{"compact", "new", "fix-tests"}) {
+		t.Fatalf("names = %v", names)
+	}
+	if got[2].Description != "Fix" {
+		t.Fatalf("description = %q", got[2].Description)
+	}
+}
+
+func TestBeaconCommandsOldGate(t *testing.T) {
+	old := commandsTimeout
+	commandsTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { commandsTimeout = old })
+	d, _ := shellBeacon(t)
+	got, err := d.completions(context.Background(), "for-sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := completionNames(got); !slices.Equal(names, []string{"compact", "new"}) {
+		t.Fatalf("names = %v, want the built-ins only", names)
+	}
+}
+
+func TestBeaconCommandsWithoutPaneOmitNew(t *testing.T) {
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	d.paneFor = func(context.Context, int) (session.TmuxServer, string) { return "", "" }
+	fb := dialBeacon(t, d)
+	fb.send(map[string]any{"type": "hello", "sessionId": "for-o", "cwd": "/w", "idle": true, "pid": 42})
+	waitCard(t, reg, "for-o", session.StatusAwaitingInput)
+	done := completeAsync(d, "for-o")
+	req := fb.waitFor(t, "get_commands")
+	fb.send(map[string]any{"type": "commands", "id": req["id"], "commands": []map[string]any{{"name": "x"}}})
+	if names := completionNames(<-done); !slices.Equal(names, []string{"compact", "x"}) {
+		t.Fatalf("names = %v", names)
+	}
+}

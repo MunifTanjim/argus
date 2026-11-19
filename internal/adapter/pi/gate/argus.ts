@@ -115,6 +115,12 @@ export default function (pi: ExtensionAPI) {
 			if (busy && !text.startsWith("/")) setQueued([...queued, text]);
 		};
 		beaconIntents.onRename = (name) => pi.setSessionName(name);
+		beaconIntents.onCommands = (id) =>
+			beaconSend({
+				type: "commands",
+				id,
+				commands: pi.getCommands().map((c) => ({ name: c.name, description: c.description ?? "" })),
+			});
 		beaconIntents.onCompact = (instructions) => liveCtx?.compact(instructions ? { customInstructions: instructions } : undefined);
 		pi.on("session_before_compact", async () => {
 			beaconSend({ type: "event", name: "compaction", open: true });
@@ -212,8 +218,9 @@ const beaconIntents: {
 	onRename: ((name: string) => void) | null;
 	onShell: ((id: string, text: string) => void) | null;
 	onCompact: ((instructions: string) => void) | null;
+	onCommands: ((id: string) => void) | null;
 	describe: (() => unknown) | null;
-} = { onPrompt: null, onRename: null, onShell: null, onCompact: null, describe: null };
+} = { onPrompt: null, onRename: null, onShell: null, onCompact: null, onCommands: null, describe: null };
 
 let beaconConn: { write: (s: string) => void; close: () => void } | null = null;
 
@@ -438,5 +445,7 @@ function handleBeaconLine(line: string) {
 		beaconIntents.onShell?.(msg.id, msg.text);
 	} else if (msg?.type === "intent_compact") {
 		beaconIntents.onCompact?.(typeof msg.instructions === "string" ? msg.instructions : "");
+	} else if (msg?.type === "get_commands" && typeof msg.id === "string") {
+		beaconIntents.onCommands?.(msg.id);
 	}
 }
