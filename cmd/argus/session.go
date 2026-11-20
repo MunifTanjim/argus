@@ -154,7 +154,7 @@ func parentLabel(p *session.ParentRef) string {
 	case p.Gone:
 		return "gone"
 	}
-	return orDash(p.SessionID)
+	return orDash(p.ID)
 }
 
 func sessionShow(dial callerFor) *cobra.Command {

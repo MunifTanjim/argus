@@ -54,7 +54,7 @@ func ownerSend(t *testing.T, d *Node, p api.OwnerSendParams) (api.OrchSendResult
 func TestOwnerSendQueuesMessage(t *testing.T) {
 	d, fp := deliverNode(t)
 	b := apiSession(d, "b", session.StatusIdle, nil)
-	res, err := ownerSend(t, d, api.OwnerSendParams{SessionID: b.ID, Text: "hello"})
+	res, err := ownerSend(t, d, api.OwnerSendParams{SessionID: d.agentID(b), Text: "hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,6 +73,7 @@ func TestOwnerSendQueuesMessage(t *testing.T) {
 
 func TestOwnerSendRejectsUnknownSession(t *testing.T) {
 	d, _ := deliverNode(t)
+	d.markOrchSettled()
 	if _, err := ownerSend(t, d, api.OwnerSendParams{SessionID: "nope", Text: "x"}); err == nil || err.Error() != "unknown session: nope" {
 		t.Fatalf("err = %v", err)
 	}
@@ -82,7 +83,7 @@ func TestOwnerReplyNeedsOwnerRecipient(t *testing.T) {
 	d, _ := deliverNode(t)
 	a := apiSession(d, "a", session.StatusIdle, nil)
 	b := apiSession(d, "b", session.StatusIdle, nil)
-	m1, err := d.send(t.Context(), d.localCallerRef(a), b.ID, "q", "")
+	m1, err := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "q", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +96,7 @@ func TestOwnerReplyNeedsOwnerRecipient(t *testing.T) {
 func TestOwnerReplyQueuesToSender(t *testing.T) {
 	d, _ := deliverNode(t)
 	b := apiSession(d, "b", session.StatusIdle, nil)
-	m1, _ := ownerSend(t, d, api.OwnerSendParams{SessionID: b.ID, Text: "q"})
+	m1, _ := ownerSend(t, d, api.OwnerSendParams{SessionID: d.agentID(b), Text: "q"})
 	r1, err := d.reply(t.Context(), d.localCallerRef(b), m1.MessageID, "a")
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +119,7 @@ func TestAgentReplyToOwnerNotifies(t *testing.T) {
 	b := apiSession(d, "b", session.StatusIdle, nil)
 	sink := newRecordingSink()
 	d.ownerSinks.Store(&[]push.Sink{sink})
-	m1, _ := ownerSend(t, d, api.OwnerSendParams{SessionID: b.ID, Text: "q"})
+	m1, _ := ownerSend(t, d, api.OwnerSendParams{SessionID: d.agentID(b), Text: "q"})
 	r, err := d.reply(t.Context(), d.localCallerRef(b), m1.MessageID, "the answer")
 	if err != nil {
 		t.Fatal(err)
@@ -146,7 +147,7 @@ func TestMessagesListReturnsLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if _, err := ownerSend(t, d, api.OwnerSendParams{SessionID: b.ID, Text: "x"}); err != nil {
+		if _, err := ownerSend(t, d, api.OwnerSendParams{SessionID: d.agentID(b), Text: "x"}); err != nil {
 			t.Fatal(err)
 		}
 	}

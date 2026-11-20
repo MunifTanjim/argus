@@ -136,11 +136,11 @@ func TestSendRequestIDReturnsFirstMessage(t *testing.T) {
 	d, _ := deliverNode(t)
 	a := apiSession(d, "a", session.StatusWorking, nil)
 	b := apiSession(d, "b", session.StatusWorking, nil)
-	first, err := d.send(t.Context(), d.localCallerRef(a), b.ID, "q", "r1")
+	first, err := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "q", "r1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := d.send(t.Context(), d.localCallerRef(a), b.ID, "q", "r1")
+	again, err := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "q", "r1")
 	if err != nil || again != first {
 		t.Fatalf("first=%+v again=%+v err=%v", first, again, err)
 	}
@@ -153,10 +153,10 @@ func TestSendRequestIDWithDifferentTextFails(t *testing.T) {
 	d, _ := deliverNode(t)
 	a := apiSession(d, "a", session.StatusWorking, nil)
 	b := apiSession(d, "b", session.StatusWorking, nil)
-	if _, err := d.send(t.Context(), d.localCallerRef(a), b.ID, "q", "r1"); err != nil {
+	if _, err := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "q", "r1"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.send(t.Context(), d.localCallerRef(a), b.ID, "other", "r1"); err == nil || !strings.Contains(err.Error(), "different parameters") {
+	if _, err := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "other", "r1"); err == nil || !strings.Contains(err.Error(), "different parameters") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -166,11 +166,11 @@ func TestSendRequestIDIsScopedToSender(t *testing.T) {
 	a := apiSession(d, "a", session.StatusWorking, nil)
 	c := apiSession(d, "c", session.StatusWorking, nil)
 	b := apiSession(d, "b", session.StatusWorking, nil)
-	m1, err := d.send(t.Context(), d.localCallerRef(a), b.ID, "q", "r1")
+	m1, err := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "q", "r1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m2, err := d.send(t.Context(), d.localCallerRef(c), b.ID, "q", "r1")
+	m2, err := d.send(t.Context(), d.localCallerRef(c), d.agentID(b), "q", "r1")
 	if err != nil || m2 == m1 {
 		t.Fatalf("m1=%+v m2=%+v err=%v", m1, m2, err)
 	}
@@ -180,7 +180,7 @@ func TestSendRequestIDNotSharedAcrossNodes(t *testing.T) {
 	d, _ := deliverNode(t)
 	a := apiSession(d, "a", session.StatusWorking, nil)
 	b := apiSession(d, "b", session.StatusWorking, nil)
-	local, err := d.send(t.Context(), d.localCallerRef(a), b.ID, "q", "r1")
+	local, err := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "q", "r1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestSendRequestIDNotSharedAcrossNodes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := d.send(t.Context(), remote, b.ID, "q", "r1")
+	other, err := d.send(t.Context(), remote, d.agentID(b), "q", "r1")
 	if err != nil || other == local {
 		t.Fatalf("local=%+v remote=%+v err=%v", local, other, err)
 	}
@@ -196,7 +196,7 @@ func TestSendRequestIDNotSharedAcrossNodes(t *testing.T) {
 	if err != nil || !ok || m.From != remote.Actor {
 		t.Fatalf("remote message = %+v ok=%v err=%v", m, ok, err)
 	}
-	if again, err := d.send(t.Context(), remote, b.ID, "q", "r1"); err != nil || again != other {
+	if again, err := d.send(t.Context(), remote, d.agentID(b), "q", "r1"); err != nil || again != other {
 		t.Fatalf("remote retry = %+v err=%v, want %+v", again, err, other)
 	}
 }

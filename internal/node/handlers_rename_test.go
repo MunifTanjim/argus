@@ -174,7 +174,7 @@ func callAgentRename(d *Node, id, name string) (api.SessionRenameResult, error) 
 func TestAgentRenameRenamesAnySession(t *testing.T) {
 	fr := &fakeRenamer{}
 	d, s := renameTestNode(t, "opencode", fr)
-	res, err := callAgentRename(d, s.ID, "  New name  ")
+	res, err := callAgentRename(d, d.agentID(s), "  New name  ")
 	if err != nil {
 		t.Fatalf("rename: %v", err)
 	}
@@ -189,8 +189,8 @@ func TestAgentRenameRenamesAnySession(t *testing.T) {
 func TestAgentRenameRejectsBadInput(t *testing.T) {
 	d, s := renameTestNode(t, "opencode", &fakeRenamer{})
 	for _, tc := range []struct{ id, name, want string }{
-		{s.ID, "  ", "name"},
-		{s.ID, "a\nb", "control characters"},
+		{d.agentID(s), "  ", "name"},
+		{d.agentID(s), "a\nb", "control characters"},
 		{"nope", "x", "unknown session"},
 	} {
 		if _, err := callAgentRename(d, tc.id, tc.name); err == nil || !strings.Contains(err.Error(), tc.want) {

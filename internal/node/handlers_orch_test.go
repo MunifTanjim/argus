@@ -52,18 +52,6 @@ func homeNode() *Node {
 	return d
 }
 
-func TestAgentListComposites(t *testing.T) {
-	d := homeNode()
-	out, err := d.handleOrchSessionList(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	list := out.(api.OrchListResult).Sessions
-	if len(list) != 1 || list[0].ID != "home:argus:%3" {
-		t.Fatalf("got %+v", list)
-	}
-}
-
 func TestAgentWhoamiNeedsCaller(t *testing.T) {
 	d := homeNode()
 	params, _ := json.Marshal(api.CallerParams{Caller: api.CallerInfo{PID: 5}})
@@ -82,24 +70,6 @@ func TestAgentShowDisabledWithoutOrch(t *testing.T) {
 	}
 }
 
-func TestLocalTargetForeignNode(t *testing.T) {
-	d := homeNode()
-	_, err := d.localTarget("other:argus:%3")
-	if err == nil || !strings.Contains(err.Error(), "on node other, which is not connected") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestLocalTargetOwnPrefixAndBare(t *testing.T) {
-	d := homeNode()
-	for _, id := range []string{"home:argus:%3", "argus:%3"} {
-		s, err := d.localTarget(id)
-		if err != nil || s.ID != "argus:%3" {
-			t.Errorf("%s: s=%q err=%v", id, s.ID, err)
-		}
-	}
-}
-
 func TestAgentShowReturnsAllQueued(t *testing.T) {
 	d, store := orchNode(t)
 	d.SetIdentity("home", "")
@@ -112,13 +82,13 @@ func TestAgentShowReturnsAllQueued(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	params, _ := json.Marshal(api.OrchTargetParams{SessionID: "home:default:%3"})
+	params, _ := json.Marshal(api.OrchTargetParams{SessionID: "home:claude:c1"})
 	out, err := d.handleOrchSessionGet(t.Context(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
 	res := out.(api.OrchGetResult)
-	if len(res.Queued) != 2 || res.Session.ID != "home:default:%3" {
+	if len(res.Queued) != 2 || res.Session.ID != "home:claude:c1" {
 		t.Fatalf("got %+v", res)
 	}
 }
@@ -292,7 +262,7 @@ func TestAgentSpawnPresetsClaudeSessionID(t *testing.T) {
 	if _, err := uuid.Parse(*preset); err != nil {
 		t.Fatalf("preset = %q: %v", *preset, err)
 	}
-	if res.SessionID != "home:argus:%9" {
+	if res.SessionID != "home:claude:"+*preset {
 		t.Fatalf("session id = %q", res.SessionID)
 	}
 	assertChildKey(t, d, "claude:"+*preset, res.TaskID)
@@ -309,21 +279,6 @@ func TestAgentSpawnRejectsUnorchestratedAgent(t *testing.T) {
 	}
 	if spawned {
 		t.Fatal("spawner was called")
-	}
-}
-
-func TestCompositeParentSessionID(t *testing.T) {
-	d, _, _ := spawnNode(t, true)
-	d.addAgentSession("claude", "c1")
-	if err := d.orch.PutLink(t.Context(), api.Link{
-		Child:  api.Actor{Node: "home", Key: "claude:c1"},
-		Parent: api.Actor{Node: "home", Key: "claude:p1"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	child, _ := d.reg.FindByAgentSession("claude", "c1")
-	if p := d.composite(child).Parent; p == nil || p.SessionID != "home:default:%p1" {
-		t.Fatalf("parent = %+v", p)
 	}
 }
 
@@ -362,7 +317,7 @@ func assertEnded(t *testing.T, d *Node, by string) {
 
 func TestAgentKillByParent(t *testing.T) {
 	d, fd, caller := killNode(t)
-	params, _ := json.Marshal(api.OrchTargetParams{Caller: caller, SessionID: "home:default:%p2"})
+	params, _ := json.Marshal(api.OrchTargetParams{Caller: caller, SessionID: "home:claude:p2"})
 	if _, err := d.handleOrchSessionKill(t.Context(), params); err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +336,7 @@ func TestAgentKillBySelf(t *testing.T) {
 	}
 	d.procTable = func(context.Context) (procwalk.Table, error) { return table, nil }
 	caller = api.CallerInfo{PID: 220, Env: map[string]string{"CLAUDE_PID": "200", "CLAUDE_CODE_SESSION_ID": "p2"}}
-	params, _ := json.Marshal(api.OrchTargetParams{Caller: caller, SessionID: "home:default:%p2"})
+	params, _ := json.Marshal(api.OrchTargetParams{Caller: caller, SessionID: "home:claude:p2"})
 	if _, err := d.handleOrchSessionKill(t.Context(), params); err != nil {
 		t.Fatal(err)
 	}
@@ -394,9 +349,9 @@ func TestAgentKillBySelf(t *testing.T) {
 func TestAgentKillByOtherFails(t *testing.T) {
 	d, fd, caller := killNode(t)
 	d.addAgentSession("claude", "p3")
-	params, _ := json.Marshal(api.OrchTargetParams{Caller: caller, SessionID: "home:default:%p3"})
+	params, _ := json.Marshal(api.OrchTargetParams{Caller: caller, SessionID: "home:claude:p3"})
 	_, err := d.handleOrchSessionKill(t.Context(), params)
-	if err == nil || !strings.Contains(err.Error(), "only the parent of home:default:%p3") {
+	if err == nil || !strings.Contains(err.Error(), "only the parent of home:claude:p3") {
 		t.Fatalf("err = %v", err)
 	}
 	if fd.called {
@@ -484,7 +439,7 @@ func TestOwnerKillEndsDeliveredInteraction(t *testing.T) {
 			closed = append(closed, m)
 		}
 	}
-	want := "claude (home:default:%p2) was killed by owner; its interaction m-0000000a ended."
+	want := "claude (home:claude:p2) was killed by owner; its interaction m-0000000a ended."
 	if len(closed) != 1 || closed[0].Body != want || closed[0].State != api.MessageQueued {
 		t.Fatalf("closed notices = %+v", closed)
 	}
@@ -506,18 +461,6 @@ func TestMessageLookupBareLegacyID(t *testing.T) {
 	}
 	if _, ok, _ := d.message(ctx, "other:m-1a2b3c4d"); ok {
 		t.Fatal("foreign-qualified ID resolved")
-	}
-}
-
-func TestLocalTargetBeforeSettleReturnsNotReady(t *testing.T) {
-	d, _ := orchNode(t)
-	var rpcErr *api.RPCError
-	if _, err := d.localTarget("nope"); !errors.As(err, &rpcErr) || rpcErr.Code != api.CodeNotReady {
-		t.Fatalf("before settle: err = %v", err)
-	}
-	d.markOrchSettled()
-	if _, err := d.localTarget("nope"); !errors.As(err, &rpcErr) || rpcErr.Code != api.CodeUnknownSession {
-		t.Fatalf("after settle: err = %v", err)
 	}
 }
 
@@ -563,5 +506,100 @@ func TestReplyAndStateChangeAreAtomic(t *testing.T) {
 	}
 	if replies := messagesOf(t, d, api.MessageReply); len(replies) != 0 {
 		t.Fatalf("a reply was stored without the state change: %+v", replies)
+	}
+}
+
+func agentNode(t *testing.T) *Node {
+	t.Helper()
+	d, _ := orchNode(t)
+	d.SetIdentity("home", "")
+	d.markOrchSettled()
+	return d
+}
+
+func isCode(err error, code int) bool {
+	var rpcErr *api.RPCError
+	return errors.As(err, &rpcErr) && rpcErr.Code == code
+}
+
+func mustList(t *testing.T, d *Node) []session.Session {
+	t.Helper()
+	out, err := d.handleOrchSessionList(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out.(api.OrchListResult).Sessions
+}
+
+func TestAgentListUsesAgentIDs(t *testing.T) {
+	d := agentNode(t)
+	hookSession(d, "%3", "")
+	d.addAgentSession("claude", "c1")
+	list := mustList(t, d)
+	if len(list) != 1 || list[0].ID != "home:claude:c1" {
+		t.Fatalf("got %+v", list)
+	}
+}
+
+func TestAgentTargetRejectsArgusIDs(t *testing.T) {
+	d := agentNode(t)
+	d.addAgentSession("claude", "c1")
+	for _, id := range []string{"home:default:%c1", "default:%c1", "claude:c1", "home:claude:c2"} {
+		if _, err := d.agentTarget(id); !isCode(err, api.CodeUnknownSession) {
+			t.Errorf("agentTarget(%q) err = %v, want unknown session", id, err)
+		}
+	}
+	if s, err := d.agentTarget("home:claude:c1"); err != nil || s.AgentSessionID != "c1" {
+		t.Fatalf("got %+v, %v", s, err)
+	}
+}
+
+func TestAgentTargetForeignNode(t *testing.T) {
+	d := agentNode(t)
+	_, err := d.agentTarget("other:claude:c1")
+	if err == nil || !strings.Contains(err.Error(), "on node other, which is not connected") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestAgentTargetBeforeSettleReturnsNotReady(t *testing.T) {
+	d, _ := orchNode(t)
+	d.SetIdentity("home", "")
+	if _, err := d.agentTarget("home:claude:nope"); !isCode(err, api.CodeNotReady) {
+		t.Fatalf("before settle: err = %v", err)
+	}
+	d.markOrchSettled()
+	if _, err := d.agentTarget("home:claude:nope"); !isCode(err, api.CodeUnknownSession) {
+		t.Fatalf("after settle: err = %v", err)
+	}
+}
+
+func TestParentRefIsAgentID(t *testing.T) {
+	d := agentNode(t)
+	d.addAgentSession("claude", "p1")
+	d.addAgentSession("claude", "c1")
+	d.addAgentSession("claude", "c2")
+	for _, l := range []api.Link{
+		{Child: api.Actor{Node: "home", Key: "claude:c1"}, Parent: api.Actor{Node: "home", Key: "claude:p1"}},
+		{Child: api.Actor{Node: "home", Key: "claude:c2"}, Parent: api.Actor{Node: "far", Key: "claude:p9"}},
+	} {
+		if err := d.orch.PutLink(t.Context(), l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	parentOf := func(child string) *session.ParentRef {
+		s, _ := d.reg.FindByAgentSession("claude", child)
+		return d.composite(s).Parent
+	}
+	if p := parentOf("c1"); p == nil || *p != (session.ParentRef{ID: "home:claude:p1"}) {
+		t.Fatalf("local parent = %+v", p)
+	}
+	if p := parentOf("c2"); p == nil || *p != (session.ParentRef{ID: "far:claude:p9"}) {
+		t.Fatalf("remote parent = %+v", p)
+	}
+	d.reg.ReconcileSessions("claude", nil)
+	d.addAgentSession("claude", "c1")
+	if p := parentOf("c1"); p == nil || *p != (session.ParentRef{ID: "home:claude:p1", Gone: true}) {
+		t.Fatalf("gone parent = %+v", p)
 	}
 }

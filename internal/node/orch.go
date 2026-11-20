@@ -152,11 +152,11 @@ func (d *Node) killTree(ctx context.Context, target session.Session, by string) 
 	var errs []error
 	kill := func(s session.Session, by string) {
 		if err := d.killSession(ctx, s); err != nil {
-			errs = append(errs, fmt.Errorf("kill %s: %w", d.compositeID(s), err))
+			errs = append(errs, fmt.Errorf("kill %s: %w", d.agentID(s), err))
 			return
 		}
 		d.orchEnded(ctx, s, by)
-		killed = append(killed, d.compositeID(s))
+		killed = append(killed, d.agentID(s))
 	}
 	for _, s := range below {
 		kill(s, "ancestor")
@@ -165,12 +165,7 @@ func (d *Node) killTree(ctx context.Context, target session.Session, by string) 
 	return killed, notKilled, errors.Join(errs...)
 }
 
-// remoteChildID names a child on another node by its composite session ID, or
-// by its node and actor key when the mirror predates session IDs.
 func remoteChildID(l api.Link) string {
-	if l.ChildSessionID != "" {
-		return l.ChildSessionID
-	}
 	return actorID(l.Child)
 }
 
@@ -178,15 +173,12 @@ func remoteChildID(l api.Link) string {
 // of a session this node is killing, and records the mirror as ended. The
 // child's node also pushes link_ended; both set the same ended_by.
 func (d *Node) killRemoteChild(ctx context.Context, l api.Link) (api.OrchKillResult, error) {
-	if l.ChildSessionID == "" {
-		return api.OrchKillResult{}, errors.New("the link mirror has no session id for the child")
-	}
 	caller := callerRef{Actor: l.Parent}
 	if p, ok := d.sessionForKey(l.Parent.Key); ok {
 		caller = d.localCallerRef(p)
 	}
 	params := api.OrchKillParams{
-		OrchTargetParams: api.OrchTargetParams{Caller: caller.remote(), SessionID: l.ChildSessionID},
+		OrchTargetParams: api.OrchTargetParams{Caller: caller.remote(), SessionID: actorID(l.Child)},
 		Ancestor:         true,
 		ChildKey:         l.Child.Key,
 	}
@@ -280,7 +272,7 @@ func (d *Node) orchEnded(ctx context.Context, s session.Session, by string) {
 	}
 	for _, n := range open {
 		d.withdrawInteraction(ctx, n, fmt.Sprintf("%s (%s) was killed by %s; its interaction %s ended.",
-			sessionLabel(s), d.compositeID(s), by, n.ID))
+			sessionLabel(s), d.agentID(s), by, n.ID))
 	}
 	d.orchChanged()
 }
@@ -625,7 +617,7 @@ func (d *Node) senderLabel(p api.Actor) (label, sessionID string) {
 	if !live {
 		return p.Key, ""
 	}
-	return sessionLabel(s), d.compositeID(s)
+	return sessionLabel(s), d.agentID(s)
 }
 
 // nextBatch picks the messages for one prompt: a message from the owner of

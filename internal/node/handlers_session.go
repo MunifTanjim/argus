@@ -66,18 +66,15 @@ func (d *Node) parentRef(s session.Session) *session.ParentRef {
 	if !ok {
 		return nil
 	}
-	ref := &session.ParentRef{Node: link.Parent.Node, Key: link.Parent.Key}
+	ref := &session.ParentRef{ID: actorID(link.Parent)}
 	if link.Parent.Node != d.id {
-		// The parent's node is not asked: the link's session ID stands, and it
-		// is gone once the link ended or the parent's node said the parent ended.
-		ref.SessionID, ref.Gone = link.ParentSessionID, link.EndedBy != "" || link.ParentEnded
+		// The parent's node is not asked: it is gone once the link ended or the
+		// parent's node said the parent ended.
+		ref.Gone = link.EndedBy != "" || link.ParentEnded
 		return ref
 	}
-	if p, live := d.sessionForKey(link.Parent.Key); live {
-		ref.SessionID = p.ID
-	} else {
-		ref.Gone = true
-	}
+	_, live := d.sessionForKey(link.Parent.Key)
+	ref.Gone = !live
 	return ref
 }
 
