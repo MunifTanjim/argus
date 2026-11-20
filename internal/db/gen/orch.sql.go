@@ -136,7 +136,10 @@ UPDATE orch_message
 SET state = 'failed', updated_at = ?1
 WHERE to_node = ?2 AND to_key = ?3
     AND state = 'queued' AND from_key != 'argus'
-RETURNING id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to, child_node, child_key, interaction, state, answered_by_node, answered_by_key, request_id, request_hash, created_at, updated_at
+RETURNING
+    id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to,
+    child_node, child_key, interaction, state, answered_by_node,
+    answered_by_key, request_id, request_hash, created_at, updated_at
 `
 
 type FailQueuedOrchMessagesParams struct {
@@ -189,7 +192,10 @@ func (q *Queries) FailQueuedOrchMessages(ctx context.Context, arg FailQueuedOrch
 }
 
 const getOrchLink = `-- name: GetOrchLink :one
-SELECT child_node, child_key, parent_node, parent_key, task_id, ended_by, request_id, request_hash, created_at, parent_ended FROM orch_link WHERE child_node = ? AND child_key = ?
+SELECT
+    child_node, child_key, parent_node, parent_key, task_id, ended_by,
+    request_id, request_hash, created_at, parent_ended
+FROM orch_link WHERE child_node = ? AND child_key = ?
 `
 
 type GetOrchLinkParams struct {
@@ -216,7 +222,10 @@ func (q *Queries) GetOrchLink(ctx context.Context, arg GetOrchLinkParams) (OrchL
 }
 
 const getOrchLinkByRequest = `-- name: GetOrchLinkByRequest :one
-SELECT child_node, child_key, parent_node, parent_key, task_id, ended_by, request_id, request_hash, created_at, parent_ended FROM orch_link WHERE parent_node = ? AND parent_key = ? AND request_id = ?
+SELECT
+    child_node, child_key, parent_node, parent_key, task_id, ended_by,
+    request_id, request_hash, created_at, parent_ended
+FROM orch_link WHERE parent_node = ? AND parent_key = ? AND request_id = ?
 `
 
 type GetOrchLinkByRequestParams struct {
@@ -244,7 +253,11 @@ func (q *Queries) GetOrchLinkByRequest(ctx context.Context, arg GetOrchLinkByReq
 }
 
 const getOrchMessage = `-- name: GetOrchMessage :one
-SELECT id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to, child_node, child_key, interaction, state, answered_by_node, answered_by_key, request_id, request_hash, created_at, updated_at FROM orch_message WHERE id = ?
+SELECT
+    id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to,
+    child_node, child_key, interaction, state, answered_by_node,
+    answered_by_key, request_id, request_hash, created_at, updated_at
+FROM orch_message WHERE id = ?
 `
 
 func (q *Queries) GetOrchMessage(ctx context.Context, id string) (OrchMessage, error) {
@@ -275,7 +288,11 @@ func (q *Queries) GetOrchMessage(ctx context.Context, id string) (OrchMessage, e
 }
 
 const getOrchMessageByRequest = `-- name: GetOrchMessageByRequest :one
-SELECT id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to, child_node, child_key, interaction, state, answered_by_node, answered_by_key, request_id, request_hash, created_at, updated_at FROM orch_message WHERE from_node = ? AND from_key = ? AND request_id = ?
+SELECT
+    id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to,
+    child_node, child_key, interaction, state, answered_by_node,
+    answered_by_key, request_id, request_hash, created_at, updated_at
+FROM orch_message WHERE from_node = ? AND from_key = ? AND request_id = ?
 `
 
 type GetOrchMessageByRequestParams struct {
@@ -389,7 +406,10 @@ func (q *Queries) InsertOrchOutbox(ctx context.Context, arg InsertOrchOutboxPara
 }
 
 const listOrchLinks = `-- name: ListOrchLinks :many
-SELECT child_node, child_key, parent_node, parent_key, task_id, ended_by, request_id, request_hash, created_at, parent_ended FROM orch_link ORDER BY created_at, child_node, child_key
+SELECT
+    child_node, child_key, parent_node, parent_key, task_id, ended_by,
+    request_id, request_hash, created_at, parent_ended
+FROM orch_link ORDER BY created_at, child_node, child_key
 `
 
 func (q *Queries) ListOrchLinks(ctx context.Context) ([]OrchLink, error) {
@@ -427,7 +447,11 @@ func (q *Queries) ListOrchLinks(ctx context.Context) ([]OrchLink, error) {
 }
 
 const listOrchMessages = `-- name: ListOrchMessages :many
-SELECT id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to, child_node, child_key, interaction, state, answered_by_node, answered_by_key, request_id, request_hash, created_at, updated_at FROM orch_message ORDER BY created_at DESC, id DESC LIMIT ?
+SELECT
+    id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to,
+    child_node, child_key, interaction, state, answered_by_node,
+    answered_by_key, request_id, request_hash, created_at, updated_at
+FROM orch_message ORDER BY created_at DESC, id DESC LIMIT ?
 `
 
 func (q *Queries) ListOrchMessages(ctx context.Context, limit int64) ([]OrchMessage, error) {
@@ -474,7 +498,11 @@ func (q *Queries) ListOrchMessages(ctx context.Context, limit int64) ([]OrchMess
 }
 
 const openOrchInteractions = `-- name: OpenOrchInteractions :many
-SELECT id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to, child_node, child_key, interaction, state, answered_by_node, answered_by_key, request_id, request_hash, created_at, updated_at FROM orch_message
+SELECT
+    id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to,
+    child_node, child_key, interaction, state, answered_by_node,
+    answered_by_key, request_id, request_hash, created_at, updated_at
+FROM orch_message
 WHERE child_node = ? AND child_key = ? AND kind = 'interaction' AND state IN ('queued', 'delivered')
 ORDER BY created_at, id
 `
@@ -555,7 +583,9 @@ func (q *Queries) OrchOutboxNodes(ctx context.Context) ([]string, error) {
 }
 
 const pendingOrchOutbox = `-- name: PendingOrchOutbox :many
-SELECT seq, node, method, params, created_at, attempts, parked, last_attempt_at FROM orch_peer_outbox WHERE node = ? AND parked = 0 ORDER BY seq LIMIT ?
+SELECT
+    seq, node, method, params, created_at, attempts, parked, last_attempt_at
+FROM orch_peer_outbox WHERE node = ? AND parked = 0 ORDER BY seq LIMIT ?
 `
 
 type PendingOrchOutboxParams struct {
@@ -640,7 +670,11 @@ func (q *Queries) PutOrchLink(ctx context.Context, arg PutOrchLinkParams) error 
 }
 
 const queuedOrchMessages = `-- name: QueuedOrchMessages :many
-SELECT id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to, child_node, child_key, interaction, state, answered_by_node, answered_by_key, request_id, request_hash, created_at, updated_at FROM orch_message
+SELECT
+    id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to,
+    child_node, child_key, interaction, state, answered_by_node,
+    answered_by_key, request_id, request_hash, created_at, updated_at
+FROM orch_message
 WHERE to_node = ? AND to_key = ? AND state = 'queued'
 ORDER BY rowid
 `
@@ -886,7 +920,11 @@ func (q *Queries) TransitionOrchMessageState(ctx context.Context, arg Transition
 }
 
 const unrepliedOrchTask = `-- name: UnrepliedOrchTask :one
-SELECT id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to, child_node, child_key, interaction, state, answered_by_node, answered_by_key, request_id, request_hash, created_at, updated_at FROM orch_message
+SELECT
+    id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to,
+    child_node, child_key, interaction, state, answered_by_node,
+    answered_by_key, request_id, request_hash, created_at, updated_at
+FROM orch_message
 WHERE to_node = ? AND to_key = ? AND kind = 'task' AND state = 'delivered'
 ORDER BY created_at DESC, id DESC
 LIMIT 1
