@@ -177,3 +177,32 @@ func TestLiveCompletions(t *testing.T) {
 		t.Fatalf("missing or wrong: %v", want)
 	}
 }
+
+// Run with: go test ./internal/adapter/pi/ -tags pi_live -run TestLiveUsage -v
+func TestLiveUsage(t *testing.T) {
+	if _, err := exec.LookPath(piBin); err != nil {
+		t.Skipf("pi binary not available: %v", err)
+	}
+	useRealRelay(t)
+	d := newDiscoverer(registry.New(), nil)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	id, err := d.spawnSession(ctx, t.TempDir(), adapter.SpawnOptions{})
+	if err != nil {
+		t.Fatalf("spawnSession: %v", err)
+	}
+	p := d.get(id)
+	if p == nil {
+		t.Fatal("no session")
+	}
+	if _, err := d.loadState(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	u := p.usage
+	p.mu.Unlock()
+	if u == nil || !u.hasCost {
+		t.Fatalf("usage = %+v, want pi's report with a cost", u)
+	}
+	t.Logf("usage: %+v", *u)
+}
