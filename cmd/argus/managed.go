@@ -123,7 +123,7 @@ func (s spawnSpec) env(environ []string) []string {
 // configArgs gives the managed server the TUI's config file choice. Without
 // either flag, the child resolves $ARGUS_CONFIG or the default as the TUI did.
 func configArgs(cmd *cobra.Command) []string {
-	if noConfig, _ := cmd.Flags().GetBool("no-config"); noConfig {
+	if noConfig(cmd) {
 		return []string{"--no-config"}
 	}
 	if f := cmd.Flags().Lookup("config"); f != nil && f.Changed {

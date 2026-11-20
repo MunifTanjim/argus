@@ -111,12 +111,13 @@ type model struct {
 	popups     popupStack // the open popups; the last one takes the keys
 	hovered    string     // the key of the item the hover shows; "" when closed
 
-	keys      *keymap    // resolved keymaps; nil in models built without withKeymaps
-	kittyKeys bool       // the terminal reported the Kitty keyboard protocol
-	mouse     bool       // the mouse is captured on every screen
-	hits      *hitMap    // what the last frame drew that takes the mouse
-	drag      dragTarget // the divider that the mouse drags
-	sel       selectDrag // the press a text drag starts from
+	keys      *keymap     // resolved keymaps; nil in models built without withKeymaps
+	lua       *luaRuntime // nil when there is no init.lua
+	kittyKeys bool        // the terminal reported the Kitty keyboard protocol
+	mouse     bool        // the mouse is captured on every screen
+	hits      *hitMap     // what the last frame drew that takes the mouse
+	drag      dragTarget  // the divider that the mouse drags
+	sel       selectDrag  // the press a text drag starts from
 
 	verboseTranscript bool // transcript runs of thinking/tool calls start expanded
 

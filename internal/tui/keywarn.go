@@ -11,9 +11,12 @@ import (
 
 type kittyCheckMsg struct{}
 
-func (m model) withKeymaps(cfg config.TUIConfig) model {
+func (m model) withKeymaps(cfg config.TUIConfig, luaPath string) model {
 	km, errs := buildKeymap(cfg.Keymaps, cfg.KeyTimeout, cfg.LeaderKey)
+	rt, luaErrs := loadLua(luaPath)
+	errs = append(errs, luaErrs...)
 	m.keys = km
+	m = m.withLua(rt)
 	if len(errs) > 0 {
 		m.flash = errs[0]
 		if len(errs) > 1 {

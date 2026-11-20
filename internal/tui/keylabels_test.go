@@ -299,24 +299,140 @@ func TestDescNamesTheNextKeyOfASequence(t *testing.T) {
 	}
 }
 
-func TestHelpListsYourMappings(t *testing.T) {
+func TestLuaCustomActionHidesReplacedKey(t *testing.T) {
+	m := withLua(t, projectsTestModel(), `argus.action{ name = "mark", title = "Mark", run = function() end }
+argus.bind("k", "mark")`)
+	if got := m.helpKeys("project-tree", projectsKeys.Up); got != "↑/↓ j" {
+		t.Errorf("helpKeys = %q, want %q", got, "↑/↓ j")
+	}
+}
+
+func TestLuaFunctionKeepsReplacedKey(t *testing.T) {
+	m := withLua(t, projectsTestModel(), `argus.bind("k", function() return true end)`)
+	if got := m.helpKeys("project-tree", projectsKeys.Up); got != "↑ k/↓ j" {
+		t.Errorf("helpKeys = %q, want %q", got, "↑ k/↓ j")
+	}
+}
+
+func TestLuaScreenFunctionShadowsGlobalAction(t *testing.T) {
+	m := withLua(t, projectsTestModel(), `argus.action{ name = "mark", title = "Mark", run = function() end }
+argus.bind("k", "mark")
+argus.bind("project-tree:k", function() return false end)`)
+	if got := m.helpKeys("project-tree", projectsKeys.Up); got != "↑ k/↓ j" {
+		t.Errorf("helpKeys = %q, want %q", got, "↑ k/↓ j")
+	}
+}
+
+func TestLuaBuiltinActionKeyJoinsCommandRow(t *testing.T) {
+	m := withLua(t, projectsTestModel(), `argus.bind("ctrl+l", "client.pane.focus.right")`)
+	if got := m.helpKeys("workspace", paneKeys.Right); !strings.HasPrefix(got, "^l") {
+		t.Errorf("helpKeys = %q, want ^l first", got)
+	}
+	if got := m.keyTextOn("workspace", paneKeys.Right); got != "^l" {
+		t.Errorf("keyTextOn = %q, want ^l", got)
+	}
+}
+
+func TestLuaSectionActionKeyJoinsOnlyItsSection(t *testing.T) {
+	m := withLua(t, projectsTestModel(), `argus.bind("workspace:ctrl+l", "client.pane.focus.right")`)
+	if got := m.helpKeys("workspace", paneKeys.Right); !strings.HasPrefix(got, "^l") {
+		t.Errorf("workspace: helpKeys = %q, want ^l first", got)
+	}
+	for s := range screenBindings {
+		if s != "workspace" && slices.Contains(m.keymap().screenKeys(s).keys(paneKeys.Right), "ctrl+l") {
+			t.Errorf("%s lists ^l", s)
+		}
+	}
+}
+
+func TestLuaBuiltinActionHidesKeyOnlyWhereAvailable(t *testing.T) {
+	m := withLua(t, projectsTestModel(), `argus.bind("k", "client.pane.focus.left")`)
+	var hidden, kept int
+	for s := range screenBindings {
+		sk := m.keymap().screenKeys(s)
+		for _, b := range screenBindings[s] {
+			if !slices.Contains(sk.defaults[b.defKey].ids, "k") {
+				continue
+			}
+			has := slices.Contains(sk.keys(b), "k")
+			switch avail := screenHas(s, paneKeys.Left.name); {
+			case avail && has:
+				t.Errorf("%s: %s still lists k", s, b.name)
+			case !avail && !has:
+				t.Errorf("%s: %s lost k, but the screen has no %s", s, b.name, paneKeys.Left.name)
+			case avail:
+				hidden++
+			default:
+				kept++
+			}
+		}
+	}
+	if hidden == 0 || kept == 0 {
+		t.Fatalf("hidden = %d, kept = %d: the test needs both kinds of screen", hidden, kept)
+	}
+}
+
+// userHelpGroups is the help groups after the built-in ones, as "title: key label" lines.
+func userHelpGroups(m model) (titles []string, rows map[string][]string) {
+	rows = map[string][]string{}
+	builtin := len(projectsTestModel().helpGroups())
+	for _, g := range m.helpGroups()[builtin:] {
+		titles = append(titles, g.title)
+		for _, r := range g.rows {
+			rows[g.title] = append(rows[g.title], r.key+" "+r.label())
+		}
+	}
+	return titles, rows
+}
+
+func TestHelpGroupsYourMappingsBySection(t *testing.T) {
 	m := descKeymap(projectsTestModel(), map[string]map[string]config.Mapping{
 		"global":     {"<C-g>": {Action: ":open palette<CR>", Desc: "go to"}},
 		"transcript": {"<C-n>": {Action: "j", Desc: "down"}},
 	})
-	var rows []helpRow
-	for _, g := range m.helpGroups() {
-		if g.title == "Your mappings" {
-			rows = g.rows
+	titles, rows := userHelpGroups(m)
+	if want := []string{"Your mappings", "transcript"}; !slices.Equal(titles, want) {
+		t.Fatalf("titles = %q, want %q", titles, want)
+	}
+	if got, want := rows["Your mappings"], []string{"^g go to · open palette"}; !slices.Equal(got, want) {
+		t.Errorf("Your mappings = %q, want %q", got, want)
+	}
+	if got, want := rows["transcript"], []string{"^n down · j"}; !slices.Equal(got, want) {
+		t.Errorf("transcript = %q, want %q", got, want)
+	}
+}
+
+func TestHelpGroupsLuaKeysBySection(t *testing.T) {
+	if titles, _ := userHelpGroups(projectsTestModel()); len(titles) != 0 {
+		t.Errorf("no mappings, so no groups: %q", titles)
+	}
+	m := descKeymap(projectsTestModel(), map[string]map[string]config.Mapping{
+		"global":     {"<C-g>": {Action: ":open palette<CR>", Desc: "go to"}},
+		"transcript": {"<C-n>": {Action: "j", Desc: "down"}},
+	})
+	m = withLua(t, m, `
+argus.action{ name = "mark", title = "Mark", run = function() end }
+argus.bind("ctrl+h", function() return true end)
+argus.bind("ctrl+m", "mark")
+argus.bind("workspace:ctrl+o", "mark")
+argus.bind("transcript:ctrl+e", function() return true end)
+argus.bind("transcript:ctrl+n", function() return true end)
+argus.bind("workspace:ctrl+l", "client.pane.focus.right")
+argus.bind("workspace:ctrl+h", "client.pane.focus.left")
+argus.bind("ctrl+h", "client.pane.focus_next")
+`)
+	titles, rows := userHelpGroups(m)
+	if want := []string{"Your mappings", "transcript", "workspace"}; !slices.Equal(titles, want) {
+		t.Fatalf("titles = %q, want %q", titles, want)
+	}
+	for title, want := range map[string][]string{
+		"Your mappings": {"^g go to · open palette", "^m Mark · mark"},
+		"transcript":    {"^n down · j", "^e <lua>", "^n <lua>"},
+		"workspace":     {"^o Mark · mark"},
+	} {
+		if got := rows[title]; !slices.Equal(got, want) {
+			t.Errorf("%s = %q, want %q", title, got, want)
 		}
-	}
-	got := make([]string, len(rows))
-	for i, r := range rows {
-		got[i] = r.key + " " + r.label()
-	}
-	want := []string{"^g go to · open palette", "^n down (transcript) · j"}
-	if !slices.Equal(got, want) {
-		t.Errorf("Your mappings rows = %q, want %q", got, want)
 	}
 }
 
@@ -440,5 +556,33 @@ func TestRemovedCommandNamesItsReplacement(t *testing.T) {
 	}
 	if strings.Join(errs, "\n") != strings.Join(want, "\n") {
 		t.Errorf("errors:\n%s\nwant:\n%s", strings.Join(errs, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestHelpGroupsFunctionKeepsMappingOfItsSection(t *testing.T) {
+	m := descKeymap(projectsTestModel(), map[string]map[string]config.Mapping{
+		"global": {"<C-e>": {Action: ":open palette<CR>", Desc: "go to"}, "<C-n>": {Action: ":open palette<CR>", Desc: "find"}},
+	})
+	m = withLua(t, m, `
+argus.action{ name = "mark", title = "Mark", run = function() end }
+argus.bind("ctrl+e", function() return false end)
+argus.bind("ctrl+n", "mark")`)
+	_, rows := userHelpGroups(m)
+	if got, want := rows["Your mappings"], []string{"^e go to · open palette", "^e <lua>", "^n Mark · mark"}; !slices.Equal(got, want) {
+		t.Errorf("Your mappings = %q, want %q", got, want)
+	}
+}
+
+func TestHelpGroupsGlobalLuaActionHidesSectionMapping(t *testing.T) {
+	m := descKeymap(projectsTestModel(), map[string]map[string]config.Mapping{
+		"transcript": {"<C-n>": {Action: "j", Desc: "down"}, "<C-e>": {Action: "k", Desc: "up"}},
+	})
+	m = withLua(t, m, `
+argus.action{ name = "mark", title = "Mark", run = function() end }
+argus.bind("ctrl+n", "mark")
+argus.bind("ctrl+e", function() return false end)`)
+	_, rows := userHelpGroups(m)
+	if got, want := rows["transcript"], []string{"^e up · k"}; !slices.Equal(got, want) {
+		t.Errorf("transcript = %q, want %q", got, want)
 	}
 }

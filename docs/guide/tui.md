@@ -219,12 +219,17 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 - A removed key (`<Nop>`) takes no `desc`.
 - In a text input, only single keys work.
 - Yes/no prompts and the live screen do not use keymaps.
+- While a popup or the help is open, mappings do not work.
 - Some keys need a terminal with the
   [Kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/),
   for example a key with two modifiers. If the terminal does not support it,
   the TUI shows a warning at startup.
 - A bad mapping is skipped, and the other mappings still load. At startup, the
   footer shows the first error.
+
+### Lua
+
+To run Lua code on a key, see [Lua](/getting-started/configuration#lua).
 
 ### Commands
 
@@ -307,8 +312,8 @@ the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 | `settings unpin` |  | settings | `P` |  |
 | `sidebar narrower` |  | changes, file-tree, node, project, project-tree, sidebar-sessions, workspace | `<C-w><lt>` |  |
 | `sidebar wider` |  | changes, file-tree, node, project, project-tree, sidebar-sessions, workspace | `<C-w>>` |  |
-| `tab next` |  | changes, file-tree, history, home, logs, node, project-tree, session-dock, settings, sidebar-sessions, terminals, workspace | `<Right>` `gt` |  |
-| `tab prev` |  | changes, file-tree, history, home, logs, node, project-tree, session-dock, settings, sidebar-sessions, terminals, workspace | `<Left>` `gT` |  |
+| `tab next` | `client.pane.tab.next` | changes, file-tree, history, home, logs, node, project-tree, session-dock, settings, sidebar-sessions, terminals, workspace | `<Right>` `gt` |  |
+| `tab prev` | `client.pane.tab.previous` | changes, file-tree, history, home, logs, node, project-tree, session-dock, settings, sidebar-sessions, terminals, workspace | `<Left>` `gT` |  |
 | `terminal kill` |  | terminals |  | `dd` |
 | `terminal rename` |  | terminals |  | `r` |
 | `terminal spawn` |  | terminals |  | `a` |

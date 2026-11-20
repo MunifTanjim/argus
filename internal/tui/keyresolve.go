@@ -84,8 +84,13 @@ func (m *model) clearKeys() {
 func (m model) runSequence(matched []tea.KeyPressMsg, toFeed []tea.KeyPressMsg, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{cmd}
 	run := func(k tea.KeyPressMsg) {
-		mm, c := m.runKey(k)
-		m = mm.(model).repairFocus()
+		mm, c, ok := m.runLua(k)
+		if !ok {
+			res, kc := mm.runKey(k)
+			mm = res.(model)
+			c = tea.Batch(c, kc)
+		}
+		m = mm.repairFocus()
 		cmds = append(cmds, c)
 	}
 	for _, k := range matched {
@@ -127,13 +132,12 @@ func (km *keymap) lookup(screen string, buf []tea.KeyPressMsg) (exact string, lo
 	sk := km.screenKeys(screen)
 	pressed := keyTexts(buf)
 	for _, s := range sk.seqs {
-		if len(s.seq) < len(pressed) || !s.seq.startsWith(pressed) {
-			continue
-		}
-		if len(s.seq) == len(pressed) {
-			exact = s.id
-		} else {
+		switch {
+		case len(s.seq) < len(pressed) || !s.seq.startsWith(pressed):
+		case len(s.seq) > len(pressed):
 			longer = true
+		case exact == "":
+			exact = s.id
 		}
 	}
 	return exact, longer
@@ -171,8 +175,11 @@ func (m model) keyHint() string {
 	var order []string
 	labels := map[string]string{}
 	completes := map[string]bool{}
-	sk := m.keymap().screenKeys(m.screen())
-	for _, s := range sk.seqs {
+	var wait string
+	for _, s := range m.keymap().screenKeys(m.screen()).seqs {
+		if wait == "" && m.keyMatch != "" && s.id == m.keyMatch {
+			wait = s.label()
+		}
 		if len(s.seq) <= len(pressed) || !s.seq.startsWith(pressed) {
 			continue
 		}
@@ -188,13 +195,8 @@ func (m model) keyHint() string {
 	for _, next := range order {
 		parts = append(parts, next+" "+labels[next])
 	}
-	if m.keyMatch != "" {
-		for _, s := range sk.seqs {
-			if s.id == m.keyMatch {
-				parts = append(parts, "(wait) "+s.label())
-				break
-			}
-		}
+	if wait != "" {
+		parts = append(parts, "(wait) "+wait)
 	}
 	return strings.Join(parts, " · ")
 }

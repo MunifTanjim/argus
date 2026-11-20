@@ -332,3 +332,5 @@ func (d dockComp) wheel(c *ctx, delta int) (component, tea.Cmd) {
 	d.scroll = max(0, min(min(d.scroll, maxScroll)+delta, maxScroll))
 	return d, nil
 }
+
+func (d dockComp) tabIndex() int { return d.tab }

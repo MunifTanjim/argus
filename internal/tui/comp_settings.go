@@ -1018,3 +1018,5 @@ func then(a, b tea.Cmd) tea.Cmd {
 		return b()
 	}
 }
+
+func (s settingsComp) tabIndex() int { return int(s.sub) }

@@ -66,6 +66,176 @@ For the project and workspace settings, see
 
 To change the keys of the TUI, see [Keymaps](/guide/tui#keymaps).
 
+## Lua
+
+To configure argus with Lua, add an `init.lua` file next to the config file in
+use. If no config file exists, argus reads `init.lua` from the [config
+directory](#config-file). `--no-config` skips it. If the file does not exist,
+nothing happens.
+
+The TUI is the only client that loads `init.lua`. `argus` and `argus view` load
+it.
+
+The file runs once when the TUI starts. If it fails, the footer shows the error
+and the TUI starts without the bindings that the file did not register. The
+standard library is available, and `require` finds modules next to `init.lua`.
+The
+functions `io.popen`, `os.execute`, and `os.exit` raise an error. Use
+`argus.exec` to run a program. `io.read`, `io.write`, `io.input`, and
+`io.output` also raise an error. Each method of `io.stdin`, `io.stdout`, and
+`io.stderr` raises an error. `io.lines` without a file name raises an error.
+`io.close` without a file raises an error. `dofile` and `loadfile` without a
+file name raise an error. `io.open` and `io.lines` with a file name work.
+`print` writes to the [log](#logs). If the TUI started no local servers, it has
+no log, and `print` writes nothing.
+
+If a Lua call runs longer than 2 seconds, it stops with an error. The load of
+`init.lua` is one call, and each key press is one call. The time inside
+`argus.exec` does not count. A file read that waits for input, for example
+from a FIFO, is not stopped. A coroutine works only in the call that creates
+it.
+
+```lua
+argus.bind("ctrl+a>w", "client.pane.focus_next")
+
+argus.bind("ctrl+a>t", function(ctx)
+  local r = argus.exec({ "tmux", "split-window", "-h" })
+  return r ~= nil and r.ok
+end)
+```
+
+### argus.action
+
+`argus.action{ name, title, run }`
+
+Defines an action. `argus.action` works only while `init.lua` loads.
+
+- `name` uses only lowercase letters, digits, and underscores. If a name is
+  defined again, the later definition wins and the log gets a warning.
+- `title` is the label of the keys bound to the action, in the footer and the
+  help.
+- `run` is a function. It receives `ctx` and `args`. `ctx.section` is the name
+  of the focused [section](/guide/tui#sections). `args` is the table given to
+  `argus.bind` or `argus.invoke`, or an empty table. The value that `run`
+  returns is the result of the action.
+
+```lua
+argus.action({
+  name = "split",
+  title = "split pane",
+  run = function(ctx, args)
+    return argus.exec({ "tmux", "split-window", args.dir or "-h" })
+  end,
+})
+
+argus.bind("ctrl+a>v", "split", { dir = "-v" })
+```
+
+### argus.bind
+
+`argus.bind(key, target[, args])`
+
+`key` uses the
+[Rex key notation](https://www.superlogical.com/rex/docs/customize/keyboard-shortcuts),
+not the Vim notation of YAML mappings. `argus.bind` works only while
+`init.lua` loads. A Lua binding replaces a mapping or a built-in key with the
+same key. The same sequence and `tui.key-timeout` rules apply as for YAML
+mappings.
+
+`target` is a function or an action name. The [command
+table](/guide/tui#commands) lists the built-in action names. An action must be
+defined before a binding names it.
+
+- A function receives `ctx`. `ctx.section` is the name of the focused
+  [section](/guide/tui#sections). If the function returns `true`, the key is
+  handled. If it returns `nil` or `false`, the key keeps its mapping or built-in
+  meaning, and the effects of its `argus.invoke` calls stay. If the function
+  raises an error, the footer shows the error and the key is handled.
+- A built-in action name runs that action. In a section that does not have the
+  action, the key keeps its mapping or built-in meaning. An unknown action name
+  raises an error at load.
+- An action defined with `argus.action` gets `args`, and the key is always
+  handled. If `run` raises an error, the footer shows the error.
+
+`args` is a table, and only an action defined with `argus.action` takes it.
+
+These differences from Rex apply:
+
+- `cmd`, `super`, and `meta` are the same modifier. A terminal sends it only
+  with the Kitty keyboard protocol.
+- A physical key in brackets, for example `ctrl+[KeyA]`, raises an error.
+- A character is the character that the key types, shift included. For
+  example, `&` and `D` are keys, and `shift+7` does not match `&`.
+- `+` as the last key, as in `alt++`, is the `+` key. `>` at the start of a
+  key or after `+`, as in `ctrl+a>>` or `alt+>`, is the `>` key.
+- A key with a mode prefix, for example `nav/h`, raises an error.
+
+A key can start with a section name and `:`, for example `workspace:ctrl+h`.
+The binding then works only in that section. `global:` and no prefix both mean
+every section. A section binding wins over a global binding for the same key.
+For the same key and section, the last `argus.bind` wins.
+
+A binding works in every section where keys use the keymap. It does not work
+on the live screen, in a text input, or while a popup or the help is open.
+
+### argus.invoke
+
+`argus.invoke(action[, args])`
+
+Runs an action and returns two values: the result and an error message. If
+the action runs, the error is `nil`. An action defined with `argus.action`
+returns the value that its `run` returns, and gets `args`. The focus
+actions return `{ ok = true }` if the focused pane changed and
+`{ ok = false }` if not. The tab actions return `{ ok = true }` if the tab
+changed and `{ ok = false }` if not, for example if the pane has only one tab.
+
+In these cases, the result is `nil` and the error tells why:
+
+- The action name is unknown.
+- The focused section does not have the built-in action.
+- `args` is given to a built-in action.
+- `run` raises an error. The effects of `run` before the error stay.
+
+`argus.invoke` works only inside a bound function or an action. Elsewhere it
+raises an error. If `args` is not a table, it also raises an error.
+
+### argus.exec
+
+`argus.exec(argv[, opts])`
+
+Runs a program without a shell. `argv` is a list of strings: the program, then
+its arguments. The TUI waits for the program to end.
+
+`argus.exec` runs each program in its own process group, and the TUI owns the
+terminal. If a program reads the terminal or changes its modes, for example
+`fzf`, the program stops until `SIGKILL` ends it, 2 seconds after the
+timeout. If a program writes to `/dev/tty`, the output draws over the TUI.
+
+| Option | Meaning |
+|---|---|
+| `cwd` | The working directory. The default is the one of the TUI. |
+| `env` | A table of variables to set. A value of `false` removes the variable. |
+| `clear_env` | If `true`, the program starts with an empty environment. `env` still applies. |
+| `stdin` | A string that the program reads from its standard input. |
+| `timeout` | Seconds until the program and every process it started get `SIGTERM`. `SIGKILL` follows 2 seconds later. The default is 2. |
+| `stdout`, `stderr` | If `false`, the stream is discarded. |
+
+An unknown option raises an error.
+
+The result is a table with these fields:
+
+- `code`: the exit status, or `-1` if a signal ended the program.
+- `signal`: the signal name, for example `SIGTERM`, or `nil`.
+- `stdout`, `stderr`: the captured output, or `""`. argus keeps the first
+  1 MiB of each stream and discards the rest.
+- `timed_out`: `true` if `timeout` stopped the program.
+- `ok`: `true` if `code` is `0` and the program did not time out.
+
+A non-zero exit is a result, not an error. If the program does not start,
+`argus.exec` returns `nil` and an error message. An empty `argv`, an argument
+or option of the wrong type, and a `timeout` that is not a positive number
+raise an error.
+
 ## End-to-End Encryption
 
 `e2ee.enabled` (default `false`) turns on the blind-relay encrypted transport.

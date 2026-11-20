@@ -535,7 +535,7 @@ func TestBuildKeymapReportsBadEntries(t *testing.T) {
 		"transcript": {"e": ":toggle show-hidden<CR>"},
 	}), time.Second, "")
 	want := []string{
-		`keymap: unknown screen "nowhere"`,
+		`keymap: unknown section "nowhere"`,
 		`keymap: project-tree "<X-a>": unknown modifier "X" in <X-a>`,
 		`keymap: project-tree "b": shell commands are not supported yet`,
 		`keymap: project-tree "c": unknown argument "tpo" for goto (bottom, top)`,

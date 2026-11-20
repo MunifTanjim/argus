@@ -295,9 +295,9 @@ func TestKeymapSectionsByComponent(t *testing.T) {
 			"detail":   {"c": ":back<CR>"},
 		}), time.Second, "")
 		want := []string{
-			`keymap: unknown screen "detail" (now transcript)`,
-			`keymap: unknown screen "projects" (now project-tree, workspace, project, node, file, file-tree, changes)`,
-			`keymap: unknown screen "session" (now transcript, session-dock)`,
+			`keymap: unknown section "detail" (now transcript)`,
+			`keymap: unknown section "projects" (now project-tree, workspace, project, node, file, file-tree, changes)`,
+			`keymap: unknown section "session" (now transcript, session-dock)`,
 		}
 		if strings.Join(errs, "\n") != strings.Join(want, "\n") {
 			t.Errorf("errors:\n%s\nwant:\n%s", strings.Join(errs, "\n"), strings.Join(want, "\n"))

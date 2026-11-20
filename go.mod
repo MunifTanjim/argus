@@ -25,6 +25,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/tyler-smith/go-bip39 v1.1.0
+	github.com/yuin/gopher-lua v1.1.2
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/crypto v0.55.0
 	golang.org/x/mod v0.38.0

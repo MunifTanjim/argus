@@ -34,7 +34,7 @@ tool input and output. Share them only with people you trust.`,
 			if err != nil {
 				return fail(cmd, err)
 			}
-			if err := tui.RunBundle(path, redact, cfg.TUI); err != nil {
+			if err := tui.RunBundle(path, redact, cfg.TUI, cfg.LuaPath); err != nil {
 				return fail(cmd, err)
 			}
 			return nil
