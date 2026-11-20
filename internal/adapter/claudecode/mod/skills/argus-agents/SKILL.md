@@ -5,7 +5,7 @@ description: Use when you need to spawn other agent sessions, give them tasks, m
 
 # Working with other agent sessions
 
-The argus tools let you spawn agent sessions, message them, and answer their questions. Permission prompts and plan approvals always go to the user in the worker's own session. Session IDs have the form `<node>:<id>`. Messages are asynchronous: `send_message` and `reply_to_message` return a message ID and never wait.
+The argus tools let you spawn agent sessions, message them, and answer their questions. Permission prompts and plan approvals always go to the user in the worker's own session. Session IDs have the form `<node>:<agent>:<agent session id>`. Messages are asynchronous: `send_message` and `reply_to_message` return a message ID and never wait.
 
 If the argus tools are not available to you, use the `argus session` CLI. Each tool below lists its CLI form.
 

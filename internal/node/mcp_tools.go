@@ -31,7 +31,7 @@ type mcpProp struct {
 func required(name, kind string) mcpProp { return mcpProp{name: name, kind: kind, required: true} }
 func optional(name, kind string) mcpProp { return mcpProp{name: name, kind: kind} }
 
-const idNote = "IDs are composite, like home:argus:%3 (node id, then session id). An ID can belong to any connected node, and the call goes to that node."
+const idNote = "IDs name an agent conversation, like home:claude:5f1c0e2a-9b1d-4c1e-8f00-2a6d3c4b5e61 (node id, agent, then the agent's own session id). An ID can belong to any connected node, and the call goes to that node."
 
 const requestNote = "request_id is optional: a retry with the same request_id returns the first result instead of acting again, and a request_id reused with different parameters is an error."
 
@@ -109,7 +109,7 @@ func mcpTools() []mcpTool {
 		{
 			Tool: mcphttp.Tool{
 				Name:        "get_current_session",
-				Description: "Return the current session, which is the argus session this agent is running in: its composite ID, agent, name, status, working directory, and parent session if it was spawned by another agent. Use it to learn your own ID before sharing it with other agents. " + idNote,
+				Description: "Return the current session, which is the argus session this agent is running in: its ID, agent, name, status, working directory, and parent session if it was spawned by another agent. Use it to learn your own ID before sharing it with other agents. " + idNote,
 			},
 			needsCaller: true,
 			run: func(_ context.Context, d *Node, caller callerRef, _ json.RawMessage) (any, error) {
@@ -119,7 +119,7 @@ func mcpTools() []mcpTool {
 		{
 			Tool: mcphttp.Tool{
 				Name:        "list_sessions",
-				Description: "List every session on every online node (the result's unreachable lists nodes that did not answer), agent and shell sessions alike, with composite IDs, agent, name, status, working directory, and parent. Use it to find the session to message. " + idNote,
+				Description: "List every session on every online node (the result's unreachable lists nodes that did not answer), with IDs, agent, name, status, working directory, and parent. A session appears once its agent session id is known. Use it to find the session to message. " + idNote,
 			},
 			run: func(ctx context.Context, d *Node, _ callerRef, _ json.RawMessage) (any, error) {
 				return d.listAll(ctx), nil
@@ -142,7 +142,7 @@ func mcpTools() []mcpTool {
 					"agent is the agent to run; cwd is an absolute directory path and is required. name and model are optional. " +
 					"node is the ID or label of the node to start it on; it defaults to your own node, and cwd and agent refer to that node. " +
 					"If prompt is given, it is delivered to the new session as a task message from you, and the new session reports back to you with the reply_to_message tool; the result's task_id is the ID of that task message. The new session becomes your child: you can answer its questions with respond_to_interaction (its permission prompts and plans go to the user) and stop it with kill_session. " +
-					asyncNote + " The result's session_id is composite. " + requestNote + " " + idNote,
+					asyncNote + " The result's session_id is the new session's ID. A message to it waits until the session starts. " + requestNote + " " + idNote,
 			},
 			props: []mcpProp{
 				{name: "agent", kind: "string", required: true, enum: orchestratedAgents}, required("cwd", "string"),

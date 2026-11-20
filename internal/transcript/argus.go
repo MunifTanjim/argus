@@ -11,10 +11,10 @@ type ArgusMessage struct {
 	ID           string `json:"id"`
 	Kind         string `json:"kind"`              // text, task, reply, interaction, turn_ended, interaction_ended
 	From         string `json:"from,omitempty"`    // sender label: "owner", "argus", or a session label
-	Session      string `json:"session,omitempty"` // sender's composite session ID
+	Session      string `json:"session,omitempty"` // sender's agent ID
 	ReplyTo      string `json:"replyTo,omitempty"`
 	Child        string `json:"child,omitempty"`        // notices: the child's label
-	ChildSession string `json:"childSession,omitempty"` // notices: the child's composite session ID
+	ChildSession string `json:"childSession,omitempty"` // notices: the child's agent ID
 	Body         string `json:"body"`
 }
 
