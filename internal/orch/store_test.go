@@ -47,7 +47,7 @@ func TestInsertGetRoundTrip(t *testing.T) {
 	in.Kind = api.MessageInteraction
 	in.Child = &api.Actor{Node: "home", Key: "claude:a"}
 	in.Interaction = &session.Interaction{Kind: session.InteractionPermission, ToolName: "Bash"}
-	in.FromSessionID, in.FromLabel = "home:%3", "worker"
+	in.FromLabel = "worker"
 	got, err := s.Insert(ctx, in)
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestInsertGetRoundTrip(t *testing.T) {
 		t.Fatalf("Get: ok=%v err=%v", ok, err)
 	}
 	if back.Kind != in.Kind || back.From != in.From || back.To != in.To || back.Child == nil || *back.Child != *in.Child || back.State != in.State ||
-		back.FromSessionID != in.FromSessionID || back.FromLabel != in.FromLabel {
+		back.FromLabel != in.FromLabel {
 		t.Fatalf("round trip mismatch: %+v", back)
 	}
 	if back.Interaction == nil || back.Interaction.Kind != session.InteractionPermission || back.Interaction.ToolName != "Bash" {
@@ -372,7 +372,7 @@ func TestLinkSpawnedStoresLinkTaskAndRequest(t *testing.T) {
 	parent := api.Actor{Node: "n1", Key: "claude:p"}
 	child := api.Actor{Node: "n1", Key: "codex:c"}
 	task := api.Message{ID: "m-00000001", Kind: api.MessageTask, From: parent, To: child, Body: "x", State: api.MessageDelivered}
-	l := api.Link{Child: child, Parent: parent, TaskID: task.ID, ChildSessionID: "n1:argus:%3"}
+	l := api.Link{Child: child, Parent: parent, TaskID: task.ID}
 	if err := s.LinkSpawned(t.Context(), l, task, orch.Request{ID: "r1", Hash: "h1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -449,14 +449,14 @@ func TestReceiveKeepsSender(t *testing.T) {
 	at := time.Unix(1_700_000_000, 0)
 	in := api.Message{
 		ID: "b:m-00000001", Kind: api.MessageText,
-		From: api.Actor{Node: "b", Key: "opencode:x"}, FromSessionID: "b:opencode:x", FromLabel: "planner",
+		From: api.Actor{Node: "b", Key: "opencode:x"}, FromLabel: "planner",
 		To: api.Actor{Node: "home", Key: "claude:a"}, Body: "hi", State: api.MessageQueued, CreatedAt: at, UpdatedAt: at,
 	}
 	if added, err := s.Receive(ctx, in); err != nil || !added {
 		t.Fatalf("Receive: added=%v err=%v", added, err)
 	}
 	back, ok, err := s.Get(ctx, in.ID)
-	if err != nil || !ok || back.FromSessionID != in.FromSessionID || back.FromLabel != in.FromLabel {
+	if err != nil || !ok || back.FromLabel != in.FromLabel {
 		t.Fatalf("back = %+v ok=%v err=%v", back, ok, err)
 	}
 }

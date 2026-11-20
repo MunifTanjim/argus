@@ -1,18 +1,18 @@
 -- name: InsertOrchMessage :exec
 INSERT INTO orch_message (
-    id, kind, from_node, from_key, from_session_id, from_label,
+    id, kind, from_node, from_key, from_label,
     to_node, to_key, body,
     reply_to, child_node, child_key, interaction, state, answered_by_node, answered_by_key,
     request_id, request_hash, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: ReceiveOrchMessage :execrows
 INSERT INTO orch_message (
-    id, kind, from_node, from_key, from_session_id, from_label,
+    id, kind, from_node, from_key, from_label,
     to_node, to_key, body,
     reply_to, child_node, child_key, interaction, state, answered_by_node, answered_by_key,
     request_id, request_hash, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?)
 ON CONFLICT (id) DO NOTHING;
 
 -- name: GetOrchMessage :one
@@ -77,8 +77,8 @@ DELETE FROM orch_message WHERE created_at < ?;
 -- name: PutOrchLink :exec
 INSERT INTO orch_link (
     child_key, child_node, parent_node, parent_key, task_id, ended_by,
-    request_id, request_hash, child_session_id, parent_session_id, parent_ended, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    request_id, request_hash, parent_ended, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (child_node, child_key) DO UPDATE SET
     parent_node = excluded.parent_node,
     parent_key = excluded.parent_key,
@@ -86,8 +86,6 @@ ON CONFLICT (child_node, child_key) DO UPDATE SET
     ended_by = excluded.ended_by,
     request_id = excluded.request_id,
     request_hash = excluded.request_hash,
-    child_session_id = excluded.child_session_id,
-    parent_session_id = excluded.parent_session_id,
     parent_ended = excluded.parent_ended;
 
 -- name: GetOrchLink :one

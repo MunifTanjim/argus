@@ -13,6 +13,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/db"
 	"github.com/MunifTanjim/argus/internal/orch"
 	"github.com/MunifTanjim/argus/internal/procwalk"
+	"github.com/MunifTanjim/argus/internal/session"
 )
 
 func TestPeerChannelCannotImpersonateLocal(t *testing.T) {
@@ -67,7 +68,7 @@ func TestPeerChannelCannotImpersonateLocal(t *testing.T) {
 
 func remoteCaller(node, key string) api.CallerInfo {
 	return api.CallerInfo{Remote: &api.RemoteCaller{
-		Actor: api.Actor{Node: node, Key: key}, SessionID: node + ":argus:%1", Label: "worker",
+		Actor: api.Actor{Node: node, Key: key}, Label: "worker",
 	}}
 }
 
@@ -78,7 +79,7 @@ func TestCallerFromRemoteOnPeerChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ref.Actor != (api.Actor{Node: "b", Key: "claude:k"}) || ref.SessionID != "b:argus:%1" || ref.Label != "worker" || ref.Local != nil {
+	if ref.Actor != (api.Actor{Node: "b", Key: "claude:k"}) || ref.Label != "worker" || ref.Local != nil {
 		t.Fatalf("ref = %+v", ref)
 	}
 }
@@ -88,22 +89,6 @@ func TestCallerFromRemoteNodeMismatch(t *testing.T) {
 	_, err := d.callerFrom(withPeerNode(t.Context(), "b"), remoteCaller("c", "claude:k"))
 	if !errors.Is(err, errRemoteCallerDenied) {
 		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestCallerFromRejectsForeignSessionPrefix(t *testing.T) {
-	d := callerNode()
-	for _, sid := range []string{"c:argus:%1", "argus:%1", "bb:argus:%1"} {
-		c := remoteCaller("b", "claude:k")
-		c.Remote.SessionID = sid
-		if _, err := d.callerFrom(withPeerNode(t.Context(), "b"), c); !errors.Is(err, errRemoteCallerDenied) {
-			t.Errorf("session %q: err = %v", sid, err)
-		}
-	}
-	c := remoteCaller("b", "claude:k")
-	c.Remote.SessionID = ""
-	if _, err := d.callerFrom(withPeerNode(t.Context(), "b"), c); err != nil {
-		t.Fatalf("empty session: %v", err)
 	}
 }
 
@@ -174,8 +159,18 @@ func TestRemoteCallerDecodesActor(t *testing.T) {
 
 func TestCurrentSessionErrorNamesNoOldTool(t *testing.T) {
 	d := callerNode()
-	_, err := d.currentSession(callerRef{Actor: api.Actor{Node: "b", Key: "claude:x"}, SessionID: "b:argus:%1"})
+	_, err := d.currentSession(callerRef{Actor: api.Actor{Node: "b", Key: "claude:x"}})
 	if err == nil || strings.Contains(err.Error(), "whoami") {
 		t.Fatalf("err = %v, want an error that does not name whoami", err)
+	}
+}
+
+func TestRemoteCallerWithoutKeyNamedByLabel(t *testing.T) {
+	d, _ := deliverNode(t)
+	b := apiSession(d, "b", session.StatusIdle, nil)
+	caller := callerRef{Actor: api.Actor{Node: "far"}, Label: "worker"}
+	_, err := d.send(t.Context(), caller, d.agentID(b), "hi", "")
+	if err == nil || !strings.HasPrefix(err.Error(), "worker is not ready yet") {
+		t.Fatalf("err = %v", err)
 	}
 }

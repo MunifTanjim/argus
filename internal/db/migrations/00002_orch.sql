@@ -6,7 +6,6 @@ CREATE TABLE orch_message (
     kind           TEXT NOT NULL,
     from_node        TEXT NOT NULL,
     from_key         TEXT NOT NULL,
-    from_session_id  TEXT NOT NULL DEFAULT '',
     from_label       TEXT NOT NULL DEFAULT '',
     to_node          TEXT NOT NULL,
     to_key           TEXT NOT NULL,
@@ -38,8 +37,6 @@ CREATE TABLE orch_link (
     request_id   TEXT NOT NULL DEFAULT '',
     request_hash TEXT NOT NULL DEFAULT '',
     created_at   INTEGER NOT NULL,
-    child_session_id  TEXT NOT NULL DEFAULT '',
-    parent_session_id TEXT NOT NULL DEFAULT '',
     parent_ended      INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (child_node, child_key)
 );

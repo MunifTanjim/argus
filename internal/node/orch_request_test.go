@@ -71,8 +71,8 @@ func TestAgentSpawnRequestIDReplayKeepsSessionID(t *testing.T) {
 		t.Fatal(err)
 	}
 	links, err := d.orch.Links(t.Context())
-	if err != nil || len(links) != 1 || links[0].ChildSessionID != first.SessionID {
-		t.Fatalf("links = %+v err=%v, want child_session_id %s", links, err, first.SessionID)
+	if err != nil || len(links) != 1 || actorID(links[0].Child) != first.SessionID {
+		t.Fatalf("links = %+v err=%v, want child %s", links, err, first.SessionID)
 	}
 	again, err := spawnRequest(t, d, p)
 	if err != nil || again.SessionID != first.SessionID {
@@ -219,7 +219,7 @@ func TestSpawnRequestIDNotSharedAcrossNodes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n.Load() != 2 || other.TaskID == local.TaskID || other.SessionID == local.SessionID || other.ChildKey == "" {
+	if n.Load() != 2 || other.TaskID == local.TaskID || other.SessionID == local.SessionID {
 		t.Fatalf("local=%+v remote=%+v spawns=%d", local, other, n.Load())
 	}
 	if again, err := d.spawnFor(t.Context(), remote, p); err != nil || again != other || n.Load() != 2 {

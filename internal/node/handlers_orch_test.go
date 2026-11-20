@@ -589,7 +589,7 @@ func TestParentRefIsAgentID(t *testing.T) {
 	}
 	parentOf := func(child string) *session.ParentRef {
 		s, _ := d.reg.FindByAgentSession("claude", child)
-		return d.composite(s).Parent
+		return d.agentView(s).Parent
 	}
 	if p := parentOf("c1"); p == nil || *p != (session.ParentRef{ID: "home:claude:p1"}) {
 		t.Fatalf("local parent = %+v", p)

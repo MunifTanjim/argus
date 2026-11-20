@@ -130,7 +130,7 @@ func TestCrossNodeReplyReachesParent(t *testing.T) {
 	cp := newCrossPeers(t)
 	ctx := peerCtx(t)
 	childSID := session.CompositeID("b", cp.child.ID)
-	if err := cp.a.orch.PutLink(ctx, api.Link{Child: crossChild, Parent: crossParent, ChildSessionID: childSID}); err != nil {
+	if err := cp.a.orch.PutLink(ctx, api.Link{Child: crossChild, Parent: crossParent}); err != nil {
 		t.Fatal(err)
 	}
 	taskID := cp.sendToChild(t)
@@ -246,7 +246,7 @@ func TestCrossNodeInteractionAndRespond(t *testing.T) {
 	ix.RequestID = "r1"
 	child := apiSession(cp.b, "c1", session.StatusAwaitingInput, ix)
 	childSID := session.CompositeID("b", child.ID)
-	if err := cp.a.orch.PutLink(ctx, api.Link{Child: crossChild, Parent: crossParent, ChildSessionID: childSID}); err != nil {
+	if err := cp.a.orch.PutLink(ctx, api.Link{Child: crossChild, Parent: crossParent}); err != nil {
 		t.Fatal(err)
 	}
 	cp.b.orchPass(t.Context())
@@ -426,8 +426,8 @@ func TestFailGoneIgnoresRemoteRecipients(t *testing.T) {
 func TestSenderLabelRemoteActorNeverMatchesLocal(t *testing.T) {
 	d, _ := deliverNode(t)
 	apiSession(d, "x", session.StatusIdle, nil)
-	if label, sid := d.senderLabel(api.Actor{Node: "b", Key: "opencode:x"}); label != "b:opencode:x" || sid != "" {
-		t.Fatalf("label = %q session = %q", label, sid)
+	if label := d.senderLabel(api.Actor{Node: "b", Key: "opencode:x"}); label != "b:opencode:x" {
+		t.Fatalf("label = %q", label)
 	}
 }
 
@@ -537,10 +537,10 @@ func newRemoteTree(t *testing.T) *remoteTree {
 	rt.stops["a"], rt.stops["b"] = stopA, stopB
 	waitPeerOnline(t, rt.a, "b", true)
 	waitPeerOnline(t, rt.b, "a", true)
-	if err := rt.b.orch.PutLink(t.Context(), api.Link{Child: treeChild, Parent: treeParent, ParentSessionID: "a:claude:p1"}); err != nil {
+	if err := rt.b.orch.PutLink(t.Context(), api.Link{Child: treeChild, Parent: treeParent}); err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.a.orch.PutLink(t.Context(), api.Link{Child: treeChild, Parent: treeParent, ChildSessionID: "b:claude:c1"}); err != nil {
+	if err := rt.a.orch.PutLink(t.Context(), api.Link{Child: treeChild, Parent: treeParent}); err != nil {
 		t.Fatal(err)
 	}
 	return rt
@@ -609,7 +609,7 @@ func TestAncestorKillNeedsRemoteParent(t *testing.T) {
 	if err := rt.b.orch.PutLink(t.Context(), api.Link{Child: treeChild, Parent: rt.b.actor(x)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rt.b.killAs(t.Context(), rt.b.localCallerRef(x), "b:claude:c1", "", true); err != nil {
+	if _, err := rt.b.killAs(t.Context(), rt.b.localCallerRef(x), "b:claude:c1", true); err != nil {
 		t.Fatal(err)
 	}
 	if by := linkOf(t, rt.b, treeChild).EndedBy; by != "parent" {
@@ -634,7 +634,7 @@ func TestParentRefRemoteParent(t *testing.T) {
 	if ref := rt.b.parentRef(rt.child); ref == nil || *ref != want {
 		t.Fatalf("parent ref = %+v, want %+v", ref, want)
 	}
-	if got := rt.b.composite(rt.child).Parent; got == nil || *got != want {
+	if got := rt.b.agentView(rt.child).Parent; got == nil || *got != want {
 		t.Fatalf("composite parent = %+v, want %+v", got, want)
 	}
 	if err := rt.b.orch.SetEndedBy(t.Context(), treeChild, "owner"); err != nil {
@@ -702,10 +702,10 @@ func TestNestedCrossNodeKill(t *testing.T) {
 	rt := newRemoteTree(t)
 	rt.a.addAgentSession("claude", "g1")
 	grand := api.Actor{Node: "a", Key: "claude:g1"}
-	if err := rt.a.orch.PutLink(t.Context(), api.Link{Child: grand, Parent: treeChild, ParentSessionID: "b:claude:c1"}); err != nil {
+	if err := rt.a.orch.PutLink(t.Context(), api.Link{Child: grand, Parent: treeChild}); err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.b.orch.PutLink(t.Context(), api.Link{Child: grand, Parent: treeChild, ChildSessionID: "a:claude:g1"}); err != nil {
+	if err := rt.b.orch.PutLink(t.Context(), api.Link{Child: grand, Parent: treeChild}); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()
@@ -755,18 +755,24 @@ func TestDeliveryRendersRecordedRemoteSender(t *testing.T) {
 	d, _ := deliverNode(t)
 	from := api.Actor{Node: "b", Key: "opencode:x"}
 	to := api.Actor{Node: d.id, Key: "claude:a"}
-	dl := d.delivery(t.Context(), api.Message{ID: "b:m-00000001", Kind: api.MessageText, From: from, To: to,
-		FromSessionID: "b:opencode:x", FromLabel: "planner"})
+	dl := d.delivery(api.Message{ID: "b:m-00000001", Kind: api.MessageText, From: from, To: to,
+		FromLabel: "planner"})
 	if dl.From != "planner" || dl.FromSession != "b:opencode:x" {
 		t.Fatalf("from = %q session = %q", dl.From, dl.FromSession)
 	}
-	// A message from before the sender was recorded keeps the old rendering.
-	dl = d.delivery(t.Context(), api.Message{ID: "b:m-00000002", Kind: api.MessageText, From: from, To: to})
-	if dl.From != "b:opencode:x" || dl.FromSession != "" {
-		t.Fatalf("old message: from = %q session = %q", dl.From, dl.FromSession)
+	// Without a recorded label, the sender is named by its agent ID.
+	dl = d.delivery(api.Message{ID: "b:m-00000002", Kind: api.MessageText, From: from, To: to})
+	if dl.From != "b:opencode:x" || dl.FromSession != "b:opencode:x" {
+		t.Fatalf("unlabeled message: from = %q session = %q", dl.From, dl.FromSession)
+	}
+	// A notice about a remote child with no local link still names the child.
+	dl = d.delivery(api.Message{ID: "b:m-00000004", Kind: api.MessageTurnEnded,
+		From: api.Actor{Node: "b", Key: api.ActorArgus}, To: to, Child: &api.Actor{Node: "b", Key: "opencode:k1"}})
+	if dl.ChildSession != "b:opencode:k1" {
+		t.Fatalf("child session = %q", dl.ChildSession)
 	}
 	// argus on another node renders as argus.
-	dl = d.delivery(t.Context(), api.Message{ID: "b:m-00000003", Kind: api.MessageTurnEnded,
+	dl = d.delivery(api.Message{ID: "b:m-00000003", Kind: api.MessageTurnEnded,
 		From: api.Actor{Node: "b", Key: api.ActorArgus}, To: to})
 	if dl.From != api.ActorArgus || dl.FromSession != "" {
 		t.Fatalf("argus: from = %q session = %q", dl.From, dl.FromSession)
@@ -858,7 +864,7 @@ func TestRemoteKillFindsResumedChild(t *testing.T) {
 	rt := newRemoteTree(t)
 	rt.b.markOrchSettled()
 	// The mirror holds the session id from spawn; the child now runs elsewhere.
-	if err := rt.a.orch.PutLink(t.Context(), api.Link{Child: treeChild, Parent: treeParent, ChildSessionID: "b:claude:old"}); err != nil {
+	if err := rt.a.orch.PutLink(t.Context(), api.Link{Child: treeChild, Parent: treeParent}); err != nil {
 		t.Fatal(err)
 	}
 	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:claude:p1")
@@ -876,7 +882,7 @@ func TestRemoteKillFindsResumedChild(t *testing.T) {
 func TestRemoteKillBeforeSettleIsNotKilled(t *testing.T) {
 	rt := newRemoteTree(t)
 	gone := api.Actor{Node: "b", Key: "claude:gone"}
-	if err := rt.a.orch.PutLink(t.Context(), api.Link{Child: gone, Parent: treeParent, ChildSessionID: "b:claude:gone"}); err != nil {
+	if err := rt.a.orch.PutLink(t.Context(), api.Link{Child: gone, Parent: treeParent}); err != nil {
 		t.Fatal(err)
 	}
 	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:claude:p1")
@@ -940,7 +946,7 @@ func TestCrossNodeSendFailsFastForUnknownSession(t *testing.T) {
 func TestCrossNodeSendToLinkedChildWhileOffline(t *testing.T) {
 	cp := newCrossPeers(t)
 	childID := session.CompositeID("b", cp.child.ID)
-	if err := cp.a.orch.PutLink(t.Context(), api.Link{Child: crossChild, Parent: crossParent, ChildSessionID: childID}); err != nil {
+	if err := cp.a.orch.PutLink(t.Context(), api.Link{Child: crossChild, Parent: crossParent}); err != nil {
 		t.Fatal(err)
 	}
 	cp.takeOffline(t, "b")
@@ -969,14 +975,14 @@ func TestCrossNodeSendThroughLinkStillFailsFast(t *testing.T) {
 	cp := newCrossPeers(t)
 	cp.b.markOrchSettled()
 	gone := "b:claude:gone"
-	if err := cp.a.orch.PutLink(t.Context(), api.Link{Child: api.Actor{Node: "b", Key: "opencode:gone"}, Parent: crossParent, ChildSessionID: gone}); err != nil {
+	if err := cp.a.orch.PutLink(t.Context(), api.Link{Child: api.Actor{Node: "b", Key: "opencode:gone"}, Parent: crossParent}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := cp.a.send(peerCtx(t), cp.a.localCallerRef(cp.parent), gone, "hi", ""); err == nil {
 		t.Fatal("send to an ended child on an online node succeeded")
 	}
 	cp.takeOffline(t, "b")
-	ended := api.Link{Child: api.Actor{Node: "b", Key: "opencode:gone"}, Parent: crossParent, ChildSessionID: gone, EndedBy: "self"}
+	ended := api.Link{Child: api.Actor{Node: "b", Key: "opencode:gone"}, Parent: crossParent, EndedBy: "self"}
 	if err := cp.a.orch.PutLink(t.Context(), ended); err != nil {
 		t.Fatal(err)
 	}

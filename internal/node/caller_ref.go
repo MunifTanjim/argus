@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -18,14 +17,13 @@ var (
 // callerRef is the actor behind an orch.* call. Local is the caller's session
 // when it runs on this node, and nil for a caller on another node.
 type callerRef struct {
-	Actor     api.Actor
-	SessionID string // composite
-	Label     string
-	Local     *session.Session
+	Actor api.Actor
+	Label string
+	Local *session.Session
 }
 
 func (d *Node) localCallerRef(s session.Session) callerRef {
-	return callerRef{Actor: d.actor(s), SessionID: d.agentID(s), Label: sessionLabel(s), Local: &s}
+	return callerRef{Actor: d.actor(s), Label: sessionLabel(s), Local: &s}
 }
 
 // callerFrom identifies the caller of a request. A remote caller is accepted
@@ -40,10 +38,7 @@ func (d *Node) callerFrom(ctx context.Context, c api.CallerInfo) (callerRef, err
 		if k := c.Remote.Actor.Key; reservedKey(k) {
 			return callerRef{}, fmt.Errorf("%w: %s is a reserved actor", errRemoteCallerDenied, k)
 		}
-		if sid := c.Remote.SessionID; sid != "" && !strings.HasPrefix(sid, peer+":") {
-			return callerRef{}, fmt.Errorf("%w: session %s is not on node %s", errRemoteCallerDenied, sid, peer)
-		}
-		return callerRef{Actor: c.Remote.Actor, SessionID: c.Remote.SessionID, Label: c.Remote.Label}, nil
+		return callerRef{Actor: c.Remote.Actor, Label: c.Remote.Label}, nil
 	}
 	if onPeer {
 		return callerRef{}, errLocalCallerOnPeer
@@ -53,4 +48,12 @@ func (d *Node) callerFrom(ctx context.Context, c api.CallerInfo) (callerRef, err
 		return callerRef{}, err
 	}
 	return d.localCallerRef(s), nil
+}
+
+// name is how errors name the caller: its agent ID, else its label.
+func (c callerRef) name() string {
+	if id := actorID(c.Actor); id != "" {
+		return id
+	}
+	return c.Label
 }

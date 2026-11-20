@@ -9,18 +9,16 @@ import (
 )
 
 type OrchLink struct {
-	ChildNode       string
-	ChildKey        string
-	ParentNode      string
-	ParentKey       string
-	TaskID          string
-	EndedBy         string
-	RequestID       string
-	RequestHash     string
-	CreatedAt       int64
-	ChildSessionID  string
-	ParentSessionID string
-	ParentEnded     int64
+	ChildNode   string
+	ChildKey    string
+	ParentNode  string
+	ParentKey   string
+	TaskID      string
+	EndedBy     string
+	RequestID   string
+	RequestHash string
+	CreatedAt   int64
+	ParentEnded int64
 }
 
 type OrchMessage struct {
@@ -28,7 +26,6 @@ type OrchMessage struct {
 	Kind           string
 	FromNode       string
 	FromKey        string
-	FromSessionID  string
 	FromLabel      string
 	ToNode         string
 	ToKey          string
