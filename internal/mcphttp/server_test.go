@@ -264,3 +264,48 @@ func TestInitializeDefaultsEmptyVersion(t *testing.T) {
 		t.Fatalf("result = %s", out["result"])
 	}
 }
+
+type recordingBackend struct{ meta map[string]json.RawMessage }
+
+func (*recordingBackend) Tools() []Tool { return nil }
+
+func (b *recordingBackend) Call(_ context.Context, _, _ string, meta map[string]json.RawMessage, _ json.RawMessage) CallResult {
+	b.meta = meta
+	return CallResult{Text: "ok"}
+}
+
+func callTool(t *testing.T, header, meta string) map[string]json.RawMessage {
+	t.Helper()
+	b := &recordingBackend{}
+	srv := httptest.NewServer(NewHandler("tok", "1", b))
+	defer srv.Close()
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"x","_meta":` + meta + `}}`
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/mcp/pi", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer tok")
+	if header != "" {
+		req.Header.Set(SessionHeader, header)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	return b.meta
+}
+
+func TestCallCarriesSessionHeader(t *testing.T) {
+	meta := callTool(t, "s1", `{}`)
+	if string(meta[SessionMetaKey]) != `"s1"` {
+		t.Fatalf("meta[%s] = %s", SessionMetaKey, meta[SessionMetaKey])
+	}
+}
+
+func TestCallDropsMetaSessionWithoutHeader(t *testing.T) {
+	meta := callTool(t, "", `{"argus/session":"forged","other":"x"}`)
+	if _, ok := meta[SessionMetaKey]; ok {
+		t.Fatalf("meta kept the client's %s: %s", SessionMetaKey, meta[SessionMetaKey])
+	}
+	if string(meta["other"]) != `"x"` {
+		t.Fatalf("meta[other] = %s", meta["other"])
+	}
+}
