@@ -11,12 +11,13 @@ import (
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
+// Commands that drive Claude's terminal UI are left out.
 func TestCompletePromptSlashFromMod(t *testing.T) {
 	a, _ := newWiredAdapter(t)
 	b := a.ModBridge()
 	go func() {
 		for _, c := range b.Wait(context.Background(), "s1", time.Minute, []string{modbridge.KindCommands}) {
-			b.Ack(c.ID, "", true, json.RawMessage(`[{"name":"compact","description":"Free up context"},{"name":"brainstorming","description":"x"}]`))
+			b.Ack(c.ID, "", true, json.RawMessage(`[{"name":"compact","description":"Free up context"},{"name":"btw","description":"Side question"},{"name":"brainstorming","description":"x"},{"name":"config","description":"Open settings"}]`))
 		}
 	}()
 	waitUntil(t, func() bool { return b.Reachable("s1") })

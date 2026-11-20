@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
@@ -33,5 +34,56 @@ func (a *ccAdapter) CompletePrompt(ctx context.Context, sess session.Session, tr
 			return nil, fmt.Errorf("claude command list: %w", err)
 		}
 	}
-	return items, nil
+	return slices.DeleteFunc(items, func(c api.PromptCompletion) bool { return hiddenCommands[c.Name] }), nil
+}
+
+// hiddenCommands are built-ins that open a panel, picker or dialog in Claude's
+// terminal, change its display, or only run in server-launched sessions.
+var hiddenCommands = map[string]bool{
+	"__remote-workflow":    true,
+	"agents":               true,
+	"background":           true,
+	"btw":                  true,
+	"bug":                  true,
+	"color":                true,
+	"config":               true,
+	"context":              true,
+	"copy":                 true,
+	"diff":                 true,
+	"export":               true,
+	"feedback":             true,
+	"focus":                true,
+	"heapdump":             true,
+	"help":                 true,
+	"hooks":                true,
+	"ide":                  true,
+	"keybindings":          true,
+	"list-agents":          true,
+	"login":                true,
+	"mcp":                  true,
+	"memory":               true,
+	"mobile":               true,
+	"passes":               true,
+	"permissions":          true,
+	"plugin":               true,
+	"powerup":              true,
+	"pro-trial-expired":    true,
+	"radio":                true,
+	"release-notes":        true,
+	"resume":               true,
+	"rewind":               true,
+	"sandbox":              true,
+	"scroll-speed":         true,
+	"setup-bedrock":        true,
+	"setup-vertex":         true,
+	"skills":               true,
+	"status":               true,
+	"stickers":             true,
+	"tasks":                true,
+	"terminal-setup":       true,
+	"theme":                true,
+	"tui":                  true,
+	"usage":                true,
+	"workflow-launch-exec": true,
+	"workflows":            true,
 }
