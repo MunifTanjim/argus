@@ -38,6 +38,8 @@ type fakePi struct {
 	// commandsReply is "fail" (an error answer), "silent" (no answer), or
 	// empty (the commands).
 	commandsReply string
+	stats         map[string]any // get_session_stats answer
+	statsFail     bool
 
 	mu      sync.Mutex
 	gotUI   []map[string]any
@@ -114,6 +116,16 @@ func (f *fakePi) run(stdin io.Reader, stdout io.WriteCloser) {
 			f.mu.Unlock()
 			enc.Encode(map[string]any{"id": rec["id"], "type": "response", "command": "new_session", "success": true,
 				"data": map[string]any{"cancelled": cancelled}})
+		case "get_session_stats":
+			f.mu.Lock()
+			f.calls = append(f.calls, rec)
+			stats, fail := f.stats, f.statsFail
+			f.mu.Unlock()
+			if fail {
+				enc.Encode(map[string]any{"id": rec["id"], "type": "response", "command": "get_session_stats", "success": false, "error": "Unknown command: get_session_stats"})
+				break
+			}
+			enc.Encode(map[string]any{"id": rec["id"], "type": "response", "command": "get_session_stats", "success": true, "data": stats})
 		case "get_commands":
 			f.mu.Lock()
 			f.calls = append(f.calls, rec)

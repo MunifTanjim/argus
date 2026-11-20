@@ -65,6 +65,7 @@ type card struct {
 	streaming bool
 	pending   map[string]*pendingUI // ui request id -> dialog
 	queue     []string              // prompts pi has not taken yet
+	usage     *cardUsage            // nil until pi reports one
 }
 
 func (c *card) sessionID() string {
@@ -76,7 +77,7 @@ func (c *card) sessionID() string {
 // hookUpdate builds the card's push; c.mu must be held. Empty status leaves
 // status/interaction alone; non-nil interaction replaces the current one.
 func (c *card) hookUpdate(st session.Status, ix *session.Interaction, replace bool) registry.HookUpdate {
-	return registry.HookUpdate{
+	u := registry.HookUpdate{
 		Agent:              Agent,
 		AgentSessionID:     c.id,
 		PrevAgentSessionID: c.prevID,
@@ -91,6 +92,14 @@ func (c *card) hookUpdate(st session.Status, ix *session.Interaction, replace bo
 		ReplaceInteraction: replace,
 		Model:              modelUpdate(c.model, c.reasoning, c.level),
 	}
+	if c.usage != nil {
+		u.Summary = c.usage.summary()
+		if c.usage.hasCost {
+			cost := c.usage.cost
+			u.CostUSD = &cost
+		}
+	}
+	return u
 }
 
 // pickPending picks the dialog to answer: by RequestID when the client echoes
@@ -368,6 +377,14 @@ func (d *discoverer) loadState(ctx context.Context, p *sessionProc) (bool, error
 	if err := json.Unmarshal(data, &st); err != nil {
 		return false, err
 	}
+	// pi builds without get_session_stats keep the last usage.
+	var usage *cardUsage
+	if raw, err := p.conn.call(ctx, d.nextID(), "get_session_stats", nil); err == nil && len(raw) > 0 {
+		var stats sessionStats
+		if json.Unmarshal(raw, &stats) == nil {
+			usage = stats.usage()
+		}
+	}
 	d.mu.Lock()
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -385,12 +402,16 @@ func (d *discoverer) loadState(ctx context.Context, p *sessionProc) (bool, error
 		if p.prevID == "" {
 			p.prevID = id
 		}
-		p.id, p.name, p.file, p.queue, p.pending = st.SessionID, "", "", nil, map[string]*pendingUI{}
+		p.id, p.name, p.file, p.queue, p.pending, p.usage = st.SessionID, "", "", nil, map[string]*pendingUI{}, nil
 		delete(d.procs, id)
 		d.procs[st.SessionID] = p
 	}
 	d.mu.Unlock()
-	return p.foldStateLocked(st) || rekeyed, nil
+	usageChanged := false
+	if usage != nil && (p.usage == nil || *usage != *p.usage) {
+		p.usage, usageChanged = usage, true
+	}
+	return p.foldStateLocked(st) || rekeyed || usageChanged, nil
 }
 
 // foldStateLocked takes get_state's file, name, and model; c.mu must be held.
@@ -606,7 +627,16 @@ func (d *discoverer) compact(ctx context.Context, p *sessionProc, instructions s
 	if instructions != "" {
 		params["customInstructions"] = instructions
 	}
-	return d.runCommand(ctx, p, "compact", params)
+	// A manual compact aborts the run first, so no agent_settled follows it to
+	// reread the usage.
+	return inBackground(ctx, func() error {
+		_, err := p.conn.call(context.Background(), d.nextID(), "compact", params)
+		if err == nil {
+			_, err = d.loadState(context.Background(), p)
+		}
+		d.settleIdle(p)
+		return err
+	})
 }
 
 // runCommand runs an RPC command that no agent turn follows.
