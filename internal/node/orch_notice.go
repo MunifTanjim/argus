@@ -148,7 +148,7 @@ func (d *Node) interactionMessages(ctx context.Context, s session.Session, link 
 			continue
 		}
 		d.withdrawInteraction(ctx, n, fmt.Sprintf("The interaction %s of %s (%s) was answered outside argus.",
-			n.ID, sessionLabel(s), d.compositeID(s)))
+			n.ID, sessionLabel(s), d.agentID(s)))
 	}
 	if cur == "" || covered || cur == seen {
 		return cur
@@ -157,7 +157,7 @@ func (d *Node) interactionMessages(ctx context.Context, s session.Session, link 
 	_, err = d.insertMessage(ctx, api.Message{
 		ID: id, Kind: api.MessageInteraction,
 		From: api.Actor{Node: d.id, Key: api.ActorArgus}, To: link.Parent, Child: &api.Actor{Node: d.id, Key: key},
-		Interaction: s.Interaction, Body: renderInteraction(s, d.compositeID(s), s.Interaction),
+		Interaction: s.Interaction, Body: renderInteraction(s, d.agentID(s), s.Interaction),
 		State: api.MessageQueued,
 	})
 	if err != nil {
@@ -245,7 +245,7 @@ func (d *Node) turnEnded(ctx context.Context, s session.Session, link api.Link) 
 	}
 	_, err = d.insertMessage(ctx, api.Message{
 		Kind: api.MessageTurnEnded, From: api.Actor{Node: d.id, Key: api.ActorArgus}, To: link.Parent,
-		Child: &api.Actor{Node: d.id, Key: key}, Body: renderTurnEnded(s, d.compositeID(s), task.ID, lastAssistantText(view.Entries)),
+		Child: &api.Actor{Node: d.id, Key: key}, Body: renderTurnEnded(s, d.agentID(s), task.ID, lastAssistantText(view.Entries)),
 		State: api.MessageQueued,
 	})
 	if err != nil {

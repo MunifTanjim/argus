@@ -52,7 +52,7 @@ func TestPeerChannelCannotImpersonateLocal(t *testing.T) {
 			t.Fatalf("caller does not resolve locally on b: %+v %v", s, err)
 		}
 		err := a.peers.Load().call(peerCtx(t), "b", api.MethodOrchSessionKill,
-			api.OrchTargetParams{Caller: caller, SessionID: "b:default:%p2"}, nil)
+			api.OrchTargetParams{Caller: caller, SessionID: "b:claude:p2"}, nil)
 		if err == nil || !strings.Contains(err.Error(), errLocalCallerOnPeer.Error()) {
 			t.Fatalf("kill over a peer channel with a local caller: err = %v", err)
 		}
@@ -151,7 +151,7 @@ func TestKillChecksActorNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.kill(t.Context(), ref, "home:default:%p2"); err == nil || !strings.Contains(err.Error(), "only the parent") {
+	if _, err := d.kill(t.Context(), ref, "home:claude:p2"); err == nil || !strings.Contains(err.Error(), "only the parent") {
 		t.Fatalf("err = %v", err)
 	}
 	if fd.called {

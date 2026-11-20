@@ -170,7 +170,7 @@ func TestSessionRespondAllow(t *testing.T) {
 
 func TestSessionListTable(t *testing.T) {
 	f := &sessionFake{result: api.OrchListResult{Sessions: []session.Session{
-		{ID: "n1:a", Name: "one", Agent: "claude", Status: "idle", Cwd: "/x", Parent: &session.ParentRef{SessionID: "n1:p"}},
+		{ID: "n1:a", Name: "one", Agent: "claude", Status: "idle", Cwd: "/x", Parent: &session.ParentRef{ID: "n1:claude:p"}},
 		{ID: "n1:b", Name: "two", Agent: "codex", Status: "working", Cwd: "/y", Parent: &session.ParentRef{Gone: true}},
 		{ID: "n1:c", Name: "three", Agent: "codex", Status: "working", Cwd: "/z"},
 	}}}
@@ -182,7 +182,7 @@ func TestSessionListTable(t *testing.T) {
 	if len(lines) != 4 || !strings.HasPrefix(lines[0], "ID") || !strings.Contains(lines[0], "PARENT") {
 		t.Fatalf("out = %q", out)
 	}
-	for i, want := range []string{"n1:p", "gone", "-"} {
+	for i, want := range []string{"n1:claude:p", "gone", "-"} {
 		fields := strings.Fields(lines[i+1])
 		if fields[len(fields)-2] != want {
 			t.Errorf("row %d = %q, want parent %q", i, lines[i+1], want)

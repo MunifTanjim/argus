@@ -561,7 +561,7 @@ func TestCrossNodeClientRelayUnchanged(t *testing.T) {
 			got := sessionsOf()
 			ch, ok := got[childSID]
 			_, hasParent := got[cn.a.sid]
-			return ok && hasParent && ch.Parent != nil && ch.Parent.SessionID == cn.a.sid
+			return ok && hasParent && ch.Parent != nil && ch.Parent.ID == cn.a.sid
 		})
 		read(cn.a.sid)
 		read(childSID)

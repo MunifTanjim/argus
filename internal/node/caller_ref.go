@@ -25,7 +25,7 @@ type callerRef struct {
 }
 
 func (d *Node) localCallerRef(s session.Session) callerRef {
-	return callerRef{Actor: d.actor(s), SessionID: d.compositeID(s), Label: sessionLabel(s), Local: &s}
+	return callerRef{Actor: d.actor(s), SessionID: d.agentID(s), Label: sessionLabel(s), Local: &s}
 }
 
 // callerFrom identifies the caller of a request. A remote caller is accepted

@@ -272,23 +272,10 @@ type Session struct {
 	Offline bool `json:"offline,omitempty"`
 }
 
-// ParentRef is the session that spawned this one through argus, by its stable actor key.
+// ParentRef is the session that spawned this one through argus.
 type ParentRef struct {
-	Node      string `json:"node"`
-	Key       string `json:"key"`
-	SessionID string `json:"session_id,omitempty"` // the live session with Key, when one exists
-	Gone      bool   `json:"gone,omitempty"`
-}
-
-// Composite returns p with a session ID of node nodeID prefixed by nodeID. A
-// parent on another node already carries its composite session ID.
-func (p *ParentRef) Composite(nodeID string) *ParentRef {
-	if p == nil || p.SessionID == "" || p.Node != nodeID {
-		return p
-	}
-	c := *p
-	c.SessionID = CompositeID(nodeID, c.SessionID)
-	return &c
+	ID   string `json:"id"` // agent ID: node, agent, and agent session id
+	Gone bool   `json:"gone,omitempty"`
 }
 
 // Controllable reports whether argus can drive the session's terminal. Only

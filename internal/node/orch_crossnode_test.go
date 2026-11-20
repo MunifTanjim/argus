@@ -537,10 +537,10 @@ func newRemoteTree(t *testing.T) *remoteTree {
 	rt.stops["a"], rt.stops["b"] = stopA, stopB
 	waitPeerOnline(t, rt.a, "b", true)
 	waitPeerOnline(t, rt.b, "a", true)
-	if err := rt.b.orch.PutLink(t.Context(), api.Link{Child: treeChild, Parent: treeParent, ParentSessionID: "a:default:%p1"}); err != nil {
+	if err := rt.b.orch.PutLink(t.Context(), api.Link{Child: treeChild, Parent: treeParent, ParentSessionID: "a:claude:p1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.a.orch.PutLink(t.Context(), api.Link{Child: treeChild, Parent: treeParent, ChildSessionID: "b:default:%c1"}); err != nil {
+	if err := rt.a.orch.PutLink(t.Context(), api.Link{Child: treeChild, Parent: treeParent, ChildSessionID: "b:claude:c1"}); err != nil {
 		t.Fatal(err)
 	}
 	return rt
@@ -557,11 +557,11 @@ func linkOf(t *testing.T, d *Node, child api.Actor) api.Link {
 
 func TestKillTreeKillsRemoteChildren(t *testing.T) {
 	rt := newRemoteTree(t)
-	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:default:%p1")
+	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:claude:p1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"b:default:%c1", "a:default:%p1"}; !slices.Equal(res.Killed, want) || len(res.NotKilled) != 0 {
+	if want := []string{"b:claude:c1", "a:claude:p1"}; !slices.Equal(res.Killed, want) || len(res.NotKilled) != 0 {
 		t.Fatalf("result = %+v, want killed %v", res, want)
 	}
 	if !slices.Equal(rt.rdB.dismissed, []string{"c1"}) {
@@ -578,11 +578,11 @@ func TestKillTreeKillsRemoteChildren(t *testing.T) {
 func TestKillTreeReportsOfflineChildren(t *testing.T) {
 	rt := newRemoteTree(t)
 	rt.takeOffline(t, "b")
-	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:default:%p1")
+	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:claude:p1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(res.Killed, []string{"a:default:%p1"}) || !slices.Equal(res.NotKilled, []string{"b:default:%c1"}) {
+	if !slices.Equal(res.Killed, []string{"a:claude:p1"}) || !slices.Equal(res.NotKilled, []string{"b:claude:c1"}) {
 		t.Fatalf("result = %+v", res)
 	}
 	if by := linkOf(t, rt.a, treeChild).EndedBy; by != "" {
@@ -596,8 +596,8 @@ func TestKillTreeSkipsEndedRemoteChildren(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt.takeOffline(t, "b")
-	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:default:%p1")
-	if err != nil || !slices.Equal(res.Killed, []string{"a:default:%p1"}) || len(res.NotKilled) != 0 {
+	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:claude:p1")
+	if err != nil || !slices.Equal(res.Killed, []string{"a:claude:p1"}) || len(res.NotKilled) != 0 {
 		t.Fatalf("result = %+v err=%v", res, err)
 	}
 }
@@ -609,7 +609,7 @@ func TestAncestorKillNeedsRemoteParent(t *testing.T) {
 	if err := rt.b.orch.PutLink(t.Context(), api.Link{Child: treeChild, Parent: rt.b.actor(x)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rt.b.killAs(t.Context(), rt.b.localCallerRef(x), "b:default:%c1", "", true); err != nil {
+	if _, err := rt.b.killAs(t.Context(), rt.b.localCallerRef(x), "b:claude:c1", "", true); err != nil {
 		t.Fatal(err)
 	}
 	if by := linkOf(t, rt.b, treeChild).EndedBy; by != "parent" {
@@ -619,7 +619,7 @@ func TestAncestorKillNeedsRemoteParent(t *testing.T) {
 
 func TestRemoteChildEndUpdatesMirror(t *testing.T) {
 	rt := newRemoteTree(t)
-	if _, err := rt.b.kill(peerCtx(t), rt.b.localCallerRef(rt.child), "b:default:%c1"); err != nil {
+	if _, err := rt.b.kill(peerCtx(t), rt.b.localCallerRef(rt.child), "b:claude:c1"); err != nil {
 		t.Fatal(err)
 	}
 	rt.flush(t, "b")
@@ -630,7 +630,7 @@ func TestRemoteChildEndUpdatesMirror(t *testing.T) {
 
 func TestParentRefRemoteParent(t *testing.T) {
 	rt := newRemoteTree(t)
-	want := session.ParentRef{Node: "a", Key: "claude:p1", SessionID: "a:default:%p1"}
+	want := session.ParentRef{ID: "a:claude:p1"}
 	if ref := rt.b.parentRef(rt.child); ref == nil || *ref != want {
 		t.Fatalf("parent ref = %+v, want %+v", ref, want)
 	}
@@ -669,11 +669,11 @@ func TestKillRemoteChildAlreadyGone(t *testing.T) {
 	rt := newRemoteTree(t)
 	rt.b.markOrchSettled()
 	rt.b.reg.ReconcileSessions("claude", nil)
-	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:default:%p1")
+	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:claude:p1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(res.Killed, []string{"a:default:%p1"}) || len(res.NotKilled) != 0 {
+	if !slices.Equal(res.Killed, []string{"a:claude:p1"}) || len(res.NotKilled) != 0 {
 		t.Fatalf("result = %+v", res)
 	}
 	if by := linkOf(t, rt.a, treeChild).EndedBy; by != "self" {
@@ -688,7 +688,7 @@ func TestOwnerKillWithUnreachableRemoteChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res, ok := out.(api.SessionKillResult); !ok || !slices.Equal(res.NotKilled, []string{"b:default:%c1"}) {
+	if res, ok := out.(api.SessionKillResult); !ok || !slices.Equal(res.NotKilled, []string{"b:claude:c1"}) {
 		t.Fatalf("result = %#v", out)
 	}
 	if !slices.Equal(rt.rdA.dismissed, []string{"p1"}) {
@@ -702,21 +702,21 @@ func TestNestedCrossNodeKill(t *testing.T) {
 	rt := newRemoteTree(t)
 	rt.a.addAgentSession("claude", "g1")
 	grand := api.Actor{Node: "a", Key: "claude:g1"}
-	if err := rt.a.orch.PutLink(t.Context(), api.Link{Child: grand, Parent: treeChild, ParentSessionID: "b:default:%c1"}); err != nil {
+	if err := rt.a.orch.PutLink(t.Context(), api.Link{Child: grand, Parent: treeChild, ParentSessionID: "b:claude:c1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.b.orch.PutLink(t.Context(), api.Link{Child: grand, Parent: treeChild, ChildSessionID: "a:default:%g1"}); err != nil {
+	if err := rt.b.orch.PutLink(t.Context(), api.Link{Child: grand, Parent: treeChild, ChildSessionID: "a:claude:g1"}); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:default:%p1")
+	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:claude:p1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if d := time.Since(start); d > 5*time.Second {
 		t.Fatalf("kill took %s", d)
 	}
-	if want := []string{"a:default:%g1", "b:default:%c1", "a:default:%p1"}; !slices.Equal(res.Killed, want) || len(res.NotKilled) != 0 {
+	if want := []string{"a:claude:g1", "b:claude:c1", "a:claude:p1"}; !slices.Equal(res.Killed, want) || len(res.NotKilled) != 0 {
 		t.Fatalf("result = %+v, want killed %v", res, want)
 	}
 	for _, c := range []struct {
@@ -858,14 +858,14 @@ func TestRemoteKillFindsResumedChild(t *testing.T) {
 	rt := newRemoteTree(t)
 	rt.b.markOrchSettled()
 	// The mirror holds the session id from spawn; the child now runs elsewhere.
-	if err := rt.a.orch.PutLink(t.Context(), api.Link{Child: treeChild, Parent: treeParent, ChildSessionID: "b:default:%old"}); err != nil {
+	if err := rt.a.orch.PutLink(t.Context(), api.Link{Child: treeChild, Parent: treeParent, ChildSessionID: "b:claude:old"}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:default:%p1")
+	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:claude:p1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(res.Killed, "b:default:%c1") || len(res.NotKilled) != 0 {
+	if !slices.Contains(res.Killed, "b:claude:c1") || len(res.NotKilled) != 0 {
 		t.Fatalf("result = %+v, want the child killed by its key", res)
 	}
 	if by := linkOf(t, rt.a, treeChild).EndedBy; by != "ancestor" {
@@ -876,14 +876,14 @@ func TestRemoteKillFindsResumedChild(t *testing.T) {
 func TestRemoteKillBeforeSettleIsNotKilled(t *testing.T) {
 	rt := newRemoteTree(t)
 	gone := api.Actor{Node: "b", Key: "claude:gone"}
-	if err := rt.a.orch.PutLink(t.Context(), api.Link{Child: gone, Parent: treeParent, ChildSessionID: "b:default:%gone"}); err != nil {
+	if err := rt.a.orch.PutLink(t.Context(), api.Link{Child: gone, Parent: treeParent, ChildSessionID: "b:claude:gone"}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:default:%p1")
+	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:claude:p1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(res.NotKilled, "b:default:%gone") {
+	if !slices.Contains(res.NotKilled, "b:claude:gone") {
 		t.Fatalf("result = %+v, want the unknown child not killed", res)
 	}
 	if by := linkOf(t, rt.a, gone).EndedBy; by != "" {
@@ -929,7 +929,7 @@ func TestCrossNodeSendStateComesBack(t *testing.T) {
 func TestCrossNodeSendFailsFastForUnknownSession(t *testing.T) {
 	cp := newCrossPeers(t)
 	cp.b.markOrchSettled()
-	if _, err := cp.a.send(peerCtx(t), cp.a.localCallerRef(cp.parent), "b:default:%nope", "hi", ""); err == nil {
+	if _, err := cp.a.send(peerCtx(t), cp.a.localCallerRef(cp.parent), "b:claude:nope", "hi", ""); err == nil {
 		t.Fatal("send to an unknown session on b succeeded")
 	}
 	if ms := messagesOf(t, cp.a, api.MessageText); len(ms) != 0 {
@@ -968,7 +968,7 @@ func delivers(items []orch.OutboxItem) []orch.OutboxItem {
 func TestCrossNodeSendThroughLinkStillFailsFast(t *testing.T) {
 	cp := newCrossPeers(t)
 	cp.b.markOrchSettled()
-	gone := "b:default:%gone"
+	gone := "b:claude:gone"
 	if err := cp.a.orch.PutLink(t.Context(), api.Link{Child: api.Actor{Node: "b", Key: "opencode:gone"}, Parent: crossParent, ChildSessionID: gone}); err != nil {
 		t.Fatal(err)
 	}
@@ -1062,11 +1062,11 @@ func TestRemoteKillOfAClearedChildLeavesTheNewConversation(t *testing.T) {
 	rt.b.markOrchSettled()
 	// The child ran /clear on b; a's mirror still has the old key.
 	clearSession(rt.b, "%c1", "c1-next")
-	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:default:%p1")
+	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:claude:p1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if slices.Contains(res.Killed, "b:default:%c1") || len(res.NotKilled) > 0 {
+	if slices.Contains(res.Killed, "b:claude:c1") || len(res.NotKilled) > 0 {
 		t.Fatalf("result = %+v, want the new conversation left alone and nothing failed", res)
 	}
 	if _, ok := rt.b.reg.FindByAgentSession("claude", "c1-next"); !ok {
@@ -1080,11 +1080,11 @@ func TestRemoteKillOfAClearedChildLeavesTheNewConversation(t *testing.T) {
 func TestRemoteKillOfAClearedChildBeforeSettleIsNotKilled(t *testing.T) {
 	rt := newRemoteTree(t)
 	clearSession(rt.b, "%c1", "c1-next")
-	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:default:%p1")
+	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:claude:p1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(res.NotKilled, "b:default:%c1") {
+	if !slices.Contains(res.NotKilled, "b:claude:c1") {
 		t.Fatalf("result = %+v, want the child not killed before b settled", res)
 	}
 	if by := linkOf(t, rt.a, treeChild).EndedBy; by != "" {

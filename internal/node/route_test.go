@@ -109,11 +109,11 @@ func TestRouteKillRemoteChild(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := rp.a.kill(ctx, rp.a.localCallerRef(rp.caller), "b:default:%p2")
+	res, err := rp.a.kill(ctx, rp.a.localCallerRef(rp.caller), "b:claude:p2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Killed) != 1 || res.Killed[0] != "b:default:%p2" {
+	if len(res.Killed) != 1 || res.Killed[0] != "b:claude:p2" {
 		t.Fatalf("killed = %v", res.Killed)
 	}
 	if !rp.fd.called {
@@ -123,7 +123,7 @@ func TestRouteKillRemoteChild(t *testing.T) {
 
 func TestRouteKillRemoteNotParent(t *testing.T) {
 	rp := newRoutePeers(t)
-	_, err := rp.a.kill(peerCtx(t), rp.a.localCallerRef(rp.caller), "b:default:%p2")
+	_, err := rp.a.kill(peerCtx(t), rp.a.localCallerRef(rp.caller), "b:claude:p2")
 	if err == nil || !strings.Contains(err.Error(), "only the parent") {
 		t.Fatalf("err = %v", err)
 	}
@@ -167,12 +167,9 @@ func TestRouteTargetBareIDThatLooksComposite(t *testing.T) {
 	if _, remote := d.ownerOf("default:%3"); remote {
 		t.Fatal("default:%3 routed to node default")
 	}
-	res, err := d.getSession(t.Context(), "default:%3")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Session.ID != "home:default:%3" {
-		t.Fatalf("session = %+v", res.Session)
+	d.markOrchSettled()
+	if _, err := d.getSession(t.Context(), "default:%3"); !isCode(err, api.CodeUnknownSession) {
+		t.Fatalf("err = %v", err)
 	}
 }
 

@@ -142,13 +142,12 @@ func TestWithCapsStampsParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	child, _ := d.reg.FindByAgentSession("claude", "c1")
-	if p := d.withCaps(child).Parent; p == nil || !p.Gone || p.Key != "claude:p1" {
+	if p := d.withCaps(child).Parent; p == nil || !p.Gone || p.ID != actorID(api.Actor{Node: d.id, Key: "claude:p1"}) {
 		t.Fatalf("absent parent: %+v", p)
 	}
 	hookSession(d, "%2", "p1")
-	parent, _ := d.reg.FindByAgentSession("claude", "p1")
 	p := d.withCaps(child).Parent
-	if p == nil || p.Gone || p.SessionID != parent.ID {
+	if p == nil || p.Gone || p.ID != actorID(api.Actor{Node: d.id, Key: "claude:p1"}) {
 		t.Fatalf("live parent: %+v", p)
 	}
 }
@@ -271,5 +270,39 @@ func TestOrchGoneGraceKeepsAShortDropOut(t *testing.T) {
 	assertActor(t, d, store, "claude:c1")
 	if m, _, _ := store.Get(ctx, "m-00000001"); m.State != api.MessageQueued {
 		t.Fatalf("state = %s, want queued", m.State)
+	}
+}
+
+func TestOrchOldAgentIDNeverReachesNewConversation(t *testing.T) {
+	d, _ := orchNode(t)
+	ctx := context.Background()
+	d.SetIdentity("home", "")
+	d.markOrchSettled()
+	hookSession(d, "%3", "c1")
+	d.orchPass(ctx)
+	clearSession(d, "%3", "c2")
+	d.orchPass(ctx)
+	owner := callerRef{Actor: api.Actor{Node: "home", Key: api.ActorOwner}}
+	const old = "home:claude:c1"
+	if _, err := d.send(ctx, owner, old, "hi", ""); !isCode(err, api.CodeUnknownSession) {
+		t.Errorf("send: err = %v", err)
+	}
+	if _, err := d.getSession(ctx, old); !isCode(err, api.CodeUnknownSession) {
+		t.Errorf("get: err = %v", err)
+	}
+	if _, err := d.output(ctx, old); !isCode(err, api.CodeUnknownSession) {
+		t.Errorf("output: err = %v", err)
+	}
+	if _, err := d.transcript(ctx, old, 0); !isCode(err, api.CodeUnknownSession) {
+		t.Errorf("transcript: err = %v", err)
+	}
+	if _, err := d.rename(ctx, old, "x"); !isCode(err, api.CodeUnknownSession) {
+		t.Errorf("rename: err = %v", err)
+	}
+	if _, err := d.kill(ctx, owner, old); !isCode(err, api.CodeUnknownSession) {
+		t.Errorf("kill: err = %v", err)
+	}
+	if got := messagesTo(t, d, "claude:c2"); len(got) != 0 {
+		t.Fatalf("new conversation got %+v", got)
 	}
 }

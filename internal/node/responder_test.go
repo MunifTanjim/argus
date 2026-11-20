@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"io"
 	"net"
 	"os"
@@ -768,21 +767,16 @@ func callOver(t *testing.T, ch *api.Channel, gw *api.Peer, fromNode chan api.Rel
 	}
 }
 
-func isMethodNotFound(err error) bool {
-	var rpcErr *api.RPCError
-	return errors.As(err, &rpcErr) && rpcErr.Code == api.CodeMethodNotFound
-}
-
 func TestPeerOpenedChannelGetsPeerDispatch(t *testing.T) {
 	forModes(t, func(t *testing.T, e2ee bool) {
 		a, _ := twoNodes(t, e2ee)
 		err := a.peers.Load().call(peerCtx(t), "b", api.MethodOrchSessionCurrent, api.CallerParams{}, nil)
-		if isMethodNotFound(err) {
+		if isCode(err, api.CodeMethodNotFound) {
 			t.Fatalf("orch.session.current over a node-opened channel: %v", err)
 		}
 		// lock.* and server.stop stay local-only on peer channels.
 		for _, m := range []string{"lock.status", api.MethodServerStop} {
-			if err := a.peers.Load().call(peerCtx(t), "b", m, nil, nil); !isMethodNotFound(err) {
+			if err := a.peers.Load().call(peerCtx(t), "b", m, nil, nil); !isCode(err, api.CodeMethodNotFound) {
 				t.Fatalf("%s over a node-opened channel: err = %v, want method not found", m, err)
 			}
 		}

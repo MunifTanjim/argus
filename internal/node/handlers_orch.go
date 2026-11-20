@@ -22,19 +22,19 @@ import (
 
 var errOrchDisabled = errors.New("agent sessions are disabled on this node")
 
-// localTarget resolves a bare or own-prefixed composite ID to a session on this node.
-func (d *Node) localTarget(id string) (session.Session, error) {
-	node, rest, prefixed := session.SplitCompositeID(id)
-	if prefixed && node == d.id {
-		if s, found := d.reg.Get(rest); found {
-			return s, nil
-		}
+// agentTarget resolves an agent ID (node, agent, agent session id) to the live
+// session of that conversation on this node. It never resolves a pane.
+func (d *Node) agentTarget(id string) (session.Session, error) {
+	node, key, _ := session.SplitCompositeID(id)
+	// A key is agent:id, so an ID without the node prefix has no second colon.
+	if !strings.Contains(key, ":") {
+		return session.Session{}, d.missing(id)
 	}
-	if s, found := d.reg.Get(id); found {
-		return s, nil
-	}
-	if prefixed && node != d.id && strings.Contains(rest, ":") {
+	if node != d.id {
 		return session.Session{}, fmt.Errorf("session %s is on node %s, which is not connected", id, node)
+	}
+	if s, live := d.sessionForKey(key); live {
+		return s, nil
 	}
 	return session.Session{}, d.missing(id)
 }
@@ -62,16 +62,17 @@ func (d *Node) settled() bool {
 	}
 }
 
-// composite returns s as orch.* clients see it, with session IDs prefixed by the node ID.
+// composite returns s as orch.* clients see it: its ID is the agent ID.
 func (d *Node) composite(s session.Session) session.Session {
 	s = d.withCaps(s)
-	s.ID = d.compositeID(s)
-	s.Parent = s.Parent.Composite(d.id)
+	s.ID = d.agentID(s)
 	return s
 }
 
-func (d *Node) compositeID(s session.Session) string {
-	return session.CompositeID(d.id, s.ID)
+// agentID is the ID that orch.* clients use for s; "" until its agent session
+// id is known.
+func (d *Node) agentID(s session.Session) string {
+	return actorID(d.actor(s))
 }
 
 // lastAssistantText joins the text entries that follow the last user entry.
@@ -113,6 +114,9 @@ func (d *Node) handleOrchSessionCurrent(ctx context.Context, params json.RawMess
 func (d *Node) currentSession(caller callerRef) (session.Session, error) {
 	if caller.Local == nil {
 		return session.Session{}, fmt.Errorf("current session: %s is not a session on this node", caller.SessionID)
+	}
+	if d.agentID(*caller.Local) == "" {
+		return session.Session{}, notReady(caller.Label)
 	}
 	return d.composite(*caller.Local), nil
 }
@@ -170,11 +174,13 @@ func (d *Node) listAll(ctx context.Context) api.OrchListResult {
 }
 
 func (d *Node) list() []session.Session {
-	snap := d.reg.Snapshot()
-	for i := range snap {
-		snap[i] = d.composite(snap[i])
+	out := []session.Session{}
+	for _, s := range d.reg.Snapshot() {
+		if d.agentID(s) != "" {
+			out = append(out, d.composite(s))
+		}
 	}
-	return snap
+	return out
 }
 
 // orchCall decodes an orch.* request that needs the store, resolving the
@@ -206,7 +212,7 @@ func (d *Node) getSession(ctx context.Context, id string) (api.OrchGetResult, er
 	if res, done, err := routed[api.OrchGetResult](ctx, d, id, api.MethodOrchSessionGet, api.OrchTargetParams{SessionID: id}); done {
 		return res, err
 	}
-	s, err := d.localTarget(id)
+	s, err := d.agentTarget(id)
 	if err != nil {
 		return api.OrchGetResult{}, err
 	}
@@ -231,7 +237,7 @@ func (d *Node) output(ctx context.Context, id string) (api.OrchOutputResult, err
 	if res, done, err := routed[api.OrchOutputResult](ctx, d, id, api.MethodOrchSessionOutput, api.OrchTargetParams{SessionID: id}); done {
 		return res, err
 	}
-	s, err := d.localTarget(id)
+	s, err := d.agentTarget(id)
 	if err != nil {
 		return api.OrchOutputResult{}, err
 	}
@@ -254,7 +260,7 @@ func (d *Node) transcript(ctx context.Context, id string, last int) (api.OrchTra
 	if res, done, err := routed[api.OrchTranscriptResult](ctx, d, id, api.MethodOrchSessionTranscript, api.OrchTranscriptParams{SessionID: id, Last: last}); done {
 		return res, err
 	}
-	s, err := d.localTarget(id)
+	s, err := d.agentTarget(id)
 	if err != nil {
 		return api.OrchTranscriptResult{}, err
 	}
@@ -347,9 +353,9 @@ func (d *Node) spawnFor(ctx context.Context, caller callerRef, p api.OrchSpawnPa
 
 	child := api.Actor{Node: d.id, Key: childKey}
 	task.To = child
-	link := api.Link{Child: child, Parent: parent, TaskID: task.ID, ChildSessionID: session.CompositeID(d.id, spawned.SessionID)}
+	link := api.Link{Child: child, Parent: parent, TaskID: task.ID, ChildSessionID: actorID(child)}
 	if parent.Node != d.id {
-		link.ParentSessionID = caller.SessionID
+		link.ParentSessionID = actorID(parent)
 	}
 	if err := d.orch.LinkSpawned(ctx, link, task, req); err != nil {
 		d.abortSpawn(ctx, p.Agent, childKey, spawned)
@@ -459,7 +465,7 @@ func (d *Node) send(ctx context.Context, caller callerRef, targetID, text, reque
 		}
 		return d.sendTo(ctx, caller, to, text, requestID)
 	}
-	target, err := d.localTarget(targetID)
+	target, err := d.agentTarget(targetID)
 	if err != nil {
 		return api.OrchSendResult{}, err
 	}
@@ -693,7 +699,7 @@ func (d *Node) respond(ctx context.Context, caller callerRef, p api.OrchRespondP
 		if n.Child != nil {
 			who = n.Child.Key
 			if c, live := d.sessionForKey(n.Child.Key); live {
-				who = fmt.Sprintf("%s (%s)", sessionLabel(c), d.compositeID(c))
+				who = fmt.Sprintf("%s (%s)", sessionLabel(c), d.agentID(c))
 			}
 		}
 		return fmt.Errorf("%s waits for the user; only the user can answer it, in the child's session", who)
@@ -715,7 +721,7 @@ func (d *Node) respond(ctx context.Context, caller callerRef, p api.OrchRespondP
 		return err
 	}
 	if !ok || caller.Actor.Key == "" || link.Parent != caller.Actor {
-		return fmt.Errorf("only the parent of %s can answer its prompts", d.compositeID(child))
+		return fmt.Errorf("only the parent of %s can answer its prompts", d.agentID(child))
 	}
 	if pendingSig(child) == "" || pendingSig(child) != interactionSig(n.Interaction) {
 		return answered
@@ -851,7 +857,7 @@ func (d *Node) rename(ctx context.Context, id, name string) (api.SessionRenameRe
 	if res, done, err := routed[api.SessionRenameResult](ctx, d, id, api.MethodOrchSessionRename, api.OrchRenameParams{SessionID: id, Name: name}); done {
 		return res, err
 	}
-	s, err := d.localTarget(id)
+	s, err := d.agentTarget(id)
 	if err != nil {
 		return api.SessionRenameResult{}, err
 	}
@@ -878,17 +884,8 @@ func (d *Node) killAs(ctx context.Context, caller callerRef, targetID, childKey 
 	if res, done, err := routed[api.OrchKillResult](ctx, d, targetID, api.MethodOrchSessionKill, params); done {
 		return res, err
 	}
-	var target session.Session
-	var err error
-	if childKey != "" && caller.Local == nil {
-		// A child key that is not live names a conversation that ended: the
-		// session that holds its pane now is not the caller's child.
-		s, live := d.sessionForKey(childKey)
-		if !live {
-			return api.OrchKillResult{}, d.missing(targetID)
-		}
-		target = s
-	} else if target, err = d.localTarget(targetID); err != nil {
+	target, err := d.agentTarget(targetID)
+	if err != nil {
 		return api.OrchKillResult{}, err
 	}
 	by := "self"
@@ -898,7 +895,7 @@ func (d *Node) killAs(ctx context.Context, caller callerRef, targetID, childKey 
 			return api.OrchKillResult{}, err
 		}
 		if !ok || caller.Actor.Key == "" || link.Parent != caller.Actor {
-			return api.OrchKillResult{}, fmt.Errorf("only the parent of %s or the session itself can kill it", d.compositeID(target))
+			return api.OrchKillResult{}, fmt.Errorf("only the parent of %s or the session itself can kill it", d.agentID(target))
 		}
 		by = "parent"
 		if ancestor && caller.Local == nil && caller.Actor.Node != d.id {

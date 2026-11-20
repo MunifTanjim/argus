@@ -87,14 +87,14 @@ func TestMCPRespondSchemaConstrainsAnswers(t *testing.T) {
 func TestMCPWhoamiComposite(t *testing.T) {
 	_, b := toolNode(t)
 	res := b.Call(t.Context(), "codex", "get_current_session", codexMeta("t1"), json.RawMessage(`{}`))
-	if res.IsError || !strings.Contains(res.Text, `"id":"home:default:%t1"`) {
+	if res.IsError || !strings.Contains(res.Text, `"id":"home:codex:t1"`) {
 		t.Fatalf("res = %+v", res)
 	}
 }
 
 func TestMCPSendQueuesFromMetaCaller(t *testing.T) {
 	d, b := toolNode(t)
-	args := json.RawMessage(`{"session_id":"home:default:%t2","text":"hello"}`)
+	args := json.RawMessage(`{"session_id":"home:codex:t2","text":"hello"}`)
 	res := b.Call(t.Context(), "codex", "send_message", codexMeta("t1"), args)
 	if res.IsError {
 		t.Fatalf("res = %+v", res)
@@ -111,7 +111,7 @@ func TestMCPSendQueuesFromMetaCaller(t *testing.T) {
 
 func TestMCPSendRequestIDQueuesOnce(t *testing.T) {
 	d, b := toolNode(t)
-	args := json.RawMessage(`{"session_id":"home:default:%t2","text":"hello","request_id":"r1"}`)
+	args := json.RawMessage(`{"session_id":"home:codex:t2","text":"hello","request_id":"r1"}`)
 	first := b.Call(t.Context(), "codex", "send_message", codexMeta("t1"), args)
 	again := b.Call(t.Context(), "codex", "send_message", codexMeta("t1"), args)
 	if first.IsError || again.Text != first.Text {
@@ -124,7 +124,7 @@ func TestMCPSendRequestIDQueuesOnce(t *testing.T) {
 
 func TestToolArgumentCannotSetCaller(t *testing.T) {
 	d, b := toolNode(t)
-	args := json.RawMessage(`{"session_id":"home:default:%t2","text":"hello","caller":"claude:p1"}`)
+	args := json.RawMessage(`{"session_id":"home:codex:t2","text":"hello","caller":"claude:p1"}`)
 	res := b.Call(t.Context(), "codex", "send_message", codexMeta("t1"), args)
 	if !res.IsError || !strings.Contains(res.Text, "caller") {
 		t.Fatalf("res = %+v", res)
@@ -136,7 +136,7 @@ func TestToolArgumentCannotSetCaller(t *testing.T) {
 
 func TestMCPCallerToolWithoutIdentityFails(t *testing.T) {
 	_, b := toolNode(t)
-	args := json.RawMessage(`{"session_id":"home:default:%t2","text":"hello"}`)
+	args := json.RawMessage(`{"session_id":"home:codex:t2","text":"hello"}`)
 	res := b.Call(t.Context(), "codex", "send_message", map[string]json.RawMessage{}, args)
 	if !res.IsError || !strings.Contains(res.Text, "not running inside an argus agent session") {
 		t.Fatalf("res = %+v", res)
@@ -146,14 +146,14 @@ func TestMCPCallerToolWithoutIdentityFails(t *testing.T) {
 func TestMCPListWorksWithoutIdentity(t *testing.T) {
 	_, b := toolNode(t)
 	res := b.Call(t.Context(), "codex", "list_sessions", nil, nil)
-	if res.IsError || !strings.Contains(res.Text, "home:default:%t1") {
+	if res.IsError || !strings.Contains(res.Text, "home:codex:t1") {
 		t.Fatalf("res = %+v", res)
 	}
 }
 
 func TestMCPKillRightsMatchCLI(t *testing.T) {
 	_, b := toolNode(t)
-	args := json.RawMessage(`{"session_id":"home:default:%t1"}`)
+	args := json.RawMessage(`{"session_id":"home:codex:t1"}`)
 	res := b.Call(t.Context(), "codex", "kill_session", codexMeta("t2"), args)
 	if !res.IsError || !strings.Contains(res.Text, "only the parent") {
 		t.Fatalf("res = %+v", res)
@@ -245,7 +245,7 @@ func TestMCPRenameRenamesAnySession(t *testing.T) {
 	fr := &fakeRenamer{Adapter: d.adapters["codex"]}
 	d.adapters["codex"] = fr
 	// t2 is neither the caller's child nor the caller.
-	res := b.Call(t.Context(), "codex", "rename_session", nil, json.RawMessage(`{"session_id":"home:default:%t2","name":"Review"}`))
+	res := b.Call(t.Context(), "codex", "rename_session", nil, json.RawMessage(`{"session_id":"home:codex:t2","name":"Review"}`))
 	var out api.SessionRenameResult
 	if res.IsError || json.Unmarshal([]byte(res.Text), &out) != nil || out.Name != "Review" || !out.Applied {
 		t.Fatalf("res = %+v", res)
@@ -258,7 +258,7 @@ func TestMCPRenameRenamesAnySession(t *testing.T) {
 func TestMCPRejectsWhitespaceOnlyRequiredValues(t *testing.T) {
 	d, b := toolNode(t)
 	for _, args := range []string{
-		`{"session_id":"home:default:%t2","text":"  \n\t"}`,
+		`{"session_id":"home:codex:t2","text":"  \n\t"}`,
 		`{"session_id":"   ","text":"hello"}`,
 	} {
 		res := b.Call(t.Context(), "codex", "send_message", codexMeta("t1"), json.RawMessage(args))
@@ -274,7 +274,7 @@ func TestMCPRejectsWhitespaceOnlyRequiredValues(t *testing.T) {
 func TestMCPReplyRightsMatchCLI(t *testing.T) {
 	d, b := toolNode(t)
 	d.addAgentSession("codex", "t3")
-	sent := b.Call(t.Context(), "codex", "send_message", codexMeta("t1"), json.RawMessage(`{"session_id":"home:default:%t2","text":"q"}`))
+	sent := b.Call(t.Context(), "codex", "send_message", codexMeta("t1"), json.RawMessage(`{"session_id":"home:codex:t2","text":"q"}`))
 	var m api.OrchSendResult
 	if sent.IsError || json.Unmarshal([]byte(sent.Text), &m) != nil {
 		t.Fatalf("send = %+v", sent)
@@ -322,15 +322,15 @@ func TestMCPRespondRightsMatchCLI(t *testing.T) {
 
 func TestMCPShowReturnsQueued(t *testing.T) {
 	_, b := toolNode(t)
-	if res := b.Call(t.Context(), "codex", "send_message", codexMeta("t1"), json.RawMessage(`{"session_id":"home:default:%t2","text":"q"}`)); res.IsError {
+	if res := b.Call(t.Context(), "codex", "send_message", codexMeta("t1"), json.RawMessage(`{"session_id":"home:codex:t2","text":"q"}`)); res.IsError {
 		t.Fatalf("send = %+v", res)
 	}
-	res := b.Call(t.Context(), "codex", "get_session", nil, json.RawMessage(`{"session_id":"home:default:%t2"}`))
+	res := b.Call(t.Context(), "codex", "get_session", nil, json.RawMessage(`{"session_id":"home:codex:t2"}`))
 	var out api.OrchGetResult
 	if res.IsError || json.Unmarshal([]byte(res.Text), &out) != nil {
 		t.Fatalf("res = %+v", res)
 	}
-	if out.Session.ID != "home:default:%t2" || len(out.Queued) != 1 || out.Queued[0].Body != "q" {
+	if out.Session.ID != "home:codex:t2" || len(out.Queued) != 1 || out.Queued[0].Body != "q" {
 		t.Fatalf("out = %+v", out)
 	}
 }
@@ -361,7 +361,7 @@ func transcriptToolNode(t *testing.T) mcpBackend {
 
 func TestMCPOutputReturnsLatestAnswer(t *testing.T) {
 	b := transcriptToolNode(t)
-	res := b.Call(t.Context(), "codex", "get_session_output", nil, json.RawMessage(`{"session_id":"home:default:%t9"}`))
+	res := b.Call(t.Context(), "codex", "get_session_output", nil, json.RawMessage(`{"session_id":"home:codex:t9"}`))
 	var out api.OrchOutputResult
 	if res.IsError || json.Unmarshal([]byte(res.Text), &out) != nil || out.Text != "working\n\ndone" {
 		t.Fatalf("res = %+v", res)
@@ -370,7 +370,7 @@ func TestMCPOutputReturnsLatestAnswer(t *testing.T) {
 
 func TestMCPTranscriptHonorsLast(t *testing.T) {
 	b := transcriptToolNode(t)
-	res := b.Call(t.Context(), "codex", "get_session_transcript", nil, json.RawMessage(`{"session_id":"home:default:%t9","last":2}`))
+	res := b.Call(t.Context(), "codex", "get_session_transcript", nil, json.RawMessage(`{"session_id":"home:codex:t9","last":2}`))
 	var out api.OrchTranscriptResult
 	if res.IsError || json.Unmarshal([]byte(res.Text), &out) != nil {
 		t.Fatalf("res = %+v", res)
@@ -389,7 +389,7 @@ func TestMCPTranscriptOmitsArgusMessages(t *testing.T) {
 		Agent: "codex", Server: session.TmuxServerDefault, PaneID: "%t9",
 		AgentSessionID: "t9", Status: session.StatusIdle, TranscriptPath: "/t9.jsonl",
 	})
-	res := b.Call(t.Context(), "codex", "get_session_transcript", nil, json.RawMessage(`{"session_id":"home:default:%t9"}`))
+	res := b.Call(t.Context(), "codex", "get_session_transcript", nil, json.RawMessage(`{"session_id":"home:codex:t9"}`))
 	var out api.OrchTranscriptResult
 	if res.IsError || json.Unmarshal([]byte(res.Text), &out) != nil {
 		t.Fatalf("res = %+v", res)

@@ -58,7 +58,7 @@ func endedBy(t *testing.T, d *Node, id string) string {
 
 func agentKill(t *testing.T, d *Node, caller api.CallerInfo, id string) (api.OrchKillResult, error) {
 	t.Helper()
-	params, _ := json.Marshal(api.OrchTargetParams{Caller: caller, SessionID: "home:default:%" + id})
+	params, _ := json.Marshal(api.OrchTargetParams{Caller: caller, SessionID: "home:claude:" + id})
 	out, err := d.handleOrchSessionKill(t.Context(), params)
 	if err != nil {
 		return api.OrchKillResult{}, err
@@ -72,7 +72,7 @@ func TestAgentKillCascadesDeepestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"home:default:%p4", "home:default:%p3", "home:default:%p5", "home:default:%p2"}
+	want := []string{"home:claude:p4", "home:claude:p3", "home:claude:p5", "home:claude:p2"}
 	if !slices.Equal(res.Killed, want) {
 		t.Fatalf("killed = %v, want %v", res.Killed, want)
 	}
@@ -121,7 +121,7 @@ func TestKillReachesBelowAGoneChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"home:default:%p4", "home:default:%p3", "home:default:%p7", "home:default:%p5", "home:default:%p2"}
+	want := []string{"home:claude:p4", "home:claude:p3", "home:claude:p7", "home:claude:p5", "home:claude:p2"}
 	if !slices.Equal(res.Killed, want) {
 		t.Fatalf("killed = %v, want %v", res.Killed, want)
 	}
@@ -134,8 +134,8 @@ func TestKillContinuesAfterAFailedDescendant(t *testing.T) {
 	d, rd, caller := treeNode(t)
 	rd.fail["p3"] = true
 	_, err := agentKill(t, d, caller, "p2")
-	if err == nil || !strings.Contains(err.Error(), "kill home:default:%p3: boom") ||
-		!strings.Contains(err.Error(), "killed: home:default:%p4, home:default:%p5, home:default:%p2") {
+	if err == nil || !strings.Contains(err.Error(), "kill home:claude:p3: boom") ||
+		!strings.Contains(err.Error(), "killed: home:claude:p4, home:claude:p5, home:claude:p2") {
 		t.Fatalf("err = %v", err)
 	}
 	if !slices.Equal(rd.dismissed, []string{"p4", "p5", "p2"}) {

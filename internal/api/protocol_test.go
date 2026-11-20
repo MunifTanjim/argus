@@ -155,12 +155,12 @@ func TestOrchMethodsArePrefixed(t *testing.T) {
 }
 
 func TestSessionParentJSON(t *testing.T) {
-	s := session.Session{Parent: &session.ParentRef{Node: "home", Key: "claude:p", Gone: true}}
+	s := session.Session{Parent: &session.ParentRef{ID: "home:claude:p", Gone: true}}
 	b, err := json.Marshal(s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `"parent":{"node":"home","key":"claude:p","gone":true}`; !strings.Contains(string(b), want) {
+	if want := `"parent":{"id":"home:claude:p","gone":true}`; !strings.Contains(string(b), want) {
 		t.Fatalf("session json = %s, want it to contain %s", b, want)
 	}
 }

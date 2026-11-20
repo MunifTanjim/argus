@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/push"
@@ -37,9 +36,9 @@ func (d *Node) handleMessageSend(ctx context.Context, params json.RawMessage) (a
 	}
 	owner := api.Actor{Node: d.id, Key: api.ActorOwner}
 	if p.ReplyTo == "" {
-		target, ok := d.reg.Get(p.SessionID)
-		if !ok {
-			return nil, fmt.Errorf("unknown session: %s", p.SessionID)
+		target, err := d.agentTarget(p.SessionID)
+		if err != nil {
+			return nil, err
 		}
 		return d.sendText(ctx, callerRef{Actor: owner}, target, p.SessionID, p.Text, "")
 	}

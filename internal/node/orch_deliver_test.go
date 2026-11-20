@@ -74,7 +74,7 @@ func TestSendWaitsWhileWorking(t *testing.T) {
 	d, fp := deliverNode(t)
 	a := apiSession(d, "a", session.StatusIdle, nil)
 	b := apiSession(d, "b", session.StatusWorking, nil)
-	res, err := d.send(t.Context(), d.localCallerRef(a), b.ID, "later", "")
+	res, err := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "later", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestSendWaitsWhilePromptPending(t *testing.T) {
 	d, fp := deliverNode(t)
 	a := apiSession(d, "a", session.StatusIdle, nil)
 	b := apiSession(d, "b", session.StatusAwaitingInput, &session.Interaction{Kind: session.InteractionPermission})
-	res, err := d.send(t.Context(), d.localCallerRef(a), b.ID, "hold", "")
+	res, err := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "hold", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,8 +106,8 @@ func TestSendWaitsWhilePromptPending(t *testing.T) {
 func TestSendToNonAgentSessionFails(t *testing.T) {
 	d, _ := deliverNode(t)
 	a := apiSession(d, "a", session.StatusIdle, nil)
-	plain, _ := d.reg.ApplyHook(registry.HookUpdate{Agent: "shell", AgentSessionID: "x", Status: session.StatusIdle})
-	_, err := d.send(t.Context(), d.localCallerRef(a), plain.ID, "hi", "")
+	plain, _ := d.reg.ApplyHook(registry.HookUpdate{Agent: "antigravity", AgentSessionID: "x", Status: session.StatusIdle})
+	_, err := d.send(t.Context(), d.localCallerRef(a), d.agentID(plain), "hi", "")
 	if err == nil || !strings.Contains(err.Error(), "does not support agent messages") {
 		t.Fatalf("err = %v", err)
 	}
@@ -115,17 +115,16 @@ func TestSendToNonAgentSessionFails(t *testing.T) {
 
 func TestSendToSessionWithoutAgentIDFails(t *testing.T) {
 	d, _ := deliverNode(t)
+	d.markOrchSettled()
 	a := apiSession(d, "a", session.StatusIdle, nil)
 	hookSession(d, "%3", "")
-	want := "default:%3 is not ready yet: its agent session id is unknown"
-	if _, err := d.send(t.Context(), d.localCallerRef(a), "default:%3", "hi", ""); err == nil || err.Error() != want {
-		t.Fatalf("agent send err = %v", err)
-	}
-	if _, err := ownerSend(t, d, api.OwnerSendParams{SessionID: "default:%3", Text: "hi"}); err == nil || err.Error() != want {
-		t.Fatalf("owner send err = %v", err)
-	}
-	if msgs, err := d.orch.List(t.Context(), 10); err != nil || len(msgs) != 0 {
-		t.Fatalf("messages = %+v err=%v", msgs, err)
+	for _, id := range []string{"default:%3", d.id + ":default:%3"} {
+		if _, err := d.send(t.Context(), d.localCallerRef(a), id, "hi", ""); !isCode(err, api.CodeUnknownSession) {
+			t.Errorf("agent send %s: err = %v", id, err)
+		}
+		if _, err := ownerSend(t, d, api.OwnerSendParams{SessionID: id, Text: "hi"}); !isCode(err, api.CodeUnknownSession) {
+			t.Errorf("owner send %s: err = %v", id, err)
+		}
 	}
 }
 
@@ -133,7 +132,7 @@ func TestReplyMarksOriginalAndQueuesBack(t *testing.T) {
 	d, _ := deliverNode(t)
 	a := apiSession(d, "a", session.StatusIdle, nil)
 	b := apiSession(d, "b", session.StatusIdle, nil)
-	m1, err := d.send(t.Context(), d.localCallerRef(a), b.ID, "q", "")
+	m1, err := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "q", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +154,7 @@ func TestReplyByNonRecipientFails(t *testing.T) {
 	a := apiSession(d, "a", session.StatusIdle, nil)
 	b := apiSession(d, "b", session.StatusIdle, nil)
 	c := apiSession(d, "c", session.StatusIdle, nil)
-	m1, _ := d.send(t.Context(), d.localCallerRef(a), b.ID, "q", "")
+	m1, _ := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "q", "")
 	_, err := d.reply(t.Context(), d.localCallerRef(c), m1.MessageID, "x")
 	if err == nil || !strings.Contains(err.Error(), "only the recipient") {
 		t.Fatalf("err = %v", err)
@@ -166,7 +165,7 @@ func TestReplyToGoneSenderFails(t *testing.T) {
 	d, _ := deliverNode(t)
 	a := apiSession(d, "a", session.StatusIdle, nil)
 	b := apiSession(d, "b", session.StatusIdle, nil)
-	m1, _ := d.send(t.Context(), d.localCallerRef(a), b.ID, "q", "")
+	m1, _ := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "q", "")
 	d.orchPass(t.Context())
 	d.reg.ReconcileSessions("opencode", []registry.DiscoveredSession{{AgentSessionID: "b"}})
 	_, err := d.reply(t.Context(), d.localCallerRef(b), m1.MessageID, "a")
@@ -182,7 +181,7 @@ func TestQueuedMessagesFailWhenRecipientEnds(t *testing.T) {
 	d, fp := deliverNode(t)
 	a := apiSession(d, "a", session.StatusIdle, nil)
 	b := apiSession(d, "b", session.StatusWorking, nil)
-	res, err := d.send(t.Context(), d.localCallerRef(a), b.ID, "q", "")
+	res, err := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "q", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,9 +197,9 @@ func TestDeliveryWaitsForTheTurnOfTheLastMessage(t *testing.T) {
 	d, fp := deliverNode(t)
 	a := apiSession(d, "a", session.StatusIdle, nil)
 	b := apiSession(d, "b", session.StatusIdle, nil)
-	m1, _ := d.send(t.Context(), d.localCallerRef(a), b.ID, "one", "")
+	m1, _ := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "one", "")
 	d.orchPass(t.Context())
-	m2, _ := d.send(t.Context(), d.localCallerRef(a), b.ID, "two", "")
+	m2, _ := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "two", "")
 	d.orchPass(t.Context())
 	if msgState(t, d, m1.MessageID) != api.MessageDelivered || msgState(t, d, m2.MessageID) != api.MessageQueued {
 		t.Fatal("second message went out before the first turn started")
@@ -230,7 +229,7 @@ func TestOrchQueueSurvivesRestart(t *testing.T) {
 	d1.adapters["opencode"] = orchPrompter{&fakePrompter{}}
 	a := apiSession(d1, "a", session.StatusIdle, nil)
 	apiSession(d1, "b", session.StatusWorking, nil)
-	res, err := d1.send(context.Background(), d1.localCallerRef(a), "opencode:b", "persist", "")
+	res, err := d1.send(context.Background(), d1.localCallerRef(a), d1.id+":opencode:b", "persist", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +265,7 @@ func TestDeliveryFailureLeavesQueued(t *testing.T) {
 	d.adapters["opencode"] = hookPrompter{orchPrompter{fp}, errors.New("boom"), nil}
 	a := apiSession(d, "a", session.StatusIdle, nil)
 	b := apiSession(d, "b", session.StatusIdle, nil)
-	res, _ := d.send(t.Context(), d.localCallerRef(a), b.ID, "x", "")
+	res, _ := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "x", "")
 	d.orchPass(t.Context())
 	if st := msgState(t, d, res.MessageID); st != api.MessageQueued {
 		t.Fatalf("state = %s", st)
@@ -279,7 +278,7 @@ func TestDeliveryFailureWaitsBeforeRetry(t *testing.T) {
 	d.adapters["opencode"] = hookPrompter{orchPrompter{fp}, errors.New("boom"), func() { tries++ }}
 	a := apiSession(d, "a", session.StatusIdle, nil)
 	b := apiSession(d, "b", session.StatusIdle, nil)
-	if _, err := d.send(t.Context(), d.localCallerRef(a), b.ID, "x", ""); err != nil {
+	if _, err := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "x", ""); err != nil {
 		t.Fatal(err)
 	}
 	d.orchPass(t.Context())
@@ -298,7 +297,7 @@ func TestReplyDuringDeliveryStaysReplied(t *testing.T) {
 	d, fp := deliverNode(t)
 	a := apiSession(d, "a", session.StatusIdle, nil)
 	b := apiSession(d, "b", session.StatusIdle, nil)
-	res, _ := d.send(t.Context(), d.localCallerRef(a), b.ID, "x", "")
+	res, _ := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "x", "")
 	d.adapters["opencode"] = hookPrompter{orchPrompter{fp}, nil, func() {
 		if _, err := d.reply(t.Context(), d.localCallerRef(b), res.MessageID, "done"); err != nil {
 			t.Error(err)
@@ -357,7 +356,7 @@ func TestQueuedMessagesStayForRecipientLiveAfterRestart(t *testing.T) {
 	d, _ := deliverNode(t)
 	a := apiSession(d, "a", session.StatusIdle, nil)
 	b := apiSession(d, "b", session.StatusWorking, nil)
-	res, err := d.send(t.Context(), d.localCallerRef(a), b.ID, "q", "")
+	res, err := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "q", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +399,7 @@ func TestDeliverGroupsWaitingMessages(t *testing.T) {
 	b := apiSession(d, "b", session.StatusWorking, nil)
 	var ids []string
 	for _, from := range []string{"a", "c", "e"} {
-		res, err := d.send(t.Context(), d.localCallerRef(apiSession(d, from, session.StatusIdle, nil)), b.ID, "result from "+from, "")
+		res, err := d.send(t.Context(), d.localCallerRef(apiSession(d, from, session.StatusIdle, nil)), d.agentID(b), "result from "+from, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -421,7 +420,7 @@ func TestDeliverGroupsWaitingMessages(t *testing.T) {
 func TestDeliverGroupsAroundAnOwnerMessage(t *testing.T) {
 	d, fp := deliverNode(t)
 	b := apiSession(d, "b", session.StatusWorking, nil)
-	a, err := d.send(t.Context(), d.localCallerRef(apiSession(d, "a", session.StatusIdle, nil)), b.ID, "from a", "")
+	a, err := d.send(t.Context(), d.localCallerRef(apiSession(d, "a", session.StatusIdle, nil)), d.agentID(b), "from a", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +431,7 @@ func TestDeliverGroupsAroundAnOwnerMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := d.send(t.Context(), d.localCallerRef(apiSession(d, "c", session.StatusIdle, nil)), b.ID, "from c", "")
+	c, err := d.send(t.Context(), d.localCallerRef(apiSession(d, "c", session.StatusIdle, nil)), d.agentID(b), "from c", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -534,7 +533,7 @@ func TestDeliverIgnoresAPIInput(t *testing.T) {
 	}
 	a := apiSession(d, "a", session.StatusWorking, nil)
 	b := apiSession(d, "b", session.StatusIdle, nil)
-	if _, err := d.send(t.Context(), d.localCallerRef(a), b.ID, "hi", ""); err != nil {
+	if _, err := d.send(t.Context(), d.localCallerRef(a), d.agentID(b), "hi", ""); err != nil {
 		t.Fatal(err)
 	}
 	d.orchPass(t.Context())
