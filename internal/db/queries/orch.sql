@@ -16,13 +16,25 @@ INSERT INTO orch_message (
 ON CONFLICT (id) DO NOTHING;
 
 -- name: GetOrchMessage :one
-SELECT * FROM orch_message WHERE id = ?;
+SELECT
+    id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to,
+    child_node, child_key, interaction, state, answered_by_node,
+    answered_by_key, request_id, request_hash, created_at, updated_at
+FROM orch_message WHERE id = ?;
 
 -- name: GetOrchMessageByRequest :one
-SELECT * FROM orch_message WHERE from_node = ? AND from_key = ? AND request_id = ?;
+SELECT
+    id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to,
+    child_node, child_key, interaction, state, answered_by_node,
+    answered_by_key, request_id, request_hash, created_at, updated_at
+FROM orch_message WHERE from_node = ? AND from_key = ? AND request_id = ?;
 
 -- name: QueuedOrchMessages :many
-SELECT * FROM orch_message
+SELECT
+    id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to,
+    child_node, child_key, interaction, state, answered_by_node,
+    answered_by_key, request_id, request_hash, created_at, updated_at
+FROM orch_message
 WHERE to_node = ? AND to_key = ? AND state = 'queued'
 ORDER BY rowid;
 
@@ -55,21 +67,36 @@ UPDATE orch_message
 SET state = 'failed', updated_at = sqlc.arg(updated_at)
 WHERE to_node = sqlc.arg(to_node) AND to_key = sqlc.arg(to_key)
     AND state = 'queued' AND from_key != 'argus'
-RETURNING *;
+RETURNING
+    id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to,
+    child_node, child_key, interaction, state, answered_by_node,
+    answered_by_key, request_id, request_hash, created_at, updated_at;
 
 -- name: OpenOrchInteractions :many
-SELECT * FROM orch_message
+SELECT
+    id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to,
+    child_node, child_key, interaction, state, answered_by_node,
+    answered_by_key, request_id, request_hash, created_at, updated_at
+FROM orch_message
 WHERE child_node = ? AND child_key = ? AND kind = 'interaction' AND state IN ('queued', 'delivered')
 ORDER BY created_at, id;
 
 -- name: UnrepliedOrchTask :one
-SELECT * FROM orch_message
+SELECT
+    id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to,
+    child_node, child_key, interaction, state, answered_by_node,
+    answered_by_key, request_id, request_hash, created_at, updated_at
+FROM orch_message
 WHERE to_node = ? AND to_key = ? AND kind = 'task' AND state = 'delivered'
 ORDER BY created_at DESC, id DESC
 LIMIT 1;
 
 -- name: ListOrchMessages :many
-SELECT * FROM orch_message ORDER BY created_at DESC, id DESC LIMIT ?;
+SELECT
+    id, kind, from_node, from_key, from_label, to_node, to_key, body, reply_to,
+    child_node, child_key, interaction, state, answered_by_node,
+    answered_by_key, request_id, request_hash, created_at, updated_at
+FROM orch_message ORDER BY created_at DESC, id DESC LIMIT ?;
 
 -- name: ExpireOrchMessages :execrows
 DELETE FROM orch_message WHERE created_at < ?;
@@ -89,13 +116,22 @@ ON CONFLICT (child_node, child_key) DO UPDATE SET
     parent_ended = excluded.parent_ended;
 
 -- name: GetOrchLink :one
-SELECT * FROM orch_link WHERE child_node = ? AND child_key = ?;
+SELECT
+    child_node, child_key, parent_node, parent_key, task_id, ended_by,
+    request_id, request_hash, created_at, parent_ended
+FROM orch_link WHERE child_node = ? AND child_key = ?;
 
 -- name: GetOrchLinkByRequest :one
-SELECT * FROM orch_link WHERE parent_node = ? AND parent_key = ? AND request_id = ?;
+SELECT
+    child_node, child_key, parent_node, parent_key, task_id, ended_by,
+    request_id, request_hash, created_at, parent_ended
+FROM orch_link WHERE parent_node = ? AND parent_key = ? AND request_id = ?;
 
 -- name: ListOrchLinks :many
-SELECT * FROM orch_link ORDER BY created_at, child_node, child_key;
+SELECT
+    child_node, child_key, parent_node, parent_key, task_id, ended_by,
+    request_id, request_hash, created_at, parent_ended
+FROM orch_link ORDER BY created_at, child_node, child_key;
 
 -- name: SetOrchLinkEndedBy :exec
 UPDATE orch_link SET ended_by = ? WHERE child_node = ? AND child_key = ?;
@@ -110,7 +146,9 @@ DELETE FROM orch_link WHERE child_node = ? AND child_key = ?;
 INSERT INTO orch_peer_outbox (node, method, params, created_at) VALUES (?, ?, ?, ?);
 
 -- name: PendingOrchOutbox :many
-SELECT * FROM orch_peer_outbox WHERE node = ? AND parked = 0 ORDER BY seq LIMIT ?;
+SELECT
+    seq, node, method, params, created_at, attempts, parked, last_attempt_at
+FROM orch_peer_outbox WHERE node = ? AND parked = 0 ORDER BY seq LIMIT ?;
 
 -- name: FailOrchOutbox :one
 UPDATE orch_peer_outbox
