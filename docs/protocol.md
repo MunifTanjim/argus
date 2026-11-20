@@ -803,7 +803,7 @@ All ids in params and results are composite (`<node>:<id>`).
 A node sends these methods to another node on a peer channel. The receiver
 accepts them only from a peer channel, and only about actors of the sending
 node. Every method is idempotent. A retry after a lost reply does no harm. All
-six return `null`.
+five return `null`.
 
 | Method | Params | Meaning |
 | ------ | ------ | ------- |
@@ -811,13 +811,12 @@ six return `null`.
 | `orch.peer.withdraw` | `{ message_id, ended?, answered_by?: Actor }` | Withdraw an open message that the sender created. `ended` is the body of the `interaction_ended` message that the receiver gives the recipient when it already delivered the message. `answered_by` (an actor of the receiver) means that actor answered the interaction: the receiver marks its copy answered and gives no `interaction_ended` message. |
 | `orch.peer.link_ended` | `{ child_key, ended_by }` | Record how a child on the sending node ended. |
 | `orch.peer.parent_ended` | `{ parent_key }` | Record that a parent on the sending node ended. The receiver shows the parent as gone and refuses replies to it. |
-| `orch.peer.rekey` | `{ old_key, new_key }` | Move an actor of the sending node to a new key. The keys must not be reserved. |
 | `orch.peer.state` | `{ message_id, state }` | Report that the sender's copy of a message the receiver created is now `delivered`, `replied`, or `failed`. The receiver moves its message forward only, and ignores an unknown message. Needs version `2`. |
 
 ### Outbox
 
-A node queues messages and notices, withdraws, link and parent ends, and rekeys
-for another node that is offline. It sends them in order when the node returns.
+A node queues messages and notices, withdraws, and link and parent ends for
+another node that is offline. It sends them in order when the node returns.
 
 - The node sends items only to a node with `capabilities.cross_node_orch`.
   For other nodes, it keeps the items queued. An item whose method needs a

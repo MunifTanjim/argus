@@ -71,44 +71,6 @@ LIMIT 1;
 -- name: ListOrchMessages :many
 SELECT * FROM orch_message ORDER BY created_at DESC, id DESC LIMIT ?;
 
--- name: RekeyOrchNodeSender :exec
-UPDATE orch_message SET from_key = sqlc.arg(new_key)
-WHERE from_node = sqlc.arg(node) AND from_key = sqlc.arg(old_key);
-
--- name: RekeyOrchNodeRecipient :exec
-UPDATE orch_message SET to_key = sqlc.arg(new_key)
-WHERE to_node = sqlc.arg(node) AND to_key = sqlc.arg(old_key);
-
--- name: RekeyOrchNodeChild :exec
-UPDATE orch_message SET child_key = sqlc.arg(new_key)
-WHERE child_node = sqlc.arg(node) AND child_key = sqlc.arg(old_key);
-
--- name: RekeyOrchNodeLinkChild :exec
-UPDATE orch_link SET child_key = sqlc.arg(new_key)
-WHERE child_node = sqlc.arg(node) AND child_key = sqlc.arg(old_key);
-
--- name: RekeyOrchNodeLinkParent :exec
-UPDATE orch_link SET parent_key = sqlc.arg(new_key)
-WHERE parent_node = sqlc.arg(node) AND parent_key = sqlc.arg(old_key);
-
--- name: RekeyOrchOutboxSender :exec
-UPDATE orch_peer_outbox SET params = json_set(params, '$.message.from.key', sqlc.arg(new_key))
-WHERE method = 'orch.peer.deliver'
-    AND json_extract(params, '$.message.from.node') = sqlc.arg(node)
-    AND json_extract(params, '$.message.from.key') = sqlc.arg(old_key);
-
--- name: RekeyOrchOutboxChild :exec
-UPDATE orch_peer_outbox SET params = json_set(params, '$.message.child.key', sqlc.arg(new_key))
-WHERE method = 'orch.peer.deliver'
-    AND json_extract(params, '$.message.child.node') = sqlc.arg(node)
-    AND json_extract(params, '$.message.child.key') = sqlc.arg(old_key);
-
--- name: RekeyOrchOutboxRecipient :exec
-UPDATE orch_peer_outbox SET params = json_set(params, '$.message.to.key', sqlc.arg(new_key))
-WHERE node = sqlc.arg(node) AND method = 'orch.peer.deliver'
-    AND json_extract(params, '$.message.to.node') = sqlc.arg(node)
-    AND json_extract(params, '$.message.to.key') = sqlc.arg(old_key);
-
 -- name: ExpireOrchMessages :execrows
 DELETE FROM orch_message WHERE created_at < ?;
 
@@ -174,7 +136,3 @@ SELECT DISTINCT node FROM orch_peer_outbox WHERE parked = 0 ORDER BY node;
 -- name: ExpireOrchOutbox :execrows
 DELETE FROM orch_peer_outbox WHERE created_at < ?;
 
--- name: OrchMessagePeerNodes :many
-SELECT DISTINCT CAST(CASE WHEN to_node = sqlc.arg(node) AND to_key = sqlc.arg(key) THEN from_node ELSE to_node END AS TEXT) AS peer
-FROM orch_message
-WHERE (to_node = sqlc.arg(node) AND to_key = sqlc.arg(key)) OR (from_node = sqlc.arg(node) AND from_key = sqlc.arg(key));

@@ -90,20 +90,6 @@ func assertActor(t *testing.T, d *Node, store *orch.Store, key string) {
 	}
 }
 
-func TestOrchRekeysOnClear(t *testing.T) {
-	d, store := orchNode(t)
-	ctx := context.Background()
-	hookSession(d, "%3", "c1")
-	linkAndQueue(t, d, store, "claude:c1")
-	d.orchPass(ctx)
-	clearSession(d, "%3", "c2")
-	d.orchPass(ctx)
-	assertActor(t, d, store, "claude:c2")
-	if _, ok, _ := store.Link(ctx, api.Actor{Node: d.id, Key: "claude:c1"}); ok {
-		t.Fatal("old link key still present")
-	}
-}
-
 func TestOrchPaneReuseKeepsOldActor(t *testing.T) {
 	cases := map[string]func(d *Node){
 		"same record":  func(*Node) {},
@@ -185,23 +171,6 @@ func TestRemoteDispatchServesMessageList(t *testing.T) {
 	}
 }
 
-func TestOrchGoneGraceCoversLateClearHook(t *testing.T) {
-	d, store := orchNode(t)
-	d.orchGoneGrace = time.Hour
-	ctx := context.Background()
-	hookSession(d, "%3", "c1")
-	linkAndQueue(t, d, store, "claude:c1")
-	d.orchPass(ctx)
-	hookSession(d, "%3", "c2")
-	d.orchPass(ctx)
-	clearSession(d, "%3", "c2")
-	d.orchPass(ctx)
-	assertActor(t, d, store, "claude:c2")
-	if m, _, _ := store.Get(ctx, "m-00000001"); m.State != api.MessageQueued {
-		t.Fatalf("state = %s, want queued", m.State)
-	}
-}
-
 func TestOrchRepublishesChildWhenParentChanges(t *testing.T) {
 	d, store := orchNode(t)
 	ctx := context.Background()
@@ -245,7 +214,30 @@ func TestOrchRepublishesChildWhenParentChanges(t *testing.T) {
 	}
 }
 
-func TestRekeyReachesNodesThatExchangedMessages(t *testing.T) {
+func TestOrchClearKeepsTheOldLink(t *testing.T) {
+	d, store := orchNode(t)
+	ctx := context.Background()
+	hookSession(d, "%3", "c1")
+	linkAndQueue(t, d, store, "claude:c1")
+	d.orchPass(ctx)
+	clearSession(d, "%3", "c2")
+	d.orchPass(ctx)
+	if _, ok, _ := store.Link(ctx, api.Actor{Node: d.id, Key: "claude:c1"}); !ok {
+		t.Fatal("the link left the old key")
+	}
+	if _, ok, _ := store.Link(ctx, api.Actor{Node: d.id, Key: "claude:c2"}); ok {
+		t.Fatal("the link moved to the new conversation")
+	}
+	if m, _, _ := store.Get(ctx, "m-00000001"); m.State != api.MessageFailed || m.To.Key != "claude:c1" {
+		t.Fatalf("message = %+v, want failed under claude:c1", m)
+	}
+	s, _ := d.reg.FindByAgentSession("claude", "c2")
+	if p := d.withCaps(s).Parent; p != nil {
+		t.Fatalf("new conversation inherited parent %+v", p)
+	}
+}
+
+func TestOrchClearSendsNothingToPeers(t *testing.T) {
 	d, store := orchNode(t)
 	d.SetIdentity("a", "")
 	store.SetNodeID("a")
@@ -260,8 +252,24 @@ func TestRekeyReachesNodesThatExchangedMessages(t *testing.T) {
 	d.orchPass(t.Context())
 	clearSession(d, "%3", "c2")
 	d.orchPass(t.Context())
-	items, err := store.Pending(t.Context(), "b", 10)
-	if err != nil || len(items) != 1 || items[0].Method != api.MethodOrchPeerRekey {
-		t.Fatalf("b's outbox = %+v err=%v, want the rekey", items, err)
+	if items, err := store.Pending(t.Context(), "b", 10); err != nil || len(items) != 0 {
+		t.Fatalf("b's outbox = %+v err=%v, want nothing", items, err)
+	}
+}
+
+func TestOrchGoneGraceKeepsAShortDropOut(t *testing.T) {
+	d, store := orchNode(t)
+	d.orchGoneGrace = time.Hour
+	ctx := context.Background()
+	hookSession(d, "%3", "c1")
+	linkAndQueue(t, d, store, "claude:c1")
+	d.orchPass(ctx)
+	d.reg.ReconcileSessions("claude", nil)
+	d.orchPass(ctx)
+	hookSession(d, "%3", "c1")
+	d.orchPass(ctx)
+	assertActor(t, d, store, "claude:c1")
+	if m, _, _ := store.Get(ctx, "m-00000001"); m.State != api.MessageQueued {
+		t.Fatalf("state = %s, want queued", m.State)
 	}
 }

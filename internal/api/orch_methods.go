@@ -46,7 +46,6 @@ const (
 	MethodOrchPeerDeliver   = "orch.peer.deliver"    // request: OrchPeerDeliverParams; result: nil
 	MethodOrchPeerWithdraw  = "orch.peer.withdraw"   // request: OrchPeerWithdrawParams; result: nil
 	MethodOrchPeerLinkEnded = "orch.peer.link_ended" // request: OrchPeerLinkEndedParams; result: nil
-	MethodOrchPeerRekey     = "orch.peer.rekey"      // request: OrchPeerRekeyParams; result: nil
 	// request: OrchPeerParentEndedParams; result: nil
 	MethodOrchPeerParentEnded = "orch.peer.parent_ended"
 	// request: OrchPeerStateParams; result: nil. Needs cross_node_orch 2.
@@ -85,12 +84,6 @@ type OrchPeerParentEndedParams struct {
 type OrchPeerLinkEndedParams struct {
 	ChildKey string `json:"child_key"`
 	EndedBy  string `json:"ended_by"`
-}
-
-// OrchPeerRekeyParams moves an actor of the sending node to a new key.
-type OrchPeerRekeyParams struct {
-	OldKey string `json:"old_key"`
-	NewKey string `json:"new_key"`
 }
 
 type CallerParams struct {

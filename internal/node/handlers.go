@@ -66,7 +66,6 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodOrchPeerDeliver, d.handleOrchPeerDeliver)
 	srv.Handle(api.MethodOrchPeerWithdraw, d.handleOrchPeerWithdraw)
 	srv.Handle(api.MethodOrchPeerLinkEnded, d.handleOrchPeerLinkEnded)
-	srv.Handle(api.MethodOrchPeerRekey, d.handleOrchPeerRekey)
 	srv.Handle(api.MethodOrchPeerParentEnded, d.handleOrchPeerParentEnded)
 	srv.Handle(api.MethodOrchPeerState, d.handleOrchPeerState)
 	srv.Handle(api.MethodMessageList, d.handleMessageList)

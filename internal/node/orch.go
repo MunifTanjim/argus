@@ -25,8 +25,8 @@ const (
 	// orchDeliverHold bounds the wait for a recipient to start the turn of its
 	// last delivered message before the next one goes out.
 	orchDeliverHold = 10 * time.Second
-	// orchGoneGrace covers a /clear whose hook lands after a scan saw the new
-	// agent session id: the old key leaves the snapshot before the rekey.
+	// orchGoneGrace absorbs a session that leaves the registry for a short
+	// time: ending its link and failing its messages cannot be undone.
 	orchGoneGrace = 10 * time.Second
 	// orchTypingQuiet is how long a pane's clients must be idle before argus
 	// types a delivery into it, so it never types over a person.
@@ -71,8 +71,6 @@ func (d *Node) SetOrchStore(s *orch.Store) {
 	if s != nil {
 		s.SetNodeID(d.id)
 	}
-	d.orchCleared = map[string]bool{}
-	d.orchRekeyFailed = map[string]bool{}
 	d.orchPrev = map[string]session.Status{}
 	d.orchWorked = map[string]bool{}
 	d.orchLive = map[string]bool{}
@@ -328,7 +326,6 @@ func (d *Node) orchNoteEvent(ev registry.Event) {
 
 func (d *Node) orchPass(ctx context.Context) {
 	snap := d.reg.Snapshot()
-	d.orchRekey(ctx, snap)
 	d.orchFailGone(ctx, snap)
 	d.orchNotices(ctx, snap)
 	d.orchDeliver(ctx, snap)
@@ -520,74 +517,6 @@ func (d *Node) orchRepublishParents(snap []session.Session) {
 			d.reg.Republish(s.ID)
 		}
 	}
-}
-
-// orchRekey moves a /clear predecessor's links and messages to its successor.
-func (d *Node) orchRekey(ctx context.Context, snap []session.Session) {
-	applied := d.orchCleared
-	d.orchCleared = make(map[string]bool, len(applied))
-	for _, s := range snap {
-		to := actorKey(s)
-		if s.ClearedFrom == "" || to == "" {
-			continue
-		}
-		from := registry.AgentSessionKey(s.Agent, s.ClearedFrom)
-		pair := from + " " + to
-		if applied[pair] {
-			d.orchCleared[pair] = true
-			continue
-		}
-		if err := d.orch.Rekey(ctx, from, to); err != nil {
-			// The pass retries every second; say it once per pair.
-			if !d.orchRekeyFailed[pair] {
-				d.log.Warn("orch: rekey failed; retrying", "from", from, "to", to, "err", err)
-				d.orchRekeyFailed[pair] = true
-			}
-			continue
-		}
-		delete(d.orchRekeyFailed, pair)
-		d.orchChanged()
-		// A retry finds the links under the new key; Rekey and the receivers are idempotent.
-		if err := d.pushRekey(ctx, from, to); err != nil {
-			d.log.Warn("orch: queue rekey failed", "from", from, "to", to, "err", err)
-			continue
-		}
-		d.orchCleared[pair] = true
-	}
-}
-
-// pushRekey queues the rekey of from to to for each other node with a link to
-// to, or with a stored message exchanged with it, after the pushes already
-// queued there: a deliver queued earlier under from is rewritten in the outbox
-// by Rekey, and lands before the rekey.
-func (d *Node) pushRekey(ctx context.Context, from, to string) error {
-	links, err := d.orch.Children(ctx, api.Actor{Node: d.id, Key: to})
-	if err != nil {
-		return err
-	}
-	if l, ok, err := d.orch.Link(ctx, api.Actor{Node: d.id, Key: to}); err != nil {
-		return err
-	} else if ok {
-		links = append(links, l)
-	}
-	nodes, err := d.orch.MessagePeers(ctx, api.Actor{Node: d.id, Key: to})
-	if err != nil {
-		return err
-	}
-	for _, l := range links {
-		nodes = append(nodes, l.Child.Node, l.Parent.Node)
-	}
-	seen := map[string]bool{d.id: true}
-	for _, node := range nodes {
-		if seen[node] {
-			continue
-		}
-		seen[node] = true
-		if err := d.orch.Enqueue(ctx, node, api.MethodOrchPeerRekey, api.OrchPeerRekeyParams{OldKey: from, NewKey: to}); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // orchDeliver sends each recipient its next queued message. A recipient that

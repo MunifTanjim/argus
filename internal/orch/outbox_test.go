@@ -119,34 +119,6 @@ func TestReceiveKeepsIDAndTimestamps(t *testing.T) {
 	}
 }
 
-func TestRekeyNodeTouchesOnlyThatNode(t *testing.T) {
-	s, _ := newTestStore(t)
-	ctx := t.Context()
-	for _, node := range []string{"a", "b"} {
-		if err := s.PutLink(ctx, api.Link{
-			Child: api.Actor{Node: node, Key: "claude:" + node}, Parent: api.Actor{Node: node, Key: "claude:old"},
-		}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := s.Insert(ctx, api.Message{
-			ID: node + ":m-1", Kind: api.MessageText, From: api.Actor{Node: node, Key: "claude:old"},
-			To: api.Actor{Node: "a", Key: "claude:x"}, Body: "hi", State: api.MessageQueued,
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := s.RekeyNode(ctx, "b", "claude:old", "claude:new"); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range []struct{ node, key string }{{"a", "claude:old"}, {"b", "claude:new"}} {
-		m, _, _ := s.Get(ctx, c.node+":m-1")
-		l, _, _ := s.Link(ctx, api.Actor{Node: c.node, Key: "claude:" + c.node})
-		if m.From.Key != c.key || l.Parent.Key != c.key {
-			t.Errorf("%s: message from %q, link parent %q, want %q", c.node, m.From.Key, l.Parent.Key, c.key)
-		}
-	}
-}
-
 func TestRequestIndexesAreScopedToNode(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := t.Context()
@@ -196,53 +168,6 @@ func pendingDelivers(t *testing.T, s *orch.Store, node string) []api.Message {
 		out = append(out, p.Message)
 	}
 	return out
-}
-
-func TestRekeyRewritesQueuedDeliversFromSelf(t *testing.T) {
-	s, _ := newTestStore(t)
-	s.SetNodeID("b")
-	ctx := t.Context()
-	for _, m := range []api.Message{
-		{Kind: api.MessageReply, From: api.Actor{Node: "b", Key: "claude:old"}, To: api.Actor{Node: "a", Key: "claude:p"}, Body: "x", State: api.MessageQueued},
-		{Kind: api.MessageInteraction, From: api.Actor{Node: "b", Key: api.ActorArgus}, To: api.Actor{Node: "a", Key: "claude:p"}, Child: &api.Actor{Node: "b", Key: "claude:old"}, Body: "y", State: api.MessageQueued},
-		{Kind: api.MessageInteraction, From: api.Actor{Node: "b", Key: api.ActorArgus}, To: api.Actor{Node: "a", Key: "claude:p"}, Child: &api.Actor{Node: "c", Key: "claude:old"}, Body: "z", State: api.MessageQueued},
-	} {
-		if _, err := s.InsertAndEnqueue(ctx, m, "a", api.MethodOrchPeerDeliver, func(m api.Message) any {
-			return api.OrchPeerDeliverParams{Message: m}
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := s.Rekey(ctx, "claude:old", "claude:new"); err != nil {
-		t.Fatal(err)
-	}
-	got := pendingDelivers(t, s, "a")
-	if len(got) != 3 || got[0].From.Key != "claude:new" || got[1].Child.Key != "claude:new" || got[1].From.Key != api.ActorArgus ||
-		got[2].Child.Key != "claude:old" {
-		t.Fatalf("queued delivers = %+v", got)
-	}
-}
-
-func TestRekeyNodeRewritesQueuedDeliversToThatNode(t *testing.T) {
-	s, _ := newTestStore(t)
-	s.SetNodeID("a")
-	ctx := t.Context()
-	for _, to := range []api.Actor{{Node: "b", Key: "claude:old"}, {Node: "c", Key: "claude:old"}} {
-		if _, err := s.InsertAndEnqueue(ctx, api.Message{
-			Kind: api.MessageText, From: api.Actor{Node: "a", Key: "claude:p"}, To: to, Body: "x", State: api.MessageQueued,
-		}, to.Node, api.MethodOrchPeerDeliver, func(m api.Message) any { return api.OrchPeerDeliverParams{Message: m} }); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := s.RekeyNode(ctx, "b", "claude:old", "claude:new"); err != nil {
-		t.Fatal(err)
-	}
-	if got := pendingDelivers(t, s, "b"); len(got) != 1 || got[0].To.Key != "claude:new" {
-		t.Fatalf("b delivers = %+v", got)
-	}
-	if got := pendingDelivers(t, s, "c"); len(got) != 1 || got[0].To.Key != "claude:old" {
-		t.Fatalf("c delivers = %+v", got)
-	}
 }
 
 func TestDropDeliverMatchesPeerDeliver(t *testing.T) {
