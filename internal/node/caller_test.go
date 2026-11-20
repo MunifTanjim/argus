@@ -180,3 +180,20 @@ func TestResolveCallerOpencodeSubagent(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestResolveCallerPi(t *testing.T) {
+	d := callerNode(
+		chainProc{1, 0, "/sbin/launchd"},
+		chainProc{100, 1, "pi"},
+		chainProc{110, 100, "/bin/bash"},
+		chainProc{120, 110, "argus session list"},
+	)
+	d.addAgentSession("pi", "p1")
+	s, err := d.resolveCaller(t.Context(), api.CallerInfo{PID: 120, Env: map[string]string{"PI_SESSION_ID": "p1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Agent != "pi" || s.AgentSessionID != "p1" {
+		t.Fatalf("got %s/%s", s.Agent, s.AgentSessionID)
+	}
+}

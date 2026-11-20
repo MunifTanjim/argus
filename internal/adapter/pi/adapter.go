@@ -11,6 +11,8 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/mcphttp"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/tmux"
@@ -60,6 +62,21 @@ func (a *piAdapter) ResumeCommand(agentSessionID string) (string, []string, bool
 		return "pi", nil, false
 	}
 	return "pi", []string{"--session", agentSessionID}, true
+}
+
+// PI_SESSION_ID is set on every command pi's bash tool runs, read when the
+// command starts, so it follows /new.
+func (piAdapter) CallerEnv() string { return "PI_SESSION_ID" }
+
+// IsAgentProcess matches pi's process title: "pi", or "pi-rpc" from its RPC entry.
+func (piAdapter) IsAgentProcess(p procwalk.Proc, _ map[string]string) bool {
+	return p.Runs("pi") || p.Runs("pi-rpc")
+}
+
+// MCPSessionID reads the session id the gate puts in its MCP header: pi's MCP
+// client sends none in _meta.
+func (piAdapter) MCPSessionID(meta map[string]json.RawMessage) (string, error) {
+	return adapter.MetaSessionID(meta, mcphttp.SessionMetaKey)
 }
 
 // Pi uses no shell hooks; status and dialogs arrive over RPC (owned

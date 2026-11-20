@@ -1,11 +1,16 @@
 package pi
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
+	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/mcphttp"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 )
 
 func TestAdapterShape(t *testing.T) {
@@ -71,5 +76,31 @@ func TestSessionsRootReadsSettings(t *testing.T) {
 	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "/env/s")
 	if got, err := sessionsRoot(); err != nil || got != "/env/s" {
 		t.Fatalf("env must win over settings: sessionsRoot = %q, %v", got, err)
+	}
+}
+
+func TestPiIdentity(t *testing.T) {
+	a := New()
+	ci, ok := a.(adapter.CallerIdentity)
+	if !ok {
+		t.Fatal("pi does not implement CallerIdentity")
+	}
+	if ci.CallerEnv() != "PI_SESSION_ID" {
+		t.Fatalf("CallerEnv() = %q", ci.CallerEnv())
+	}
+	for args, want := range map[string]bool{"pi": true, "pi-rpc": true, "node /x/pi.js": false} {
+		if got := ci.IsAgentProcess(procwalk.Proc{Args: args}, nil); got != want {
+			t.Errorf("IsAgentProcess(%q) = %v, want %v", args, got, want)
+		}
+	}
+	mi, ok := a.(adapter.MCPIdentity)
+	if !ok {
+		t.Fatal("pi does not implement MCPIdentity")
+	}
+	if id, err := mi.MCPSessionID(map[string]json.RawMessage{mcphttp.SessionMetaKey: json.RawMessage(`"s1"`)}); err != nil || id != "s1" {
+		t.Fatalf("MCPSessionID = %q, %v", id, err)
+	}
+	if _, err := mi.MCPSessionID(map[string]json.RawMessage{}); !errors.Is(err, api.ErrNoCaller) {
+		t.Fatalf("missing key: err = %v, want ErrNoCaller", err)
 	}
 }

@@ -17,7 +17,7 @@ func TestAntigravityRegistered(t *testing.T) {
 }
 
 func TestOrchestratedAgentsImplementIdentity(t *testing.T) {
-	for _, agent := range []string{"claude", "codex", "opencode"} {
+	for _, agent := range []string{"claude", "codex", "opencode", "pi"} {
 		a := ByAgent(agent)
 		if a == nil {
 			t.Fatalf("%s not registered", agent)

@@ -306,3 +306,24 @@ func TestOrchOldAgentIDNeverReachesNewConversation(t *testing.T) {
 		t.Fatalf("new conversation got %+v", got)
 	}
 }
+
+func TestOrchPiSwitchKeepsOldActor(t *testing.T) {
+	d, store := orchNode(t)
+	ctx := context.Background()
+	piHook := func(id, prev string) {
+		d.reg.ApplyHook(registry.HookUpdate{
+			Agent: "pi", AgentSessionID: id, PrevAgentSessionID: prev,
+			Input: session.InputAPI, Status: session.StatusIdle,
+		})
+	}
+	piHook("a", "")
+	linkAndQueue(t, d, store, "pi:a")
+	d.orchPass(ctx)
+	piHook("b", "a")
+	d.orchPass(ctx)
+	assertActor(t, d, store, "pi:a")
+	s, _ := d.reg.FindByAgentSession("pi", "b")
+	if p := d.withCaps(s).Parent; p != nil {
+		t.Fatalf("new conversation inherited parent %+v", p)
+	}
+}
