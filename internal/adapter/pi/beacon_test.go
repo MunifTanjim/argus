@@ -1153,3 +1153,33 @@ func TestBeaconCommandsWithoutPaneOmitNew(t *testing.T) {
 		t.Fatalf("names = %v", names)
 	}
 }
+
+func usageBeacon(t *testing.T) (*registry.Registry, *fakeBeacon) {
+	t.Helper()
+	reg := registry.New()
+	d := newDiscoverer(reg, nil)
+	fb := dialBeacon(t, d)
+	fb.send(map[string]any{"type": "hello", "sessionId": "for-u", "cwd": "/w", "idle": true})
+	waitCard(t, reg, "for-u", session.StatusAwaitingInput)
+	return reg, fb
+}
+
+func TestBeaconReportsUsage(t *testing.T) {
+	reg, fb := usageBeacon(t)
+	fb.send(map[string]any{"type": "event", "name": "usage", "tokens": 84000, "percent": 42, "cost": 0.45})
+	waitSummary(t, reg, func(s session.Session) bool {
+		m := s.Summary
+		return m.HasContext && m.Tokens == 84000 && m.ContextPct == 42 && m.HasCost && m.CostUSD == 0.45
+	})
+}
+
+func TestBeaconUsageNullContext(t *testing.T) {
+	reg, fb := usageBeacon(t)
+	fb.send(map[string]any{"type": "event", "name": "usage", "tokens": 84000, "percent": 42, "cost": 0.45})
+	waitSummary(t, reg, func(s session.Session) bool { return s.Summary.HasContext })
+	fb.send(map[string]any{"type": "event", "name": "usage", "tokens": nil, "percent": nil, "cost": 0.5})
+	waitSummary(t, reg, func(s session.Session) bool {
+		m := s.Summary
+		return !m.HasContext && m.Tokens == 0 && m.HasCost && m.CostUSD == 0.5
+	})
+}

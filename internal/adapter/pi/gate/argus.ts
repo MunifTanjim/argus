@@ -77,6 +77,7 @@ export default function (pi: ExtensionAPI) {
 			// A run that ended with steers left over (aborted, say) drops them.
 			if (queued.length && !ctx.hasPendingMessages()) setQueued([]);
 			beaconSend({ type: "event", name: "agent_settled" });
+			beaconSend(usageEvent(ctx));
 		});
 		// Dialogs patchDialogs cannot forward (editor, custom, opened offline)
 		// reach extensions only as kind and title. Argus shows that one waits in pi.
@@ -89,8 +90,10 @@ export default function (pi: ExtensionAPI) {
 		pi.on("session_info_changed", async (ev) => {
 			beaconSend({ type: "event", name: "session_info_changed", displayName: ev.name ?? null });
 		});
-		pi.on("model_select", async (ev) => {
+		// The context percent depends on the model's context window.
+		pi.on("model_select", async (ev, ctx) => {
 			beaconSend({ type: "event", name: "model", ...modelInfo(ev.model, pi.getThinkingLevel()) });
+			beaconSend(usageEvent(ctx));
 		});
 		pi.on("thinking_level_select", async (ev, ctx) => {
 			beaconSend({ type: "event", name: "model", ...modelInfo(ctx.model, ev.level) });
@@ -128,7 +131,10 @@ export default function (pi: ExtensionAPI) {
 		const compactionEnded = async () => {
 			beaconSend({ type: "event", name: "compaction", open: false });
 		};
-		pi.on("session_compact", compactionEnded);
+		pi.on("session_compact", async (_ev, ctx) => {
+			await compactionEnded();
+			beaconSend(usageEvent(ctx));
+		});
 		pi.on("session_compact_failed", compactionEnded);
 		// pi gives extensions no way to submit "!" input, so the gate stages it in
 		// the editor and Argus presses Enter in the pane. The user's draft waits
@@ -169,6 +175,7 @@ export default function (pi: ExtensionAPI) {
 		});
 		// Only the first hello names the previous session; describe runs only
 		// to build a hello.
+		beaconIntents.usage = () => (liveCtx ? usageEvent(liveCtx) : null);
 		beaconIntents.describe = () => {
 			const ctx = liveCtx;
 			if (!ctx) return null;
@@ -189,6 +196,26 @@ export default function (pi: ExtensionAPI) {
 
 function modelInfo(model: { id: string; reasoning?: boolean } | undefined, thinkingLevel: string) {
 	return { model: model?.id ?? null, reasoning: model?.reasoning === true, thinkingLevel };
+}
+
+type UsageLike = { cost?: { total?: number } } | undefined;
+
+// usageEvent reports what pi's footer shows. The cost sums the entries pi's
+// getSessionStats counts; extensions have no call for it.
+function usageEvent(ctx: ExtensionContext) {
+	const context = ctx.getContextUsage();
+	let cost = 0;
+	const add = (usage: UsageLike) => {
+		cost += usage?.cost?.total ?? 0;
+	};
+	for (const entry of ctx.sessionManager.getEntries() as any[]) {
+		if (entry.type === "usage" || entry.type === "branch_summary" || entry.type === "compaction") {
+			add(entry.usage);
+		} else if (entry.type === "message" && (entry.message?.role === "assistant" || entry.message?.role === "toolResult")) {
+			add(entry.message.usage);
+		}
+	}
+	return { type: "event", name: "usage", tokens: context?.tokens ?? null, percent: context?.percent ?? null, cost };
 }
 
 function messageText(content: unknown): string {
@@ -220,7 +247,8 @@ const beaconIntents: {
 	onCompact: ((instructions: string) => void) | null;
 	onCommands: ((id: string) => void) | null;
 	describe: (() => unknown) | null;
-} = { onPrompt: null, onRename: null, onShell: null, onCompact: null, onCommands: null, describe: null };
+	usage: (() => unknown) | null;
+} = { onPrompt: null, onRename: null, onShell: null, onCompact: null, onCommands: null, describe: null, usage: null };
 
 let beaconConn: { write: (s: string) => void; close: () => void } | null = null;
 
@@ -373,6 +401,8 @@ async function connectBeacon() {
 		beaconConn = self;
 		const info = beaconIntents.describe?.();
 		beaconSend({ type: "hello", ...(info as object) });
+		const usage = beaconIntents.usage?.();
+		if (usage) beaconSend(usage);
 		resendDialogs();
 		startHeartbeat();
 		if (head.length) feed(head);
