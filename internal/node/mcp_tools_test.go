@@ -68,7 +68,7 @@ func propSchema(t *testing.T, b mcpBackend, tool, prop string) string {
 
 func TestMCPSpawnSchemaListsOrchestratedAgents(t *testing.T) {
 	_, b := toolNode(t)
-	if got := propSchema(t, b, "spawn_session", "agent"); got != `{"enum":["claude","codex","opencode"],"type":"string"}` {
+	if got := propSchema(t, b, "spawn_session", "agent"); got != `{"enum":["claude","codex","opencode","pi"],"type":"string"}` {
 		t.Fatalf("agent = %s", got)
 	}
 }

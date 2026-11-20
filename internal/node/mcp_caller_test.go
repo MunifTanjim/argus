@@ -218,3 +218,42 @@ func TestModPreToolUseAnnouncesCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func piMeta(id string) map[string]json.RawMessage {
+	return rawMeta(map[string]string{"argus/session": id})
+}
+
+func (d *Node) addPiSession(id, prev string) {
+	d.reg.ApplyHook(registry.HookUpdate{
+		Agent: "pi", AgentSessionID: id, PrevAgentSessionID: prev,
+		Input: session.InputAPI, Status: session.StatusIdle,
+	})
+}
+
+func TestResolveMCPCallerPi(t *testing.T) {
+	d := mcpNode()
+	d.addPiSession("a", "")
+	s, err := d.resolveMCPCaller(t.Context(), "pi", piMeta("a"))
+	if err != nil || s.AgentSessionID != "a" {
+		t.Fatalf("resolve = %+v, %v", s, err)
+	}
+}
+
+func TestResolveMCPCallerPiAfterSwitch(t *testing.T) {
+	d := mcpNode()
+	d.addPiSession("a", "")
+	first, _ := d.reg.FindByAgentSession("pi", "a")
+	d.addPiSession("b", "a")
+	s, err := d.resolveMCPCaller(t.Context(), "pi", piMeta("b"))
+	if err != nil || s.ID != first.ID || s.AgentSessionID != "b" {
+		t.Fatalf("resolve = %+v, %v; want record %s", s, err, first.ID)
+	}
+}
+
+func TestResolveMCPCallerPiUnknownSession(t *testing.T) {
+	d := mcpNode()
+	d.addPiSession("a", "")
+	if _, err := d.resolveMCPCaller(t.Context(), "pi", piMeta("zz")); !errors.Is(err, api.ErrNoCaller) {
+		t.Fatalf("err = %v, want ErrNoCaller", err)
+	}
+}
