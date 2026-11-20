@@ -881,19 +881,11 @@ func (d *Node) killAs(ctx context.Context, caller callerRef, targetID, childKey 
 	var target session.Session
 	var err error
 	if childKey != "" && caller.Local == nil {
-		// The key can be stale: the child ran /clear and the rekey has not
-		// reached the caller's node yet. Its successor, then its session id,
-		// still name it.
+		// A child key that is not live names a conversation that ended: the
+		// session that holds its pane now is not the caller's child.
 		s, live := d.sessionForKey(childKey)
 		if !live {
-			if next, ok := d.successorKey(childKey); ok {
-				s, live = d.sessionForKey(next)
-			}
-		}
-		if !live {
-			if s, err = d.localTarget(targetID); err != nil {
-				return api.OrchKillResult{}, err
-			}
+			return api.OrchKillResult{}, d.missing(targetID)
 		}
 		target = s
 	} else if target, err = d.localTarget(targetID); err != nil {

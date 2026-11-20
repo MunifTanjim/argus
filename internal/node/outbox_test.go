@@ -36,7 +36,6 @@ func pushTo(ctx context.Context, d *Node, method string, params any) error {
 		api.MethodOrchPeerDeliver:     d.handleOrchPeerDeliver,
 		api.MethodOrchPeerWithdraw:    d.handleOrchPeerWithdraw,
 		api.MethodOrchPeerLinkEnded:   d.handleOrchPeerLinkEnded,
-		api.MethodOrchPeerRekey:       d.handleOrchPeerRekey,
 		api.MethodOrchPeerParentEnded: d.handleOrchPeerParentEnded,
 		api.MethodOrchPeerState:       d.handleOrchPeerState,
 	}[method]
@@ -261,7 +260,6 @@ func TestPeerOnlyMethodsRejectLocal(t *testing.T) {
 		api.MethodOrchPeerDeliver:     api.OrchPeerDeliverParams{Message: peerMessage("b:m-00000001", "b")},
 		api.MethodOrchPeerWithdraw:    api.OrchPeerWithdrawParams{MessageID: "b:m-00000001"},
 		api.MethodOrchPeerLinkEnded:   api.OrchPeerLinkEndedParams{ChildKey: "claude:c", EndedBy: "self"},
-		api.MethodOrchPeerRekey:       api.OrchPeerRekeyParams{OldKey: "claude:c", NewKey: "claude:d"},
 		api.MethodOrchPeerParentEnded: api.OrchPeerParentEndedParams{ParentKey: "claude:p"},
 	} {
 		if err := pushTo(t.Context(), d, method, params); !rejectedByPeer(err) || !strings.Contains(err.Error(), errRemoteCallerDenied.Error()) {
@@ -301,9 +299,6 @@ func TestPeerPushRejectsOtherNodesData(t *testing.T) {
 	if l, _, _ := d.orch.Link(t.Context(), api.Actor{Node: "c", Key: "claude:c"}); l.EndedBy != "" {
 		t.Errorf("link_ended from b ended c's child: %+v", l)
 	}
-	if err := pushTo(ctx, d, api.MethodOrchPeerRekey, api.OrchPeerRekeyParams{OldKey: "claude:c", NewKey: api.ActorArgus}); !rejectedByPeer(err) {
-		t.Error("rekey to a reserved key was accepted")
-	}
 }
 
 func TestPeerPushesApply(t *testing.T) {
@@ -339,16 +334,6 @@ func TestPeerPushesApply(t *testing.T) {
 	}
 	if err := pushTo(ctx, d, api.MethodOrchPeerLinkEnded, api.OrchPeerLinkEndedParams{ChildKey: "claude:zz", EndedBy: "self"}); err != nil {
 		t.Fatalf("link_ended unknown: %v", err)
-	}
-
-	if err := pushTo(ctx, d, api.MethodOrchPeerRekey, api.OrchPeerRekeyParams{OldKey: "claude:w", NewKey: "claude:w2"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok, _ := d.orch.Link(t.Context(), api.Actor{Node: "b", Key: "claude:w2"}); !ok {
-		t.Fatal("link not rekeyed")
-	}
-	if err := pushTo(ctx, d, api.MethodOrchPeerRekey, api.OrchPeerRekeyParams{OldKey: "claude:none", NewKey: "claude:x"}); err != nil {
-		t.Fatalf("rekey with no rows: %v", err)
 	}
 }
 
@@ -542,5 +527,28 @@ func TestBurstOfPeerErrorsDoesNotPark(t *testing.T) {
 	}
 	if left, _ := d.orch.Pending(ctx, "b", 10); len(left) != 1 {
 		t.Fatalf("left = %+v, want m1 still pending", left)
+	}
+}
+
+func TestOutboxDropsRetiredRekeyPushes(t *testing.T) {
+	d := pushNode(t)
+	fakeRosterEntry(t, d, "b")
+	var sent []string
+	d.outboxSend = func(_ context.Context, _, method string, _ json.RawMessage) error {
+		sent = append(sent, method)
+		return nil
+	}
+	ctx := t.Context()
+	for _, m := range []string{"orch.peer.rekey", api.MethodOrchPeerLinkEnded} {
+		if err := d.orch.Enqueue(ctx, "b", m, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.flushOutbox(ctx)
+	if !slices.Equal(sent, []string{api.MethodOrchPeerLinkEnded}) {
+		t.Fatalf("sent = %v, want the rekey dropped", sent)
+	}
+	if left, _ := d.orch.Pending(ctx, "b", 10); len(left) != 0 {
+		t.Fatalf("left = %+v", left)
 	}
 }

@@ -115,19 +115,17 @@ type Node struct {
 	instanceID string                                                                                 // tells mods this node process from a restarted one
 	spawnFn    func(ctx context.Context, p api.SpawnParams, presetID string) (api.SpawnResult, error) // seam for tests; defaults to (*Node).spawn
 
-	orch            *orch.Store     // nil = orch.* and message.* disabled
-	orchCleared     map[string]bool // "<from> <to>" /clear rekeys already applied
-	orchRekeyFailed map[string]bool // "<from> <to>" rekeys whose failure was logged
-	orchPrev        map[string]session.Status
-	orchWorked      map[string]bool      // session id -> reported working since the last pass
-	orchLive        map[string]bool      // actor keys live at the last pass
-	orchGone        map[string]time.Time // actor key -> when it was first seen gone
-	orchGoneGrace   time.Duration
-	orchSettled     chan struct{} // closed once startup discovery has settled
-	orchSettleOne   *sync.Once    // closes orchSettled
-	orchSeeded      bool
-	orchRecheck     atomic.Bool          // a peer queued a message: check its recipient is live
-	orchHeld        map[string]time.Time // actor key -> when its delivery hold ends
+	orch          *orch.Store // nil = orch.* and message.* disabled
+	orchPrev      map[string]session.Status
+	orchWorked    map[string]bool      // session id -> reported working since the last pass
+	orchLive      map[string]bool      // actor keys live at the last pass
+	orchGone      map[string]time.Time // actor key -> when it was first seen gone
+	orchGoneGrace time.Duration
+	orchSettled   chan struct{} // closed once startup discovery has settled
+	orchSettleOne *sync.Once    // closes orchSettled
+	orchSeeded    bool
+	orchRecheck   atomic.Bool          // a peer queued a message: check its recipient is live
+	orchHeld      map[string]time.Time // actor key -> when its delivery hold ends
 	// deliverFn types a delivery into a session; tests replace it.
 	deliverFn func(ctx context.Context, s session.Session, text string) error
 	// paneProbe reports a pane session's last client activity and its screen;

@@ -78,10 +78,6 @@ type Registry struct {
 	// decisions are pending decisions by session id, laid over the stored
 	// session by view.
 	decisions map[string]*decisionQueue
-	// prevAgentSession is the agent session id each session held before its
-	// latest change, so a /clear hook that lands after a scan saw the new id
-	// still knows what it cleared.
-	prevAgentSession map[string]string
 }
 
 // New returns an empty Registry.
@@ -97,8 +93,6 @@ func New() *Registry {
 		subagents:     make(map[string][]session.RunningSubagent),
 		shells:        make(map[string][]session.RunningShell),
 		decisions:     make(map[string]*decisionQueue),
-
-		prevAgentSession: make(map[string]string),
 	}
 }
 
@@ -350,11 +344,7 @@ func (r *Registry) reindexAgentSession(s *session.Session, agentSessionID string
 		}
 	}
 	r.index.clear("", s.AgentSessionID)
-	if s.AgentSessionID != "" {
-		r.prevAgentSession[s.ID] = s.AgentSessionID
-	}
 	s.AgentSessionID = agentSessionID
-	s.ClearedFrom = ""
 	r.index.setAgentSession(agentSessionID, s.ID)
 }
 
@@ -534,7 +524,6 @@ func (r *Registry) remove(id, paneK string, finalStatus session.Status) {
 	delete(r.live, id)
 	delete(r.subagents, id)
 	delete(r.shells, id)
-	delete(r.prevAgentSession, id)
 	r.index.clear(paneK, s.AgentSessionID)
 	r.publish(EventRemoved, s)
 }
@@ -778,8 +767,7 @@ type HookUpdate struct {
 	// replaces it (empty clears).
 	Subagents *[]session.RunningSubagent
 	Shells    *[]session.RunningShell
-	// Cleared marks the start of a conversation that /clear continued from the
-	// session's previous agent session id.
+	// Cleared marks a /clear: the session's cost starts again.
 	Cleared bool
 }
 
@@ -848,9 +836,6 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	}
 
 	r.reindexAgentSession(s, u.AgentSessionID)
-	if u.Cleared && u.AgentSessionID != "" {
-		s.ClearedFrom = r.prevAgentSession[s.ID]
-	}
 	if u.Name != "" {
 		s.Name = u.Name
 	}

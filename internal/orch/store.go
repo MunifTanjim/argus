@@ -333,75 +333,6 @@ func (s *Store) List(ctx context.Context, limit int) ([]api.Message, error) {
 	return many(rows, err)
 }
 
-// Rekey moves this node's actor oldKey to newKey in every message and link,
-// and in the delivers queued for other nodes, atomically. An actor of another
-// node with the same key is left as is.
-func (s *Store) Rekey(ctx context.Context, oldKey, newKey string) error {
-	s.nodeMu.RLock()
-	self := s.nodeID
-	s.nodeMu.RUnlock()
-	s.linksMu.Lock()
-	defer s.linksMu.Unlock()
-	err := s.inTx(ctx, "rekey", func(q *gen.Queries) error {
-		return firstErr(
-			func() error { return rekeyNodeRows(ctx, q, self, oldKey, newKey) },
-			func() error {
-				return q.RekeyOrchOutboxSender(ctx, gen.RekeyOrchOutboxSenderParams{NewKey: newKey, Node: self, OldKey: oldKey})
-			},
-			func() error {
-				return q.RekeyOrchOutboxChild(ctx, gen.RekeyOrchOutboxChildParams{NewKey: newKey, Node: self, OldKey: oldKey})
-			},
-		)
-	})
-	if err != nil {
-		return err
-	}
-	s.rekeyLinks(oldKey, newKey, func(p api.Actor) bool { return p.Node == self })
-	return nil
-}
-
-// rekeyNodeRows moves node's actor oldKey to newKey in every message and link.
-func rekeyNodeRows(ctx context.Context, q *gen.Queries, node, oldKey, newKey string) error {
-	return firstErr(
-		func() error {
-			return q.RekeyOrchNodeSender(ctx, gen.RekeyOrchNodeSenderParams{NewKey: newKey, Node: node, OldKey: oldKey})
-		},
-		func() error {
-			return q.RekeyOrchNodeRecipient(ctx, gen.RekeyOrchNodeRecipientParams{NewKey: newKey, Node: node, OldKey: oldKey})
-		},
-		func() error {
-			return q.RekeyOrchNodeChild(ctx, gen.RekeyOrchNodeChildParams{NewKey: newKey, Node: node, OldKey: oldKey})
-		},
-		func() error {
-			return q.RekeyOrchNodeLinkChild(ctx, gen.RekeyOrchNodeLinkChildParams{NewKey: newKey, Node: node, OldKey: oldKey})
-		},
-		func() error {
-			return q.RekeyOrchNodeLinkParent(ctx, gen.RekeyOrchNodeLinkParentParams{NewKey: newKey, Node: node, OldKey: oldKey})
-		},
-	)
-}
-
-// RekeyNode replaces oldKey with newKey for the actors of node in every
-// message and link, and in the delivers queued for node, atomically. A child is
-// rekeyed when it is an actor of node.
-func (s *Store) RekeyNode(ctx context.Context, node, oldKey, newKey string) error {
-	s.linksMu.Lock()
-	defer s.linksMu.Unlock()
-	err := s.inTx(ctx, "rekey", func(q *gen.Queries) error {
-		return firstErr(
-			func() error { return rekeyNodeRows(ctx, q, node, oldKey, newKey) },
-			func() error {
-				return q.RekeyOrchOutboxRecipient(ctx, gen.RekeyOrchOutboxRecipientParams{NewKey: newKey, Node: node, OldKey: oldKey})
-			},
-		)
-	})
-	if err != nil {
-		return err
-	}
-	s.rekeyLinks(oldKey, newKey, func(p api.Actor) bool { return p.Node == node })
-	return nil
-}
-
 // inTx runs fn in one transaction and commits when fn succeeds.
 func (s *Store) inTx(ctx context.Context, op string, fn func(q *gen.Queries) error) error {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -413,36 +344,6 @@ func (s *Store) inTx(ctx context.Context, op string, fn func(q *gen.Queries) err
 		return fmt.Errorf("orch: %s: %w", op, err)
 	}
 	return tx.Commit()
-}
-
-func firstErr(steps ...func() error) error {
-	for _, step := range steps {
-		if err := step(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// rekeyLinks patches the link mirror after a rekey of the actors that match.
-// The caller holds linksMu.
-func (s *Store) rekeyLinks(oldKey, newKey string, match func(api.Actor) bool) {
-	if s.links == nil {
-		return
-	}
-	for k, l := range s.links {
-		if k.Key == oldKey && match(k) {
-			delete(s.links, k)
-			l.Child.Key = newKey
-			s.links[l.Child] = l
-		}
-	}
-	for k, l := range s.links {
-		if l.Parent.Key == oldKey && match(l.Parent) {
-			l.Parent.Key = newKey
-			s.links[k] = l
-		}
-	}
 }
 
 // Expire deletes messages created before the cutoff and returns how many.
@@ -730,12 +631,6 @@ func toMessage(r gen.OrchMessage) (api.Message, error) {
 		m.Interaction = &in
 	}
 	return m, nil
-}
-
-// MessagePeers returns the other nodes that exchanged a stored message with
-// the actor a of this store's node.
-func (s *Store) MessagePeers(ctx context.Context, a api.Actor) ([]string, error) {
-	return s.q.OrchMessagePeerNodes(ctx, gen.OrchMessagePeerNodesParams{Node: a.Node, Key: a.Key})
 }
 
 // ReplyTo stores the reply m to the message origID and marks origID replied,

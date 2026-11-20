@@ -628,81 +628,6 @@ func TestRemoteChildEndUpdatesMirror(t *testing.T) {
 	}
 }
 
-func TestRekeyPropagatesToParentNode(t *testing.T) {
-	rt := newRemoteTree(t)
-	ctx := t.Context()
-	// A message the child sent before the clear, already on a.
-	early, err := rt.a.orch.Insert(ctx, api.Message{
-		ID: "b:m-00000001", Kind: api.MessageText, From: treeChild, To: treeParent, Body: "early", State: api.MessageQueued,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rt.takeOffline(t, "a")
-	// A message the child sends while a is away waits in b's outbox.
-	late, err := rt.b.insertMessage(ctx, api.Message{
-		Kind: api.MessageText, From: treeChild, To: treeParent, Body: "late", State: api.MessageQueued,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	clearSession(rt.b, "%c1", "c2")
-	rt.b.orchPass(ctx)
-	newKey := "claude:c2"
-	items, err := rt.b.orch.Pending(ctx, "a", 10)
-	if err != nil || len(items) != 2 || items[0].Method != api.MethodOrchPeerDeliver || items[1].Method != api.MethodOrchPeerRekey {
-		t.Fatalf("b outbox = %+v err=%v", items, err)
-	}
-	var dp api.OrchPeerDeliverParams
-	if err := json.Unmarshal(items[0].Params, &dp); err != nil || dp.Message.From.Key != newKey {
-		t.Fatalf("queued deliver = %+v err=%v", dp, err)
-	}
-
-	rt.bringBack(t, "a")
-	rt.flush(t, "b")
-	if l := linkOf(t, rt.a, api.Actor{Node: "b", Key: newKey}); l.Child != (api.Actor{Node: "b", Key: newKey}) {
-		t.Fatalf("a mirror = %+v", l)
-	}
-	if _, ok, _ := rt.a.orch.Link(ctx, treeChild); ok {
-		t.Fatal("a mirror still under the old key")
-	}
-	for _, id := range []string{early.ID, late.ID} {
-		m, ok, err := rt.a.orch.Get(ctx, id)
-		if err != nil || !ok || m.From.Key != newKey {
-			t.Fatalf("message %s on a = %+v ok=%v err=%v", id, m, ok, err)
-		}
-	}
-}
-
-func TestRekeyPropagatesToChildNode(t *testing.T) {
-	rt := newRemoteTree(t)
-	clearSession(rt.a, "%p1", "p2")
-	rt.a.orchPass(t.Context())
-	rt.flush(t, "a")
-	if l := linkOf(t, rt.b, treeChild); l.Parent != (api.Actor{Node: "a", Key: "claude:p2"}) {
-		t.Fatalf("b link = %+v", l)
-	}
-}
-
-func TestDeliverToClearedKeyReachesSuccessor(t *testing.T) {
-	rt := newRemoteTree(t)
-	clearSession(rt.b, "%c1", "c2")
-	rt.b.orchPass(t.Context())
-	// A deliver a sent before it applied the rekey still names the old key.
-	m := api.Message{
-		ID: "a:m-00000001", Kind: api.MessageText, From: treeParent, To: treeChild, Body: "hi",
-		CreatedAt: time.Now(), UpdatedAt: time.Now(),
-	}
-	if err := pushTo(withPeerNode(t.Context(), "a"), rt.b, api.MethodOrchPeerDeliver, api.OrchPeerDeliverParams{Message: m}); err != nil {
-		t.Fatal(err)
-	}
-	got, ok, err := rt.b.orch.Get(t.Context(), m.ID)
-	if err != nil || !ok || got.To.Key != "claude:c2" {
-		t.Fatalf("message on b = %+v ok=%v err=%v", got, ok, err)
-	}
-}
-
 func TestParentRefRemoteParent(t *testing.T) {
 	rt := newRemoteTree(t)
 	want := session.ParentRef{Node: "a", Key: "claude:p1", SessionID: "a:default:%p1"}
@@ -1040,24 +965,6 @@ func delivers(items []orch.OutboxItem) []orch.OutboxItem {
 	return out
 }
 
-func TestRemoteKillByStaleKeyFindsTheClearedChild(t *testing.T) {
-	rt := newRemoteTree(t)
-	rt.b.markOrchSettled()
-	// The child ran /clear on b; a's mirror still has the old key.
-	clearSession(rt.b, "%c1", "c1-next")
-	rt.b.orchPass(t.Context())
-	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:default:%p1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(res.Killed, "b:default:%c1") {
-		t.Fatalf("result = %+v, want the cleared child killed", res)
-	}
-	if by := linkOf(t, rt.a, treeChild).EndedBy; by == "self" {
-		t.Fatalf("a mirror recorded the running child as ended by itself")
-	}
-}
-
 func TestCrossNodeSendThroughLinkStillFailsFast(t *testing.T) {
 	cp := newCrossPeers(t)
 	cp.b.markOrchSettled()
@@ -1092,5 +999,98 @@ func TestCrossNodeSendRetryWhileOfflineReturnsFirst(t *testing.T) {
 	}
 	if _, err := cp.a.send(peerCtx(t), cp.a.localCallerRef(cp.parent), target, "something else", "r1"); err == nil {
 		t.Fatal("a reused request_id with other text succeeded")
+	}
+}
+
+func TestClearedChildEndsItsLinkOnTheParentNode(t *testing.T) {
+	rt := newRemoteTree(t)
+	ctx := t.Context()
+	rt.b.orchGoneGrace = 0
+	rt.b.orchPass(ctx)
+	clearSession(rt.b, "%c1", "c2")
+	rt.b.orchPass(ctx)
+	if by := linkOf(t, rt.b, treeChild).EndedBy; by != "self" {
+		t.Fatalf("b link ended by %q", by)
+	}
+	rt.flush(t, "b")
+	if by := linkOf(t, rt.a, treeChild).EndedBy; by != "self" {
+		t.Fatalf("a mirror ended by %q", by)
+	}
+	if _, ok, _ := rt.a.orch.Link(ctx, api.Actor{Node: "b", Key: "claude:c2"}); ok {
+		t.Fatal("a mirror moved to the new conversation")
+	}
+}
+
+func TestClearedParentEndsOnTheChildNode(t *testing.T) {
+	rt := newRemoteTree(t)
+	ctx := t.Context()
+	rt.a.orchGoneGrace = 0
+	rt.a.orchPass(ctx)
+	clearSession(rt.a, "%p1", "p2")
+	rt.a.orchPass(ctx)
+	rt.flush(t, "a")
+	if l := linkOf(t, rt.b, treeChild); l.Parent != treeParent || !l.ParentEnded {
+		t.Fatalf("b link = %+v, want the old parent, ended", l)
+	}
+}
+
+func TestDeliverToClearedKeyKeepsItsKey(t *testing.T) {
+	rt := newRemoteTree(t)
+	rt.b.orchGoneGrace = 0
+	clearSession(rt.b, "%c1", "c2")
+	rt.b.orchPass(t.Context())
+	m := api.Message{
+		ID: "a:m-00000001", Kind: api.MessageText, From: treeParent, To: treeChild, Body: "hi",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := pushTo(withPeerNode(t.Context(), "a"), rt.b, api.MethodOrchPeerDeliver, api.OrchPeerDeliverParams{Message: m}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := rt.b.orch.Get(t.Context(), m.ID)
+	if err != nil || !ok || got.To.Key != treeChild.Key {
+		t.Fatalf("message on b = %+v ok=%v err=%v", got, ok, err)
+	}
+	rt.b.markOrchSettled()
+	rt.b.orchPass(t.Context())
+	if got, _, _ := rt.b.orch.Get(t.Context(), m.ID); got.State != api.MessageFailed {
+		t.Fatalf("message state = %s, want failed", got.State)
+	}
+}
+
+func TestRemoteKillOfAClearedChildLeavesTheNewConversation(t *testing.T) {
+	rt := newRemoteTree(t)
+	rt.b.markOrchSettled()
+	// The child ran /clear on b; a's mirror still has the old key.
+	clearSession(rt.b, "%c1", "c1-next")
+	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:default:%p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(res.Killed, "b:default:%c1") || len(res.NotKilled) > 0 {
+		t.Fatalf("result = %+v, want the new conversation left alone and nothing failed", res)
+	}
+	if _, ok := rt.b.reg.FindByAgentSession("claude", "c1-next"); !ok {
+		t.Fatal("the new conversation was removed")
+	}
+	if by := linkOf(t, rt.a, treeChild).EndedBy; by != "self" {
+		t.Fatalf("a mirror ended by %q, want self", by)
+	}
+}
+
+func TestRemoteKillOfAClearedChildBeforeSettleIsNotKilled(t *testing.T) {
+	rt := newRemoteTree(t)
+	clearSession(rt.b, "%c1", "c1-next")
+	res, err := rt.a.kill(peerCtx(t), rt.a.localCallerRef(rt.parent), "a:default:%p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(res.NotKilled, "b:default:%c1") {
+		t.Fatalf("result = %+v, want the child not killed before b settled", res)
+	}
+	if by := linkOf(t, rt.a, treeChild).EndedBy; by != "" {
+		t.Fatalf("a mirror ended by %q before b settled", by)
+	}
+	if _, ok := rt.b.reg.FindByAgentSession("claude", "c1-next"); !ok {
+		t.Fatal("the new conversation was removed")
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
-	"github.com/MunifTanjim/argus/internal/registry"
 )
 
 const (
@@ -82,6 +81,9 @@ func (d *Node) flushOutbox(ctx context.Context) {
 	wg.Wait()
 }
 
+// retiredRekey is dropped unsent: a peer on an older build would move the link.
+const retiredRekey = "orch.peer.rekey"
+
 func (d *Node) flushNode(ctx context.Context, node string) {
 	for ctx.Err() == nil {
 		items, err := d.orch.Pending(ctx, node, outboxBatch)
@@ -90,6 +92,13 @@ func (d *Node) flushNode(ctx context.Context, node string) {
 			return
 		}
 		for _, it := range items {
+			if it.Method == retiredRekey {
+				if err := d.orch.Ack(ctx, it.Seq); err != nil {
+					d.log.Warn("orch: drop retired push failed", "node", node, "seq", it.Seq, "err", err)
+					return
+				}
+				continue
+			}
 			if err := d.sendPush(ctx, node, it.Method, it.Params); err != nil {
 				switch {
 				case rejectedByPeer(err):
@@ -199,10 +208,6 @@ func (d *Node) handleOrchPeerDeliver(ctx context.Context, params json.RawMessage
 	}
 	if !reservedKey(m.To.Key) {
 		m.State = api.MessageQueued
-		// The peer sent it before it applied this node's rekey of the recipient.
-		if key, ok := d.successorKey(m.To.Key); ok {
-			m.To.Key = key
-		}
 	}
 	added, err := d.orch.Receive(ctx, m)
 	if err != nil || !added {
@@ -218,20 +223,6 @@ func (d *Node) handleOrchPeerDeliver(ctx context.Context, params json.RawMessage
 	d.orchKick()
 	d.orchChanged()
 	return nil, nil
-}
-
-// successorKey returns the key of the live session that a /clear moved key to,
-// when key itself is not live.
-func (d *Node) successorKey(key string) (string, bool) {
-	if _, live := d.sessionForKey(key); live {
-		return "", false
-	}
-	for _, s := range d.reg.Snapshot() {
-		if to := actorKey(s); to != "" && s.ClearedFrom != "" && registry.AgentSessionKey(s.Agent, s.ClearedFrom) == key {
-			return to, true
-		}
-	}
-	return "", false
 }
 
 // handleOrchPeerWithdraw withdraws an open message the peer created, and gives its
@@ -302,22 +293,6 @@ func (d *Node) handleOrchPeerParentEnded(ctx context.Context, params json.RawMes
 		return nil, err
 	}
 	d.orchKick()
-	d.orchChanged()
-	return nil, nil
-}
-
-// handleOrchPeerRekey moves an actor of the peer to a new key.
-func (d *Node) handleOrchPeerRekey(ctx context.Context, params json.RawMessage) (any, error) {
-	p, peer, err := peerPush[api.OrchPeerRekeyParams](ctx, d, params)
-	if err != nil {
-		return nil, err
-	}
-	if p.OldKey == "" || p.NewKey == "" || reservedKey(p.OldKey) || reservedKey(p.NewKey) {
-		return nil, rejectPush(fmt.Errorf("cannot rekey %q to %q", p.OldKey, p.NewKey))
-	}
-	if err := d.orch.RekeyNode(ctx, peer, p.OldKey, p.NewKey); err != nil {
-		return nil, err
-	}
 	d.orchChanged()
 	return nil, nil
 }

@@ -140,7 +140,6 @@ func TestOrchMethodsArePrefixed(t *testing.T) {
 		MethodOrchSessionCurrent, MethodOrchSessionList, MethodOrchSessionGet, MethodOrchSessionSpawn, MethodOrchMessageSend,
 		MethodOrchMessageReply, MethodOrchInteractionRespond, MethodOrchSessionOutput, MethodOrchSessionTranscript, MethodOrchSessionKill,
 		MethodOrchSessionRename, MethodOrchPeerDeliver, MethodOrchPeerWithdraw, MethodOrchPeerLinkEnded, MethodOrchPeerParentEnded,
-		MethodOrchPeerRekey,
 	}
 	for _, m := range methods {
 		if !strings.HasPrefix(m, "orch.") {

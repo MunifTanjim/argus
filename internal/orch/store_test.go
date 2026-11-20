@@ -115,66 +115,6 @@ func TestQueuedRecipientsDistinct(t *testing.T) {
 	}
 }
 
-func TestRekeyMovesMessagesAndLinks(t *testing.T) {
-	s, _ := newTestStore(t)
-	s.SetNodeID("n1")
-	ctx := context.Background()
-	insert := func(m api.Message) api.Message {
-		t.Helper()
-		got, err := s.Insert(ctx, m)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return got
-	}
-	toOld := insert(queued("claude:old"))
-	fromOld := queued("claude:p")
-	fromOld.From = api.Actor{Node: "n1", Key: "claude:old"}
-	fromOld = insert(fromOld)
-	notice := queued("claude:p")
-	notice.Kind = api.MessageInteraction
-	notice.From = api.Actor{Node: "n1", Key: api.ActorArgus}
-	notice.Child = &api.Actor{Node: "n1", Key: "claude:old"}
-	notice = insert(notice)
-	for _, l := range []api.Link{
-		{Child: api.Actor{Node: "n1", Key: "claude:old"}, Parent: api.Actor{Node: "n1", Key: "claude:p"}},
-		{Child: api.Actor{Node: "n1", Key: "claude:w"}, Parent: api.Actor{Node: "n1", Key: "claude:old"}},
-	} {
-		if err := s.PutLink(ctx, l); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := s.Rekey(ctx, "claude:old", "claude:new"); err != nil {
-		t.Fatal(err)
-	}
-	get := func(id string) api.Message {
-		t.Helper()
-		m, ok, err := s.Get(ctx, id)
-		if err != nil || !ok {
-			t.Fatalf("get %s: ok=%v err=%v", id, ok, err)
-		}
-		return m
-	}
-	if m := get(toOld.ID); m.To.Key != "claude:new" {
-		t.Fatalf("recipient not moved: %+v", m.To)
-	}
-	if m := get(fromOld.ID); m.From.Key != "claude:new" {
-		t.Fatalf("sender not moved: %+v", m.From)
-	}
-	if m := get(notice.ID); m.Child == nil || m.Child.Key != "claude:new" {
-		t.Fatalf("child not moved: %+v", m.Child)
-	}
-	if l, ok, _ := s.Link(ctx, api.Actor{Node: "n1", Key: "claude:new"}); !ok || l.Parent.Key != "claude:p" {
-		t.Fatalf("child link not moved: %+v ok=%v", l, ok)
-	}
-	if _, ok, _ := s.Link(ctx, api.Actor{Node: "n1", Key: "claude:old"}); ok {
-		t.Fatal("old link remains")
-	}
-	if l, ok, _ := s.Link(ctx, api.Actor{Node: "n1", Key: "claude:w"}); !ok || l.Parent.Key != "claude:new" {
-		t.Fatalf("parent key not moved: %+v ok=%v", l, ok)
-	}
-}
-
 func TestUnrepliedTaskClearsOnReply(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
@@ -379,19 +319,13 @@ func TestLinkCacheFollowsWrites(t *testing.T) {
 	}
 	put("claude:c", "claude:p")
 	put("claude:w", "claude:c")
-	if err := s.Rekey(ctx, "claude:c", "claude:c2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SetEndedBy(ctx, api.Actor{Node: "n1", Key: "claude:c2"}, "parent"); err != nil {
+	if err := s.SetEndedBy(ctx, api.Actor{Node: "n1", Key: "claude:c"}, "parent"); err != nil {
 		t.Fatal(err)
 	}
 	put("claude:w", "claude:q")
-	if err := s.Rekey(ctx, "claude:w", "claude:c2"); err == nil {
-		t.Fatal("rekey onto an existing child succeeded")
-	}
 
 	fresh := orch.NewStore(sqlDB, time.Now)
-	for _, key := range []string{"claude:c", "claude:c2", "claude:w"} {
+	for _, key := range []string{"claude:c", "claude:w"} {
 		got, gotOK, err := s.Link(ctx, api.Actor{Node: "n1", Key: key})
 		if err != nil {
 			t.Fatal(err)
@@ -404,8 +338,8 @@ func TestLinkCacheFollowsWrites(t *testing.T) {
 			t.Errorf("%s: cached %+v/%v, stored %+v/%v", key, got, gotOK, want, wantOK)
 		}
 	}
-	if l, _, _ := s.Link(ctx, api.Actor{Node: "n1", Key: "claude:c2"}); l.EndedBy != "parent" || l.Parent.Key != "claude:p" {
-		t.Fatalf("c2 = %+v", l)
+	if l, _, _ := s.Link(ctx, api.Actor{Node: "n1", Key: "claude:c"}); l.EndedBy != "parent" || l.Parent.Key != "claude:p" {
+		t.Fatalf("c = %+v", l)
 	}
 }
 
@@ -548,32 +482,6 @@ func TestReleaseInteractionNeedsSameActor(t *testing.T) {
 	}
 	if got, _, _ := s.Get(ctx, msg.ID); got.State != api.MessageQueued || got.AnsweredBy != nil {
 		t.Fatalf("got %+v", got)
-	}
-}
-
-func TestRekeyLeavesOtherNodesActors(t *testing.T) {
-	s, _ := newTestStore(t)
-	s.SetNodeID("n1")
-	ctx := context.Background()
-	other := api.Actor{Node: "n2", Key: "claude:old"}
-	m := queued("claude:p")
-	m.From, m.To, m.Child = other, other, &other
-	m, err := s.Insert(ctx, m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.PutLink(ctx, api.Link{Child: other, Parent: other}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Rekey(ctx, "claude:old", "claude:new"); err != nil {
-		t.Fatal(err)
-	}
-	got, _, _ := s.Get(ctx, m.ID)
-	if got.From != other || got.To != other || *got.Child != other {
-		t.Fatalf("another node's actor was rekeyed: %+v", got)
-	}
-	if l, ok, _ := s.Link(ctx, other); !ok || l.Child != other || l.Parent != other {
-		t.Fatalf("another node's link was rekeyed: %+v ok=%v", l, ok)
 	}
 }
 
