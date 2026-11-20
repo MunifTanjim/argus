@@ -764,9 +764,8 @@ CallerInfo {
 }
 
 RemoteCaller {
-  actor:      Actor    // the caller, as its own node states it
-  session_id: string   // composite id of the caller session
-  label:      string   // the label of the caller session
+  actor: Actor    // the caller, as its own node states it
+  label: string   // the label of the caller session
 }
 ```
 
@@ -790,10 +789,10 @@ fields:
 | Method | Change |
 | ------ | ------ |
 | `orch.session.list` | Param `all: boolean`. With `all`, the node returns the sessions of every online node. The result is `OrchListResult { sessions, unreachable? }`. `unreachable` lists the nodes whose sessions are missing: nodes that did not answer, and offline nodes that are still in the gateway roster. |
-| `orch.session.spawn` | Param `node: string`, an id or a label. Empty means the local node. An ambiguous label fails. The result field `child_key` is internal: the node sets it only for a caller on another node, so that node can record the link. |
-| `orch.session.kill` | The result is `OrchKillResult { killed, not_killed? }`. `not_killed` lists descendants on other nodes that the node could not reach or kill. A parent on another node also sends `child_key`, the child's actor key, so the child's node finds the child even after it moved to a new pane. |
+| `orch.session.spawn` | Param `node: string`, an id or a label. Empty means the local node. An ambiguous label fails. The result's `session_id` is the child's agent ID; a caller on another node records the link from it. |
+| `orch.session.kill` | The result is `OrchKillResult { killed, not_killed? }`. `not_killed` lists descendants on other nodes that the node could not reach or kill. A child that was just spawned and has not started yet is listed in `killed`: its link ends and its messages fail at once, and the session is killed when it starts. |
 
-All ids in params and results are composite (`<node>:<id>`).
+Session ids in params and results are agent ids: `<node>:<agent>:<agent session id>`. A session without an agent session id has no agent id: `orch.session.list` omits it, and no call can target it. A message to a child that was just spawned and has not started yet is queued until it starts, and fails if the child does not start.
 
 `argus session list --json` prints the `OrchListResult` object,
 `{ sessions, unreachable? }`, not a bare array of sessions.
@@ -1571,7 +1570,7 @@ are served by the node, on the unix socket and on relay channels.
 
 ```ts
 OwnerSendParams {
-  session_id?: string   // local id of the recipient; required without reply_to
+  session_id?: string   // agent id of the recipient; required without reply_to
   text:        string
   reply_to?:   string   // id of a message to the owner
 }
@@ -1580,7 +1579,6 @@ Message {
   id:           string            // node id, ":m-", and 16 hex characters, e.g. "home:m-7f3a09c1b2d4e6f8"
   kind:         "text" | "task" | "reply" | "interaction" | "turn_ended" | "interaction_ended"
   from, to:     Actor
-  from_session_id?: string        // composite session id of a session sender, recorded at creation
   from_label?:  string            // label of a session sender, recorded at creation
   body:         string
   reply_to?:    string
@@ -1595,8 +1593,6 @@ Link {
   child, parent:      Actor
   task_id?:           string
   ended_by?:          "owner" | "parent" | "self" | "ancestor"
-  child_session_id?:  string    // composite session id of the child, recorded at spawn
-  parent_session_id?: string    // composite session id of a parent on another node, recorded at spawn
   parent_ended?:      boolean   // a parent on another node ended
 }
 
@@ -2000,10 +1996,8 @@ Session {
 }
 
 ParentRef {
-  node:        string
-  key:         string                 // the actor key of the parent
-  session_id?: string                 // the running session with key, if there is one; composite for a parent on another node, bare for a local parent
-  gone?:       boolean                // the parent is not running; for a parent on another node, the link ended
+  id:    string   // agent id of the parent
+  gone?: boolean  // the parent is not running; for a parent on another node, the link ended
 }
 
 RunningSubagent {

@@ -82,8 +82,9 @@ func sessionCmd(dial callerFor) *cobra.Command {
 		Short: "List, spawn, message and control agent sessions",
 		Long: `List, spawn, message and control agent sessions from inside an agent session.
 
-Session IDs have the form <node>:<id>, for example home:argus:%3 or
-home:opencode:ses_01J..., and are printed by list, spawn and whoami.
+Session IDs have the form <node>:<agent>:<agent session id>, for example
+home:claude:5f1c0e2a-... or home:opencode:ses_01J..., and are printed by list,
+spawn and whoami.
 
 Messages are asynchronous. send and reply return a message ID immediately and
 never wait. The recipient receives the message as a new prompt once it can take
@@ -159,7 +160,7 @@ func parentLabel(p *session.ParentRef) string {
 
 func sessionShow(dial callerFor) *cobra.Command {
 	return sessionSub(dial, "show <id>", "Show a session, its pending prompt and its queued messages",
-		"  argus session show home:argus:%3", cobra.ExactArgs(1), nil,
+		"  argus session show home:claude:5f1c0e2a", cobra.ExactArgs(1), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
 			var res api.OrchGetResult
 			if err := call(api.MethodOrchSessionGet, api.OrchTargetParams{Caller: callerInfo(), SessionID: args[0]}, &res); err != nil {
@@ -318,7 +319,7 @@ func sessionRespond(dial callerFor) *cobra.Command {
 
 func sessionOutput(dial callerFor) *cobra.Command {
 	return sessionSub(dial, "output <id>", "Print the session's last assistant reply",
-		"  argus session output home:argus:%3", cobra.ExactArgs(1), nil,
+		"  argus session output home:claude:5f1c0e2a", cobra.ExactArgs(1), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
 			var res api.OrchOutputResult
 			if err := call(api.MethodOrchSessionOutput, api.OrchTargetParams{Caller: callerInfo(), SessionID: args[0]}, &res); err != nil {
@@ -338,7 +339,7 @@ func sessionOutput(dial callerFor) *cobra.Command {
 func sessionTranscript(dial callerFor) *cobra.Command {
 	var last int
 	return sessionSub(dial, "transcript <id> [--last N]", "Print a session's conversation transcript",
-		"  argus session transcript home:argus:%3 --last 10", cobra.ExactArgs(1),
+		"  argus session transcript home:claude:5f1c0e2a --last 10", cobra.ExactArgs(1),
 		func(cmd *cobra.Command) {
 			cmd.Flags().IntVar(&last, "last", 0, "only the last N entries (default: all)")
 		},
@@ -366,7 +367,7 @@ func entryText(e transcript.Entry) string {
 
 func sessionRename(dial callerFor) *cobra.Command {
 	return sessionSub(dial, "rename <id> <name>", "Rename any session",
-		"  argus session rename home:argus:%3 \"Review the API\"", cobra.ExactArgs(2), nil,
+		"  argus session rename home:claude:5f1c0e2a \"Review the API\"", cobra.ExactArgs(2), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
 			var res api.SessionRenameResult
 			if err := call(api.MethodOrchSessionRename, api.OrchRenameParams{SessionID: args[0], Name: args[1]}, &res); err != nil {
@@ -386,7 +387,7 @@ func sessionRename(dial callerFor) *cobra.Command {
 
 func sessionKill(dial callerFor) *cobra.Command {
 	return sessionSub(dial, "kill <id>", "Kill a child session, or your own, with every session below it",
-		"  argus session kill home:argus:%3", cobra.ExactArgs(1), nil,
+		"  argus session kill home:claude:5f1c0e2a", cobra.ExactArgs(1), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
 			var res api.OrchKillResult
 			if err := call(api.MethodOrchSessionKill, api.OrchTargetParams{Caller: callerInfo(), SessionID: args[0]}, &res); err != nil {

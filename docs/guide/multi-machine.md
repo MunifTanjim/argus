@@ -86,9 +86,9 @@ Front the gateway yourself with TLS to serve `wss://`.
 ## Agents across nodes
 
 Agents can orchestrate sessions on any connected node. An agent lists the
-sessions of every online node, messages them, and kills them. Session IDs carry
-the node, like `home:argus:%3`, so a call goes to the node that owns the
-session.
+sessions of every online node, messages them, and kills them. A session ID
+names the node, the agent, and the agent's own session id, like
+`home:claude:5f1c0e2a-…`, so a call goes to the node that owns the session.
 
 - `spawn_session` takes a `node` (an ID or a label). The working directory
   and the agent refer to that node. Without `node`, the session starts on the

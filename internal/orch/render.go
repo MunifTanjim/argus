@@ -11,9 +11,9 @@ import (
 type Delivery struct {
 	Msg          api.Message
 	From         string // sender label: "owner", "argus", or a session label
-	FromSession  string // sender composite session ID; "" for owner and argus
+	FromSession  string // sender agent ID; "" for owner and argus
 	Child        string // notices: the child's label
-	ChildSession string // notices: the child's composite session ID
+	ChildSession string // notices: the child's agent ID
 }
 
 const (
