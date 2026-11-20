@@ -15,6 +15,15 @@ import (
 
 const maxBodyBytes = 1 << 20
 
+// SessionHeader carries the caller's session id for agents whose MCP client
+// puts none in _meta (pi): the agent's runtime sets it, never the model.
+const SessionHeader = "X-Argus-Session"
+
+// SessionMetaKey is where a call's meta holds SessionHeader's value. Only the
+// header sets it; a client value under the key is dropped. Only the pi adapter
+// reads it.
+const SessionMetaKey = "argus/session"
+
 type Tool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
@@ -89,10 +98,10 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	writeJSON(w, s.dispatch(r.Context(), r.PathValue("agent"), req))
+	writeJSON(w, s.dispatch(r.Context(), r.PathValue("agent"), r.Header.Get(SessionHeader), req))
 }
 
-func (s *server) dispatch(ctx context.Context, agent string, req request) response {
+func (s *server) dispatch(ctx context.Context, agent, session string, req request) response {
 	resp := response{JSONRPC: "2.0", ID: req.ID}
 	fail := func(code int, msg string) response {
 		resp.Error = &api.RPCError{Code: code, Message: msg}
@@ -121,6 +130,14 @@ func (s *server) dispatch(ctx context.Context, agent string, req request) respon
 		var p callParams
 		if err := json.Unmarshal(req.Params, &p); err != nil || p.Name == "" {
 			return fail(api.CodeInvalidParams, "invalid params")
+		}
+		delete(p.Meta, SessionMetaKey)
+		if session != "" {
+			if p.Meta == nil {
+				p.Meta = map[string]json.RawMessage{}
+			}
+			v, _ := json.Marshal(session)
+			p.Meta[SessionMetaKey] = v
 		}
 		res := s.backend.Call(ctx, agent, p.Name, p.Meta, p.Arguments)
 		resp.Result = callResponse{Content: []textContent{{Type: "text", Text: res.Text}}, IsError: res.IsError}
