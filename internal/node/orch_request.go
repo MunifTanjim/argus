@@ -78,9 +78,5 @@ func (d *Node) spawnedRequest(ctx context.Context, parent api.Actor, req orch.Re
 	if prev.Hash != req.Hash {
 		return api.OrchSpawnResult{}, false, errRequestReused(req.ID)
 	}
-	res := api.OrchSpawnResult{SessionID: prev.Link.ChildSessionID, TaskID: prev.Link.TaskID}
-	if parent.Node != d.id {
-		res.ChildKey = prev.Link.Child.Key
-	}
-	return res, true, nil
+	return api.OrchSpawnResult{SessionID: actorID(prev.Link.Child), TaskID: prev.Link.TaskID}, true, nil
 }

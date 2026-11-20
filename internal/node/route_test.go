@@ -383,17 +383,15 @@ func TestSpawnRemoteNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.SessionID != "b:fake:ses_x" || !strings.HasPrefix(res.TaskID, "b:m-") || res.ChildKey != "" {
+	if res.SessionID != "b:fake:ses_x" || !strings.HasPrefix(res.TaskID, "b:m-") {
 		t.Fatalf("result = %+v", res)
 	}
 	parent := api.Actor{Node: "a", Key: "opencode:p1"}
-	want := api.Link{Child: api.Actor{Node: "b", Key: "fake:ses_x"}, Parent: parent, TaskID: res.TaskID, ChildSessionID: res.SessionID}
-	want.ParentSessionID = "a:" + sp.caller.ID
+	want := api.Link{Child: api.Actor{Node: "b", Key: "fake:ses_x"}, Parent: parent, TaskID: res.TaskID}
 	link, ok, err := sp.b.orch.Link(t.Context(), api.Actor{Node: "b", Key: "fake:ses_x"})
 	if err != nil || !ok || link != want {
 		t.Fatalf("b link = %+v ok=%v err=%v, want %+v", link, ok, err, want)
 	}
-	want.ParentSessionID = ""
 	mirror, ok, err := sp.a.orch.Link(t.Context(), api.Actor{Node: "b", Key: "fake:ses_x"})
 	if err != nil || !ok || mirror != want {
 		t.Fatalf("a mirror = %+v ok=%v err=%v, want %+v", mirror, ok, err, want)
@@ -439,7 +437,7 @@ func TestSpawnOwnNodeByIDAndLabel(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", node, err)
 		}
-		if res := out.(api.OrchSpawnResult); res.SessionID != "home:fake:ses_x" || res.ChildKey != "" {
+		if res := out.(api.OrchSpawnResult); res.SessionID != "home:fake:ses_x" {
 			t.Fatalf("%s: result = %+v", node, res)
 		}
 	}

@@ -87,5 +87,5 @@ func routedMessage[R any](ctx context.Context, d *Node, id, method string, param
 
 // remote is the caller as the target node receives it.
 func (c callerRef) remote() api.CallerInfo {
-	return api.CallerInfo{Remote: &api.RemoteCaller{Actor: c.Actor, SessionID: c.SessionID, Label: c.Label}}
+	return api.CallerInfo{Remote: &api.RemoteCaller{Actor: c.Actor, Label: c.Label}}
 }

@@ -123,7 +123,7 @@ func (d *Node) orchKick() {
 func (d *Node) orchChanged() { d.notifyConns(api.MethodMessageChanged) }
 
 // killTree kills target and the live sessions below it in the parent links,
-// deepest first, and returns the composite IDs it killed. Each child on another
+// deepest first, and returns the agent IDs it killed. Each child on another
 // node is killed there with its subtree, in parallel and before any local
 // session; one that cannot be reached or killed is returned in notKilled. A
 // failed kill does not stop the others, and a disconnecting caller does not
@@ -146,7 +146,7 @@ func (d *Node) killTree(ctx context.Context, target session.Session, by string) 
 		notKilled = append(notKilled, results[i].NotKilled...)
 		if err := remoteErrs[i]; err != nil {
 			d.log.Warn("orch: kill remote child failed", "node", l.Child.Node, "child", l.Child.Key, "err", err)
-			notKilled = append(notKilled, remoteChildID(l))
+			notKilled = append(notKilled, actorID(l.Child))
 		}
 	}
 	var errs []error
@@ -180,7 +180,6 @@ func (d *Node) killRemoteChild(ctx context.Context, l api.Link) (api.OrchKillRes
 	params := api.OrchKillParams{
 		OrchTargetParams: api.OrchTargetParams{Caller: caller.remote(), SessionID: actorID(l.Child)},
 		Ancestor:         true,
-		ChildKey:         l.Child.Key,
 	}
 	by := "ancestor"
 	var res api.OrchKillResult
@@ -553,7 +552,7 @@ func (d *Node) orchDeliver(ctx context.Context, snap []session.Session) {
 		}
 		ds := make([]orch.Delivery, len(batch))
 		for i, m := range batch {
-			ds[i] = d.delivery(ctx, m)
+			ds[i] = d.delivery(m)
 		}
 		jobs = append(jobs, job{key: key, s: s, batch: batch, text: orch.RenderPrompt(ds)})
 	}
@@ -606,18 +605,24 @@ func (d *Node) orchDeliver(ctx context.Context, snap []session.Session) {
 
 // senderLabel names an actor of this node; another node's actor goes by
 // <node>:<key>, as a local session never stands for it.
-func (d *Node) senderLabel(p api.Actor) (label, sessionID string) {
+func (d *Node) senderLabel(p api.Actor) string {
 	if reservedKey(p.Key) {
-		return p.Key, ""
+		return p.Key
 	}
-	if p.Node != d.id {
-		return actorID(p), ""
+	if p.Node == d.id {
+		if s, live := d.sessionForKey(p.Key); live {
+			return sessionLabel(s)
+		}
 	}
-	s, live := d.sessionForKey(p.Key)
-	if !live {
-		return p.Key, ""
+	return actorID(p)
+}
+
+// senderID is the agent ID a prompt shows for p; "" for the owner and argus.
+func senderID(p api.Actor) string {
+	if reservedKey(p.Key) {
+		return ""
 	}
-	return sessionLabel(s), d.agentID(s)
+	return actorID(p)
 }
 
 // nextBatch picks the messages for one prompt: a message from the owner of
@@ -636,49 +641,18 @@ func nextBatch(self string, queued []api.Message) []api.Message {
 	return batch
 }
 
-func (d *Node) delivery(ctx context.Context, m api.Message) orch.Delivery {
+func (d *Node) delivery(m api.Message) orch.Delivery {
 	dl := orch.Delivery{Msg: m}
-	dl.From, dl.FromSession = d.senderLabel(m.From)
-	if m.From.Node != d.id && !reservedKey(m.From.Key) {
-		// This node cannot look up a session on another node, so it uses what
-		// the creating node recorded, and the link for older messages.
-		if m.FromLabel != "" {
-			dl.From = m.FromLabel
-		}
-		dl.FromSession = m.FromSessionID
-		if dl.FromSession == "" {
-			dl.FromSession = d.remoteSessionID(ctx, m)
-		}
+	dl.From, dl.FromSession = d.senderLabel(m.From), senderID(m.From)
+	// This node cannot look up a session on another node, so it uses the label
+	// the creating node recorded.
+	if m.From.Node != d.id && !reservedKey(m.From.Key) && m.FromLabel != "" {
+		dl.From = m.FromLabel
 	}
 	if m.Child != nil {
-		child, childSession := d.childActor(ctx, *m.Child)
-		dl.Child, dl.ChildSession = d.senderLabel(child)
-		if child.Node != d.id {
-			dl.ChildSession = childSession
-		}
+		dl.Child, dl.ChildSession = d.senderLabel(*m.Child), senderID(*m.Child)
 	}
 	return dl
-}
-
-// remoteSessionID is the composite session ID of m's sender on another node,
-// as its link with m's recipient recorded it, or "" when unknown.
-func (d *Node) remoteSessionID(ctx context.Context, m api.Message) string {
-	if l, ok, err := d.orch.Link(ctx, m.From); err == nil && ok {
-		return l.ChildSessionID
-	}
-	if l, ok, err := d.orch.Link(ctx, m.To); err == nil && ok && l.Parent == m.From {
-		return l.ParentSessionID
-	}
-	return ""
-}
-
-// childActor is the child a notice is about, with its composite session ID
-// when the child is on another node, as its link recorded it.
-func (d *Node) childActor(ctx context.Context, child api.Actor) (api.Actor, string) {
-	if l, ok, err := d.orch.Link(ctx, child); err == nil && ok {
-		return l.Child, l.ChildSessionID
-	}
-	return child, ""
 }
 
 // insertMessage stores m and, when its recipient is on another node, queues

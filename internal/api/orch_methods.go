@@ -17,14 +17,13 @@ type CallerInfo struct {
 
 // RemoteCaller is an agent session on another node, as that node states it.
 type RemoteCaller struct {
-	Actor     Actor  `json:"actor"`
-	SessionID string `json:"session_id"` // composite
-	Label     string `json:"label"`
+	Actor Actor  `json:"actor"`
+	Label string `json:"label"`
 }
 
 var ErrNoCaller = errors.New("not running inside an argus agent session")
 
-// Method names for orch.* calls. IDs in their params and results are composite.
+// Method names for orch.* calls. Session IDs in their params and results are agent IDs.
 const (
 	MethodOrchSessionCurrent     = "orch.session.current"     // request: CallerParams; result: session.Session
 	MethodOrchSessionList        = "orch.session.list"        // request: OrchListParams; result: OrchListResult
@@ -128,9 +127,6 @@ type OrchSpawnParams struct {
 type OrchSpawnResult struct {
 	SessionID string `json:"session_id"`
 	TaskID    string `json:"task_id,omitempty"`
-	// ChildKey is the child's actor key, sent only to a caller on another node
-	// so that node can mirror the link.
-	ChildKey string `json:"child_key,omitempty"`
 }
 
 type OrchSendParams struct {
@@ -170,12 +166,9 @@ type OrchRenameParams struct {
 type OrchKillParams struct {
 	OrchTargetParams
 	Ancestor bool `json:"ancestor,omitempty"`
-	// ChildKey names the target by its actor key, so a child that moved to a
-	// new pane is still found. A parent on another node sets it.
-	ChildKey string `json:"child_key,omitempty"`
 }
 
-// OrchKillResult lists the composite IDs of the killed sessions: the target's
+// OrchKillResult lists the agent IDs of the killed sessions: the target's
 // live descendants, deepest first, then the target. NotKilled lists the
 // descendants on other nodes that could not be reached or killed.
 type OrchKillResult struct {

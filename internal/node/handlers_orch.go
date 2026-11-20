@@ -62,8 +62,8 @@ func (d *Node) settled() bool {
 	}
 }
 
-// composite returns s as orch.* clients see it: its ID is the agent ID.
-func (d *Node) composite(s session.Session) session.Session {
+// agentView returns s as orch.* clients see it: its ID is the agent ID.
+func (d *Node) agentView(s session.Session) session.Session {
 	s = d.withCaps(s)
 	s.ID = d.agentID(s)
 	return s
@@ -113,12 +113,12 @@ func (d *Node) handleOrchSessionCurrent(ctx context.Context, params json.RawMess
 
 func (d *Node) currentSession(caller callerRef) (session.Session, error) {
 	if caller.Local == nil {
-		return session.Session{}, fmt.Errorf("current session: %s is not a session on this node", caller.SessionID)
+		return session.Session{}, fmt.Errorf("current session: %s is not a session on this node", caller.name())
 	}
 	if d.agentID(*caller.Local) == "" {
 		return session.Session{}, notReady(caller.Label)
 	}
-	return d.composite(*caller.Local), nil
+	return d.agentView(*caller.Local), nil
 }
 
 func (d *Node) handleOrchSessionList(ctx context.Context, params json.RawMessage) (any, error) {
@@ -177,7 +177,7 @@ func (d *Node) list() []session.Session {
 	out := []session.Session{}
 	for _, s := range d.reg.Snapshot() {
 		if d.agentID(s) != "" {
-			out = append(out, d.composite(s))
+			out = append(out, d.agentView(s))
 		}
 	}
 	return out
@@ -222,7 +222,7 @@ func (d *Node) getSession(ctx context.Context, id string) (api.OrchGetResult, er
 			return api.OrchGetResult{}, err
 		}
 	}
-	return api.OrchGetResult{Session: d.composite(s), Queued: queued}, nil
+	return api.OrchGetResult{Session: d.agentView(s), Queued: queued}, nil
 }
 
 func (d *Node) handleOrchSessionOutput(ctx context.Context, params json.RawMessage) (any, error) {
@@ -310,7 +310,7 @@ func (d *Node) spawnFor(ctx context.Context, caller callerRef, p api.OrchSpawnPa
 	}
 	parent := caller.Actor
 	if parent.Key == "" {
-		return api.OrchSpawnResult{}, notReady(caller.SessionID)
+		return api.OrchSpawnResult{}, notReady(caller.name())
 	}
 	var req orch.Request
 	if p.RequestID != "" {
@@ -326,9 +326,9 @@ func (d *Node) spawnFor(ctx context.Context, caller callerRef, p api.OrchSpawnPa
 	if p.Prompt != "" {
 		task = api.Message{
 			ID: orch.NewID(d.id), Kind: api.MessageTask, From: parent, Body: p.Prompt,
-			FromSessionID: caller.SessionID, FromLabel: caller.Label, State: api.MessageDelivered,
+			FromLabel: caller.Label, State: api.MessageDelivered,
 		}
-		prompt = orch.RenderPrompt([]orch.Delivery{{Msg: task, From: caller.Label, FromSession: caller.SessionID}})
+		prompt = orch.RenderPrompt([]orch.Delivery{{Msg: task, From: caller.Label, FromSession: actorID(caller.Actor)}})
 	}
 
 	a := d.adapterFor(p.Agent)
@@ -353,20 +353,13 @@ func (d *Node) spawnFor(ctx context.Context, caller callerRef, p api.OrchSpawnPa
 
 	child := api.Actor{Node: d.id, Key: childKey}
 	task.To = child
-	link := api.Link{Child: child, Parent: parent, TaskID: task.ID, ChildSessionID: actorID(child)}
-	if parent.Node != d.id {
-		link.ParentSessionID = actorID(parent)
-	}
+	link := api.Link{Child: child, Parent: parent, TaskID: task.ID}
 	if err := d.orch.LinkSpawned(ctx, link, task, req); err != nil {
 		d.abortSpawn(ctx, p.Agent, childKey, spawned)
 		return api.OrchSpawnResult{}, err
 	}
 	d.orchChanged()
-	res := api.OrchSpawnResult{SessionID: link.ChildSessionID, TaskID: task.ID}
-	if parent.Node != d.id {
-		res.ChildKey = childKey
-	}
-	return res, nil
+	return api.OrchSpawnResult{SessionID: actorID(child), TaskID: task.ID}, nil
 }
 
 // spawnRemote spawns on nodeID, which stores the link and dedupes request_id,
@@ -374,7 +367,7 @@ func (d *Node) spawnFor(ctx context.Context, caller callerRef, p api.OrchSpawnPa
 func (d *Node) spawnRemote(ctx context.Context, caller callerRef, nodeID string, p api.OrchSpawnParams) (api.OrchSpawnResult, error) {
 	parent := caller.Actor
 	if parent.Key == "" {
-		return api.OrchSpawnResult{}, notReady(caller.SessionID)
+		return api.OrchSpawnResult{}, notReady(caller.name())
 	}
 	fwd := p
 	fwd.Caller, fwd.Node = caller.remote(), ""
@@ -387,12 +380,12 @@ func (d *Node) spawnRemote(ctx context.Context, caller callerRef, nodeID string,
 		}
 		return api.OrchSpawnResult{}, err
 	}
-	if res.ChildKey == "" {
-		d.log.Warn("orch: remote spawn returned no child key; link not mirrored", "node", nodeID, "session", res.SessionID)
+	childNode, childKey, _ := session.SplitCompositeID(res.SessionID)
+	if childNode != nodeID || !strings.Contains(childKey, ":") {
+		d.log.Warn("orch: remote spawn returned no agent id; link not mirrored", "node", nodeID, "session", res.SessionID)
 		return res, nil
 	}
-	link := api.Link{Child: api.Actor{Node: nodeID, Key: res.ChildKey}, Parent: parent, TaskID: res.TaskID, ChildSessionID: res.SessionID}
-	res.ChildKey = ""
+	link := api.Link{Child: api.Actor{Node: nodeID, Key: childKey}, Parent: parent, TaskID: res.TaskID}
 	// A request_id retry finds its mirror in place; rewriting it would clear ended_by.
 	if prev, ok, err := d.orch.Link(ctx, link.Child); err == nil && ok && prev.Parent == parent {
 		return res, nil
@@ -484,12 +477,12 @@ func (d *Node) remoteActor(ctx context.Context, caller callerRef, node, targetID
 		}
 		for _, l := range links {
 			switch {
-			case l.Child.Node == node && l.ChildSessionID == targetID:
+			case l.Child.Node == node && actorID(l.Child) == targetID:
 				if l.EndedBy != "" {
 					return api.Actor{}, fmt.Errorf("%s is not running", targetID)
 				}
 				return l.Child, nil
-			case l.Parent.Node == node && l.ParentSessionID == targetID:
+			case l.Parent.Node == node && actorID(l.Parent) == targetID:
 				if l.ParentEnded {
 					return api.Actor{}, fmt.Errorf("%s is not running", targetID)
 				}
@@ -528,7 +521,7 @@ func (d *Node) sendText(ctx context.Context, caller callerRef, target session.Se
 func (d *Node) sendTo(ctx context.Context, caller callerRef, to api.Actor, text, requestID string) (api.OrchSendResult, error) {
 	from := caller.Actor
 	if from.Key == "" {
-		return api.OrchSendResult{}, notReady(caller.SessionID)
+		return api.OrchSendResult{}, notReady(caller.name())
 	}
 	var req orch.Request
 	if requestID != "" {
@@ -539,7 +532,7 @@ func (d *Node) sendTo(ctx context.Context, caller callerRef, to api.Actor, text,
 		}
 	}
 	msg := api.Message{
-		Kind: api.MessageText, From: from, FromSessionID: caller.SessionID, FromLabel: caller.Label, To: to,
+		Kind: api.MessageText, From: from, FromLabel: caller.Label, To: to,
 		Body: text, State: api.MessageQueued,
 	}
 	var m api.Message
@@ -643,7 +636,7 @@ func (d *Node) insertReply(ctx context.Context, caller callerRef, orig api.Messa
 		}
 	}
 	reply := api.Message{
-		Kind: api.MessageReply, From: caller.Actor, FromSessionID: caller.SessionID, FromLabel: caller.Label,
+		Kind: api.MessageReply, From: caller.Actor, FromLabel: caller.Label,
 		To: orig.From, Body: text, ReplyTo: orig.ID, State: state,
 	}
 	var m api.Message
@@ -869,18 +862,18 @@ func (d *Node) handleOrchSessionKill(ctx context.Context, params json.RawMessage
 	if err != nil {
 		return nil, err
 	}
-	return d.killAs(ctx, caller, p.SessionID, p.ChildKey, p.Ancestor)
+	return d.killAs(ctx, caller, p.SessionID, p.Ancestor)
 }
 
 func (d *Node) kill(ctx context.Context, caller callerRef, targetID string) (api.OrchKillResult, error) {
-	return d.killAs(ctx, caller, targetID, "", false)
+	return d.killAs(ctx, caller, targetID, false)
 }
 
 // killAs kills targetID for caller. ancestor marks a kill by another node of a
 // child of a session it is killing: the child ends by "ancestor", as a local
 // descendant does. Only a parent on another node can ask for it.
-func (d *Node) killAs(ctx context.Context, caller callerRef, targetID, childKey string, ancestor bool) (api.OrchKillResult, error) {
-	params := api.OrchKillParams{OrchTargetParams: api.OrchTargetParams{Caller: caller.remote(), SessionID: targetID}, Ancestor: ancestor, ChildKey: childKey}
+func (d *Node) killAs(ctx context.Context, caller callerRef, targetID string, ancestor bool) (api.OrchKillResult, error) {
+	params := api.OrchKillParams{OrchTargetParams: api.OrchTargetParams{Caller: caller.remote(), SessionID: targetID}, Ancestor: ancestor}
 	if res, done, err := routed[api.OrchKillResult](ctx, d, targetID, api.MethodOrchSessionKill, params); done {
 		return res, err
 	}

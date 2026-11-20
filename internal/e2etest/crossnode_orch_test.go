@@ -347,7 +347,7 @@ func runFlow(t *testing.T, cn *crossNet, mid func()) {
 	if _, ok := b.n.Registry().FindByAgentSession(opencode.Agent, "c1"); !ok {
 		t.Fatal("spawn did not reach b's spawner")
 	}
-	if spawned.SessionID != childSID || !strings.HasPrefix(spawned.TaskID, "b:m-") || spawned.ChildKey != "" {
+	if spawned.SessionID != childSID || !strings.HasPrefix(spawned.TaskID, "b:m-") {
 		t.Fatalf("spawn result = %+v, want session %s", spawned, childSID)
 	}
 	b.mu.Lock()
@@ -358,10 +358,10 @@ func runFlow(t *testing.T, cn *crossNet, mid func()) {
 	}
 	childKey := "opencode:c1"
 	parent := api.Actor{Node: "a", Key: "opencode:p1"}
-	if l, ok := b.link(t, api.Actor{Node: "b", Key: childKey}); !ok || l.Parent != parent || l.TaskID != spawned.TaskID || l.ParentSessionID != a.sid {
+	if l, ok := b.link(t, api.Actor{Node: "b", Key: childKey}); !ok || l.Parent != parent || l.TaskID != spawned.TaskID {
 		t.Fatalf("link on b = %+v ok=%v", l, ok)
 	}
-	if l, ok := a.link(t, api.Actor{Node: "b", Key: childKey}); !ok || l.Child != (api.Actor{Node: "b", Key: childKey}) || l.ChildSessionID != childSID {
+	if l, ok := a.link(t, api.Actor{Node: "b", Key: childKey}); !ok || l.Child != (api.Actor{Node: "b", Key: childKey}) {
 		t.Fatalf("mirror on a = %+v ok=%v", l, ok)
 	}
 

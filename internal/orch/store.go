@@ -94,7 +94,6 @@ func (s *Store) insert(ctx context.Context, q *gen.Queries, m api.Message, req R
 		Kind:           string(m.Kind),
 		FromNode:       m.From.Node,
 		FromKey:        m.From.Key,
-		FromSessionID:  m.FromSessionID,
 		FromLabel:      m.FromLabel,
 		ToNode:         m.To.Node,
 		ToKey:          m.To.Key,
@@ -131,7 +130,6 @@ func (s *Store) Receive(ctx context.Context, m api.Message) (bool, error) {
 		Kind:           string(m.Kind),
 		FromNode:       m.From.Node,
 		FromKey:        m.From.Key,
-		FromSessionID:  m.FromSessionID,
 		FromLabel:      m.FromLabel,
 		ToNode:         m.To.Node,
 		ToKey:          m.To.Key,
@@ -442,18 +440,16 @@ func (s *Store) LinkByRequest(ctx context.Context, parent api.Actor, requestID s
 
 func (s *Store) putLink(ctx context.Context, q *gen.Queries, l api.Link, req Request) error {
 	return q.PutOrchLink(ctx, gen.PutOrchLinkParams{
-		ChildKey:        l.Child.Key,
-		ChildNode:       l.Child.Node,
-		ParentNode:      l.Parent.Node,
-		ParentKey:       l.Parent.Key,
-		TaskID:          l.TaskID,
-		EndedBy:         l.EndedBy,
-		RequestID:       req.ID,
-		RequestHash:     req.Hash,
-		ChildSessionID:  l.ChildSessionID,
-		ParentSessionID: l.ParentSessionID,
-		ParentEnded:     boolInt(l.ParentEnded),
-		CreatedAt:       s.now().UnixNano(),
+		ChildKey:    l.Child.Key,
+		ChildNode:   l.Child.Node,
+		ParentNode:  l.Parent.Node,
+		ParentKey:   l.Parent.Key,
+		TaskID:      l.TaskID,
+		EndedBy:     l.EndedBy,
+		RequestID:   req.ID,
+		RequestHash: req.Hash,
+		ParentEnded: boolInt(l.ParentEnded),
+		CreatedAt:   s.now().UnixNano(),
 	})
 }
 
@@ -561,13 +557,11 @@ func (s *Store) SetParentEnded(ctx context.Context, parentNode, parentKey string
 
 func toLink(r gen.OrchLink) api.Link {
 	return api.Link{
-		Child:           api.Actor{Node: r.ChildNode, Key: r.ChildKey},
-		Parent:          api.Actor{Node: r.ParentNode, Key: r.ParentKey},
-		TaskID:          r.TaskID,
-		EndedBy:         r.EndedBy,
-		ChildSessionID:  r.ChildSessionID,
-		ParentSessionID: r.ParentSessionID,
-		ParentEnded:     r.ParentEnded != 0,
+		Child:       api.Actor{Node: r.ChildNode, Key: r.ChildKey},
+		Parent:      api.Actor{Node: r.ParentNode, Key: r.ParentKey},
+		TaskID:      r.TaskID,
+		EndedBy:     r.EndedBy,
+		ParentEnded: r.ParentEnded != 0,
 	}
 }
 
@@ -609,19 +603,18 @@ func many(rows []gen.OrchMessage, err error) ([]api.Message, error) {
 
 func toMessage(r gen.OrchMessage) (api.Message, error) {
 	m := api.Message{
-		ID:            r.ID,
-		Kind:          api.MessageKind(r.Kind),
-		From:          api.Actor{Node: r.FromNode, Key: r.FromKey},
-		FromSessionID: r.FromSessionID,
-		FromLabel:     r.FromLabel,
-		To:            api.Actor{Node: r.ToNode, Key: r.ToKey},
-		Body:          r.Body,
-		ReplyTo:       r.ReplyTo,
-		Child:         colsActor(r.ChildNode, r.ChildKey),
-		State:         api.MessageState(r.State),
-		AnsweredBy:    colsActor(r.AnsweredByNode, r.AnsweredByKey),
-		CreatedAt:     time.Unix(0, r.CreatedAt),
-		UpdatedAt:     time.Unix(0, r.UpdatedAt),
+		ID:         r.ID,
+		Kind:       api.MessageKind(r.Kind),
+		From:       api.Actor{Node: r.FromNode, Key: r.FromKey},
+		FromLabel:  r.FromLabel,
+		To:         api.Actor{Node: r.ToNode, Key: r.ToKey},
+		Body:       r.Body,
+		ReplyTo:    r.ReplyTo,
+		Child:      colsActor(r.ChildNode, r.ChildKey),
+		State:      api.MessageState(r.State),
+		AnsweredBy: colsActor(r.AnsweredByNode, r.AnsweredByKey),
+		CreatedAt:  time.Unix(0, r.CreatedAt),
+		UpdatedAt:  time.Unix(0, r.UpdatedAt),
 	}
 	if r.Interaction != "" {
 		var in session.Interaction

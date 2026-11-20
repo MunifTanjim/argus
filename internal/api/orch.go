@@ -42,14 +42,13 @@ type Message struct {
 	ID   string      `json:"id"`
 	Kind MessageKind `json:"kind"`
 	From Actor       `json:"from"`
-	// The composite session ID and label of a session sender, as known when
-	// the message was created. The receiving node renders them for a sender on
-	// another node, which it cannot look up.
-	FromSessionID string `json:"from_session_id,omitempty"`
-	FromLabel     string `json:"from_label,omitempty"`
-	To            Actor  `json:"to"`
-	Body          string `json:"body"`
-	ReplyTo       string `json:"reply_to,omitempty"`
+	// FromLabel is a session sender's label, as known when the message was
+	// created. The receiving node renders it for a sender on another node, which
+	// it cannot look up.
+	FromLabel string `json:"from_label,omitempty"`
+	To        Actor  `json:"to"`
+	Body      string `json:"body"`
+	ReplyTo   string `json:"reply_to,omitempty"`
 	// Child is the child session a notice is about.
 	Child       *Actor               `json:"child,omitempty"`
 	Interaction *session.Interaction `json:"interaction,omitempty"` // interaction messages
@@ -66,11 +65,6 @@ type Link struct {
 	Parent  Actor  `json:"parent"`
 	TaskID  string `json:"task_id,omitempty"`
 	EndedBy string `json:"ended_by,omitempty"` // "owner" | "parent" | "self" | "ancestor"
-	// The composite session IDs of an actor on another node, as known when the
-	// link was made: the child's on the parent's mirror, the parent's on the
-	// child's node.
-	ChildSessionID  string `json:"child_session_id,omitempty"`
-	ParentSessionID string `json:"parent_session_id,omitempty"`
 	// ParentEnded reports that a parent on another node ended. The child's node
 	// learns it from an orch.peer.parent_ended push, and the parent's node sets
 	// it on its mirror once that push is queued.
