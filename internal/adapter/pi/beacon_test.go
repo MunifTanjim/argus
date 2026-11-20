@@ -418,7 +418,7 @@ func TestBeaconInstallCycle(t *testing.T) {
 	if err != nil || len(added) != 1 {
 		t.Fatalf("reconcile moved socket = %v, %v", added, err)
 	}
-	if got, ours := stampedSocket(mustRead(t, beacon)); !ours || got != "/other/argus.mod.sock" {
+	if got, ours := stampedGate(mustRead(t, beacon)); !ours || got.socket != "/other/argus.mod.sock" {
 		t.Fatalf("stamped socket = %q, %v", got, ours)
 	}
 	if err := a.Uninstall(); err != nil {
@@ -653,7 +653,7 @@ func TestGateSourceSocketUnset(t *testing.T) {
 	if strings.Count(gateSource, socketLine) != 1 {
 		t.Fatalf("gate source must hold %q once", socketLine)
 	}
-	if got, ours := stampedSocket(gateSource); !ours || got != "" {
+	if got, ours := stampedGate(gateSource); !ours || got != (gateStamp{}) {
 		t.Fatalf("stamped socket = %q, %v", got, ours)
 	}
 }
@@ -1003,7 +1003,7 @@ func TestReconcileUpgradesAMarkedGateWithOlderContent(t *testing.T) {
 	if err != nil || len(paths) != 1 {
 		t.Fatalf("reconcile = %v, %v", paths, err)
 	}
-	if got := mustRead(t, path); got != stampSocket("/new.sock") {
+	if got := mustRead(t, path); got != stampGate(gateStamp{socket: "/new.sock"}) {
 		t.Fatalf("gate not upgraded:\n%s", got)
 	}
 }

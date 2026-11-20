@@ -24,6 +24,9 @@ const Agent = "pi"
 // branches on it: RPC-dialog mode when set, socket-beacon mode otherwise.
 const gateEnv = "ARGUS_MANAGED"
 
+// mcpEnv names the MCP endpoint of the node that owns the pi process.
+const mcpEnv = "ARGUS_MCP_URL"
+
 // piHome returns pi's agent dir: PI_CODING_AGENT_DIR, else ~/.pi/agent.
 func piHome() (string, error) {
 	if d := os.Getenv("PI_CODING_AGENT_DIR"); d != "" {

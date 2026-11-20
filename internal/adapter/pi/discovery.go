@@ -308,7 +308,7 @@ func (d *discoverer) get(id string) *sessionProc {
 // send failure still leaves a live, listed session.
 func (d *discoverer) spawnSession(ctx context.Context, cwd string, opts adapter.SpawnOptions) (string, error) {
 	d.reattachFirst(ctx)
-	gate, err := gateExtension()
+	gate, err := stageGate()
 	if err != nil {
 		return "", err
 	}

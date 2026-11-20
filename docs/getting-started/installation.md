@@ -131,9 +131,9 @@ Argus opened closes that pane.
 
 ### Agent tools
 
-Argus gives Claude Code, Codex, and OpenCode a set of MCP tools. With these
-tools, an agent can start other agent sessions, send messages to them, read
-their output, answer their prompts, and stop them. Antigravity and Pi do not
+Argus gives Claude Code, Codex, OpenCode, and Pi a set of MCP tools. With
+these tools, an agent can start other agent sessions, send messages to them,
+read their output, answer their prompts, and stop them. Antigravity does not
 get the tools.
 
 The node serves the tools on `127.0.0.1`, on the port that
@@ -146,10 +146,13 @@ writes the server address and the token into the config of each agent:
 - Codex: the `[mcp_servers.argus]` table in the Codex `config.toml`.
 - OpenCode: the `argus` server and an allow rule for its tools in the global
   OpenCode config.
+- Pi: the Argus gate extension, which registers the `argus` server in each pi
+  session. Pi needs its built-in MCP support for the tools.
 
 Any local user who can read the token can start agents as you. Before Argus
 writes the token, it removes the group and other permissions from the Codex and
-OpenCode config files.
+OpenCode config files and from the gate extension files.
 
 Claude Code gets the tools when a session starts, and Codex gets them at once.
-OpenCode gets them when its server starts again.
+OpenCode gets them when its server starts again. Pi gets them when a session
+starts or reloads.

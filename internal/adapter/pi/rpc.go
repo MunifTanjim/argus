@@ -244,7 +244,7 @@ func spawnHosted(ctx context.Context, cwd, sessionID, extensionPath, model strin
 	args = append(args, modelArgs(model)...)
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = cwd
-	cmd.Env = append(cmd.Environ(), gateEnv+"=1")
+	cmd.Env = append(cmd.Environ(), managedEnv()...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("pi: start relay: %w", err)
