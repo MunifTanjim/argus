@@ -22,12 +22,56 @@ import (
 
 var errOrchDisabled = errors.New("agent sessions are disabled on this node")
 
-// agentTarget resolves an agent ID (node, agent, agent session id) to the live
-// session of that conversation on this node. It never resolves a pane.
-func (d *Node) agentTarget(id string) (session.Session, error) {
+// localTarget is a conversation on this node: a live session, or a child this
+// node spawned that has not started yet.
+type localTarget struct {
+	actor api.Actor
+	s     session.Session
+	live  bool
+}
+
+// resolveTarget resolves an agent ID (node, agent, agent session id) on this
+// node. It never resolves a pane.
+func (d *Node) resolveTarget(ctx context.Context, id string) (localTarget, error) {
+	s, err := d.liveTarget(id)
+	if err == nil {
+		return localTarget{actor: d.actor(s), s: s, live: true}, nil
+	}
+	_, key, _ := session.SplitCompositeID(id)
+	if spawning, serr := d.spawning(ctx, id); serr != nil {
+		return localTarget{}, serr
+	} else if spawning {
+		return localTarget{actor: api.Actor{Node: d.id, Key: key}}, nil
+	}
+	return localTarget{}, err
+}
+
+// agentTarget resolves id to a live session; a child that has not started yet
+// is not ready.
+func (d *Node) agentTarget(ctx context.Context, id string) (session.Session, error) {
+	t, err := d.resolveTarget(ctx, id)
+	if err != nil {
+		return session.Session{}, err
+	}
+	if !t.live {
+		return session.Session{}, notStarted(id)
+	}
+	return t.s, nil
+}
+
+// agentKeyShaped reports whether key has the agent:id shape of an actor key.
+// A tmux pane id starts with %, an agent session id never does.
+func agentKeyShaped(key string) bool {
+	agent, id, ok := strings.Cut(key, ":")
+	return ok && agent != "" && id != "" && !strings.HasPrefix(id, "%")
+}
+
+// liveTarget is agentTarget without the not-ready case: a key that is not live
+// is unknown.
+func (d *Node) liveTarget(id string) (session.Session, error) {
 	node, key, _ := session.SplitCompositeID(id)
-	// A key is agent:id, so an ID without the node prefix has no second colon.
-	if !strings.Contains(key, ":") {
+	// An ID without the node prefix leaves a key that is not agent:id.
+	if !agentKeyShaped(key) {
 		return session.Session{}, d.missing(id)
 	}
 	if node != d.id {
@@ -37,6 +81,17 @@ func (d *Node) agentTarget(id string) (session.Session, error) {
 		return s, nil
 	}
 	return session.Session{}, d.missing(id)
+}
+
+// spawning reports whether id names a child this node spawned that it has not
+// seen live yet, within the spawn window, and whose link has not ended.
+func (d *Node) spawning(ctx context.Context, id string) (bool, error) {
+	node, key, _ := session.SplitCompositeID(id)
+	if d.orch == nil || node != d.id || !d.orchSpawning.pending(key, time.Now(), d.orchSpawnWindow) {
+		return false, nil
+	}
+	l, ok, err := d.orch.Link(ctx, api.Actor{Node: d.id, Key: key})
+	return err == nil && ok && l.EndedBy == "", err
 }
 
 // missing is the error for a target this node does not hold: not ready until
@@ -212,7 +267,7 @@ func (d *Node) getSession(ctx context.Context, id string) (api.OrchGetResult, er
 	if res, done, err := routed[api.OrchGetResult](ctx, d, id, api.MethodOrchSessionGet, api.OrchTargetParams{SessionID: id}); done {
 		return res, err
 	}
-	s, err := d.agentTarget(id)
+	s, err := d.agentTarget(ctx, id)
 	if err != nil {
 		return api.OrchGetResult{}, err
 	}
@@ -237,7 +292,7 @@ func (d *Node) output(ctx context.Context, id string) (api.OrchOutputResult, err
 	if res, done, err := routed[api.OrchOutputResult](ctx, d, id, api.MethodOrchSessionOutput, api.OrchTargetParams{SessionID: id}); done {
 		return res, err
 	}
-	s, err := d.agentTarget(id)
+	s, err := d.agentTarget(ctx, id)
 	if err != nil {
 		return api.OrchOutputResult{}, err
 	}
@@ -260,7 +315,7 @@ func (d *Node) transcript(ctx context.Context, id string, last int) (api.OrchTra
 	if res, done, err := routed[api.OrchTranscriptResult](ctx, d, id, api.MethodOrchSessionTranscript, api.OrchTranscriptParams{SessionID: id, Last: last}); done {
 		return res, err
 	}
-	s, err := d.agentTarget(id)
+	s, err := d.agentTarget(ctx, id)
 	if err != nil {
 		return api.OrchTranscriptResult{}, err
 	}
@@ -358,6 +413,7 @@ func (d *Node) spawnFor(ctx context.Context, caller callerRef, p api.OrchSpawnPa
 		d.abortSpawn(ctx, p.Agent, childKey, spawned)
 		return api.OrchSpawnResult{}, err
 	}
+	d.orchSpawning.add(childKey, time.Now())
 	d.orchChanged()
 	return api.OrchSpawnResult{SessionID: actorID(child), TaskID: task.ID}, nil
 }
@@ -381,7 +437,7 @@ func (d *Node) spawnRemote(ctx context.Context, caller callerRef, nodeID string,
 		return api.OrchSpawnResult{}, err
 	}
 	childNode, childKey, _ := session.SplitCompositeID(res.SessionID)
-	if childNode != nodeID || !strings.Contains(childKey, ":") {
+	if childNode != nodeID || !agentKeyShaped(childKey) {
 		d.log.Warn("orch: remote spawn returned no agent id; link not mirrored", "node", nodeID, "session", res.SessionID)
 		return res, nil
 	}
@@ -458,11 +514,21 @@ func (d *Node) send(ctx context.Context, caller callerRef, targetID, text, reque
 		}
 		return d.sendTo(ctx, caller, to, text, requestID)
 	}
-	target, err := d.agentTarget(targetID)
+	return d.sendLocal(ctx, caller, targetID, text, requestID)
+}
+
+// sendLocal queues text to targetID on this node. A spawned child that has not
+// started yet gets the message once it starts, and the gone pass fails it if
+// the child does not start within the spawn window.
+func (d *Node) sendLocal(ctx context.Context, caller callerRef, targetID, text, requestID string) (api.OrchSendResult, error) {
+	t, err := d.resolveTarget(ctx, targetID)
 	if err != nil {
 		return api.OrchSendResult{}, err
 	}
-	return d.sendText(ctx, caller, target, targetID, text, requestID)
+	if t.live {
+		return d.sendText(ctx, caller, t.s, targetID, text, requestID)
+	}
+	return d.sendTo(ctx, caller, t.actor, text, requestID)
 }
 
 // remoteActor names the session targetID on node by its actor key. While node
@@ -490,18 +556,21 @@ func (d *Node) remoteActor(ctx context.Context, caller callerRef, node, targetID
 			}
 		}
 	}
+	_, key, _ := session.SplitCompositeID(targetID)
 	var got api.OrchGetResult
 	if err := d.forward(ctx, node, api.MethodOrchSessionGet, api.OrchTargetParams{Caller: caller.remote(), SessionID: targetID}, &got); err != nil {
+		// node holds the message for a linked child that is not live yet, and
+		// fails it if the child never starts.
+		var rpcErr *api.RPCError
+		if errors.As(err, &rpcErr) && rpcErr.Code == api.CodeNotReady && agentKeyShaped(key) {
+			return api.Actor{Node: node, Key: key}, nil
+		}
 		return api.Actor{}, err
 	}
-	s := got.Session
-	if !d.orchestrated(s.Agent) {
+	if !d.orchestrated(got.Session.Agent) {
 		return api.Actor{}, fmt.Errorf("%s does not support agent messages", targetID)
 	}
-	if s.AgentSessionID == "" {
-		return api.Actor{}, notReady(targetID)
-	}
-	return api.Actor{Node: node, Key: registry.AgentSessionKey(s.Agent, s.AgentSessionID)}, nil
+	return api.Actor{Node: node, Key: key}, nil
 }
 
 // sendText queues text from the caller to target, a session on this node.
@@ -509,11 +578,7 @@ func (d *Node) sendText(ctx context.Context, caller callerRef, target session.Se
 	if !d.orchestrated(target.Agent) {
 		return api.OrchSendResult{}, fmt.Errorf("%s does not support agent messages", targetID)
 	}
-	to := d.actor(target)
-	if to.Key == "" {
-		return api.OrchSendResult{}, notReady(targetID)
-	}
-	return d.sendTo(ctx, caller, to, text, requestID)
+	return d.sendTo(ctx, caller, d.actor(target), text, requestID)
 }
 
 // sendTo stores text from the caller to the actor to, and queues its delivery
@@ -850,7 +915,7 @@ func (d *Node) rename(ctx context.Context, id, name string) (api.SessionRenameRe
 	if res, done, err := routed[api.SessionRenameResult](ctx, d, id, api.MethodOrchSessionRename, api.OrchRenameParams{SessionID: id, Name: name}); done {
 		return res, err
 	}
-	s, err := d.agentTarget(id)
+	s, err := d.agentTarget(ctx, id)
 	if err != nil {
 		return api.SessionRenameResult{}, err
 	}
@@ -877,25 +942,29 @@ func (d *Node) killAs(ctx context.Context, caller callerRef, targetID string, an
 	if res, done, err := routed[api.OrchKillResult](ctx, d, targetID, api.MethodOrchSessionKill, params); done {
 		return res, err
 	}
-	target, err := d.agentTarget(targetID)
+	t, err := d.resolveTarget(ctx, targetID)
 	if err != nil {
 		return api.OrchKillResult{}, err
 	}
+	actor := t.actor
 	by := "self"
-	if caller.Actor.Key == "" || caller.Actor != d.actor(target) {
-		link, ok, err := d.orch.Link(ctx, d.actor(target))
+	if caller.Actor.Key == "" || caller.Actor != actor {
+		link, ok, err := d.orch.Link(ctx, actor)
 		if err != nil {
 			return api.OrchKillResult{}, err
 		}
 		if !ok || caller.Actor.Key == "" || link.Parent != caller.Actor {
-			return api.OrchKillResult{}, fmt.Errorf("only the parent of %s or the session itself can kill it", d.agentID(target))
+			return api.OrchKillResult{}, fmt.Errorf("only the parent of %s or the session itself can kill it", actorID(actor))
 		}
 		by = "parent"
 		if ancestor && caller.Local == nil && caller.Actor.Node != d.id {
 			by = "ancestor"
 		}
 	}
-	killed, notKilled, err := d.killTree(ctx, target, by)
+	if !t.live {
+		return api.OrchKillResult{Killed: []string{d.doomSpawning(ctx, actor.Key, by)}}, nil
+	}
+	killed, notKilled, err := d.killTree(ctx, t.s, by)
 	if err != nil {
 		if len(killed) > 0 {
 			err = fmt.Errorf("%w (killed: %s)", err, strings.Join(killed, ", "))

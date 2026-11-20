@@ -545,18 +545,18 @@ func TestAgentTargetRejectsArgusIDs(t *testing.T) {
 	d := agentNode(t)
 	d.addAgentSession("claude", "c1")
 	for _, id := range []string{"home:default:%c1", "default:%c1", "claude:c1", "home:claude:c2"} {
-		if _, err := d.agentTarget(id); !isCode(err, api.CodeUnknownSession) {
+		if _, err := d.agentTarget(t.Context(), id); !isCode(err, api.CodeUnknownSession) {
 			t.Errorf("agentTarget(%q) err = %v, want unknown session", id, err)
 		}
 	}
-	if s, err := d.agentTarget("home:claude:c1"); err != nil || s.AgentSessionID != "c1" {
+	if s, err := d.agentTarget(t.Context(), "home:claude:c1"); err != nil || s.AgentSessionID != "c1" {
 		t.Fatalf("got %+v, %v", s, err)
 	}
 }
 
 func TestAgentTargetForeignNode(t *testing.T) {
 	d := agentNode(t)
-	_, err := d.agentTarget("other:claude:c1")
+	_, err := d.agentTarget(t.Context(), "other:claude:c1")
 	if err == nil || !strings.Contains(err.Error(), "on node other, which is not connected") {
 		t.Fatalf("err = %v", err)
 	}
@@ -565,11 +565,11 @@ func TestAgentTargetForeignNode(t *testing.T) {
 func TestAgentTargetBeforeSettleReturnsNotReady(t *testing.T) {
 	d, _ := orchNode(t)
 	d.SetIdentity("home", "")
-	if _, err := d.agentTarget("home:claude:nope"); !isCode(err, api.CodeNotReady) {
+	if _, err := d.agentTarget(t.Context(), "home:claude:nope"); !isCode(err, api.CodeNotReady) {
 		t.Fatalf("before settle: err = %v", err)
 	}
 	d.markOrchSettled()
-	if _, err := d.agentTarget("home:claude:nope"); !isCode(err, api.CodeUnknownSession) {
+	if _, err := d.agentTarget(t.Context(), "home:claude:nope"); !isCode(err, api.CodeUnknownSession) {
 		t.Fatalf("after settle: err = %v", err)
 	}
 }

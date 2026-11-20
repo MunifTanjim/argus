@@ -36,11 +36,7 @@ func (d *Node) handleMessageSend(ctx context.Context, params json.RawMessage) (a
 	}
 	owner := api.Actor{Node: d.id, Key: api.ActorOwner}
 	if p.ReplyTo == "" {
-		target, err := d.agentTarget(p.SessionID)
-		if err != nil {
-			return nil, err
-		}
-		return d.sendText(ctx, callerRef{Actor: owner}, target, p.SessionID, p.Text, "")
+		return d.sendLocal(ctx, callerRef{Actor: owner}, p.SessionID, p.Text, "")
 	}
 	orig, err := d.mustMessage(ctx, p.ReplyTo)
 	if err != nil {
