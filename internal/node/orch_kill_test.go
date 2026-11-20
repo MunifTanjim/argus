@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
@@ -174,5 +175,113 @@ func TestDescendantCountMatchesWhatAKillKills(t *testing.T) {
 	params, _ := json.Marshal(api.SessionRef{SessionID: "default:%nope"})
 	if _, err := d.handleSessionDescendantCount(t.Context(), params); err == nil {
 		t.Error("an unknown session should fail")
+	}
+}
+
+func pendingUnder(t *testing.T, d *Node, parent api.Actor, key string) {
+	t.Helper()
+	linkPendingChild(t, d, parent, key)
+	if _, err := d.orch.Insert(t.Context(), api.Message{
+		Kind: api.MessageText, From: api.Actor{Node: d.id, Key: api.ActorOwner},
+		To: api.Actor{Node: d.id, Key: key}, Body: "queued", State: api.MessageQueued,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertDoomed(t *testing.T, d *Node, key, by string) {
+	t.Helper()
+	if l, _, _ := d.orch.Link(t.Context(), api.Actor{Node: d.id, Key: key}); l.EndedBy != by {
+		t.Fatalf("link = %+v, want ended by %s", l, by)
+	}
+	if q, _ := d.orch.Queued(t.Context(), api.Actor{Node: d.id, Key: key}); len(q) != 0 {
+		t.Fatalf("queued = %+v, want failed", q)
+	}
+}
+
+func TestKillPendingChildKillsItWhenItStarts(t *testing.T) {
+	d, fd, caller := killNode(t)
+	d.markOrchSettled()
+	pendingUnder(t, d, api.Actor{Node: "home", Key: "claude:p1"}, "claude:p9")
+	params, _ := json.Marshal(api.OrchTargetParams{Caller: caller, SessionID: "home:claude:p9"})
+	out, err := d.handleOrchSessionKill(t.Context(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res := out.(api.OrchKillResult); !slices.Equal(res.Killed, []string{"home:claude:p9"}) {
+		t.Fatalf("result = %+v", res)
+	}
+	assertDoomed(t, d, "claude:p9", "parent")
+	if fd.called {
+		t.Fatal("dismissed before the child started")
+	}
+	d.addAgentSession("claude", "p9")
+	d.orchPass(t.Context())
+	if !fd.called {
+		t.Fatal("child not killed when it started")
+	}
+}
+
+func TestKillTreeReachesPendingChild(t *testing.T) {
+	d, fd, caller := killNode(t)
+	d.markOrchSettled()
+	pendingUnder(t, d, api.Actor{Node: "home", Key: "claude:p2"}, "claude:p9")
+	params, _ := json.Marshal(api.OrchTargetParams{Caller: caller, SessionID: "home:claude:p2"})
+	out, err := d.handleOrchSessionKill(t.Context(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res := out.(api.OrchKillResult); !slices.Contains(res.Killed, "home:claude:p9") {
+		t.Fatalf("result = %+v", res)
+	}
+	assertDoomed(t, d, "claude:p9", "ancestor")
+	fd.called = false
+	d.addAgentSession("claude", "p9")
+	d.orchPass(t.Context())
+	if !fd.called {
+		t.Fatal("child not killed when it started")
+	}
+}
+
+func TestRemoteAncestorKillReachesPendingChild(t *testing.T) {
+	d, _, _ := killNode(t)
+	d.markOrchSettled()
+	pendingUnder(t, d, api.Actor{Node: "far", Key: "claude:pp"}, "claude:p9")
+	caller := callerRef{Actor: api.Actor{Node: "far", Key: "claude:pp"}}
+	res, err := d.killAs(peerCtx(t), caller, "home:claude:p9", true)
+	if err != nil || !slices.Equal(res.Killed, []string{"home:claude:p9"}) {
+		t.Fatalf("result = %+v err = %v", res, err)
+	}
+	assertDoomed(t, d, "claude:p9", "ancestor")
+}
+
+func TestKilledPendingChildThatNeverStartsIsForgotten(t *testing.T) {
+	d, fd, caller := killNode(t)
+	d.markOrchSettled()
+	pendingUnder(t, d, api.Actor{Node: "home", Key: "claude:p1"}, "claude:p9")
+	params, _ := json.Marshal(api.OrchTargetParams{Caller: caller, SessionID: "home:claude:p9"})
+	if _, err := d.handleOrchSessionKill(t.Context(), params); err != nil {
+		t.Fatal(err)
+	}
+	d.orchSpawning.add("claude:p9", time.Now().Add(-2*d.orchSpawnWindow))
+	d.orchPass(t.Context())
+	d.addAgentSession("claude", "p9")
+	d.orchPass(t.Context())
+	if fd.called {
+		t.Fatal("killed a session after its spawn window ended")
+	}
+}
+
+func TestDescendantCountIncludesPendingChild(t *testing.T) {
+	d, _, _ := killNode(t)
+	pendingUnder(t, d, api.Actor{Node: "home", Key: "claude:p1"}, "claude:p9")
+	p1, _ := d.reg.FindByAgentSession("claude", "p1")
+	params, _ := json.Marshal(api.SessionRef{SessionID: p1.ID})
+	out, err := d.handleSessionDescendantCount(t.Context(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := out.(api.DescendantCountResult).Count; n != 2 {
+		t.Fatalf("count = %d, want 2", n)
 	}
 }

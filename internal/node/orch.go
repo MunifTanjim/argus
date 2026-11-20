@@ -28,6 +28,9 @@ const (
 	// orchGoneGrace absorbs a session that leaves the registry for a short
 	// time: ending its link and failing its messages cannot be undone.
 	orchGoneGrace = 10 * time.Second
+	// orchSpawnWindow bounds how long a spawned child that was never live takes
+	// messages: argus cannot tell a slow start from a failed one.
+	orchSpawnWindow = time.Minute
 	// orchTypingQuiet is how long a pane's clients must be idle before argus
 	// types a delivery into it, so it never types over a person.
 	orchTypingQuiet = 5 * time.Second
@@ -76,6 +79,8 @@ func (d *Node) SetOrchStore(s *orch.Store) {
 	d.orchLive = map[string]bool{}
 	d.orchGone = map[string]time.Time{}
 	d.orchGoneGrace = orchGoneGrace
+	d.orchSpawnWindow = orchSpawnWindow
+	d.orchSpawning = newSpawningKeys()
 	d.orchSettled = make(chan struct{})
 	d.orchSettleOne = &sync.Once{}
 	d.orchHeld = map[string]time.Time{}
@@ -94,8 +99,12 @@ func actorKey(s session.Session) string {
 	return registry.AgentSessionKey(s.Agent, s.AgentSessionID)
 }
 
+func notStarted(id string) error {
+	return &api.RPCError{Code: api.CodeNotReady, Message: id + " has not started yet"}
+}
+
 func notReady(id string) error {
-	return fmt.Errorf("%s is not ready yet: its agent session id is unknown", id)
+	return &api.RPCError{Code: api.CodeNotReady, Message: id + " is not ready yet: its agent session id is unknown"}
 }
 
 func (d *Node) actor(s session.Session) api.Actor {
@@ -158,15 +167,15 @@ func (d *Node) killTree(ctx context.Context, target session.Session, by string) 
 		d.orchEnded(ctx, s, by)
 		killed = append(killed, d.agentID(s))
 	}
-	for _, s := range below {
-		kill(s, "ancestor")
+	for _, t := range below {
+		if t.live {
+			kill(t.s, "ancestor")
+		} else {
+			killed = append(killed, d.doomSpawning(ctx, t.actor.Key, "ancestor"))
+		}
 	}
 	kill(target, by)
 	return killed, notKilled, errors.Join(errs...)
-}
-
-func remoteChildID(l api.Link) string {
-	return actorID(l.Child)
 }
 
 // killRemoteChild asks the child's node to kill it and its subtree as a child
@@ -200,13 +209,13 @@ func (d *Node) killRemoteChild(ctx context.Context, l api.Link) (api.OrchKillRes
 // descendants returns the live local sessions below root in the parent links,
 // each after its own descendants, and the links to the children on other nodes
 // that have not ended. A remote child's own subtree is its node's to walk.
-func (d *Node) descendants(ctx context.Context, root session.Session) ([]session.Session, []api.Link, error) {
+func (d *Node) descendants(ctx context.Context, root session.Session) ([]localTarget, []api.Link, error) {
 	key := actorKey(root)
 	if d.orch == nil || key == "" {
 		return nil, nil, nil
 	}
 	seen := map[api.Actor]bool{{Node: d.id, Key: key}: true}
-	var out []session.Session
+	var out []localTarget
 	var remote []api.Link
 	var walk func(parentKey string) error
 	walk = func(parentKey string) error {
@@ -229,13 +238,26 @@ func (d *Node) descendants(ctx context.Context, root session.Session) ([]session
 				return err
 			}
 			if s, ok := d.sessionForKey(l.Child.Key); ok {
-				out = append(out, s)
+				out = append(out, localTarget{actor: l.Child, s: s, live: true})
+			} else if l.EndedBy == "" && d.orchSpawning.pending(l.Child.Key, time.Now(), d.orchSpawnWindow) {
+				out = append(out, localTarget{actor: l.Child})
 			}
 		}
 		return nil
 	}
 	err := walk(key)
 	return out, remote, err
+}
+
+// doomSpawning kills key, a child this node spawned that has not started: its
+// link ends and its messages fail now, and the session is killed once it
+// starts. It returns the child's agent ID.
+func (d *Node) doomSpawning(ctx context.Context, key, by string) string {
+	d.orchSpawning.doom(key)
+	agent, id, _ := strings.Cut(key, ":")
+	s := session.Session{Agent: agent, AgentSessionID: id}
+	d.orchEnded(ctx, s, by)
+	return d.agentID(s)
 }
 
 func (d *Node) orchEnded(ctx context.Context, s session.Session, by string) {
@@ -351,12 +373,24 @@ func (d *Node) orchFailGone(ctx context.Context, snap []session.Session) {
 	now := time.Now()
 	d.markGone(maps.Keys(d.orchLive), live, now)
 	d.orchSeedGone(ctx, live, now)
+	expired, doomed := d.orchSpawning.settle(live, now, d.orchSpawnWindow)
+	// The window already waited for the child, so it ends without the grace.
+	for _, key := range expired {
+		d.orchGone[key] = now.Add(-d.orchGoneGrace)
+	}
+	for _, key := range doomed {
+		if s, ok := d.sessionForKey(key); ok {
+			if err := d.killSession(context.WithoutCancel(ctx), s); err != nil {
+				d.log.Warn("orch: kill child that was killed before it started failed", "key", key, "err", err)
+			}
+		}
+	}
 	for key, since := range d.orchGone {
 		if live[key] {
 			delete(d.orchGone, key)
 			continue
 		}
-		if now.Sub(since) < d.orchGoneGrace {
+		if now.Sub(since) < d.orchGoneGrace || d.orchSpawning.pending(key, now, d.orchSpawnWindow) {
 			continue
 		}
 		if err := d.endRemoteLink(ctx, key); err != nil {

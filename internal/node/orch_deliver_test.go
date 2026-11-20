@@ -646,3 +646,197 @@ func TestProbeAndDeliveryShareOneDeadline(t *testing.T) {
 		t.Fatalf("delivered after the deadline: %q", pt.delivered)
 	}
 }
+
+func linkPendingChild(t *testing.T, d *Node, parent api.Actor, key string) {
+	t.Helper()
+	if err := d.orch.PutLink(t.Context(), api.Link{Child: api.Actor{Node: d.id, Key: key}, Parent: parent}); err != nil {
+		t.Fatal(err)
+	}
+	d.orchSpawning.add(key, time.Now())
+}
+
+func expireSpawnWindow(d *Node, key string) {
+	d.orchSpawning.add(key, time.Now().Add(-2*d.orchSpawnWindow))
+}
+
+func TestSendToPendingChildQueuesThenDelivers(t *testing.T) {
+	d, fp := deliverNode(t)
+	d.markOrchSettled()
+	a := apiSession(d, "a", session.StatusIdle, nil)
+	linkPendingChild(t, d, d.actor(a), "opencode:k1")
+	res, err := d.send(t.Context(), d.localCallerRef(a), "home:opencode:k1", "build it", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := msgState(t, d, res.MessageID); st != api.MessageQueued {
+		t.Fatalf("state = %s", st)
+	}
+	apiSession(d, "k1", session.StatusIdle, nil)
+	d.orchPass(t.Context())
+	if st := msgState(t, d, res.MessageID); st != api.MessageDelivered || !strings.Contains(fp.gotText, "build it") {
+		t.Fatalf("state = %s prompt = %q", st, fp.gotText)
+	}
+}
+
+func TestOwnerSendToPendingChildQueues(t *testing.T) {
+	d, _ := deliverNode(t)
+	d.markOrchSettled()
+	a := apiSession(d, "a", session.StatusIdle, nil)
+	linkPendingChild(t, d, d.actor(a), "opencode:k1")
+	res, err := ownerSend(t, d, api.OwnerSendParams{SessionID: "home:opencode:k1", Text: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := msgState(t, d, res.MessageID); st != api.MessageQueued {
+		t.Fatalf("state = %s", st)
+	}
+}
+
+func TestSendToChildThatNeverStartsFails(t *testing.T) {
+	d, _ := deliverNode(t)
+	d.markOrchSettled()
+	a := apiSession(d, "a", session.StatusIdle, nil)
+	linkPendingChild(t, d, d.actor(a), "opencode:k1")
+	d.orchPass(t.Context())
+	res, err := d.send(t.Context(), d.localCallerRef(a), "home:opencode:k1", "build it", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.orchPass(t.Context())
+	if st := msgState(t, d, res.MessageID); st != api.MessageQueued {
+		t.Fatalf("state inside the spawn window = %s", st)
+	}
+	expireSpawnWindow(d, "opencode:k1")
+	d.orchPass(t.Context())
+	d.orchPass(t.Context())
+	if st := msgState(t, d, res.MessageID); st != api.MessageFailed {
+		t.Fatalf("state = %s", st)
+	}
+	if _, err := d.getSession(t.Context(), "home:opencode:k1"); !isCode(err, api.CodeUnknownSession) {
+		t.Fatalf("get after the window: err = %v", err)
+	}
+}
+
+func TestSendToUnlinkedOrEndedKeyFails(t *testing.T) {
+	d, _ := deliverNode(t)
+	d.markOrchSettled()
+	a := apiSession(d, "a", session.StatusIdle, nil)
+	if err := d.orch.PutLink(t.Context(), api.Link{Child: api.Actor{Node: d.id, Key: "opencode:k2"}, Parent: d.actor(a), EndedBy: "self"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"home:opencode:zz", "home:opencode:k2"} {
+		if _, err := d.send(t.Context(), d.localCallerRef(a), id, "hi", ""); !isCode(err, api.CodeUnknownSession) {
+			t.Errorf("send %s: err = %v", id, err)
+		}
+	}
+}
+
+func TestPendingChildIsNotReadyForReads(t *testing.T) {
+	d, _ := deliverNode(t)
+	d.markOrchSettled()
+	a := apiSession(d, "a", session.StatusIdle, nil)
+	linkPendingChild(t, d, d.actor(a), "opencode:k1")
+	ctx := t.Context()
+	const id = "home:opencode:k1"
+	if _, err := d.getSession(ctx, id); !isCode(err, api.CodeNotReady) {
+		t.Errorf("get: err = %v", err)
+	}
+	if _, err := d.output(ctx, id); !isCode(err, api.CodeNotReady) {
+		t.Errorf("output: err = %v", err)
+	}
+	if _, err := d.transcript(ctx, id, 0); !isCode(err, api.CodeNotReady) {
+		t.Errorf("transcript: err = %v", err)
+	}
+	if _, err := d.rename(ctx, id, "x"); !isCode(err, api.CodeNotReady) {
+		t.Errorf("rename: err = %v", err)
+	}
+}
+
+func TestSlowRemoteChildKeepsItsLinkInsideTheSpawnWindow(t *testing.T) {
+	d, fp := deliverNode(t)
+	d.markOrchSettled()
+	linkPendingChild(t, d, api.Actor{Node: "far", Key: "claude:p"}, "opencode:k1")
+	owner := callerRef{Actor: api.Actor{Node: d.id, Key: api.ActorOwner}}
+	res, err := d.send(t.Context(), owner, "home:opencode:k1", "build it", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.orchPass(t.Context())
+	d.orchPass(t.Context())
+	link, _, _ := d.orch.Link(t.Context(), api.Actor{Node: d.id, Key: "opencode:k1"})
+	if link.EndedBy != "" || msgState(t, d, res.MessageID) != api.MessageQueued {
+		t.Fatalf("inside the window: link = %+v state = %s", link, msgState(t, d, res.MessageID))
+	}
+	apiSession(d, "k1", session.StatusIdle, nil)
+	d.orchPass(t.Context())
+	if st := msgState(t, d, res.MessageID); st != api.MessageDelivered || !strings.Contains(fp.gotText, "build it") {
+		t.Fatalf("state = %s", st)
+	}
+}
+
+func TestRemoteChildThatNeverStartsEndsItsLink(t *testing.T) {
+	d, _ := deliverNode(t)
+	d.markOrchSettled()
+	linkPendingChild(t, d, api.Actor{Node: "far", Key: "claude:p"}, "opencode:k1")
+	d.orchPass(t.Context())
+	expireSpawnWindow(d, "opencode:k1")
+	d.orchPass(t.Context())
+	d.orchPass(t.Context())
+	if link, _, _ := d.orch.Link(t.Context(), api.Actor{Node: d.id, Key: "opencode:k1"}); link.EndedBy != "self" {
+		t.Fatalf("link = %+v", link)
+	}
+}
+
+func TestClearedLinkedChildIsUnknownNotPending(t *testing.T) {
+	d, _ := deliverNode(t)
+	d.markOrchSettled()
+	a := apiSession(d, "a", session.StatusIdle, nil)
+	linkPendingChild(t, d, d.actor(a), "claude:k1")
+	hookSession(d, "%5", "k1")
+	d.orchPass(t.Context())
+	clearSession(d, "%5", "k2")
+	d.orchPass(t.Context())
+	if _, err := d.getSession(t.Context(), "home:claude:k1"); !isCode(err, api.CodeUnknownSession) {
+		t.Errorf("get: err = %v", err)
+	}
+	if _, err := d.send(t.Context(), d.localCallerRef(a), "home:claude:k1", "hi", ""); !isCode(err, api.CodeUnknownSession) {
+		t.Errorf("send: err = %v", err)
+	}
+}
+
+func TestPendingChildOnlyOnItsOwnNode(t *testing.T) {
+	d, _ := deliverNode(t)
+	d.markOrchSettled()
+	a := apiSession(d, "a", session.StatusIdle, nil)
+	linkPendingChild(t, d, d.actor(a), "opencode:k1")
+	if _, err := d.getSession(t.Context(), "office:opencode:k1"); err == nil || !strings.Contains(err.Error(), "not connected") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestPendingChildErrorSaysNotStarted(t *testing.T) {
+	d, _ := deliverNode(t)
+	d.markOrchSettled()
+	a := apiSession(d, "a", session.StatusIdle, nil)
+	linkPendingChild(t, d, d.actor(a), "opencode:k1")
+	if _, err := d.getSession(t.Context(), "home:opencode:k1"); err == nil || err.Error() != "home:opencode:k1 has not started yet" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDeliveryNamesAnEndedLocalSenderByAgentID(t *testing.T) {
+	d, _ := deliverNode(t)
+	from := api.Actor{Node: d.id, Key: "claude:zz"}
+	dl := d.delivery(api.Message{ID: "home:m-00000001", Kind: api.MessageText, From: from, To: api.Actor{Node: d.id, Key: "opencode:a"}})
+	if dl.From != "home:claude:zz" || dl.FromSession != "home:claude:zz" {
+		t.Fatalf("from = %q session = %q", dl.From, dl.FromSession)
+	}
+}
+
+func TestListWithoutAgentSessionsIsEmptyNotNull(t *testing.T) {
+	d, _ := deliverNode(t)
+	b, err := json.Marshal(api.OrchListResult{Sessions: d.list()})
+	if err != nil || !strings.Contains(string(b), `"sessions":[]`) {
+		t.Fatalf("json = %s err = %v", b, err)
+	}
+}

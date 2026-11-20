@@ -974,7 +974,7 @@ func delivers(items []orch.OutboxItem) []orch.OutboxItem {
 func TestCrossNodeSendThroughLinkStillFailsFast(t *testing.T) {
 	cp := newCrossPeers(t)
 	cp.b.markOrchSettled()
-	gone := "b:claude:gone"
+	gone := "b:opencode:gone"
 	if err := cp.a.orch.PutLink(t.Context(), api.Link{Child: api.Actor{Node: "b", Key: "opencode:gone"}, Parent: crossParent}); err != nil {
 		t.Fatal(err)
 	}
@@ -1098,5 +1098,32 @@ func TestRemoteKillOfAClearedChildBeforeSettleIsNotKilled(t *testing.T) {
 	}
 	if _, ok := rt.b.reg.FindByAgentSession("claude", "c1-next"); !ok {
 		t.Fatal("the new conversation was removed")
+	}
+}
+
+func TestCrossNodeSendToPendingChildQueues(t *testing.T) {
+	cp := newCrossPeers(t)
+	cp.b.markOrchSettled()
+	pending := api.Link{Child: api.Actor{Node: "b", Key: "opencode:k1"}, Parent: crossParent}
+	for _, d := range []*Node{cp.a, cp.b} {
+		if err := d.orch.PutLink(t.Context(), pending); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cp.b.orchSpawning.add("opencode:k1", time.Now())
+	res, err := cp.a.send(peerCtx(t), cp.a.localCallerRef(cp.parent), "b:opencode:k1", "build it", "")
+	if err != nil {
+		t.Fatalf("send to a pending child on b: %v", err)
+	}
+	cp.flush(t, "a")
+	if st := msgState(t, cp.b, res.MessageID); st != api.MessageQueued {
+		t.Fatalf("state on b = %s", st)
+	}
+}
+
+func TestCrossNodeSendNeverQueuesToAPaneID(t *testing.T) {
+	cp := newCrossPeers(t)
+	if _, err := cp.a.send(peerCtx(t), cp.a.localCallerRef(cp.parent), "b:argus:%3", "hi", ""); err == nil {
+		t.Fatal("send to a pane id on a starting node succeeded")
 	}
 }
