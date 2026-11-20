@@ -295,6 +295,9 @@ type beaconEvent struct {
 	Items       []string `json:"items"`
 	Open        bool     `json:"open"`
 	Title       string   `json:"title"`
+	Tokens      *int     `json:"tokens"`
+	Percent     *float64 `json:"percent"`
+	Cost        *float64 `json:"cost"`
 }
 
 func (d *discoverer) foreignEvent(id string, line []byte) {
@@ -339,6 +342,11 @@ func (d *discoverer) foreignEvent(id string, line []byte) {
 	case "model":
 		fs.mu.Lock()
 		fs.model, fs.reasoning, fs.level = ev.Model, ev.Reasoning, ev.Level
+		fs.mu.Unlock()
+		d.foreignCard(fs, "", nil, false)
+	case "usage":
+		fs.mu.Lock()
+		fs.usage = newCardUsage(ev.Tokens, ev.Percent, ev.Cost)
 		fs.mu.Unlock()
 		d.foreignCard(fs, "", nil, false)
 	case "queue":
