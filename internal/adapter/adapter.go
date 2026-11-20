@@ -331,6 +331,12 @@ type MCPIdentity interface {
 	MCPSessionID(meta map[string]json.RawMessage) (string, error)
 }
 
+// MCPUser is an adapter that needs the node's MCP settings outside its
+// agent's config files.
+type MCPUser interface {
+	UseMCP(opts InstallOptions)
+}
+
 // MetaSessionID returns the session id stored under key, or an error wrapping
 // api.ErrNoCaller.
 func MetaSessionID(meta map[string]json.RawMessage, key string) (string, error) {

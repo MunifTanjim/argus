@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -245,33 +246,72 @@ func (a piAdapter) Install(opts adapter.InstallOptions) error {
 	return err
 }
 
-// Reconcile writes opts.Socket, the node's mod socket, into the installed gate
-// so beacons find the node that installed it.
+// Reconcile writes the node's mod socket and MCP endpoint into the installed
+// gate, so beacons find the node that installed it and get its agent tools.
 func (piAdapter) Reconcile(opts adapter.InstallOptions) ([]string, error) {
 	path, err := beaconPath()
 	if err != nil {
 		return nil, err
 	}
 	cur, readErr := os.ReadFile(path)
-	stamped, ours := stampedSocket(string(cur))
+	stamped, ours := stampedGate(string(cur))
 	if readErr == nil && !ours {
 		return nil, nil
 	}
-	socket := opts.Socket
-	if socket == "" {
-		socket = stamped
+	want := stamped
+	if opts.Socket != "" {
+		want.socket = opts.Socket
 	}
-	want := stampSocket(socket)
-	if string(cur) == want {
+	if _, err := adapter.SyncMCP(Agent, opts, func() string { return stamped.mcpURL },
+		func() (bool, error) {
+			want.mcpURL, want.mcpToken = "", ""
+			return true, nil
+		},
+		func(url, token string) (bool, error) {
+			want.mcpURL, want.mcpToken = url, token
+			return true, nil
+		}); err != nil {
+		return nil, err
+	}
+	if want.mcpToken != "" && readErr == nil {
+		if err := adapter.RestrictTokenFile(Agent, path); err != nil {
+			return nil, err
+		}
+	}
+	src := stampGate(want)
+	if string(cur) == src {
 		return nil, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
 		return nil, err
 	}
 	return []string{path}, nil
+}
+
+// UseMCP sets the MCP endpoint and token that owned sessions' gate carries,
+// and brings the global gate up to date before any owned session can load it:
+// either copy can win the gate's load guard.
+func (a piAdapter) UseMCP(opts adapter.InstallOptions) {
+	url, token := "", ""
+	if !opts.MCPOff && opts.MCPURL != "" {
+		url, token = opts.MCPEndpoint(Agent), opts.MCPToken
+	}
+	gateMCP.Lock()
+	gateMCP.url, gateMCP.token = url, token
+	gateMCP.Unlock()
+	home, err := piHome()
+	if err != nil {
+		return
+	}
+	if _, err := os.Stat(filepath.Dir(home)); err != nil {
+		return
+	}
+	if _, err := a.Reconcile(opts); err != nil {
+		slog.Default().With("scope", Agent).Warn("update the gate extension", "err", err)
+	}
 }
 
 func (piAdapter) Uninstall() error {
@@ -283,7 +323,8 @@ func (piAdapter) Uninstall() error {
 	if err != nil {
 		return nil
 	}
-	if _, ours := stampedSocket(string(cur)); !ours {
+	removeStagedGates()
+	if _, ours := stampedGate(string(cur)); !ours {
 		return nil // user-crafted: leave it alone
 	}
 	return os.Remove(path)

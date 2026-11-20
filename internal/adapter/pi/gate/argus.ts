@@ -27,6 +27,11 @@ import type { ExtensionAPI, ExtensionContext, ExtensionUIDialogOptions } from "@
 
 // Argus writes its mod socket path here when it installs this file globally.
 const SOCKET_PATH = "";
+// Argus writes the node's MCP endpoint and token here, in both the global
+// install and the copy it stages for owned sessions: either copy can win the
+// load guard.
+const MCP_URL = "";
+const MCP_TOKEN = "";
 
 const g = globalThis as unknown as { __argusGateLoaded?: boolean; __argusPrevSessionId?: string };
 
@@ -54,6 +59,18 @@ export default function (pi: ExtensionAPI) {
 	let liveCtx: ExtensionContext | null = null;
 	pi.on("session_start", async (_ev, ctx) => {
 		liveCtx = ctx;
+		// pi's MCP client puts no session id in _meta, so the header names the
+		// caller. A session change loads the gate again, which registers again
+		// with the new id.
+		// An owned process takes only the endpoint of the node that owns it: a
+		// global copy can carry another node's.
+		if (MCP_URL && MCP_TOKEN && (!managed || process.env["ARGUS_MCP_URL"] === MCP_URL)) {
+			pi.registerMcpServer("argus", {
+				url: MCP_URL,
+				headers: { Authorization: `Bearer ${MCP_TOKEN}`, "X-Argus-Session": ctx.sessionManager.getSessionId() },
+				exposure: "direct",
+			});
+		}
 		if (beacon) {
 			startBeacon();
 			patchDialogs(ctx);

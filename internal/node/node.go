@@ -598,6 +598,16 @@ func (d *Node) streamRegistry(n api.Notifier) func() {
 	}
 }
 
+// UseMCP hands the node's MCP settings to adapters that need them outside
+// their agent's config files. Call before Run, so spawns see them.
+func (d *Node) UseMCP(opts adapter.InstallOptions) {
+	for _, a := range d.adapterList {
+		if u, ok := a.(adapter.MCPUser); ok {
+			u.UseMCP(opts)
+		}
+	}
+}
+
 // ListenMCP binds the local MCP listener on 127.0.0.1:port; Run serves it.
 // Call before Run.
 func (d *Node) ListenMCP(port int, token string) error {
