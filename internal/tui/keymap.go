@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"slices"
@@ -25,13 +26,18 @@ type keymap struct {
 	// kittyKey names the leader or the first mapped key that a terminal can
 	// only send with the Kitty keyboard protocol, "" when there is none.
 	kittyKey string
-	// userDescs are the user's mappings that have a desc, for the help: global
-	// first, then each section in name order, as buildKeymap parses them.
+	// userDescs are the user's mappings that have a desc: global first, then
+	// each section in name order, as buildKeymap parses them.
 	userDescs []userDesc
+	// mappings are the userDescs that no init.lua binding hides, then the
+	// init.lua bindings other than built-in actions, for the help.
+	mappings []userDesc
+	sections map[string][]keyEntry // parsed mappings by section, "global" included
+	leader   keyStep
 }
 
 // userDesc is a user mapping with a desc. action is its command, or its key
-// RHS as written.
+// RHS as written. For an init.lua binding, action is its custom action name.
 type userDesc struct {
 	section, action, desc string
 	seq                   keySeq
@@ -51,6 +57,7 @@ type screenKeys struct {
 	seqs     []screenSeq            // every effective key the resolver serves on the screen
 	descs    []keyDesc              // the user's mappings with a desc, in the order they apply
 	defaults map[string]defaultKeys // shared with the keymap
+	lua      map[string]*luaKey     // key id → the init.lua handler; a single key lists every form
 }
 
 type screenSeq struct {
@@ -59,12 +66,21 @@ type screenSeq struct {
 }
 
 // keyEntry is one mapping. cmds is what it runs; rhs is a key RHS that
-// resolveScreen turns into cmds per screen. Neither removes the key.
+// resolveScreen turns into cmds per screen. Neither removes the key. lua is an
+// init.lua function or custom action binding.
 type keyEntry struct {
 	seq  keySeq
 	cmds []string
 	rhs  keySeq
 	desc string
+	lua  *luaKey
+}
+
+// keyLayer is one precedence level of a screen's mappings. filter drops the
+// commands that the screen does not have.
+type keyLayer struct {
+	entries     []keyEntry
+	filter, lua bool
 }
 
 // buildKeymap resolves raw (screen → key → RHS in Vim notation) into one table
@@ -75,21 +91,17 @@ func buildKeymap(raw map[string]map[string]config.Mapping, timeout time.Duration
 	if timeout <= 0 {
 		timeout = time.Second
 	}
-	km := &keymap{timeout: timeout, screens: map[string]*screenKeys{}, defaults: map[string]defaultKeys{}}
+	km := &keymap{timeout: timeout, defaults: map[string]defaultKeys{}, sections: map[string][]keyEntry{}}
 	var errs []string
 
-	leaderStep := parseLeader(leader, &errs)
-	if needsKitty(keySeq{leaderStep}) {
+	km.leader = parseLeader(leader, &errs)
+	if needsKitty(keySeq{km.leader}) {
 		km.kittyKey = fmt.Sprintf("tui.leader-key %q", leader)
 	}
 
 	for _, s := range slices.Sorted(maps.Keys(raw)) {
-		switch {
-		case s == "global" || screenBindings[s] != nil:
-		case oldSections[s] != "":
-			errs = append(errs, fmt.Sprintf("keymap: unknown screen %q (now %s)", s, oldSections[s]))
-		default:
-			errs = append(errs, fmt.Sprintf("keymap: unknown screen %q", s))
+		if err := checkScreen(s); err != nil {
+			errs = append(errs, "keymap: "+err.Error())
 		}
 	}
 	for _, b := range bindingsOf(append(allBindingSets(), screenLeave)...) {
@@ -99,7 +111,7 @@ func buildKeymap(raw map[string]map[string]config.Mapping, timeout time.Duration
 		var dk defaultKeys
 		quiet := strings.Fields(b.quiet)
 		for _, tok := range append(strings.Fields(b.defaults), quiet...) {
-			seq := mustParseDefault(b, tok, leaderStep)
+			seq := mustParseDefault(b, tok, km.leader)
 			dk.seqs = append(dk.seqs, seq)
 			ids := seq[0]
 			if len(seq) > 1 {
@@ -112,7 +124,7 @@ func buildKeymap(raw map[string]map[string]config.Mapping, timeout time.Duration
 		}
 		km.defaults[b.defKey] = dk
 	}
-	km.bare = &screenKeys{defaults: km.defaults, add: map[string][]keySeq{}, addIDs: map[string][]string{}, takenBy: map[string][]string{}}
+	km.bare = resolveScreen("", nil, km.defaults)
 	parse := func(section string) []keyEntry {
 		var out []keyEntry
 		for _, lhs := range slices.Sorted(maps.Keys(raw[section])) {
@@ -133,7 +145,7 @@ func buildKeymap(raw map[string]map[string]config.Mapping, timeout time.Duration
 				bad("%s", mp.Problem)
 				continue
 			}
-			e := keyEntry{seq: replaceLeader(seq, leaderStep), desc: mp.Desc}
+			e := keyEntry{seq: replaceLeader(seq, km.leader), desc: mp.Desc}
 			switch kind, cmd := parseRHS(rhs); kind {
 			case rhsNop:
 				if mp.Desc != "" {
@@ -168,7 +180,7 @@ func buildKeymap(raw map[string]map[string]config.Mapping, timeout time.Duration
 					bad("%v", err)
 					continue
 				}
-				e.rhs = replaceLeader(r, leaderStep)
+				e.rhs = replaceLeader(r, km.leader)
 				cmds := keyRHSCmds(section, e.rhs, km.defaults)
 				switch {
 				case len(cmds) == 0:
@@ -201,11 +213,85 @@ func buildKeymap(raw map[string]map[string]config.Mapping, timeout time.Duration
 		}
 		return out
 	}
-	global := parse("global")
+	km.sections["global"] = parse("global")
 	for _, s := range slices.Sorted(maps.Keys(screenBindings)) {
-		km.screens[s] = resolveScreen(s, parse(s), global, defaultEntries(s, leaderStep), km.defaults)
+		km.sections[s] = parse(s)
 	}
+	km.resolve(nil)
 	return km, errs
+}
+
+// resolve builds the screen tables and the help mappings with the init.lua
+// bindings lua above the user's mappings.
+func (km *keymap) resolve(lua []luaKey) {
+	km.screens = map[string]*screenKeys{}
+	luaGlobal := luaEntries(lua, "")
+	for s := range screenBindings {
+		km.screens[s] = resolveScreen(s, []keyLayer{
+			{entries: luaEntries(lua, s), filter: true, lua: true},
+			{entries: luaGlobal, filter: true, lua: true},
+			{entries: km.sections[s]},
+			{entries: km.sections["global"], filter: true},
+			{entries: defaultEntries(s, km.leader)},
+		}, km.defaults)
+	}
+	km.mappings = km.helpMappings(lua)
+}
+
+// luaEntries is screen's init.lua bindings, the last argus.bind first. A
+// built-in action binding is a mapping to its command.
+func luaEntries(keys []luaKey, screen string) []keyEntry {
+	var out []keyEntry
+	for i, k := range slices.Backward(keys) {
+		switch b, builtin := actions[k.action]; {
+		case k.screen != screen:
+		case builtin:
+			out = append(out, keyEntry{seq: k.seq, cmds: []string{b.name}})
+		default:
+			out = append(out, keyEntry{seq: k.seq, lua: &keys[i]})
+		}
+	}
+	return out
+}
+
+// helpMappings hides a mapping that an action binding of its section takes,
+// and a section mapping that its screen does not use. A function binding hides
+// nothing, as the key falls through to the mapping. Of the bindings of one key
+// and section, the last argus.bind shows, at the place of the first.
+func (km *keymap) helpMappings(lua []luaKey) []userDesc {
+	var bound []luaKey
+	at := map[[2]string]int{}
+	for _, k := range lua {
+		key := [2]string{cmp.Or(k.screen, "global"), k.seq.id()}
+		if i, ok := at[key]; ok {
+			bound[i] = k
+			continue
+		}
+		at[key] = len(bound)
+		bound = append(bound, k)
+	}
+	var out []userDesc
+	for _, d := range km.userDescs {
+		id := d.seq.id()
+		if i, ok := at[[2]string{d.section, id}]; ok && bound[i].action != "" {
+			continue
+		}
+		if sk := km.screens[d.section]; sk != nil && !slices.ContainsFunc(sk.descs, func(kd keyDesc) bool { return kd.id == id }) {
+			continue
+		}
+		out = append(out, d)
+	}
+	for _, k := range bound {
+		if _, builtin := actions[k.action]; builtin {
+			continue
+		}
+		d := userDesc{section: cmp.Or(k.screen, "global"), desc: k.label(), seq: k.seq}
+		if k.title != "" {
+			d.action = k.action
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 func parseLeader(leader string, errs *[]string) keyStep {
@@ -252,48 +338,58 @@ func (km *keymap) screenKeys(screen string) *screenKeys {
 	return km.bare
 }
 
-// resolveScreen layers the user's section entries, then the user's global
-// entries, then the default keymap, over the built-in keys. The first layer
-// that maps a key wins.
-func resolveScreen(screen string, own, global, defs []keyEntry, defaults map[string]defaultKeys) *screenKeys {
-	sk := &screenKeys{defaults: defaults, add: map[string][]keySeq{}, addIDs: map[string][]string{}, takenBy: map[string][]string{}}
-	taken := map[string]bool{}
-	layer := func(es []keyEntry, isGlobal bool) {
-		for _, e := range es {
-			if taken[e.seq.id()] {
+// resolveScreen applies layers over the built-in keys. The first layer that
+// maps a key wins, except that a Lua function binding leaves the key to the
+// non-Lua layers, which run when the function does not handle it.
+func resolveScreen(screen string, layers []keyLayer, defaults map[string]defaultKeys) *screenKeys {
+	sk := &screenKeys{defaults: defaults, add: map[string][]keySeq{}, addIDs: map[string][]string{}, takenBy: map[string][]string{}, lua: map[string]*luaKey{}}
+	taken, luaSeen, seen := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	for _, l := range layers {
+		for _, e := range l.entries {
+			id := e.seq.id()
+			if taken[id] || l.lua && luaSeen[id] {
 				continue
+			}
+			if l.lua {
+				luaSeen[id] = true
 			}
 			cmds := e.cmds
 			if e.rhs != nil {
 				cmds = builtinCmds(screen, e.rhs, defaults)
 			}
-			if isGlobal {
+			if l.filter {
 				cmds = slices.DeleteFunc(slices.Clone(cmds), func(c string) bool { return !screenHas(screen, c) })
 				if len(cmds) == 0 && (len(e.cmds) > 0 || e.rhs != nil) {
 					continue
 				}
 			}
-			taken[e.seq.id()] = true
-			ids := []string{e.seq.id()}
+			ids := []string{id}
 			if len(e.seq) == 1 {
 				ids = e.seq[0]
 			}
-			for _, id := range ids {
-				sk.takenBy[id] = cmds
+			if e.lua != nil {
+				for _, i := range ids {
+					sk.lua[i] = e.lua
+				}
+				seen[id] = true
+				sk.seqs = append(sk.seqs, screenSeq{seq: e.seq, id: id, cmd: e.lua.label()})
+				if e.lua.action == "" {
+					continue
+				}
+			}
+			taken[id] = true
+			for _, i := range ids {
+				sk.takenBy[i] = cmds
 			}
 			for _, c := range cmds {
 				sk.add[c] = append(sk.add[c], e.seq)
 				sk.addIDs[c] = append(sk.addIDs[c], ids...)
 			}
 			if e.desc != "" && len(cmds) > 0 {
-				sk.descs = append(sk.descs, keyDesc{id: e.seq.id(), cmds: cmds, desc: e.desc})
+				sk.descs = append(sk.descs, keyDesc{id: id, cmds: cmds, desc: e.desc})
 			}
 		}
 	}
-	layer(own, false)
-	layer(global, true)
-	layer(defs, false)
-	seen := map[string]bool{}
 	for _, b := range screenBindings[screen] {
 		if textInputOnly(b.name) {
 			continue

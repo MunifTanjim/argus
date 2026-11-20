@@ -97,10 +97,8 @@ func parseSpecial(body string) (keyStep, error) {
 	if name, ok := keyNames[strings.ToLower(k)]; ok {
 		return keyStep{modPrefix(ctrl, alt, shift, super) + name}, nil
 	}
-	if f, ok := strings.CutPrefix(strings.ToLower(k), "f"); ok {
-		if n, err := strconv.Atoi(f); err == nil && n >= 1 && n <= 12 {
-			return keyStep{modPrefix(ctrl, alt, shift, super) + "f" + f}, nil
-		}
+	if name := strings.ToLower(k); isFnKey(name) {
+		return keyStep{modPrefix(ctrl, alt, shift, super) + name}, nil
 	}
 	if r, n := utf8.DecodeRuneInString(k); mods && n == len(k) && n > 0 {
 		return charStep(r, ctrl, alt, shift, super), nil
@@ -137,4 +135,14 @@ func modPrefix(ctrl, alt, shift, super bool) string {
 		}
 	}
 	return b.String()
+}
+
+// isFnKey reports a lowercase F1 to F12 name, for example "f5".
+func isFnKey(name string) bool {
+	f, ok := strings.CutPrefix(name, "f")
+	if !ok {
+		return false
+	}
+	n, err := strconv.Atoi(f)
+	return err == nil && n >= 1 && n <= 12
 }

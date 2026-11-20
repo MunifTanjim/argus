@@ -39,7 +39,7 @@ type Client interface {
 // when client drives a local socket. Non-nil logs (the started servers' log
 // files) are shown in the Logs tab and also receive the TUI's own log output.
 // Run closes client before it returns.
-func Run(client Client, gatewayURL string, logs *logbuf.Buffer, cfg config.TUIConfig, settings Settings) error {
+func Run(client Client, gatewayURL string, logs *logbuf.Buffer, cfg config.TUIConfig, luaPath string, settings Settings) error {
 	// The client library logs warnings (e.g. a node timing out) via the standard
 	// logger; keep them off the alt-screen.
 	if logs != nil {
@@ -55,7 +55,7 @@ func Run(client Client, gatewayURL string, logs *logbuf.Buffer, cfg config.TUICo
 
 	swap := newSwapClient(client)
 	defer swap.Close()
-	m := newModel(swap, hasDark, logs).withKeymaps(cfg)
+	m := newModel(swap, hasDark, logs).withKeymaps(cfg, luaPath)
 	m.gatewayURL = gatewayURL
 	m.settings = settings
 	m.statePath = config.GetStatePath("tui.json")
@@ -121,7 +121,7 @@ func newViewerModel(client *fileClient, hasDark bool) model {
 
 // RunBundle extracts and validates the bundle before launching the TUI, so a bad
 // bundle errors out without ever opening the alt-screen.
-func RunBundle(bundlePath string, redact bool, cfg config.TUIConfig) error {
+func RunBundle(bundlePath string, redact bool, cfg config.TUIConfig, luaPath string) error {
 	pruneOldExtractions()
 
 	dest, err := bundleExtractDir(bundlePath)
@@ -142,7 +142,7 @@ func RunBundle(bundlePath string, redact bool, cfg config.TUIConfig) error {
 	if err != nil {
 		return err
 	}
-	return RunViewer(client, bundlePath, redact, cfg)
+	return RunViewer(client, bundlePath, redact, cfg, luaPath)
 }
 
 // extractPrefix marks argus view's extraction and temp dirs in TempDir so
@@ -264,13 +264,13 @@ func extractBundle(bundlePath, dest string) (bundle.Manifest, error) {
 
 // RunViewer runs the TUI as an offline viewer over an extracted .argus bundle,
 // opening directly in the transcript view.
-func RunViewer(client *fileClient, bundlePath string, redact bool, cfg config.TUIConfig) error {
+func RunViewer(client *fileClient, bundlePath string, redact bool, cfg config.TUIConfig, luaPath string) error {
 	log.SetOutput(io.Discard) // keep any stray standard-logger output off the alt-screen
 	hasDark := lipgloss.HasDarkBackground(os.Stdin, os.Stderr)
 	initTheme(hasDark)
 	initIcons()
 	initStyles()
-	m := newViewerModel(client, hasDark).withKeymaps(cfg)
+	m := newViewerModel(client, hasDark).withKeymaps(cfg, luaPath)
 	m.mouse = cfg.Mouse == config.MouseOn
 	m.verboseTranscript = cfg.VerboseTranscript
 	m.redactMode = redact

@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"maps"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -100,21 +102,25 @@ func (m model) helpGroups() []helpGroup {
 			tree(listKeys.Quit, "quit"),
 		}},
 	}
-	if mine := m.yourMappings(); len(mine) > 0 {
-		groups = append(groups, helpGroup{"Your mappings", mine})
-	}
-	return groups
+	return append(groups, m.mappingGroups()...)
 }
 
-// yourMappings are the help rows of the user's mappings that have a desc.
-func (m model) yourMappings() []helpRow {
-	var out []helpRow
-	for _, d := range m.keymap().userDescs {
-		desc := d.desc
-		if d.section != "global" {
-			desc += " (" + d.section + ")"
+// mappingGroups are the user's mappings that have a desc and the init.lua
+// bindings: the global ones under "Your mappings", then one group per section
+// in name order.
+func (m model) mappingGroups() []helpGroup {
+	rows := map[string][]helpRow{}
+	for _, d := range m.keymap().mappings {
+		rows[d.section] = append(rows[d.section], helpRow{key: keyLabel(d.seq.id()), desc: d.desc, name: d.action})
+	}
+	var out []helpGroup
+	if g := rows["global"]; len(g) > 0 {
+		out = append(out, helpGroup{"Your mappings", g})
+	}
+	for _, section := range slices.Sorted(maps.Keys(rows)) {
+		if section != "global" {
+			out = append(out, helpGroup{section, rows[section]})
 		}
-		out = append(out, helpRow{key: keyLabel(d.seq.id()), desc: desc, name: d.action})
 	}
 	return out
 }

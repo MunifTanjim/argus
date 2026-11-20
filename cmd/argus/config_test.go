@@ -97,3 +97,32 @@ func TestBadKeymapsStopOnlyTheTUI(t *testing.T) {
 		t.Error("resolveTUIConfig should report the bad keymaps")
 	}
 }
+
+func TestResolveConfigLuaPath(t *testing.T) {
+	withConfigFile(t, "")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x.yaml"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--config", filepath.Join(dir, "x.yaml")}, filepath.Join(dir, "init.lua")},
+		{[]string{"--no-config"}, ""},
+		{nil, filepath.Join(config.ConfigDir, "init.lua")},
+	}
+	for _, tc := range cases {
+		root := newRootCmd("test")
+		if err := root.Flags().Parse(tc.args); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		cfg, err := resolveConfig(root)
+		if err != nil {
+			t.Fatalf("resolveConfig %v: %v", tc.args, err)
+		}
+		if cfg.LuaPath != tc.want {
+			t.Errorf("%v: LuaPath = %q, want %q", tc.args, cfg.LuaPath, tc.want)
+		}
+	}
+}

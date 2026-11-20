@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -77,8 +78,8 @@ func resolveConfig(cmd *cobra.Command) (*config.Config, error) {
 	return c, err
 }
 
-// resolveTUIConfig is resolveConfig plus tui.keymap. Only the commands that
-// start the TUI read keymaps, so a bad keymap section stops no other command.
+// resolveTUIConfig is resolveConfig plus tui.keymap. Only the commands that start the TUI read keymaps, so a bad keymap section
+// stops no other command.
 func resolveTUIConfig(cmd *cobra.Command) (*config.Config, error) {
 	c, path, err := loadConfig(cmd)
 	if err != nil {
@@ -96,16 +97,15 @@ func resolveTUIConfig(cmd *cobra.Command) (*config.Config, error) {
 func loadConfig(cmd *cobra.Command) (*config.Config, string, error) {
 	v := viper.New()
 
-	noConfig, _ := cmd.Flags().GetBool("no-config")
-
 	cfgPath := os.Getenv("ARGUS_CONFIG")
 	if f := cmd.Flags().Lookup("config"); f != nil && f.Changed {
 		cfgPath = f.Value.String()
 	}
-	if noConfig {
+	off := noConfig(cmd)
+	if off {
 		cfgPath = "" // also ignore $ARGUS_CONFIG
 	}
-	if err := config.Load(v, cfgPath, noConfig); err != nil {
+	if err := config.Load(v, cfgPath, off); err != nil {
 		return nil, "", err
 	}
 
@@ -119,5 +119,16 @@ func loadConfig(cmd *cobra.Command) (*config.Config, string, error) {
 	if err := c.Validate(); err != nil {
 		return nil, "", err
 	}
-	return &c, v.ConfigFileUsed(), nil
+	path := v.ConfigFileUsed()
+	if path != "" {
+		c.LuaPath = filepath.Join(filepath.Dir(path), "init.lua")
+	} else if !off {
+		c.LuaPath = config.GetConfigPath("init.lua")
+	}
+	return &c, path, nil
+}
+
+func noConfig(cmd *cobra.Command) bool {
+	v, _ := cmd.Flags().GetBool("no-config")
+	return v
 }

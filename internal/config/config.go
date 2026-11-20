@@ -27,6 +27,8 @@ type Config struct {
 	Workspace WorkspaceConfig
 	TUI       TUIConfig
 	MCP       MCPConfig
+	// LuaPath is the init.lua to load; empty when config is off.
+	LuaPath string
 }
 
 // WorkspaceConfig tunes workspace (git worktree) management.

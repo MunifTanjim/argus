@@ -137,7 +137,7 @@ func newRootCmd(version string) *cobra.Command {
 				}
 			}
 
-			if err := tui.Run(client, gatewayURL, logs, cfg.TUI, newSettingsBackend(ctx, cfg, gatewayURL, gatewayToken, head)); err != nil {
+			if err := tui.Run(client, gatewayURL, logs, cfg.TUI, cfg.LuaPath, newSettingsBackend(ctx, cfg, gatewayURL, gatewayToken, head)); err != nil {
 				return fail(cmd, err)
 			}
 			return nil
