@@ -38,15 +38,21 @@ func (m model) keyTimeout(msg keyTimeoutMsg) (tea.Model, tea.Cmd) {
 	return m.runSequence(matched, toFeed, cmd)
 }
 
-func (m *model) feedKey(msg tea.KeyPressMsg) (matched []tea.KeyPressMsg, toFeed []tea.KeyPressMsg, cmd tea.Cmd) {
+// keyPress is a completed match. fallback is what the handlers see when a Lua
+// function does not handle msg.
+type keyPress struct{ msg, fallback tea.KeyPressMsg }
+
+func pressOf(k tea.KeyPressMsg) keyPress { return keyPress{k, k} }
+
+func (m *model) feedKey(msg tea.KeyPressMsg) (matched []keyPress, toFeed []tea.KeyPressMsg, cmd tea.Cmd) {
 	m.keyBuf = append(m.keyBuf, msg)
 	km := m.keymap()
 	exact, longer := km.lookup(m.screen(), m.keyBuf)
 	switch {
 	case exact != "" && !longer:
-		k := seqMsg(m.keyBuf, exact)
+		k := m.matchOf(m.keyBuf, exact)
 		m.clearKeys()
-		return []tea.KeyPressMsg{k}, nil, nil
+		return []keyPress{k}, nil, nil
 	case longer:
 		if exact != "" {
 			m.keyMatch, m.keyMatchN = exact, len(m.keyBuf)
@@ -60,16 +66,16 @@ func (m *model) feedKey(msg tea.KeyPressMsg) (matched []tea.KeyPressMsg, toFeed 
 
 // flushBuf ends the pending sequence. mismatch is false on a timeout, which
 // drops unmatched keys.
-func (m *model) flushBuf(mismatch bool) (matched []tea.KeyPressMsg, toFeed []tea.KeyPressMsg, cmd tea.Cmd) {
+func (m *model) flushBuf(mismatch bool) (matched []keyPress, toFeed []tea.KeyPressMsg, cmd tea.Cmd) {
 	buf, match, n := m.keyBuf, m.keyMatch, m.keyMatchN
 	m.clearKeys()
 	switch {
 	case match != "":
-		return []tea.KeyPressMsg{seqMsg(buf[:n], match)}, buf[n:], nil
+		return []keyPress{m.matchOf(buf[:n], match)}, buf[n:], nil
 	case !mismatch:
 		return nil, nil, nil
 	case len(buf) == 1:
-		return buf, nil, nil
+		return []keyPress{pressOf(buf[0])}, nil, nil
 	default:
 		return nil, buf[len(buf)-1:], nil
 	}
@@ -81,12 +87,12 @@ func (m *model) clearKeys() {
 
 // runSequence checks keysRaw after each key so that keys following a match
 // that opens a text input go to the input as typed, not through the resolver.
-func (m model) runSequence(matched []tea.KeyPressMsg, toFeed []tea.KeyPressMsg, cmd tea.Cmd) (tea.Model, tea.Cmd) {
+func (m model) runSequence(matched []keyPress, toFeed []tea.KeyPressMsg, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{cmd}
-	run := func(k tea.KeyPressMsg) {
-		mm, c, ok := m.runLua(k)
+	run := func(k keyPress) {
+		mm, c, ok := m.runLua(k.msg)
 		if !ok {
-			res, kc := mm.runKey(k)
+			res, kc := mm.runKey(k.fallback)
 			mm = res.(model)
 			c = tea.Batch(c, kc)
 		}
@@ -106,7 +112,7 @@ func (m model) runSequence(matched []tea.KeyPressMsg, toFeed []tea.KeyPressMsg, 
 			continue
 		}
 		if m.keysRaw() {
-			run(next)
+			run(pressOf(next))
 			continue
 		}
 		newMatched, newToFeed, timerCmd := m.feedKey(next)
@@ -119,6 +125,20 @@ func (m model) runSequence(matched []tea.KeyPressMsg, toFeed []tea.KeyPressMsg, 
 	return m, tea.Batch(cmds...)
 }
 
+// matchOf is the match of keys with id. A Lua function binding leaves the
+// keys to the other mappings, which can match them in another form.
+func (m *model) matchOf(keys []tea.KeyPressMsg, id string) keyPress {
+	k := seqMsg(keys, id)
+	sk := m.keymap().screenKeys(m.screen())
+	if len(keys) == 1 || sk.lua[id] == nil {
+		return pressOf(k)
+	}
+	if _, base, _ := resolveSeqs(sk.base, keys, keyTexts(keys)); base != "" {
+		return keyPress{k, seqMsg(keys, base)}
+	}
+	return pressOf(k)
+}
+
 // seqMsg is the key press the handlers see for a completed match: the press
 // itself for one key, or a synthetic press whose text is the sequence id.
 func seqMsg(keys []tea.KeyPressMsg, id string) tea.KeyPressMsg {
@@ -129,9 +149,31 @@ func seqMsg(keys []tea.KeyPressMsg, id string) tea.KeyPressMsg {
 }
 
 func (km *keymap) lookup(screen string, buf []tea.KeyPressMsg) (exact string, longer bool) {
-	sk := km.screenKeys(screen)
-	pressed := keyTexts(buf)
-	for _, s := range sk.seqs {
+	_, exact, longer = km.screenKeys(screen).resolve(buf, keyTexts(buf))
+	return exact, longer
+}
+
+// resolve matches pressed, the texts of buf, or else buf without the
+// modifiers that its first key holds, as Vim reads <C-w><C-h> as <C-w>h. keys
+// is the form that matched.
+func (sk *screenKeys) resolve(buf []tea.KeyPressMsg, pressed []string) (keys []string, exact string, longer bool) {
+	return resolveSeqs(sk.seqs, buf, pressed)
+}
+
+func resolveSeqs(seqs []screenSeq, buf []tea.KeyPressMsg, pressed []string) (keys []string, exact string, longer bool) {
+	exact, longer = matchSeqs(seqs, pressed)
+	if exact == "" && !longer {
+		if held := withoutHeldMods(buf, pressed); held != nil {
+			if e, l := matchSeqs(seqs, held); e != "" || l {
+				return held, e, l
+			}
+		}
+	}
+	return pressed, exact, longer
+}
+
+func matchSeqs(seqs []screenSeq, pressed []string) (exact string, longer bool) {
+	for _, s := range seqs {
 		switch {
 		case len(s.seq) < len(pressed) || !s.seq.startsWith(pressed):
 		case len(s.seq) > len(pressed):
@@ -141,6 +183,31 @@ func (km *keymap) lookup(screen string, buf []tea.KeyPressMsg) (exact string, lo
 		}
 	}
 	return exact, longer
+}
+
+// withoutHeldMods drops from each key after the first the modifiers that the
+// first key has, shift aside because it changes the character. It is nil when
+// nothing changes.
+func withoutHeldMods(buf []tea.KeyPressMsg, pressed []string) []string {
+	if len(buf) < 2 {
+		return nil
+	}
+	held := buf[0].Mod & (tea.ModCtrl | tea.ModAlt | tea.ModMeta | tea.ModHyper | tea.ModSuper)
+	if held == 0 {
+		return nil
+	}
+	var out []string
+	for i, k := range buf[1:] {
+		if k.Mod&held == 0 {
+			continue
+		}
+		k.Mod &^= held
+		if out == nil {
+			out = slices.Clone(pressed)
+		}
+		out[i+1] = k.String()
+	}
+	return out
 }
 
 // keyTexts exists because String() allocates: a lookup computes it once per
@@ -176,7 +243,9 @@ func (m model) keyHint() string {
 	labels := map[string]string{}
 	completes := map[string]bool{}
 	var wait string
-	for _, s := range m.keymap().screenKeys(m.screen()).seqs {
+	sk := m.keymap().screenKeys(m.screen())
+	pressed, _, _ = sk.resolve(m.keyBuf, pressed)
+	for _, s := range sk.seqs {
 		if wait == "" && m.keyMatch != "" && s.id == m.keyMatch {
 			wait = s.label()
 		}

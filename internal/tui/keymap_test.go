@@ -601,3 +601,68 @@ func TestObjectMappingErrors(t *testing.T) {
 		t.Errorf("errors:\n%s\nwant:\n%s", strings.Join(errs, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+func TestWithoutHeldMods(t *testing.T) {
+	key := func(code rune, mod tea.KeyMod) tea.KeyPressMsg { return tea.KeyPressMsg{Code: code, Mod: mod} }
+	ctrl, alt, shift := tea.ModCtrl, tea.ModAlt, tea.ModShift
+	for _, c := range []struct {
+		in   []tea.KeyPressMsg
+		want []string
+	}{
+		{[]tea.KeyPressMsg{key('a', ctrl), key('s', ctrl)}, []string{"ctrl+a", "s"}},
+		{[]tea.KeyPressMsg{key('a', alt), key('s', alt)}, []string{"alt+a", "s"}},
+		{[]tea.KeyPressMsg{key('a', ctrl|alt), key('s', ctrl), key('d', alt)}, []string{"ctrl+alt+a", "s", "d"}},
+		{[]tea.KeyPressMsg{key('w', ctrl), key('+', ctrl)}, []string{"ctrl+w", "+"}},
+		{[]tea.KeyPressMsg{key('a', ctrl|shift), key('b', ctrl|shift)}, []string{"ctrl+shift+a", "shift+b"}},
+		{[]tea.KeyPressMsg{key('a', ctrl), key('s', alt)}, nil},
+		{[]tea.KeyPressMsg{key('a', ctrl), key('s', 0)}, nil},
+		{[]tea.KeyPressMsg{key(tea.KeyTab, shift), key('a', shift)}, nil},
+		{[]tea.KeyPressMsg{key('g', 0), key('g', ctrl)}, nil},
+		{[]tea.KeyPressMsg{key('a', ctrl)}, nil},
+	} {
+		pressed := keyTexts(c.in)
+		if got := withoutHeldMods(c.in, pressed); !slices.Equal(got, c.want) {
+			t.Errorf("withoutHeldMods(%q) = %q, want %q", pressed, got, c.want)
+		}
+	}
+}
+
+func TestHeldModifierFallsBackToPlainKey(t *testing.T) {
+	m := pressKeys(withFocus(wideWorkspace(), mainPane), ctrlKey('w'), ctrlKey('h'))
+	if m.focused != leftSidebar {
+		t.Fatalf("<C-w><C-h> must run <C-w>h: focus = %v", m.focused)
+	}
+	altKey := func(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Mod: tea.ModAlt} }
+	m = withKeymap(withFocus(wideWorkspace(), mainPane), map[string]map[string]string{"global": {"<A-a>s": ":focus left<CR>"}})
+	m = pressKeys(m, altKey('a'), altKey('s'))
+	if m.focused != leftSidebar {
+		t.Fatalf("<A-a><A-s> must run <A-a>s: focus = %v", m.focused)
+	}
+}
+
+func TestExplicitHeldModifierKeyWins(t *testing.T) {
+	m := withKeymap(withFocus(wideWorkspace(), mainPane), map[string]map[string]string{"global": {"<C-w><C-h>": ":focus right<CR>"}})
+	if got := pressKeys(m, ctrlKey('w'), ctrlKey('h')).focused; got != rightSidebar {
+		t.Errorf("<C-w><C-h>: focus = %v, want the right sidebar", got)
+	}
+	if got := pressKeys(m, cw('h')...).focused; got != leftSidebar {
+		t.Errorf("<C-w>h: focus = %v, want the left sidebar", got)
+	}
+}
+
+func TestNoFallbackWithoutModifierOnFirstKey(t *testing.T) {
+	m := withKeymap(withFocus(wideWorkspace(), mainPane), map[string]map[string]string{"global": {"gh": ":focus left<CR>"}})
+	if got := pressKeys(m, keyMsg("g"), ctrlKey('h')).focused; got != mainPane {
+		t.Errorf("g <C-h> must not run gh: focus = %v", got)
+	}
+}
+
+func TestPendingFooterHasNoHeldModifierForms(t *testing.T) {
+	m, _ := upd(wideWorkspace(), ctrlKey('w'))
+	hint := ansi.Strip(m.keyHint())
+	for _, k := range []string{"^h", "^j", "^k", "^l", "^w "} {
+		if strings.Contains(hint, k) {
+			t.Errorf("hint lists %s: %q", k, hint)
+		}
+	}
+}

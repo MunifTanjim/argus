@@ -211,6 +211,11 @@ sequence, press `<Esc>` to cancel.
 If a key is a complete mapping and also starts a longer one, the TUI waits for
 the next key. `tui.key-timeout` sets the wait. The default is `1s`.
 
+If the first key of a sequence has a modifier other than shift, the later keys
+can have the same modifier. For example, `<C-w><C-h>` does what `<C-w>h` does,
+and `<A-a><A-s>` does what `<A-a>s` does. If a mapping uses the key with the
+modifier, that mapping wins.
+
 ### Limits
 
 - A mapping cannot start with `:`. The `:` key opens the command line.
@@ -254,14 +259,14 @@ To run Lua code on a key, see [Lua](/getting-started/configuration#lua).
 | `filter-directories` |  | spawn | `/` |  |
 | `filter-projects` |  | history, node, project, project-tree | `/` |  |
 | `filter-sessions` |  | history, home, sidebar-sessions, workspace | `/` |  |
-| `focus down` | `client.pane.focus.down` | changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><C-j>` `<C-w><Down>` `<C-w>j` |  |
-| `focus left` | `client.pane.focus.left` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><C-h>` `<C-w><Left>` `<C-w>h` |  |
-| `focus next` | `client.pane.focus_next` | changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><C-w>` `<C-w>w` |  |
+| `focus down` | `client.pane.focus.down` | changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><Down>` `<C-w>j` |  |
+| `focus left` | `client.pane.focus.left` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><Left>` `<C-w>h` |  |
+| `focus next` | `client.pane.focus_next` | changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w>w` |  |
 | `focus prev` | `client.pane.focus_previous` | changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w>W` |  |
 | `focus prompt` |  | file, transcript |  | `<Tab>` |
-| `focus right` | `client.pane.focus.right` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><C-l>` `<C-w><Right>` `<C-w>l` |  |
+| `focus right` | `client.pane.focus.right` | changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><Right>` `<C-w>l` |  |
 | `focus transcript` |  | session-dock | `<Tab>` | `<Tab>` |
-| `focus up` | `client.pane.focus.up` | changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><C-k>` `<C-w><Up>` `<C-w>k` |  |
+| `focus up` | `client.pane.focus.up` | changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><Up>` `<C-w>k` |  |
 | `fold close` |  | changes, file-tree, project-tree, transcript | `<Left>` `h` `zc` |  |
 | `fold open` |  | changes, file-tree, project-tree, transcript | `<Right>` `l` `zo` |  |
 | `goto bottom` |  | changes, file, file-tree, history, home, logs, project-tree, settings, sidebar-sessions, spawn, terminals, transcript, visual, workspace | `G` |  |
