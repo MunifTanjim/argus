@@ -248,10 +248,14 @@ void main() {
       final act = workspaceActivity(sessions);
       expect(act['A:w1']!.live, 2);
       expect(act['A:w1']!.waiting, 1);
+      expect(act['A:w1']!.working, 1);
+      expect(act['A:w1']!.idle, 0);
       expect(act.containsKey('A:w2'), isFalse);
       final home = homeActivity(sessions);
       expect(home.live, 3);
       expect(home.waiting, 1);
+      expect(home.working, 1);
+      expect(home.idle, 1);
       final sum = sumActivity(act, ['A:w1', 'A:w2']);
       expect(sum.live, 2);
     },
@@ -265,7 +269,7 @@ void main() {
       _s('4', SessionStatus.working, ws: 'A:w1'),
     ]);
     final a = act['A:w1']!;
-    expect((a.live, a.blocked, a.waiting), (4, 1, 2));
+    expect((a.live, a.blocked, a.waiting, a.working, a.idle), (4, 1, 2, 1, 0));
     final sum = sumActivity(act, ['A:w1']);
     expect((sum.blocked, sum.waiting), (1, 2));
   });

@@ -571,7 +571,8 @@ class _Badges extends StatelessWidget {
         _badge('${activity.blocked}', AppColors.blocked),
       if (activity.waiting > 0)
         _badge('${activity.waiting}', AppColors.waiting),
-      if (activity.live > 0) _badge('${activity.live}', _green),
+      if (activity.working > 0) _badge('${activity.working}', _green),
+      if (activity.idle > 0) _badge('${activity.idle}', AppColors.dim),
     ],
   );
 
