@@ -563,3 +563,20 @@ end)`)
 		t.Errorf("goroutines: %d before, %d after", before, after)
 	}
 }
+
+func TestLuaBindingTakesHeldModifierForm(t *testing.T) {
+	m := withLua(t, wideWorkspace(), `argus.action{ name = "mark", title = "Mark", run = function() hit = true end }
+argus.bind("ctrl+w>h", "mark")`)
+	m = pressKeys(m, ctrlKey('w'), ctrlKey('h'))
+	if luaGlobal(m, "hit") != lua.LTrue {
+		t.Errorf("ctrl+w ctrl+h must run the ctrl+w>h binding: flash = %q", m.flash)
+	}
+}
+
+func TestLuaHeldModifierFormFallsThrough(t *testing.T) {
+	m := withLua(t, withFocus(wideWorkspace(), mainPane), `argus.bind("ctrl+w>ctrl+h", function() return false end)`)
+	m = pressKeys(m, ctrlKey('w'), ctrlKey('h'))
+	if m.focused != leftSidebar {
+		t.Errorf("focus = %v, want the tree", m.focused)
+	}
+}

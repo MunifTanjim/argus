@@ -346,7 +346,7 @@ func (m *model) apply(c *ctx) tea.Cmd {
 			*m = res.(model)
 			cmds = append(cmds, cmd)
 		case actRunNamed:
-			res, cmd := m.runSequence([]tea.KeyPressMsg{cmdMsg(a.id)}, nil, nil)
+			res, cmd := m.runSequence([]keyPress{pressOf(cmdMsg(a.id))}, nil, nil)
 			*m = res.(model)
 			cmds = append(cmds, cmd)
 		case actToggleActiveOnly:

@@ -311,7 +311,7 @@ func (m model) runCmdLine(typed string) (tea.Model, tea.Cmd) {
 	if n := len(m.cmdHistory); n == 0 || m.cmdHistory[n-1] != typed {
 		m.cmdHistory = append(m.cmdHistory, typed)
 	}
-	return m.runSequence([]tea.KeyPressMsg{cmdMsg(name)}, nil, nil)
+	return m.runSequence([]keyPress{pressOf(cmdMsg(name))}, nil, nil)
 }
 
 func cmdInputWidth(w int) int { return max(1, w-2*screenMargin-1) }

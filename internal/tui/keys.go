@@ -297,11 +297,11 @@ var sessionKeys = struct {
 var paneKeys = struct {
 	Left, Down, Up, Right, Next, Prev binding
 }{
-	Left:  nb("focus left", "<C-w>h", "tree").alt("<C-w><C-h> <C-w><Left>"),
-	Down:  nb("focus down", "<C-w>j", "").alt("<C-w><C-j> <C-w><Down>"),
-	Up:    nb("focus up", "<C-w>k", "").alt("<C-w><C-k> <C-w><Up>"),
-	Right: nb("focus right", "<C-w>l", "files").alt("<C-w><C-l> <C-w><Right>"),
-	Next:  nb("focus next", "<C-w>w", "pane").alt("<C-w><C-w>"),
+	Left:  nb("focus left", "<C-w>h", "tree").alt("<C-w><Left>"),
+	Down:  nb("focus down", "<C-w>j", "").alt("<C-w><Down>"),
+	Up:    nb("focus up", "<C-w>k", "").alt("<C-w><Up>"),
+	Right: nb("focus right", "<C-w>l", "files").alt("<C-w><Right>"),
+	Next:  nb("focus next", "<C-w>w", "pane"),
 	Prev:  nb("focus prev", "<C-w>W", ""),
 }
 

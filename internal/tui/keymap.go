@@ -55,6 +55,7 @@ type screenKeys struct {
 	addIDs   map[string][]string    // command → ids of those keys; a single key lists every form
 	takenBy  map[string][]string    // key id → the commands its mapping runs; empty removes it
 	seqs     []screenSeq            // every effective key the resolver serves on the screen
+	base     []screenSeq            // seqs without the Lua function bindings, for their fall-through
 	descs    []keyDesc              // the user's mappings with a desc, in the order they apply
 	defaults map[string]defaultKeys // shared with the keymap
 	lua      map[string]*luaKey     // key id → the init.lua handler; a single key lists every form
@@ -343,7 +344,7 @@ func (km *keymap) screenKeys(screen string) *screenKeys {
 // non-Lua layers, which run when the function does not handle it.
 func resolveScreen(screen string, layers []keyLayer, defaults map[string]defaultKeys) *screenKeys {
 	sk := &screenKeys{defaults: defaults, add: map[string][]keySeq{}, addIDs: map[string][]string{}, takenBy: map[string][]string{}, lua: map[string]*luaKey{}}
-	taken, luaSeen, seen := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	taken, luaSeen, seen, baseSeen := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, l := range layers {
 		for _, e := range l.entries {
 			id := e.seq.id()
@@ -395,9 +396,15 @@ func resolveScreen(screen string, layers []keyLayer, defaults map[string]default
 			continue
 		}
 		for _, s := range sk.seqsOf(b) {
-			if id := s.id(); !seen[id] {
+			id := s.id()
+			ss := screenSeq{seq: s, id: id, cmd: b.name, desc: sk.descOf(id)}
+			if !seen[id] {
 				seen[id] = true
-				sk.seqs = append(sk.seqs, screenSeq{seq: s, id: id, cmd: b.name, desc: sk.descOf(id)})
+				sk.seqs = append(sk.seqs, ss)
+			}
+			if !baseSeen[id] {
+				baseSeen[id] = true
+				sk.base = append(sk.base, ss)
 			}
 		}
 	}
