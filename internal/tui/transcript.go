@@ -75,11 +75,11 @@ func (m model) renderMD(text string, width int) string {
 		m.render.mdRenderers[width] = nr
 		r = nr
 	}
-	out, err := r.Render(text)
+	out, err := r.Render(stackWideTables(text, width))
 	if err != nil {
 		out = text
 	}
-	out = strings.Trim(out, "\n")
+	out = drawTableRules(strings.Trim(out, "\n"), width)
 	m.render.mdCache[key] = out
 	return out
 }
