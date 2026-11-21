@@ -8,6 +8,7 @@ import 'package:re_highlight/re_highlight.dart';
 import 'package:re_highlight/styles/all.dart';
 
 import 'external_url.dart';
+import 'markdown_table.dart';
 import 'theme.dart';
 
 export 'external_url.dart' show openExternalUrl;
@@ -72,6 +73,7 @@ class _SelectableMarkdownState extends State<_SelectableMarkdown> {
           builder: (context) => GptMarkdown(
             widget.data,
             onLinkTap: (url, title) => showLinkActions(context, url),
+            tableBuilder: markdownTable,
             codeBuilder: (context, name, code, closed) =>
                 codeView(code, lang: name, selectable: false),
           ),
