@@ -55,7 +55,8 @@ const Duration _kPeekDuration = Duration(milliseconds: 150);
 
 /// A modal drawer over [child]. A hold at the edge peeks the drawer and a pull
 /// then drags it open, like Android's DrawerLayout, so a quick edge swipe stays
-/// with the system or route back gesture.
+/// with the system or route back gesture. Android button navigation has no
+/// edge back gesture, so there an edge swipe drags it open directly.
 class ModalShellDrawer extends StatefulWidget {
   const ModalShellDrawer({
     super.key,
@@ -114,10 +115,11 @@ class ModalShellDrawerState extends State<ModalShellDrawer>
         );
         route.addLocalHistoryEntry(_historyEntry!);
         FocusScope.of(context).setFirstFocus(_focusScope);
+      // A drag can reach dismissed without passing through reverse.
       case AnimationStatus.reverse:
+      case AnimationStatus.dismissed:
         _historyEntry?.remove();
         _historyEntry = null;
-      case AnimationStatus.dismissed:
       case AnimationStatus.completed:
         break;
     }
@@ -152,7 +154,25 @@ class ModalShellDrawerState extends State<ModalShellDrawer>
   void _peekPull(LongPressMoveUpdateDetails details) =>
       _controller.value = (_peek + details.offsetFromOrigin.dx) / widget.width;
 
-  Widget _edgeStrip(double edge) => Listener(
+  // Setting the value keeps the last direction, which a close leaves at
+  // reverse, so turn it forward for the drag to report the drawer opening.
+  void _swipeStart(DragStartDetails _) {
+    setState(() => _edgeActive = true);
+    _controller
+      ..forward(from: _controller.value)
+      ..stop();
+  }
+
+  Widget _swipeStrip() => GestureDetector(
+    behavior: HitTestBehavior.translucent,
+    excludeFromSemantics: true,
+    onHorizontalDragStart: _swipeStart,
+    onHorizontalDragUpdate: _drag,
+    onHorizontalDragEnd: (d) => _endEdge(d.primaryVelocity ?? 0),
+    onHorizontalDragCancel: () => _endEdge(0),
+  );
+
+  Widget _holdStrip(double edge) => Listener(
     behavior: HitTestBehavior.translucent,
     // The recognizer reports no end for a cancel after the hold.
     onPointerCancel: (_) => _endEdge(0),
@@ -234,10 +254,14 @@ class ModalShellDrawerState extends State<ModalShellDrawer>
 
   @override
   Widget build(BuildContext context) {
+    final gestureInset = MediaQuery.systemGestureInsetsOf(context).left;
     final edge = max(
-      MediaQuery.systemGestureInsetsOf(context).left,
+      gestureInset,
       _kEdgeDragWidth + MediaQuery.paddingOf(context).left,
     );
+    // Android reports no left gesture inset under button navigation.
+    final swipe =
+        defaultTargetPlatform == TargetPlatform.android && gestureInset == 0;
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -251,7 +275,7 @@ class ModalShellDrawerState extends State<ModalShellDrawer>
             top: 0,
             bottom: 0,
             width: edge,
-            child: _edgeStrip(edge),
+            child: swipe ? _swipeStrip() : _holdStrip(edge),
           ),
       ],
     );

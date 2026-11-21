@@ -29,6 +29,7 @@ import 'package:argus/ui/session_card.dart';
 import 'package:argus/ui/sidebar_sessions_list.dart';
 import 'package:argus/ui/session_detail_screen.dart';
 import 'package:argus/ui/session_list_screen.dart';
+import 'package:argus/ui/shell_drawer.dart';
 import 'package:argus/ui/terminal_list_screen.dart';
 import 'package:argus/ui/workspace_screen.dart';
 
@@ -877,6 +878,30 @@ void main() {
     expect(find.byType(HomeShell), findsOneWidget);
   });
 
+  double drawerRight(WidgetTester tester) =>
+      tester.getTopRight(find.byType(Drawer)).dx;
+
+  // Android gesture navigation reports a left system gesture inset.
+  Future<void> setGestureNav(WidgetTester tester) async {
+    tester.view.systemGestureInsets = const FakeViewPadding(left: 30);
+    await tester.pump();
+  }
+
+  Future<void> swipe(WidgetTester tester) async {
+    await tester.dragFrom(const Offset(5, 300), const Offset(300, 0));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> tapThroughEdge(WidgetTester tester, ProviderContainer c) async {
+    c.read(sessionsProvider.notifier).replaceAll([_session('s1')]);
+    await tester.pump();
+    final card = tester.getRect(find.byType(SessionCard));
+    expect(card.left + 2, lessThan(20));
+    await tester.tapAt(Offset(card.left + 2, card.center.dy));
+    await _pumpRoute(tester);
+    expect(_detailInShell, findsOneWidget);
+  }
+
   group('edge hold', () {
     Future<TestGesture> hold(WidgetTester tester) async {
       final gesture = await tester.startGesture(const Offset(5, 300));
@@ -885,24 +910,22 @@ void main() {
       return gesture;
     }
 
-    double drawerRight(WidgetTester tester) =>
-        tester.getTopRight(find.byType(Drawer)).dx;
-
     testWidgets('a quick edge swipe leaves the drawer closed', (tester) async {
       await _shell(tester);
-      await tester.dragFrom(const Offset(5, 300), const Offset(300, 0));
-      await tester.pumpAndSettle();
+      await setGestureNav(tester);
+      await swipe(tester);
       expect(find.byType(Drawer), findsNothing);
     });
 
-    testWidgets('a hold peeks the drawer, a pull drags it open', (tester) async {
+    testWidgets('a hold peeks the inset, a pull drags it open', (tester) async {
       await _shell(tester);
+      await setGestureNav(tester);
       final gesture = await hold(tester);
-      expect(drawerRight(tester), 20);
+      expect(drawerRight(tester), 30);
 
       await gesture.moveBy(const Offset(100, 0));
       await tester.pump();
-      expect(drawerRight(tester), 120);
+      expect(drawerRight(tester), 130);
       await gesture.moveBy(const Offset(150, 0));
       await gesture.up();
       await tester.pumpAndSettle();
@@ -910,13 +933,15 @@ void main() {
       expect(tester.getTopLeft(find.byType(Drawer)).dx, 0);
     });
 
-    testWidgets('the peek covers the system gesture inset', (tester) async {
-      await _shell(tester);
-      tester.view.systemGestureInsets = const FakeViewPadding(left: 30);
-      await tester.pump();
-      await hold(tester);
-      expect(drawerRight(tester), 30);
-    });
+    testWidgets(
+      'iOS: a hold peeks the drawer',
+      (tester) async {
+        await _shell(tester);
+        await hold(tester);
+        expect(drawerRight(tester), 20);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    );
 
     testWidgets(
       'iOS: a quick edge swipe on a pushed screen goes back',
@@ -933,6 +958,7 @@ void main() {
 
     testWidgets('releasing a peek closes the drawer', (tester) async {
       await _shell(tester);
+      await setGestureNav(tester);
       final gesture = await hold(tester);
       expect(find.byType(Drawer), findsOneWidget);
       await gesture.up();
@@ -942,13 +968,92 @@ void main() {
 
     testWidgets('a tap at the edge still reaches the content', (tester) async {
       final c = await _shell(tester);
-      c.read(sessionsProvider.notifier).replaceAll([_session('s1')]);
+      await setGestureNav(tester);
+      await tapThroughEdge(tester, c);
+    });
+  });
+
+  group('edge swipe', () {
+    // Past the drag slop, then 100 more.
+    Future<TestGesture> pull(WidgetTester tester) async {
+      final gesture = await tester.startGesture(const Offset(5, 300));
+      await gesture.moveBy(const Offset(50, 0));
+      await gesture.moveBy(const Offset(100, 0));
       await tester.pump();
-      final card = tester.getRect(find.byType(SessionCard));
-      expect(card.left + 2, lessThan(20));
-      await tester.tapAt(Offset(card.left + 2, card.center.dy));
-      await _pumpRoute(tester);
-      expect(_detailInShell, findsOneWidget);
+      return gesture;
+    }
+
+    testWidgets('a quick edge swipe drags the drawer open', (tester) async {
+      await _shell(tester);
+      final gesture = await pull(tester);
+      expect(drawerRight(tester), 100);
+
+      await gesture.moveBy(const Offset(150, 0));
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(find.text('Settings'), findsOneWidget);
+      expect(tester.getTopLeft(find.byType(Drawer)).dx, 0);
+    });
+
+    testWidgets('a short fling opens the drawer', (tester) async {
+      await _shell(tester);
+      await tester.flingFrom(const Offset(5, 300), const Offset(80, 0), 1000);
+      await tester.pumpAndSettle();
+      expect(find.text('Settings'), findsOneWidget);
+    });
+
+    testWidgets('a short edge swipe settles closed', (tester) async {
+      await _shell(tester);
+      final gesture = await tester.startGesture(const Offset(5, 300));
+      for (var i = 0; i < 10; i++) {
+        await gesture.moveBy(const Offset(6, 0));
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(find.byType(Drawer), findsNothing);
+    });
+
+    testWidgets('back during a later swipe closes the drawer', (tester) async {
+      await _shell(tester);
+      await swipe(tester);
+      await _back(tester);
+      expect(find.byType(Drawer), findsNothing);
+
+      final gesture = await pull(tester);
+      expect(await tester.binding.handlePopRoute(), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.byType(Drawer), findsNothing);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(find.byType(Drawer), findsNothing);
+    });
+
+    testWidgets('a swipe dragged back shut leaves back alone', (tester) async {
+      await _shell(tester);
+      final gesture = await pull(tester);
+      await gesture.moveBy(const Offset(-200, 0));
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(find.byType(Drawer), findsNothing);
+      final route = ModalRoute.of(tester.element(find.byType(ModalShellDrawer)));
+      expect(route!.willHandlePopInternally, isFalse);
+    });
+
+    testWidgets('switching navigation mode switches the gesture', (tester) async {
+      await _shell(tester);
+      await setGestureNav(tester);
+      await swipe(tester);
+      expect(find.byType(Drawer), findsNothing);
+
+      tester.view.resetSystemGestureInsets();
+      await tester.pump();
+      await swipe(tester);
+      expect(find.text('Settings'), findsOneWidget);
+    });
+
+    testWidgets('a tap at the edge still reaches the content', (tester) async {
+      await tapThroughEdge(tester, await _shell(tester));
     });
   });
 
