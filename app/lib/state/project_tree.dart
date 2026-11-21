@@ -193,9 +193,16 @@ List<TreeRow> buildTreeRows(List<ProjectNode> projects, TreeView view) {
 }
 
 class Activity {
-  const Activity({this.live = 0, this.waiting = 0, this.blocked = 0});
+  const Activity({
+    this.live = 0,
+    this.working = 0,
+    this.waiting = 0,
+    this.blocked = 0,
+  });
 
   final int live;
+
+  final int working;
 
   /// Awaiting sessions that finished their turn.
   final int waiting;
@@ -203,10 +210,14 @@ class Activity {
   /// Awaiting sessions blocked on a permission, question or plan.
   final int blocked;
 
+  /// Live sessions neither working nor awaiting.
+  int get idle => live - working - waiting - blocked;
+
   static const zero = Activity();
 
   Activity operator +(Activity o) => Activity(
     live: live + o.live,
+    working: working + o.working,
     waiting: waiting + o.waiting,
     blocked: blocked + o.blocked,
   );
@@ -214,11 +225,13 @@ class Activity {
 
 bool _isLive(Session s) => !s.offline && s.status != SessionStatus.dead;
 
-Activity _one(Session s) => Activity(
-  live: 1,
-  blocked: s.blocked ? 1 : 0,
-  waiting: s.status == SessionStatus.awaitingInput && !s.blocked ? 1 : 0,
-);
+Activity _one(Session s) => switch (s.status) {
+  _ when s.blocked => const Activity(live: 1, blocked: 1),
+  SessionStatus.awaitingInput => const Activity(live: 1, waiting: 1),
+  SessionStatus.working ||
+  SessionStatus.starting => const Activity(live: 1, working: 1),
+  _ => const Activity(live: 1),
+};
 
 Map<String, Activity> workspaceActivity(Iterable<Session> sessions) {
   final out = <String, Activity>{};
