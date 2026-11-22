@@ -57,6 +57,40 @@ starts. The Claude Code plugin does not use this setting.
 the tools off. Argus then removes its entries from the agent configs. If the
 port is in use, the node runs without the tools and logs an error.
 
+## Agents
+
+Persistent agents read these keys under `agents`. An agent's own definition
+overrides the `agents.defaults` values.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `agents.default-dir` | data directory `agents` | Where new agent directories go. |
+| `agents.profile-dir` | data directory `profile` | Where the profile is kept. |
+| `agents.skills-dir` | data directory `skills` | Where shared skills are kept. |
+| `agents.primary` | none | The agent that receives requests when none is named. |
+| `agents.defaults.agent` | `claude` | The coding agent that runs the sessions. |
+| `agents.defaults.model` | none | The model of the sessions. |
+| `agents.defaults.timezone` | `auto` | The timezone of schedules and quiet hours. |
+| `agents.defaults.idle-close` | `30m` | How long an idle session stays open. |
+| `agents.defaults.max-concurrent-sessions` | `2` | Sessions an agent runs at once. |
+| `agents.defaults.git.mode` | `nested` | `nested` gives each agent its own repository. `outer` uses an enclosing repository when there is one. |
+| `agents.defaults.git.commit-files` | `false` | Whether the `files` directory is committed. |
+| `agents.defaults.memory.mode` | `auto` | `auto`, `review` or `off`. |
+| `agents.defaults.memory.core-budget` | `24KB` | Size limit of the core memory. |
+| `agents.defaults.memory.capture-after` | `2m` | How long after a session goes quiet its memory is captured. |
+| `agents.defaults.memory.tidy-at` | `03:00` | Time of the daily memory tidy. |
+| `agents.defaults.memory.log-entries` | `20` | Recent log entries loaded into a session. |
+| `agents.defaults.memory.extractor` | none | The model that captures memory. |
+| `agents.defaults.proactivity` | `default` | `off`, `low`, `default` or `high`. |
+| `agents.defaults.quiet-hours` | none | Hours when the agent does not notify you. |
+| `agents.defaults.notify` | `needs-you` | `all`, `needs-you` or `off`. |
+| `agents.defaults.brief.enabled` | `false` | Whether the agent writes a daily brief. |
+| `agents.defaults.brief.at` | `08:00` | Time of the daily brief. |
+| `agents.defaults.limits.min-interval` | `15m` | Shortest interval between runs of a routine. |
+| `agents.defaults.limits.max-enabled-routines` | `20` | Routines an agent can have enabled. |
+| `agents.defaults.limits.max-check-backs` | `10` | Pending check-backs an agent can have. |
+| `agents.defaults.limits.run-timeout` | `1h` | Longest time a run can take. |
+
 ## Projects & Workspaces
 
 For the project and workspace settings, see

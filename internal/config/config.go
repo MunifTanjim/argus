@@ -3,6 +3,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +31,7 @@ type Config struct {
 	Workspace WorkspaceConfig
 	TUI       TUIConfig
 	MCP       MCPConfig
+	Agents    AgentsConfig
 	// LuaPath is the init.lua to load; empty when config is off.
 	LuaPath string
 }
@@ -150,6 +155,85 @@ type LockConfig struct {
 	Genesis string
 }
 
+// AgentsConfig configures persistent agents. Empty directory settings resolve
+// to the argus data directory.
+type AgentsConfig struct {
+	DefaultDir string
+	ProfileDir string
+	SkillsDir  string
+	Primary    string
+	Defaults   AgentDefaults
+}
+
+// AgentDefaults are the settings an agent inherits when its own definition
+// leaves them unset.
+type AgentDefaults struct {
+	Agent                 string
+	Model                 string
+	Timezone              string
+	IdleClose             time.Duration
+	MaxConcurrentSessions int
+	Git                   struct {
+		Mode        string
+		CommitFiles bool
+	}
+	Memory struct {
+		Mode string
+		// CoreBudget is the size limit in bytes; negative when the configured
+		// value does not parse.
+		CoreBudget   int64
+		CaptureAfter time.Duration
+		TidyAt       string
+		LogEntries   int
+		Extractor    string
+	}
+	Proactivity string
+	QuietHours  string
+	Notify      string
+	Brief       struct {
+		Enabled bool
+		At      string
+	}
+	Limits struct {
+		MinInterval        time.Duration
+		MaxEnabledRoutines int
+		MaxCheckBacks      int
+		RunTimeout         time.Duration
+	}
+}
+
+// ParseSize parses a byte size such as "24KB", "2MB" or "512" (1024-based).
+func ParseSize(s string) (int64, error) {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	mult := int64(1)
+	for _, u := range []struct {
+		suffix string
+		mult   int64
+	}{{"KB", 1 << 10}, {"MB", 1 << 20}, {"B", 1}} {
+		if strings.HasSuffix(s, u.suffix) {
+			s, mult = strings.TrimSpace(strings.TrimSuffix(s, u.suffix)), u.mult
+			break
+		}
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("invalid size")
+	}
+	return n * mult, nil
+}
+
+func resolveDir(v, name string) string {
+	if v == "" {
+		return GetDataPath(name)
+	}
+	if v == "~" || strings.HasPrefix(v, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, strings.TrimPrefix(v, "~"))
+		}
+	}
+	return v
+}
+
 func DefaultSocket() string { return GetRuntimePath("argus.sock") }
 
 // defaults are the built-in fallback values for unset keys.
@@ -185,6 +269,33 @@ var defaults = map[string]any{
 	"tui.mouse":                       "on",
 	"tui.verbose-transcript":          false,
 	"mcp.port":                        7734,
+
+	"agents.default-dir":                          "",
+	"agents.profile-dir":                          "",
+	"agents.skills-dir":                           "",
+	"agents.primary":                              "",
+	"agents.defaults.agent":                       "claude",
+	"agents.defaults.model":                       "",
+	"agents.defaults.timezone":                    "auto",
+	"agents.defaults.idle-close":                  "30m",
+	"agents.defaults.max-concurrent-sessions":     2,
+	"agents.defaults.git.mode":                    "nested",
+	"agents.defaults.git.commit-files":            false,
+	"agents.defaults.memory.mode":                 "auto",
+	"agents.defaults.memory.core-budget":          "24KB",
+	"agents.defaults.memory.capture-after":        "2m",
+	"agents.defaults.memory.tidy-at":              "03:00",
+	"agents.defaults.memory.log-entries":          20,
+	"agents.defaults.memory.extractor":            "",
+	"agents.defaults.proactivity":                 "default",
+	"agents.defaults.quiet-hours":                 "",
+	"agents.defaults.brief.enabled":               false,
+	"agents.defaults.brief.at":                    "08:00",
+	"agents.defaults.notify":                      "needs-you",
+	"agents.defaults.limits.min-interval":         "15m",
+	"agents.defaults.limits.max-enabled-routines": 20,
+	"agents.defaults.limits.max-check-backs":      10,
+	"agents.defaults.limits.run-timeout":          "1h",
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
@@ -254,6 +365,23 @@ func (c Config) Validate() error {
 	}
 	if c.MCP.Port < 0 || c.MCP.Port > 65535 {
 		return fmt.Errorf("mcp.port %d must be between 0 and 65535", c.MCP.Port)
+	}
+	d := c.Agents.Defaults
+	for _, e := range []struct {
+		key, val string
+		allowed  []string
+	}{
+		{"agents.defaults.git.mode", d.Git.Mode, []string{"nested", "outer"}},
+		{"agents.defaults.memory.mode", d.Memory.Mode, []string{"auto", "review", "off"}},
+		{"agents.defaults.notify", d.Notify, []string{"all", "needs-you", "off"}},
+		{"agents.defaults.proactivity", d.Proactivity, []string{"off", "low", "default", "high"}},
+	} {
+		if e.val != "" && !slices.Contains(e.allowed, e.val) {
+			return fmt.Errorf("%s %q must be one of %s", e.key, e.val, strings.Join(e.allowed, ", "))
+		}
+	}
+	if d.Memory.CoreBudget < 0 {
+		return errors.New("agents.defaults.memory.core-budget must be a size such as 24KB")
 	}
 	return nil
 }
@@ -327,5 +455,44 @@ func FromViper(v *viper.Viper) Config {
 		MCP: MCPConfig{
 			Port: v.GetInt("mcp.port"),
 		},
+		Agents: agentsFromViper(v),
 	}
+}
+
+func agentsFromViper(v *viper.Viper) AgentsConfig {
+	const p = "agents.defaults."
+	a := AgentsConfig{
+		DefaultDir: resolveDir(v.GetString("agents.default-dir"), "agents"),
+		ProfileDir: resolveDir(v.GetString("agents.profile-dir"), "profile"),
+		SkillsDir:  resolveDir(v.GetString("agents.skills-dir"), "skills"),
+		Primary:    v.GetString("agents.primary"),
+	}
+	d := &a.Defaults
+	d.Agent = v.GetString(p + "agent")
+	d.Model = v.GetString(p + "model")
+	d.Timezone = v.GetString(p + "timezone")
+	d.IdleClose = v.GetDuration(p + "idle-close")
+	d.MaxConcurrentSessions = v.GetInt(p + "max-concurrent-sessions")
+	d.Git.Mode = v.GetString(p + "git.mode")
+	d.Git.CommitFiles = v.GetBool(p + "git.commit-files")
+	d.Memory.Mode = v.GetString(p + "memory.mode")
+	if n, err := ParseSize(v.GetString(p + "memory.core-budget")); err == nil {
+		d.Memory.CoreBudget = n
+	} else {
+		d.Memory.CoreBudget = -1
+	}
+	d.Memory.CaptureAfter = v.GetDuration(p + "memory.capture-after")
+	d.Memory.TidyAt = v.GetString(p + "memory.tidy-at")
+	d.Memory.LogEntries = v.GetInt(p + "memory.log-entries")
+	d.Memory.Extractor = v.GetString(p + "memory.extractor")
+	d.Proactivity = v.GetString(p + "proactivity")
+	d.QuietHours = v.GetString(p + "quiet-hours")
+	d.Notify = v.GetString(p + "notify")
+	d.Brief.Enabled = v.GetBool(p + "brief.enabled")
+	d.Brief.At = v.GetString(p + "brief.at")
+	d.Limits.MinInterval = v.GetDuration(p + "limits.min-interval")
+	d.Limits.MaxEnabledRoutines = v.GetInt(p + "limits.max-enabled-routines")
+	d.Limits.MaxCheckBacks = v.GetInt(p + "limits.max-check-backs")
+	d.Limits.RunTimeout = v.GetDuration(p + "limits.run-timeout")
+	return a
 }

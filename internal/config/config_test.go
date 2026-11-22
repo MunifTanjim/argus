@@ -449,3 +449,109 @@ func TestMCPPortFromEnv(t *testing.T) {
 		t.Fatalf("mcp.port from env = %d, want 0", got)
 	}
 }
+
+func TestAgentsDefaults(t *testing.T) {
+	isolateConfigDir(t)
+	a := load(t, "").Agents
+	if a.DefaultDir != config.GetDataPath("agents") || a.ProfileDir != config.GetDataPath("profile") || a.SkillsDir != config.GetDataPath("skills") {
+		t.Errorf("dirs = %q %q %q", a.DefaultDir, a.ProfileDir, a.SkillsDir)
+	}
+	if a.Primary != "" {
+		t.Errorf("primary = %q", a.Primary)
+	}
+	d := a.Defaults
+	if d.Agent != "claude" || d.Model != "" || d.Timezone != "auto" || d.IdleClose != 30*time.Minute || d.MaxConcurrentSessions != 2 {
+		t.Errorf("defaults = %+v", d)
+	}
+	if d.Git.Mode != "nested" || d.Git.CommitFiles {
+		t.Errorf("git = %+v", d.Git)
+	}
+	m := d.Memory
+	if m.Mode != "auto" || m.CoreBudget != 24*1024 || m.CaptureAfter != 2*time.Minute || m.TidyAt != "03:00" || m.LogEntries != 20 || m.Extractor != "" {
+		t.Errorf("memory = %+v", m)
+	}
+	if d.Proactivity != "default" || d.QuietHours != "" || d.Notify != "needs-you" {
+		t.Errorf("defaults = %+v", d)
+	}
+	if d.Brief.Enabled || d.Brief.At != "08:00" {
+		t.Errorf("brief = %+v", d.Brief)
+	}
+	l := d.Limits
+	if l.MinInterval != 15*time.Minute || l.MaxEnabledRoutines != 20 || l.MaxCheckBacks != 10 || l.RunTimeout != time.Hour {
+		t.Errorf("limits = %+v", l)
+	}
+	if err := load(t, "").Validate(); err != nil {
+		t.Errorf("Validate: %v", err)
+	}
+}
+
+func TestAgentsFromFile(t *testing.T) {
+	isolateConfigDir(t)
+	path := writeConfig(t, `
+agents:
+  default-dir: ~/agents
+  primary: ada
+  defaults:
+    agent: codex
+    model: opus
+    idle-close: 5m
+    max-concurrent-sessions: 4
+    git:
+      mode: outer
+      commit-files: true
+    memory:
+      mode: review
+      core-budget: 8KB
+      capture-after: 10s
+      log-entries: 5
+    proactivity: high
+    quiet-hours: "22:00-07:00"
+    notify: all
+    brief:
+      enabled: true
+      at: "09:30"
+    limits:
+      min-interval: 1m
+      max-enabled-routines: 3
+      max-check-backs: 2
+      run-timeout: 10m
+`)
+	a := load(t, path).Agents
+	home, _ := os.UserHomeDir()
+	if a.DefaultDir != filepath.Join(home, "agents") || a.Primary != "ada" {
+		t.Errorf("agents = %+v", a)
+	}
+	d := a.Defaults
+	if d.Agent != "codex" || d.Model != "opus" || d.IdleClose != 5*time.Minute || d.MaxConcurrentSessions != 4 {
+		t.Errorf("defaults = %+v", d)
+	}
+	if d.Git.Mode != "outer" || !d.Git.CommitFiles {
+		t.Errorf("git = %+v", d.Git)
+	}
+	if d.Memory.Mode != "review" || d.Memory.CoreBudget != 8192 || d.Memory.CaptureAfter != 10*time.Second || d.Memory.LogEntries != 5 {
+		t.Errorf("memory = %+v", d.Memory)
+	}
+	if d.Proactivity != "high" || d.QuietHours != "22:00-07:00" || d.Notify != "all" || !d.Brief.Enabled || d.Brief.At != "09:30" {
+		t.Errorf("defaults = %+v", d)
+	}
+	if d.Limits.MinInterval != time.Minute || d.Limits.MaxEnabledRoutines != 3 || d.Limits.MaxCheckBacks != 2 || d.Limits.RunTimeout != 10*time.Minute {
+		t.Errorf("limits = %+v", d.Limits)
+	}
+}
+
+func TestAgentsInvalidGitMode(t *testing.T) {
+	isolateConfigDir(t)
+	for key, body := range map[string]string{
+		"git.mode":    "git:\n      mode: sideways",
+		"memory.mode": "memory:\n      mode: sometimes",
+		"notify":      "notify: loud",
+		"proactivity": "proactivity: extreme",
+		"core-budget": "memory:\n      core-budget: lots",
+	} {
+		c := load(t, writeConfig(t, "agents:\n  defaults:\n    "+body+"\n"))
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), key) {
+			t.Errorf("%s: Validate = %v", key, err)
+		}
+	}
+}
