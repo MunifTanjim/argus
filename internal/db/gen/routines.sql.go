@@ -556,6 +556,28 @@ func (q *Queries) RenewPAgentRoutineRunLease(ctx context.Context, arg RenewPAgen
 	return result.RowsAffected()
 }
 
+const setPAgentRoutineCheckBack = `-- name: SetPAgentRoutineCheckBack :exec
+UPDATE pagent_routine_state SET check_back_at = ?1, updated_at = ?2
+WHERE agent_id = ?3 AND slug = ?4
+`
+
+type SetPAgentRoutineCheckBackParams struct {
+	CheckBackAt int64
+	UpdatedAt   int64
+	AgentID     string
+	Slug        string
+}
+
+func (q *Queries) SetPAgentRoutineCheckBack(ctx context.Context, arg SetPAgentRoutineCheckBackParams) error {
+	_, err := q.db.ExecContext(ctx, setPAgentRoutineCheckBack,
+		arg.CheckBackAt,
+		arg.UpdatedAt,
+		arg.AgentID,
+		arg.Slug,
+	)
+	return err
+}
+
 const setPAgentRoutineDef = `-- name: SetPAgentRoutineDef :exec
 UPDATE pagent_routine_state SET def_hash = ?, next_due_at = ?, updated_at = ? WHERE agent_id = ? AND slug = ?
 `

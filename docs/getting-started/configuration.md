@@ -92,6 +92,8 @@ overrides the `agents.defaults` values.
 | `agents.defaults.limits.run-timeout` | `1h` | Longest time a run can take. |
 | `agents.defaults.limits.max-runs-per-hour` | `12` | Routine runs an agent can start in an hour. |
 | `agents.defaults.limits.max-consecutive-failures` | `10` | Failed runs in a row after which a routine pauses. |
+| `agents.defaults.limits.check-back-min` | `15m` | Shortest time a self-paced routine can wait before its next run. |
+| `agents.defaults.limits.check-back-max` | `7d` | Longest time a self-paced routine can wait before its next run. |
 | `agents.defaults.limits.catch-up-window` | `12h` | How old a missed run can be and still run when the node comes back. |
 | `agents.defaults.limits.pause-after-away` | `7d` | Routines pause when no client has connected for this long. |
 

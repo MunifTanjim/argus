@@ -85,6 +85,8 @@ type runCtl struct {
 	sessionID string
 	reported  bool
 	summary   *session.Summary
+	// nextCheckIn is the run's requested wait until a self-paced routine runs again.
+	nextCheckIn time.Duration
 }
 
 func (c *runCtl) end() { c.endOne.Do(func() { close(c.ended) }) }
@@ -175,6 +177,7 @@ func overBudget(b routine.Budget, st pagent.RoutineState) bool {
 
 func (d *Node) executeRun(ctx context.Context, c *runCtl) {
 	a, r := c.agent, c.r
+	defer d.removeOneShot(ctx, c)
 	if st, ok := d.routineState(ctx, a.ID, r.Slug); ok && overBudget(r.Budget, st) {
 		d.skipRun(ctx, c, reasonBudget)
 		d.pauseRoutine(ctx, a, r.Slug, pausedBudget, "")
@@ -447,6 +450,13 @@ func (d *Node) finishRun(ctx context.Context, c *runCtl, res pagent.RunResult) {
 	})
 	if err != nil {
 		d.log.Warn("pagent: record run outcome", "run", run.ID, "err", err)
+	}
+
+	if selfPaced(r) {
+		c.mu.Lock()
+		next := c.nextCheckIn
+		c.mu.Unlock()
+		d.setNextCheckBack(ctx, a, r.Slug, next)
 	}
 
 	switch {
@@ -790,9 +800,10 @@ func (d *Node) mcpReportRun(ctx context.Context, caller callerRef, p reportRunPa
 	default:
 		return nil, fmt.Errorf("result must be progress, no_change, blocked, needs_you or done")
 	}
+	var next time.Duration
 	if p.NextCheckIn != "" {
-		if _, err := routine.ParseDuration(p.NextCheckIn); err != nil {
-			return nil, fmt.Errorf("next_check_in: %v", err)
+		if next, err = routine.ParseDuration(p.NextCheckIn); err != nil || next <= 0 {
+			return nil, fmt.Errorf("next_check_in must be a duration such as 4h")
 		}
 	}
 	for _, f := range append(append([]string{p.Summary}, p.ActionsDone...), p.ActionsPending...) {
@@ -807,6 +818,9 @@ func (d *Node) mcpReportRun(ctx context.Context, caller callerRef, p reportRunPa
 	c.mu.Lock()
 	dup := c.reported
 	c.reported = true
+	if !dup {
+		c.nextCheckIn = next
+	}
 	c.mu.Unlock()
 	if dup {
 		return nil, fmt.Errorf("the result was already reported")

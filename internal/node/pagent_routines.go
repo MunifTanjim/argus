@@ -23,8 +23,9 @@ const (
 	evRoutineStale   = "routine.stale"
 	evRoutinePaused  = "routine.paused"
 
-	startedByRoutine = "routine"
-	routinesDir      = "routines"
+	startedByRoutine   = "routine"
+	startedByCheckBack = "check-back"
+	routinesDir        = "routines"
 
 	// routineStaleAfter is how long past a due time a routine may go without
 	// a run before a stale notice.
@@ -303,6 +304,9 @@ func (d *Node) scheduleRoutine(ctx context.Context, a pagent.Agent, set pagent.S
 	if st == nil {
 		next, _ := routine.NextDue(r, now, now, loc)
 		ns := pagent.RoutineState{AgentID: a.ID, Slug: r.Slug, DefHash: f.hash, Enabled: !away, NextDueAt: next, AnchorAt: now}
+		if selfPaced(r) {
+			ns.CheckBackAt = now.Add(checkBackDefault)
+		}
 		if away {
 			ns.PausedReason = pausedAway
 		}
@@ -340,6 +344,25 @@ func (d *Node) scheduleRoutine(ctx context.Context, a pagent.Agent, set pagent.S
 
 	d.promoteQueued(ctx, a, r)
 
+	if selfPaced(r) {
+		switch {
+		case st.CheckBackAt.IsZero():
+			if err := d.pagents.SetCheckBackAt(ctx, a.ID, r.Slug, now.Add(checkBackDefault)); err != nil {
+				d.log.Warn("pagent: check-back", "agent", a.ID, "routine", r.Slug, "err", err)
+			}
+		case !st.CheckBackAt.After(now):
+			occ := st.CheckBackAt
+			d.dispatchOccurrence(ctx, a, set, r, occ, func() (pagent.RoutineRun, bool, error) {
+				run, ok, err := d.pagents.ClaimOccurrence(ctx, a.ID, r.Slug, occ, startedByCheckBack, false)
+				if err == nil {
+					// Fallback until the run reports its own next_check_in.
+					err = d.pagents.SetCheckBackAt(ctx, a.ID, r.Slug, now.Add(checkBackDefault))
+				}
+				return run, ok, err
+			})
+		}
+	}
+
 	if st.NextDueAt.IsZero() {
 		return false
 	}
@@ -365,7 +388,13 @@ func (d *Node) scheduleRoutine(ctx context.Context, a pagent.Agent, set pagent.S
 		}
 		return false
 	}
-	d.dispatchOccurrence(ctx, a, set, r, newest, next)
+	startedBy := startedByRoutine
+	if oneShotCheckBack(r) {
+		startedBy = startedByCheckBack
+	}
+	d.dispatchOccurrence(ctx, a, set, r, newest, func() (pagent.RoutineRun, bool, error) {
+		return d.pagents.ClaimOccurrenceAdvance(ctx, a.ID, r.Slug, newest, startedBy, false, next)
+	})
 	d.checkStale(ctx, a, r, st, loc, now)
 	return false
 }
@@ -394,10 +423,10 @@ func (d *Node) recordMissed(ctx context.Context, a pagent.Agent, slug string, mi
 	})
 }
 
-// dispatchOccurrence claims occ and starts its run, unless the overlap rule
-// or the hourly cap skips (or queues) it. next becomes the routine's next due
-// time in the same transaction as the claim.
-func (d *Node) dispatchOccurrence(ctx context.Context, a pagent.Agent, set pagent.Settings, r routine.Routine, occ, next time.Time) {
+// dispatchOccurrence claims occ with claimFn and starts its run, unless the
+// overlap rule or the hourly cap skips (or queues) it. claimFn also moves the
+// routine's next due time in step with the claim.
+func (d *Node) dispatchOccurrence(ctx context.Context, a pagent.Agent, set pagent.Settings, r routine.Routine, occ time.Time, claimFn func() (pagent.RoutineRun, bool, error)) {
 	active, err := d.pagents.ActiveRuns(ctx, a.ID, r.Slug)
 	if err != nil {
 		d.log.Warn("pagent: active runs", "agent", a.ID, "routine", r.Slug, "err", err)
@@ -412,7 +441,7 @@ func (d *Node) dispatchOccurrence(ctx context.Context, a pagent.Agent, set pagen
 		}
 	}
 	claim := func() (pagent.RoutineRun, bool) {
-		run, ok, err := d.pagents.ClaimOccurrenceAdvance(ctx, a.ID, r.Slug, occ, startedByRoutine, false, next)
+		run, ok, err := claimFn()
 		if err != nil {
 			d.log.Warn("pagent: claim occurrence", "agent", a.ID, "routine", r.Slug, "err", err)
 		}

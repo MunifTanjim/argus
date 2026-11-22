@@ -110,3 +110,7 @@ SET last_run_at = sqlc.arg(last_run_at), last_result = sqlc.arg(last_result),
     updated_at = sqlc.arg(updated_at)
 WHERE agent_id = sqlc.arg(agent_id) AND slug = sqlc.arg(slug)
 RETURNING *;
+
+-- name: SetPAgentRoutineCheckBack :exec
+UPDATE pagent_routine_state SET check_back_at = sqlc.arg(check_back_at), updated_at = sqlc.arg(updated_at)
+WHERE agent_id = sqlc.arg(agent_id) AND slug = sqlc.arg(slug);

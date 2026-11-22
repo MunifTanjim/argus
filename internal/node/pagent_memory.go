@@ -55,6 +55,7 @@ func lockMemory(key string) func() {
 // memoryProposal is the ops column of a proposal row.
 type memoryProposal struct {
 	Kind   string               `json:"kind,omitempty"`
+	Slug   string               `json:"slug,omitempty"` // routine proposals
 	Text   string               `json:"text,omitempty"`
 	Reason string               `json:"reason,omitempty"`
 	Source string               `json:"source"`
@@ -680,6 +681,10 @@ func (d *Node) handlePAgentMemoryUndo(ctx context.Context, params json.RawMessag
 	if err != nil {
 		return nil, err
 	}
+	if !p.Profile {
+		// Routine changes from agent tools carry an undo too.
+		paths = append(paths, routinesDir)
+	}
 	commits, err := repo.Log(ctx, paths, 0)
 	if err != nil {
 		return nil, pagentErr("%v", err)
@@ -698,7 +703,7 @@ func (d *Node) handlePAgentMemoryUndo(ctx context.Context, params json.RawMessag
 	}
 	userPaths := paths
 	if !p.Profile {
-		userPaths = []string{memoryDir, pagent.DefinitionFile}
+		userPaths = []string{memoryDir, routinesDir, pagent.DefinitionFile}
 	}
 	if err := d.commitHandEdits(ctx, repo, a, "", userPaths); err != nil {
 		return nil, pagentErr("%v", err)
@@ -750,7 +755,7 @@ func (d *Node) handlePAgentMemoryProposals(ctx context.Context, params json.RawM
 		}
 		res.Proposals = append(res.Proposals, api.PAgentMemoryProposal{
 			ID: pr.ID, AgentID: pr.AgentID, ThreadID: pr.ThreadID, Source: body.Source,
-			Kind: body.Kind, Text: body.Text, Reason: body.Reason,
+			Kind: body.Kind, Slug: body.Slug, Text: body.Text, Reason: body.Reason,
 			Ops: ops, Log: body.Log, CreatedAt: pr.CreatedAt,
 		})
 	}
@@ -796,8 +801,12 @@ func (d *Node) handlePAgentMemoryDecide(ctx context.Context, params json.RawMess
 	if err := json.Unmarshal(pr.Ops, &body); err != nil {
 		return nil, pagentErr("bad proposal: %v", err)
 	}
-	if body.Kind == proposalKindInstructions {
-		hash, err := d.applyInstructionsProposal(ctx, a, pr, body)
+	if body.Kind == proposalKindInstructions || body.Kind == proposalKindRoutine {
+		apply := d.applyInstructionsProposal
+		if body.Kind == proposalKindRoutine {
+			apply = d.applyRoutineProposal
+		}
+		hash, err := apply(ctx, a, pr, body)
 		if err != nil {
 			return nil, err
 		}

@@ -331,3 +331,10 @@ func (s *Store) RecordRunOutcome(ctx context.Context, agentID, slug string, o Ru
 	}
 	return stateFrom(r), nil
 }
+
+// SetCheckBackAt sets when the routine's next self-paced check-back is due.
+func (s *Store) SetCheckBackAt(ctx context.Context, agentID, slug string, t time.Time) error {
+	return s.q.SetPAgentRoutineCheckBack(ctx, gen.SetPAgentRoutineCheckBackParams{
+		CheckBackAt: nanos(t), UpdatedAt: s.now().UnixNano(), AgentID: agentID, Slug: slug,
+	})
+}

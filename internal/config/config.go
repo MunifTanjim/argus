@@ -204,6 +204,10 @@ type AgentDefaults struct {
 		MaxRunsPerHour     int
 		// MaxConsecutiveFailures pauses a routine after that many failed runs in a row.
 		MaxConsecutiveFailures int
+		// CheckBackMin and CheckBackMax clamp a self-paced check-back; negative
+		// when the configured value does not parse.
+		CheckBackMin time.Duration
+		CheckBackMax time.Duration
 		// CatchUpWindow and PauseAfterAway are negative when the configured
 		// value does not parse.
 		CatchUpWindow  time.Duration
@@ -307,6 +311,8 @@ var defaults = map[string]any{
 	"agents.defaults.limits.run-timeout":              "1h",
 	"agents.defaults.limits.max-runs-per-hour":        12,
 	"agents.defaults.limits.max-consecutive-failures": 10,
+	"agents.defaults.limits.check-back-min":           "15m",
+	"agents.defaults.limits.check-back-max":           "7d",
 	"agents.defaults.limits.catch-up-window":          "12h",
 	"agents.defaults.limits.pause-after-away":         "7d",
 }
@@ -401,6 +407,12 @@ func (c Config) Validate() error {
 	}
 	if d.Limits.PauseAfterAway < 0 {
 		return errors.New("agents.defaults.limits.pause-after-away must be a duration such as 7d")
+	}
+	if d.Limits.CheckBackMin < 0 {
+		return errors.New("agents.defaults.limits.check-back-min must be a duration such as 15m")
+	}
+	if d.Limits.CheckBackMax < 0 {
+		return errors.New("agents.defaults.limits.check-back-max must be a duration such as 7d")
 	}
 	return nil
 }
@@ -524,6 +536,8 @@ func agentsFromViper(v *viper.Viper) AgentsConfig {
 	d.Limits.RunTimeout = v.GetDuration(p + "limits.run-timeout")
 	d.Limits.MaxRunsPerHour = v.GetInt(p + "limits.max-runs-per-hour")
 	d.Limits.MaxConsecutiveFailures = v.GetInt(p + "limits.max-consecutive-failures")
+	d.Limits.CheckBackMin = days(v, p+"limits.check-back-min")
+	d.Limits.CheckBackMax = days(v, p+"limits.check-back-max")
 	d.Limits.CatchUpWindow = days(v, p+"limits.catch-up-window")
 	d.Limits.PauseAfterAway = days(v, p+"limits.pause-after-away")
 	return a

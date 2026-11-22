@@ -306,6 +306,66 @@ func mcpTools() []mcpTool {
 				return d.mcpReportRun(ctx, caller, p)
 			}),
 		},
+		{
+			Tool: mcphttp.Tool{
+				Name: "schedule_check_back",
+				Description: "Schedule a one-time check-back: Argus starts a background run of you after `in` (a duration such as 2h or 3d, kept between the agent's limits) to do what `note` says. " +
+					"Works in chats and in check-back runs.",
+			},
+			props: []mcpProp{required("in", "string"), required("note", "string")}, needsCaller: true,
+			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p scheduleCheckBackParams) (any, error) {
+				return d.mcpScheduleCheckBack(ctx, caller, p)
+			}),
+		},
+		{
+			Tool:        mcphttp.Tool{Name: "routine_list", Description: "List your routines with their schedule, state and budget use. Works only in chats."},
+			needsCaller: true,
+			run: func(ctx context.Context, d *Node, caller callerRef, _ json.RawMessage) (any, error) {
+				return d.mcpRoutineList(ctx, caller)
+			},
+		},
+		{
+			Tool: mcphttp.Tool{
+				Name: "routine_create",
+				Description: "Create a routine. slug names it (lowercase letters, digits, dashes); routine is the full YAML of the routine file (what, starts, does, until, outcome, verify, budget, ...). " +
+					"A new routine waits for its next due time. A goal (until: outcome) goes to the user for review, since only the user sets a goal's outcome. Works only in chats.",
+			},
+			props: []mcpProp{required("slug", "string"), required("routine", "string"), optional("reason", "string")}, needsCaller: true,
+			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p routineWriteParams) (any, error) {
+				return d.mcpRoutineCreate(ctx, caller, p)
+			}),
+		},
+		{
+			Tool: mcphttp.Tool{
+				Name:        "routine_update",
+				Description: "Replace a routine file with routine (full YAML). A change to a goal's outcome or verify goes to the user for review; reason says why. Works only in chats.",
+			},
+			props: []mcpProp{required("slug", "string"), required("routine", "string"), optional("reason", "string")}, needsCaller: true,
+			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p routineWriteParams) (any, error) {
+				return d.mcpRoutineUpdate(ctx, caller, p)
+			}),
+		},
+		{
+			Tool:  mcphttp.Tool{Name: "routine_pause", Description: "Pause a routine (sets enabled: false in its file). Works only in chats."},
+			props: []mcpProp{required("slug", "string")}, needsCaller: true,
+			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p routineRefParams) (any, error) {
+				return d.mcpRoutineSetEnabled(ctx, caller, p, false)
+			}),
+		},
+		{
+			Tool:  mcphttp.Tool{Name: "routine_resume", Description: "Resume a paused routine. A routine paused for its budget, or a completed goal, only the user can resume. Works only in chats."},
+			props: []mcpProp{required("slug", "string")}, needsCaller: true,
+			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p routineRefParams) (any, error) {
+				return d.mcpRoutineSetEnabled(ctx, caller, p, true)
+			}),
+		},
+		{
+			Tool:  mcphttp.Tool{Name: "routine_delete", Description: "Delete a routine file. A goal's folder is kept. Works only in chats."},
+			props: []mcpProp{required("slug", "string")}, needsCaller: true,
+			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p routineRefParams) (any, error) {
+				return d.mcpRoutineDelete(ctx, caller, p)
+			}),
+		},
 	}
 	return tools
 }
