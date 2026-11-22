@@ -127,6 +127,13 @@ func agentMemoryUndo(dial callerFor) *cobra.Command {
 }
 
 func proposalSummary(p api.PAgentMemoryProposal) string {
+	if p.Kind == "routine" {
+		s := p.Summary
+		if s == "" {
+			s = p.Slug
+		}
+		return "routine: " + s
+	}
 	if p.Kind == "instructions" {
 		s := strings.TrimSpace(p.Reason)
 		if s == "" {

@@ -1449,7 +1449,101 @@ const (
 	MethodPAgentMemoryProposals = "pagent.memory.proposals" // request: PAgentRef; result: PAgentMemoryProposalsResult
 	MethodPAgentMemoryImport    = "pagent.memory.import"    // request: PAgentMemoryImportParams; result: PAgentMemoryImportResult
 	MethodPAgentMemoryDecide    = "pagent.memory.decide"    // request: PAgentMemoryDecideParams; result: PAgentMemoryDecideResult
+
+	MethodPAgentRoutineList       = "pagent.routine.list"       // request: PAgentRef; result: PAgentRoutineListResult
+	MethodPAgentRoutineRun        = "pagent.routine.run"        // request: PAgentRoutineRef; result: PAgentRoutineRunResult (a test run, started now)
+	MethodPAgentRoutinePause      = "pagent.routine.pause"      // request: PAgentRoutineRef; result: PAgentRoutineInfo
+	MethodPAgentRoutineResume     = "pagent.routine.resume"     // request: PAgentRoutineRef; result: PAgentRoutineInfo
+	MethodPAgentRoutineRuns       = "pagent.routine.runs"       // request: PAgentRoutineRunsParams; result: PAgentRoutineRunsResult
+	MethodPAgentRoutineHookSecret = "pagent.routine.hookSecret" // request: PAgentRoutineRef; result: PAgentRoutineHookSecretResult (rotates)
 )
+
+// PAgentRoutineRef names one routine of an agent.
+type PAgentRoutineRef struct {
+	AgentID string `json:"agent_id"`
+	Slug    string `json:"slug"`
+}
+
+// PAgentRoutineBudget is a routine's budget or its use; 0 is unlimited in a budget.
+type PAgentRoutineBudget struct {
+	Sessions int64   `json:"sessions"`
+	Cost     float64 `json:"cost"`
+	Tokens   int64   `json:"tokens"`
+}
+
+// PAgentRoutineInfo is a routine with its runtime state. State is "active",
+// "paused" (PausedReason says why), "disabled" (enabled: false in the file),
+// "completed" (a goal that is done) or "invalid" (Error says why).
+type PAgentRoutineInfo struct {
+	AgentID             string              `json:"agent_id"`
+	Slug                string              `json:"slug"`
+	What                string              `json:"what,omitempty"`
+	Starts              []string            `json:"starts,omitempty"` // each start in words
+	Does                string              `json:"does,omitempty"`
+	Until               string              `json:"until,omitempty"`
+	Outcome             string              `json:"outcome,omitempty"`
+	Verify              string              `json:"verify,omitempty"`
+	ReportTo            string              `json:"report_to,omitempty"`
+	State               string              `json:"state"`
+	PausedReason        string              `json:"paused_reason,omitempty"`
+	NextDue             *time.Time          `json:"next_due,omitempty"`
+	LastRunAt           *time.Time          `json:"last_run_at,omitempty"`
+	LastResult          string              `json:"last_result,omitempty"`
+	ConsecutiveFailures int                 `json:"consecutive_failures,omitempty"`
+	Budget              PAgentRoutineBudget `json:"budget"`
+	Used                PAgentRoutineBudget `json:"used"`
+	Webhook             bool                `json:"webhook,omitempty"`
+	Error               string              `json:"error,omitempty"`
+}
+
+type PAgentRoutineListResult struct {
+	Routines []PAgentRoutineInfo `json:"routines"`
+}
+
+type PAgentRoutineRunResult struct {
+	RunID string `json:"run_id"`
+}
+
+type PAgentRoutineRunsParams struct {
+	AgentID string `json:"agent_id"`
+	Slug    string `json:"slug"`
+	Limit   int    `json:"limit,omitempty"` // 0 = 20
+}
+
+// PAgentRoutineRunInfo is one run of a routine.
+type PAgentRoutineRunInfo struct {
+	ID             string     `json:"id"`
+	Slug           string     `json:"slug"`
+	StartedBy      string     `json:"started_by"`
+	Test           bool       `json:"test,omitempty"`
+	State          string     `json:"state"`
+	ThreadID       string     `json:"thread_id,omitempty"`
+	Occurrence     time.Time  `json:"occurrence"`
+	StartedAt      time.Time  `json:"started_at"`
+	EndedAt        *time.Time `json:"ended_at,omitempty"`
+	Result         string     `json:"result,omitempty"`
+	Summary        string     `json:"summary,omitempty"`
+	ActionsDone    []string   `json:"actions_done,omitempty"`
+	ActionsPending []string   `json:"actions_pending,omitempty"`
+	Unverified     []string   `json:"unverified,omitempty"`
+	Sources        []string   `json:"sources,omitempty"`
+	Cost           float64    `json:"cost,omitempty"`
+	Tokens         int64      `json:"tokens,omitempty"`
+	Error          string     `json:"error,omitempty"`
+}
+
+type PAgentRoutineRunsResult struct {
+	Runs []PAgentRoutineRunInfo `json:"runs"`
+}
+
+// PAgentRoutineHookSecretResult is a new webhook secret, shown once. Path is
+// the webhook path on the node's listener; Listen is the listener address,
+// empty when webhooks are off.
+type PAgentRoutineHookSecretResult struct {
+	Secret string `json:"secret"`
+	Path   string `json:"path"`
+	Listen string `json:"listen,omitempty"`
+}
 
 // PAgentCreateParams creates an agent directory and registers it. NodeID is a
 // gateway routing key the node ignores.
@@ -1666,8 +1760,9 @@ type PAgentMemoryProposal struct {
 	AgentID   string           `json:"agent_id"`
 	ThreadID  string           `json:"thread_id,omitempty"`
 	Source    string           `json:"source"`
-	Kind      string           `json:"kind,omitempty"` // "instructions" for an instruction rewrite, "routine" for a routine file
-	Slug      string           `json:"slug,omitempty"` // the routine of a "routine" proposal
+	Kind      string           `json:"kind,omitempty"`    // "instructions" for an instruction rewrite, "routine" for a routine file
+	Slug      string           `json:"slug,omitempty"`    // the routine of a "routine" proposal
+	Summary   string           `json:"summary,omitempty"` // a "routine" proposal in words, e.g. "change goal billing: outcome, verify"
 	Text      string           `json:"text,omitempty"`
 	Reason    string           `json:"reason,omitempty"`
 	Ops       []PAgentMemoryOp `json:"ops"`

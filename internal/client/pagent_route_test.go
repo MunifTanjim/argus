@@ -362,3 +362,84 @@ func TestPAgentChangedStampedWithNodeID(t *testing.T) {
 		t.Fatal("no pagent.changed")
 	}
 }
+
+func TestPAgentRoutineRoutesToNode(t *testing.T) {
+	f, clientConn := newFakeGatewayNode(t, "n1")
+	defer f.peer.Close()
+	var mu sync.Mutex
+	got := map[string]api.PAgentRoutineRef{}
+	f.handle = func(method string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		var p api.PAgentRoutineRef
+		_ = json.Unmarshal(params, &p)
+		mu.Lock()
+		got[method] = p
+		mu.Unlock()
+		var res any
+		switch method {
+		case api.MethodPAgentRoutineList:
+			res = api.PAgentRoutineListResult{Routines: []api.PAgentRoutineInfo{{AgentID: "a1", Slug: "inbox", State: "active"}}}
+		case api.MethodPAgentRoutinePause, api.MethodPAgentRoutineResume:
+			res = api.PAgentRoutineInfo{AgentID: "a1", Slug: p.Slug, State: "paused"}
+		case api.MethodPAgentRoutineRuns:
+			res = api.PAgentRoutineRunsResult{Runs: []api.PAgentRoutineRunInfo{{ID: "rr1", ThreadID: "t1"}}}
+		case api.MethodPAgentRoutineRun:
+			res = api.PAgentRoutineRunResult{RunID: "rr2"}
+		case api.MethodPAgentRoutineHookSecret:
+			res = api.PAgentRoutineHookSecretResult{Secret: "whs_x", Path: "/hooks/scout/inbox"}
+		default:
+			return nil, nil, nil
+		}
+		b, _ := json.Marshal(res)
+		return b, nil, nil
+	}
+	c, err := NewE2EClient(clientConn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	agent := session.CompositeID("n1", "a1")
+	ref := api.PAgentRoutineRef{AgentID: agent, Slug: "inbox"}
+
+	var list api.PAgentRoutineListResult
+	if err := c.Call(api.MethodPAgentRoutineList, api.PAgentRef{AgentID: agent}, &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Routines) != 1 || list.Routines[0].AgentID != agent {
+		t.Fatalf("list: %+v", list)
+	}
+	var info api.PAgentRoutineInfo
+	if err := c.Call(api.MethodPAgentRoutinePause, ref, &info); err != nil || info.AgentID != agent {
+		t.Fatalf("pause: %+v %v", info, err)
+	}
+	if err := c.Call(api.MethodPAgentRoutineResume, ref, &info); err != nil || info.AgentID != agent {
+		t.Fatalf("resume: %+v %v", info, err)
+	}
+	var runs api.PAgentRoutineRunsResult
+	if err := c.Call(api.MethodPAgentRoutineRuns, api.PAgentRoutineRunsParams{AgentID: agent, Slug: "inbox"}, &runs); err != nil || runs.Runs[0].ThreadID != session.CompositeID("n1", "t1") {
+		t.Fatalf("runs: %+v %v", runs, err)
+	}
+	var run api.PAgentRoutineRunResult
+	if err := c.Call(api.MethodPAgentRoutineRun, ref, &run); err != nil || run.RunID != "rr2" {
+		t.Fatalf("run: %+v %v", run, err)
+	}
+	var sec api.PAgentRoutineHookSecretResult
+	if err := c.Call(api.MethodPAgentRoutineHookSecret, ref, &sec); err != nil || sec.Secret != "whs_x" {
+		t.Fatalf("hook secret: %+v %v", sec, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, m := range []string{api.MethodPAgentRoutineList, api.MethodPAgentRoutinePause, api.MethodPAgentRoutineRuns, api.MethodPAgentRoutineRun, api.MethodPAgentRoutineHookSecret} {
+		if got[m].AgentID != "a1" {
+			t.Errorf("%s reached the node with agent_id %q", m, got[m].AgentID)
+		}
+	}
+	if got[api.MethodPAgentRoutineRun].Slug != "inbox" {
+		t.Errorf("run slug: %+v", got[api.MethodPAgentRoutineRun])
+	}
+	if err := c.Call(api.MethodPAgentRoutineRun, api.PAgentRoutineRef{AgentID: "a1", Slug: "inbox"}, &run); err == nil {
+		t.Fatal("an agent id without a node routed")
+	}
+}

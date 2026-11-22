@@ -239,6 +239,33 @@ func (m *E2EClient) routeByPAgent(method string, raw json.RawMessage, out any) e
 			}
 		}
 		return assign(out, r)
+	case api.MethodPAgentRoutineList:
+		var r api.PAgentRoutineListResult
+		if err := m.callNode(nodeID, method, params, &r); err != nil {
+			return err
+		}
+		for i := range r.Routines {
+			r.Routines[i].AgentID = session.CompositeID(nodeID, r.Routines[i].AgentID)
+		}
+		return assign(out, r)
+	case api.MethodPAgentRoutinePause, api.MethodPAgentRoutineResume:
+		var r api.PAgentRoutineInfo
+		if err := m.callNode(nodeID, method, params, &r); err != nil {
+			return err
+		}
+		r.AgentID = session.CompositeID(nodeID, r.AgentID)
+		return assign(out, r)
+	case api.MethodPAgentRoutineRuns:
+		var r api.PAgentRoutineRunsResult
+		if err := m.callNode(nodeID, method, params, &r); err != nil {
+			return err
+		}
+		for i := range r.Runs {
+			if r.Runs[i].ThreadID != "" {
+				r.Runs[i].ThreadID = session.CompositeID(nodeID, r.Runs[i].ThreadID)
+			}
+		}
+		return assign(out, r)
 	}
 	return m.callNode(nodeID, method, params, out)
 }

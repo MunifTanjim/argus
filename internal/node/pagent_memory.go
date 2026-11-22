@@ -753,9 +753,13 @@ func (d *Node) handlePAgentMemoryProposals(ctx context.Context, params json.RawM
 		if ops == nil {
 			ops = []api.PAgentMemoryOp{}
 		}
+		summary := ""
+		if body.Kind == proposalKindRoutine {
+			summary = routineProposalSummary(a, body)
+		}
 		res.Proposals = append(res.Proposals, api.PAgentMemoryProposal{
 			ID: pr.ID, AgentID: pr.AgentID, ThreadID: pr.ThreadID, Source: body.Source,
-			Kind: body.Kind, Slug: body.Slug, Text: body.Text, Reason: body.Reason,
+			Kind: body.Kind, Slug: body.Slug, Summary: summary, Text: body.Text, Reason: body.Reason,
 			Ops: ops, Log: body.Log, CreatedAt: pr.CreatedAt,
 		})
 	}

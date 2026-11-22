@@ -146,6 +146,7 @@ type Node struct {
 	routineSkip     map[string]string                 // agent id/slug -> reason of the current skip streak
 	routineStale    map[string]time.Time              // agent id/slug -> due time of the last stale notice
 	routineRuns     sync.Map                          // run id -> *runCtl; runs this process executes
+	routineCtx      context.Context                   // the run context of runs started by RPC and webhooks; set by Run
 	routineWG       sync.WaitGroup                    // run goroutines
 	routinePayloads sync.Map                          // run id -> webhook body of a run not started yet
 
@@ -742,6 +743,9 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 		go d.pagentIdleLoop(ctx)
 		go d.pagentCaptureLoop(ctx)
 		go d.pagentTidyLoop(ctx)
+		d.routineMu.Lock()
+		d.routineCtx = ctx
+		d.routineMu.Unlock()
 		go d.pagentRoutineLoop(ctx)
 		stopWebhooks, err := d.serveWebhooks(ctx)
 		if err != nil {
