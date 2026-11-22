@@ -122,3 +122,37 @@ func TestThreadRoutineEventsUseNodeTextAndUndo(t *testing.T) {
 		t.Fatalf("undo params = %+v", p)
 	}
 }
+
+func TestThreadHandoffAnswerShowsAgentAndText(t *testing.T) {
+	cl := threadClient()
+	cl.timeline.Entries = append(cl.timeline.Entries, transcript.Entry{
+		ID: "ev:10", Kind: transcript.EntryArgus, Label: "handoff.answered",
+		Detail:    "Answer from researcher: Launch is on 3 March.\nSource: the press page.",
+		Timestamp: threadT0.Add(6 * time.Minute).Format(time.RFC3339Nano),
+		Event: &transcript.ArgusEvent{ID: 10, Kind: "handoff.answered",
+			Payload: json.RawMessage(`{"agent":"researcher","text":"Launch is on 3 March.\nSource: the press page."}`)},
+	})
+	m := openedThread(t, cl)
+	out := ansi.Strip(m.View().Content)
+	for _, want := range []string{"researcher  answered", "Launch is on 3 March.", "Source: the press page."} {
+		if !strings.Contains(out, want) {
+			t.Errorf("thread view lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestAgentMemoryReviewShowsAgentProposals(t *testing.T) {
+	cl := memoryClient()
+	cl.props = []api.PAgentMemoryProposal{{ID: "n1:p7", Source: "agent", Kind: "agent",
+		Summary: "create agent writer: Drafts release notes", CreatedAt: time.Now()}}
+	m := openedMemory(t, cl)
+	m = typeKeys(m, "gT")
+	if out := ansi.Strip(m.main.top().view(&ctx{m: &m}, 100, 30)); !strings.Contains(out, "create agent writer: Drafts release notes") {
+		t.Fatalf("review tab:\n%s", out)
+	}
+	m, cmd := upd(m, keyMsg("a"))
+	cmd()
+	if p, _ := pagentParams[api.PAgentMemoryDecideParams](cl, api.MethodPAgentMemoryDecide); p != (api.PAgentMemoryDecideParams{ProposalID: "n1:p7", Accept: true}) {
+		t.Fatalf("decide = %+v", p)
+	}
+}

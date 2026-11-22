@@ -324,6 +324,9 @@ func (v agentMemoryComp) reviewRows(c *ctx, w, avail int) string {
 // proposalSummary is a proposal in one line: its ops, or the reason for an
 // instruction rewrite.
 func proposalSummary(p api.PAgentMemoryProposal) string {
+	if p.Kind == "agent" {
+		return cmp.Or(p.Summary, "create an agent")
+	}
 	if p.Kind == "routine" {
 		s := "routine " + p.Slug
 		if d := cmp.Or(p.Summary, p.Reason); d != "" {

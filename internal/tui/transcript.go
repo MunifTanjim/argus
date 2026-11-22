@@ -549,6 +549,9 @@ func systemRow(e transcript.Entry, expanded bool, iw int) (string, []cardSpan) {
 // argusRow is an Argus event in an agent thread: dim, with the undo key on a
 // memory or routine change.
 func (m tview) argusRow(e transcript.Entry, iw int) (string, []cardSpan) {
+	if e.Event != nil && e.Event.Kind == "handoff.answered" {
+		return m.handoffAnswerRow(e, iw)
+	}
 	head := Icon.System.Render() + " " + StyleSecondary.Render("Argus") + "  " + StyleDim.Render(clockTime(e.Timestamp))
 	if text := cmp.Or(e.Detail, e.Label); text != "" {
 		head += "  " + StyleDim.Render(text)
@@ -557,6 +560,24 @@ func (m tview) argusRow(e transcript.Entry, iw int) (string, []cardSpan) {
 		head += "  " + StyleDim.Render(m.c.m.keyTextOn("thread", memoryKeys.Undo)+" undo")
 	}
 	return truncateLine(head, iw), chromeSpans(1)
+}
+
+// handoffAnswerRow is another agent's answer: its name, then the answer word
+// for word.
+func (m tview) handoffAnswerRow(e transcript.Entry, iw int) (string, []cardSpan) {
+	var p struct {
+		Agent string `json:"agent"`
+		Text  string `json:"text"`
+	}
+	_ = json.Unmarshal(e.Event.Payload, &p)
+	head := Icon.Output.Render() + " " + StylePrimaryBold.Render(cmp.Or(p.Agent, "Agent")) + "  " +
+		StyleDim.Render("answered · "+clockTime(e.Timestamp))
+	spans := chromeSpans(1)
+	if strings.TrimSpace(p.Text) == "" {
+		return truncateLine(head, iw), spans
+	}
+	body := indentBlock(m.c.m.renderMD(p.Text, max(iw-2, 10)), "  ")
+	return truncateLine(head, iw) + "\n" + body, append(spans, textSpan(body, p.Text))
 }
 
 func (m tview) shellRow(e transcript.Entry, expanded bool, iw int) (string, []cardSpan) {
