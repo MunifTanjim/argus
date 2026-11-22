@@ -116,7 +116,7 @@ func TestPAgentAddressedRoutesToNode(t *testing.T) {
 func TestPAgentMemoryRoutesByAgentAndProposal(t *testing.T) {
 	f, clientConn := newFakeGatewayNode(t, "n1")
 	defer f.peer.Close()
-	var gotAgent, gotProposal string
+	var gotAgent, gotProposal, gotImport string
 	f.handle = func(method string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
 		switch method {
 		case api.MethodPAgentMemoryProposals:
@@ -127,6 +127,12 @@ func TestPAgentMemoryRoutesByAgentAndProposal(t *testing.T) {
 			return b, nil, nil
 		case api.MethodPAgentMemoryLog:
 			b, _ := json.Marshal(api.PAgentMemoryLogResult{Commits: []api.PAgentMemoryCommit{{Hash: "abc", ThreadID: "t1"}, {Hash: "def"}}})
+			return b, nil, nil
+		case api.MethodPAgentMemoryImport:
+			var p api.PAgentMemoryImportParams
+			_ = json.Unmarshal(params, &p)
+			gotImport = p.AgentID
+			b, _ := json.Marshal(api.PAgentMemoryImportResult{Staged: 1})
 			return b, nil, nil
 		case api.MethodPAgentMemoryDecide:
 			var p api.PAgentMemoryDecideParams
@@ -158,6 +164,9 @@ func TestPAgentMemoryRoutesByAgentAndProposal(t *testing.T) {
 	}
 	if log.Commits[0].ThreadID != "n1:t1" || log.Commits[1].ThreadID != "" {
 		t.Errorf("log %+v", log)
+	}
+	if err := c.Call(api.MethodPAgentMemoryImport, api.PAgentMemoryImportParams{AgentID: "n1:a1", Content: "x"}, nil); err != nil || gotImport != "a1" {
+		t.Errorf("import err %v node agent %q", err, gotImport)
 	}
 	var dr api.PAgentMemoryDecideResult
 	if err := c.Call(api.MethodPAgentMemoryDecide, api.PAgentMemoryDecideParams{ProposalID: props.Proposals[0].ID, Accept: true}, &dr); err != nil {

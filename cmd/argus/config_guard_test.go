@@ -61,6 +61,10 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"purge":               true, // `agent forget` only: must never be config-backed, a stored true would delete data
 		"all":                 true, // `agent list` only: per-invocation listing scope
 		"unset":               true, // `agent primary` only: per-invocation action
+		"limit":               true, // `agent memory log` only: per-invocation page size
+		"profile":             true, // `agent memory` only: per-invocation target
+		"accept":              true, // `agent memory review` only: per-invocation decision
+		"reject":              true, // `agent memory review` only: per-invocation decision
 	}
 
 	seen := map[string]bool{}

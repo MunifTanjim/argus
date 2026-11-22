@@ -58,3 +58,56 @@ argus agent forget scout --purge
 ```
 
 `forget` unregisters the agent and keeps its files and threads. Adding the same directory again restores them. `--purge` also deletes the agent's threads. Files are never deleted.
+
+## Memory
+
+An agent remembers what you tell it in your own chats: facts about you, your preferences and what it learns while working with you. It does not learn from routine runs or from sessions started by another agent. Each agent has its own memory, plus a profile shared by all agents.
+
+`agents.defaults.memory.mode` sets how memory is updated, and `memory.mode` in an agent's `agent.yaml` overrides it for that agent:
+
+- `auto`: changes are applied, you are told about them, and you can undo them.
+- `review`: changes are held until you accept or reject them.
+- `off`: the agent remembers nothing new, and asking it to remember something is refused.
+
+Memory is tidied once a day. Tidying never removes or rewrites anything you wrote yourself. Anything that looks like a secret is never written to memory.
+
+```sh
+argus agent memory show scout
+argus agent memory show scout --profile
+```
+
+`show` prints the agent's memory and how much of its size budget is used. `--profile` prints the shared profile instead.
+
+### History and undo
+
+```sh
+argus agent memory log scout
+argus agent memory log scout --limit 50
+argus agent memory undo scout <commit>
+argus agent memory undo scout <commit> --profile
+```
+
+`log` lists changes newest first, with where each came from (a chat, the agent itself, tidying, or you). `undo` reverts one change, given by the hash from `log`. `--profile` works on the shared profile's history.
+
+### Reviewing proposals
+
+```sh
+argus agent memory review scout
+argus agent memory review scout --accept <id>
+argus agent memory review scout --reject <id>
+```
+
+In `review` mode, and for imports, proposed changes wait for your decision. An agent can also propose a rewrite of its own instructions; that always waits for your decision, whatever the mode. Accepting applies the change; rejecting discards it.
+
+### Skills
+
+An agent can write down a procedure it learned as a skill and reuse it later. Skills are shared by all agents and can be copied to a new agent with `create --from`.
+
+### Importing
+
+```sh
+argus agent memory import scout memories.txt
+cat memories.txt | argus agent memory import scout -
+```
+
+`import` reads memory exported from another assistant, from a file or standard input, and stages what it finds for review. It prints `staged for review: N`, then use `review` to accept or reject each one.

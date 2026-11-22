@@ -41,7 +41,7 @@ are registered by name; where two nodes have an agent with the same name, use
 	}
 	cmd.AddCommand(
 		agentCreate(dial), agentAdd(dial), agentList(dial), agentShow(dial),
-		agentRename(dial), agentForget(dial), agentPrimary(dial), agentChat(dial), agentThreads(dial),
+		agentRename(dial), agentForget(dial), agentPrimary(dial), agentChat(dial), agentThreads(dial), agentMemory(dial),
 	)
 	return cmd
 }

@@ -283,3 +283,146 @@ func TestAgentNameResolution(t *testing.T) {
 		t.Fatalf("stderr = %q", errOut)
 	}
 }
+
+type memoryNode struct {
+	*fakeAgentNode
+	log       api.PAgentMemoryLogResult
+	proposals api.PAgentMemoryProposalsResult
+	decide    api.PAgentMemoryDecideResult
+	show      api.PAgentMemoryShowResult
+	imported  api.PAgentMemoryImportResult
+}
+
+func (m *memoryNode) call(method string, params, out any) error {
+	switch method {
+	case api.MethodPAgentMemoryLog:
+		*out.(*api.PAgentMemoryLogResult) = m.log
+	case api.MethodPAgentMemoryUndo:
+		*out.(*api.PAgentMemoryUndoResult) = api.PAgentMemoryUndoResult{Commit: "rev1"}
+	case api.MethodPAgentMemoryProposals:
+		*out.(*api.PAgentMemoryProposalsResult) = m.proposals
+	case api.MethodPAgentMemoryDecide:
+		*out.(*api.PAgentMemoryDecideResult) = m.decide
+	case api.MethodPAgentMemoryShow:
+		*out.(*api.PAgentMemoryShowResult) = m.show
+	case api.MethodPAgentMemoryImport:
+		*out.(*api.PAgentMemoryImportResult) = m.imported
+	default:
+		return m.fakeAgentNode.call(method, params, out)
+	}
+	m.calls = append(m.calls, method)
+	if m.params == nil {
+		m.params = map[string][]any{}
+	}
+	m.params[method] = append(m.params[method], params)
+	return nil
+}
+
+func execMemory(t *testing.T, m *memoryNode, args ...string) (string, error) {
+	t.Helper()
+	dial := func(*cobra.Command) (caller, func(), error) { return m.call, func() {}, nil }
+	root := &cobra.Command{Use: "argus"}
+	root.AddCommand(agentCmd(dial))
+	root.SetArgs(append([]string{"agent", "memory"}, args...))
+	var err error
+	out, _ := captureOutput(t, func() { err = root.Execute() })
+	return out, err
+}
+
+func newMemoryNode() *memoryNode { return &memoryNode{fakeAgentNode: twoAgents()} }
+
+func TestAgentMemoryLogJSON(t *testing.T) {
+	m := newMemoryNode()
+	m.log = api.PAgentMemoryLogResult{Commits: []api.PAgentMemoryCommit{{Hash: "abcdef1234", Subject: "add x", Source: "capture", When: time.Now()}}}
+	out, err := execMemory(t, m, "log", "scout", "--limit", "5", "--profile", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res api.PAgentMemoryLogResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil || len(res.Commits) != 1 || res.Commits[0].Hash != "abcdef1234" {
+		t.Errorf("out %q err %v", out, err)
+	}
+	p := m.params[api.MethodPAgentMemoryLog][0].(api.PAgentMemoryLogParams)
+	if p.AgentID != "a1" || p.Limit != 5 || !p.Profile {
+		t.Errorf("params %+v", p)
+	}
+}
+
+func TestAgentMemoryLogTable(t *testing.T) {
+	m := newMemoryNode()
+	m.log = api.PAgentMemoryLogResult{Commits: []api.PAgentMemoryCommit{{Hash: "abcdef1234", Subject: "add x", Source: "capture", When: time.Now()}}}
+	out, err := execMemory(t, m, "log", "scout")
+	if err != nil || !strings.Contains(out, "abcdef12 ") || !strings.Contains(out, "capture") || !strings.Contains(out, "add x") {
+		t.Errorf("out %q err %v", out, err)
+	}
+	if p := m.params[api.MethodPAgentMemoryLog][0].(api.PAgentMemoryLogParams); p.Limit != 20 {
+		t.Errorf("default limit %d", p.Limit)
+	}
+}
+
+func TestAgentMemoryUndo(t *testing.T) {
+	m := newMemoryNode()
+	out, err := execMemory(t, m, "undo", "scout", "abc123", "--profile")
+	if err != nil || !strings.Contains(out, "reverted abc123") {
+		t.Errorf("out %q err %v", out, err)
+	}
+	p := m.params[api.MethodPAgentMemoryUndo][0].(api.PAgentMemoryUndoParams)
+	if p.AgentID != "a1" || p.Commit != "abc123" || !p.Profile {
+		t.Errorf("params %+v", p)
+	}
+}
+
+func TestAgentMemoryReviewAccept(t *testing.T) {
+	m := newMemoryNode()
+	m.proposals = api.PAgentMemoryProposalsResult{Proposals: []api.PAgentMemoryProposal{
+		{ID: "n:mp1", Ops: []api.PAgentMemoryOp{{Action: "add", Text: "likes tea"}}},
+		{ID: "n:mp2", Kind: "instructions", Reason: "tighten tone"},
+	}}
+	out, err := execMemory(t, m, "review", "scout")
+	if err != nil || !strings.Contains(out, "n:mp1") || !strings.Contains(out, "add likes tea") || !strings.Contains(out, "instructions: tighten tone") {
+		t.Errorf("out %q err %v", out, err)
+	}
+	m.decide = api.PAgentMemoryDecideResult{Applied: 1}
+	out, err = execMemory(t, m, "review", "scout", "--accept", "n:mp1")
+	if err != nil || !strings.Contains(out, "accepted n:mp1") {
+		t.Errorf("out %q err %v", out, err)
+	}
+	d := m.params[api.MethodPAgentMemoryDecide][0].(api.PAgentMemoryDecideParams)
+	if d.ProposalID != "n:mp1" || !d.Accept {
+		t.Errorf("decide %+v", d)
+	}
+	if _, err = execMemory(t, m, "review", "scout", "--reject", "n:mp2"); err != nil {
+		t.Fatal(err)
+	}
+	if d := m.params[api.MethodPAgentMemoryDecide][1].(api.PAgentMemoryDecideParams); d.Accept || d.ProposalID != "n:mp2" {
+		t.Errorf("decide %+v", d)
+	}
+}
+
+func TestAgentMemoryImportStdin(t *testing.T) {
+	m := newMemoryNode()
+	m.imported = api.PAgentMemoryImportResult{Staged: 3}
+	old := agentStdin
+	agentStdin = strings.NewReader("remember this")
+	defer func() { agentStdin = old }()
+	out, err := execMemory(t, m, "import", "scout", "-")
+	if err != nil || !strings.Contains(out, "staged for review: 3") {
+		t.Errorf("out %q err %v", out, err)
+	}
+	if p := m.params[api.MethodPAgentMemoryImport][0].(api.PAgentMemoryImportParams); p.Content != "remember this" || p.AgentID != "a1" {
+		t.Errorf("params %+v", p)
+	}
+}
+
+func TestAgentMemoryShowUsage(t *testing.T) {
+	m := newMemoryNode()
+	m.show = api.PAgentMemoryShowResult{Memory: "- a\n", Usage: 14 * 1024, Budget: 24 * 1024, Profile: "prof"}
+	out, err := execMemory(t, m, "show", "scout")
+	if err != nil || !strings.Contains(out, "MEMORY.md 14 KB / 24 KB") || !strings.Contains(out, "- a") {
+		t.Errorf("out %q err %v", out, err)
+	}
+	out, _ = execMemory(t, m, "show", "scout", "--profile")
+	if strings.TrimSpace(out) != "prof" {
+		t.Errorf("profile out %q", out)
+	}
+}
