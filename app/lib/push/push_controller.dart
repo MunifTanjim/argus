@@ -418,7 +418,13 @@ class PushController {
     _registerIfPossible();
   }
 
-  void _emitTap(String sessionId) => _onSessionTap?.call(sessionId);
+  void _emitTap(String tap) {
+    if (tap.startsWith(threadTapPrefix)) {
+      _onThreadTap?.call(tap.substring(threadTapPrefix.length));
+    } else {
+      _onSessionTap?.call(tap);
+    }
+  }
 
   Future<bool> _registerIfPossible() async {
     final client = _client;

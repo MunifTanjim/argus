@@ -15,6 +15,9 @@ Future<(ProviderContainer, FakeGatewayClient)> _pump(
   bool primary = false,
   Object? Function(String m, Object? p)? extra,
 }) async {
+  tester.view.physicalSize = const Size(500, 2000);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
   var primaryId = primary ? 'A:a1' : '';
   final client = FakeGatewayClient((m, p) async {
     final x = extra?.call(m, p);
@@ -142,10 +145,10 @@ void main() {
 
   testWidgets('an unreachable agent disables its actions', (tester) async {
     final (_, client) = await _pump(tester, status: 'unreachable');
-    expect(find.text(agentOffline), findsNWidgets(2));
+    expect(find.text(agentOffline), findsNWidgets(3));
     await tester.tap(find.byTooltip('New chat'));
     await tester.pump();
-    expect(find.text(agentOffline), findsNWidgets(3)); // two notes and the snackbar
+    expect(find.text(agentOffline), findsNWidgets(4)); // three notes and the snackbar
     expect(find.byType(AlertDialog), findsNothing);
     await tester.tap(find.byType(PopupMenuButton<String>));
     await tester.pumpAndSettle();

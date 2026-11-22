@@ -78,11 +78,13 @@ const Set<String> pagentAddressed = {
   'pagent.memory.import', 'pagent.memory.proposals',
   'pagent.routine.list', 'pagent.routine.run', 'pagent.routine.pause',
   'pagent.routine.resume', 'pagent.routine.runs', 'pagent.routine.hookSecret',
+  'pagent.usage', 'pagent.set',
 };
 
 /// Methods carrying a composite thread_id.
 const Set<String> pagentThreadAddressed = {
   'pagent.thread.timeline', 'pagent.thread.markRead',
+  'pagent.offer.start', 'pagent.offer.dismiss',
 };
 
 /// Status given to an agent whose node is offline, served from the cache.

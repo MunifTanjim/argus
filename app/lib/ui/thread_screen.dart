@@ -6,6 +6,7 @@ import '../state/pagents.dart';
 import '../state/projects_api.dart' show actionError;
 import '../state/sessions.dart';
 import '../state/tool_detail.dart';
+import 'entry_row.dart' show OfferActions;
 import 'pagent_style.dart';
 import 'session_detail_screen.dart';
 import 'theme.dart';
@@ -155,6 +156,20 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
     await _load();
   }
 
+  Future<void> _offer(String offerId, bool start) async {
+    final api = ref.read(pagentsApiProvider);
+    try {
+      if (start) {
+        await api.startOffer(widget.threadId, offerId);
+      } else {
+        await api.dismissOffer(widget.threadId, offerId);
+      }
+    } catch (e) {
+      if (mounted) _say('${start ? 'start' : 'dismiss'}: ${actionError(e)}');
+    }
+    await _load();
+  }
+
   void _openSession() {
     final id = _timeline == null ? '' : liveSessionOf(_timeline!);
     final session = id.isEmpty ? null : ref.read(sessionsProvider)[id];
@@ -181,12 +196,18 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
       );
     } else {
       final nodeId = agent?.nodeId ?? '';
+      final decided = decidedOffers(tl.entries);
       body = TranscriptFeed(
         detailRef: const ToolDetailRef(),
         detailRefOf: (e) => timelineDetailRef(nodeId, tl.sessions, e.id),
         entries: tl.entries,
         emptyText: 'Empty thread.',
         onUndoMemory: _undo,
+        offerActions: OfferActions(
+          isOpen: (id) => !decided.contains(id),
+          onStart: (id) => _offer(id, true),
+          onDismiss: (id) => _offer(id, false),
+        ),
       );
     }
     return Scaffold(

@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 
 import '../models/pagent.dart';
 import '../transport/gateway_client.dart';
@@ -189,6 +190,40 @@ class PAgentsApi {
         await _map('pagent.routine.resume', {'agent_id': agentId, 'slug': slug}),
       );
 
+  /// Usage since [since], or all time when null.
+  Future<PAgentUsage> usage(String agentId, {DateTime? since}) async =>
+      PAgentUsage.fromJson(
+        await _map('pagent.usage', {
+          'agent_id': agentId,
+          if (since != null) 'since': since.toUtc().toIso8601String(),
+        }),
+      );
+
+  /// Sets one setting (notify, proactivity, memory.mode, ...); an empty
+  /// [value] removes it, so the default applies. Returns the commit made.
+  Future<String> setSetting(String agentId, String key, String value) async {
+    final res = await _map('pagent.set', {
+      'agent_id': agentId,
+      'key': key,
+      'value': value,
+    });
+    return res['commit'] as String? ?? '';
+  }
+
+  /// Sends the offer's prompt to its thread.
+  Future<PAgentSendResult> startOffer(String threadId, String offerId) async =>
+      PAgentSendResult.fromJson(
+        await _map('pagent.offer.start', {
+          'thread_id': threadId,
+          'offer_id': offerId,
+        }),
+      );
+
+  Future<void> dismissOffer(String threadId, String offerId) => _call(
+    'pagent.offer.dismiss',
+    {'thread_id': threadId, 'offer_id': offerId},
+  );
+
   /// Returns how many changes were staged for review.
   Future<int> importMemory(String agentId, String content) async {
     final res = await _map('pagent.memory.import', {
@@ -237,6 +272,22 @@ final agentMemoryUsageProvider = FutureProvider.autoDispose
       return AgentMemoryUsage(usage: mem.usage, budget: mem.budget, last: last);
     });
 
+/// The agent's usage over the last seven days. Reloads when the agent list
+/// changes.
+final agentUsageProvider = FutureProvider.autoDispose
+    .family<PAgentUsage, String>((ref, agentId) {
+      ref.watch(pagentsProvider.select((s) => s.agents));
+      return ref
+          .read(pagentsApiProvider)
+          .usage(agentId, since: DateTime.now().subtract(const Duration(days: 7)));
+    });
+
+/// The settings the user chose in this app run, by agent id and key. The node
+/// does not report an agent's current settings, so this is only what was set
+/// here.
+final agentSettingChoicesProvider =
+    StateProvider<Map<String, String>>((ref) => const {});
+
 /// The agent's routines. Reloads when the agent list changes.
 final agentRoutinesProvider = FutureProvider.autoDispose
     .family<List<PAgentRoutine>, String>((ref, agentId) {
@@ -261,6 +312,17 @@ class PAgentsState {
   final String? error; // the last load failed; agents are the last good list
 
   bool isPrimary(PAgent a) => a.primary || (a.id.isNotEmpty && a.id == primary);
+
+  /// The agent id and thread for [threadId], which may be a node-local id (a
+  /// push carries one) or the gateway-qualified id the store holds.
+  (String, PAgentThread)? findThread(String threadId) {
+    for (final e in threads.entries) {
+      for (final t in e.value) {
+        if (t.id == threadId || t.id.endsWith(':$threadId')) return (e.key, t);
+      }
+    }
+    return null;
+  }
 
   bool unread(String agentId) =>
       (threads[agentId] ?? const []).any((t) => t.unread);

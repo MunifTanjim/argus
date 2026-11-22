@@ -3,7 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../models/entry.dart';
-import '../models/pagent.dart' show undoCommit;
+import '../models/pagent.dart' show argusRowText, offerIdOf, undoCommit;
 import '../state/tool_detail.dart';
 import 'code_block.dart';
 import 'item_detail_screen.dart';
@@ -69,6 +69,20 @@ VoidCallback? drillFor(BuildContext context, Entry e, ToolDetailRef ref) {
   return null;
 }
 
+/// What the user can do with an agent's offers in a thread.
+class OfferActions {
+  const OfferActions({
+    required this.isOpen,
+    required this.onStart,
+    required this.onDismiss,
+  });
+
+  /// Whether the offer is still waiting for an answer.
+  final bool Function(String offerId) isOpen;
+  final void Function(String offerId) onStart;
+  final void Function(String offerId) onDismiss;
+}
+
 class EntryRow extends StatelessWidget {
   const EntryRow({
     super.key,
@@ -77,6 +91,7 @@ class EntryRow extends StatelessWidget {
     this.expanded = false,
     this.onToggle,
     this.onUndoMemory,
+    this.offerActions,
   });
 
   final ToolDetailRef detailRef;
@@ -87,6 +102,10 @@ class EntryRow extends StatelessWidget {
   /// Offers an undo on an argus entry that reports a memory change; null
   /// leaves the entry without one.
   final void Function(String commit)? onUndoMemory;
+
+  /// Offers Start and Dismiss on an agent's open offers; null leaves offers
+  /// as plain text.
+  final OfferActions? offerActions;
 
   @override
   Widget build(BuildContext context) {
@@ -140,7 +159,11 @@ class EntryRow extends StatelessWidget {
           onTap: drillFor(context, e, detailRef),
         );
       case EntryKind.argus:
-        return _ArgusEventRow(entry: e, onUndo: onUndoMemory);
+        return _ArgusEventRow(
+          entry: e,
+          onUndo: onUndoMemory,
+          offers: offerActions,
+        );
       case EntryKind.unknown:
         return const SizedBox.shrink();
     }
@@ -643,43 +666,80 @@ class _CompactDivider extends StatelessWidget {
   }
 }
 
-/// Argus's own event in an agent thread: dim, with an undo on a memory change.
+/// Argus's own event in an agent thread: dim, with an undo on a memory or
+/// routine change, and Start and Dismiss on an open offer.
 class _ArgusEventRow extends StatelessWidget {
-  const _ArgusEventRow({required this.entry, this.onUndo});
+  const _ArgusEventRow({required this.entry, this.onUndo, this.offers});
   final Entry entry;
   final void Function(String commit)? onUndo;
+  final OfferActions? offers;
 
   @override
   Widget build(BuildContext context) {
     final e = entry;
-    final text = (e.detail ?? '').isNotEmpty ? e.detail! : (e.event?.kind ?? e.label ?? '');
+    final kind = e.event?.kind;
+    final text = argusRowText(e);
     final commit = undoCommit(e);
+    final offerId = offerIdOf(e);
+    final open = offerId.isNotEmpty && (offers?.isOpen(offerId) ?? false);
+    // A brief is the point of its event, so it shows whole.
+    final lines = kind == 'brief' ? null : 2;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        key: const ValueKey('argus-event'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.terminal, size: 13, color: AppColors.dim),
-          const SizedBox(width: 6),
-          Text('Argus', style: _mono.copyWith(color: AppColors.secondary)),
-          Text('  ·  ${_clockTime(e.timestamp)}', style: _monoDim),
-          if (text.isNotEmpty)
-            Flexible(
-              child: Text(
-                '  $text',
-                style: _monoDim,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
+          Row(
+            key: const ValueKey('argus-event'),
+            children: [
+              const Icon(Icons.terminal, size: 13, color: AppColors.dim),
+              const SizedBox(width: 6),
+              Text('Argus', style: _mono.copyWith(color: AppColors.secondary)),
+              Text('  ·  ${_clockTime(e.timestamp)}', style: _monoDim),
+              if (text.isNotEmpty && kind != 'brief')
+                Flexible(
+                  child: Text(
+                    '  $text',
+                    style: _monoDim,
+                    maxLines: lines,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              if (commit.isNotEmpty && onUndo != null)
+                TextButton(
+                  onPressed: () => onUndo!(commit),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    minimumSize: const Size(0, 28),
+                  ),
+                  child: const Text('Undo'),
+                ),
+            ],
+          ),
+          if (kind == 'brief' && text.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, left: 19),
+              child: appMarkdown(text),
             ),
-          if (commit.isNotEmpty && onUndo != null)
-            TextButton(
-              onPressed: () => onUndo!(commit),
-              style: TextButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                minimumSize: const Size(0, 28),
+          if (open)
+            Padding(
+              padding: const EdgeInsets.only(left: 13),
+              child: Row(
+                children: [
+                  FilledButton(
+                    onPressed: () => offers!.onStart(offerId),
+                    style: FilledButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: const Text('Start'),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () => offers!.onDismiss(offerId),
+                    child: const Text('Dismiss'),
+                  ),
+                ],
               ),
-              child: const Text('Undo'),
             ),
         ],
       ),

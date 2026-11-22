@@ -87,6 +87,27 @@ type PagentCaptureCursor struct {
 	UpdatedAt   int64
 }
 
+type PagentHandoff struct {
+	ID          string
+	RootID      string
+	Depth       int64
+	Ancestors   string
+	FromNode    string
+	FromAgent   string
+	FromName    string
+	FromThread  string
+	FromSession string
+	ToNode      string
+	ToAgent     string
+	ToName      string
+	ToThread    string
+	Request     string
+	State       string
+	Answer      string
+	CreatedAt   int64
+	AnsweredAt  int64
+}
+
 type PagentMemoryProposal struct {
 	ID        string
 	AgentID   string

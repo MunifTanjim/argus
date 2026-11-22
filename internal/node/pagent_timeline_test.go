@@ -180,6 +180,10 @@ func TestEventTextReadsPayloads(t *testing.T) {
 		{evDraftSent, `{"event_id":4,"command":"git push","exit_code":0}`, "Ran approved command: git push"},
 		{evDraftDiscarded, `{"event_id":4}`, "Discarded a drafted action"},
 		{evSkillsMissing, `{"skills":["x"],"message":"Skills not found: x"}`, "Skills not found: x"},
+		{evHandoffAsked, `{"agent":"researcher","task":"find the date"}`, "Asked researcher: find the date"},
+		{evHandoffAnswered, `{"agent":"researcher","text":"3 March.\nSource: the press page."}`, "Answer from researcher: 3 March.\nSource: the press page."},
+		{evHandoffRefused, `{"agent":"x","reason":"can't ask \"x\": it is not an agent you may message"}`, `can't ask "x": it is not an agent you may message`},
+		{evHandoffNoAnswer, `{"agent":"researcher","text":"no answer within 1h"}`, "No answer from researcher: no answer within 1h"},
 		{"other.kind", `{}`, "other.kind"},
 	} {
 		if got := eventText(pagent.Event{Kind: c.kind, Payload: json.RawMessage(c.payload)}); got != c.want {

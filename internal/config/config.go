@@ -179,6 +179,17 @@ type AgentsConfig struct {
 		Hook ApprovalHook
 	}
 	Defaults AgentDefaults
+	// Coordination lets agents ask each other for work.
+	Coordination Coordination
+}
+
+// Coordination limits agent hand-offs.
+type Coordination struct {
+	Enabled            bool
+	MaxDepth           int
+	MaxRequestsPerRoot int
+	// AnswerTimeout is negative when the configured value does not parse.
+	AnswerTimeout time.Duration
 }
 
 // Policy hook modes.
@@ -322,6 +333,10 @@ var defaults = map[string]any{
 	"agents.skills-dir":                               "",
 	"agents.primary":                                  "",
 	"agents.webhook.listen-addr":                      "",
+	"agents.coordination.enabled":                     false,
+	"agents.coordination.max-depth":                   3,
+	"agents.coordination.max-requests-per-root":       12,
+	"agents.coordination.answer-timeout":              "1h",
 	"agents.execution":                                "ask",
 	"agents.approvals.unattended-expiry":              "30m",
 	"agents.approvals.hook.command":                   "",
@@ -460,6 +475,9 @@ func (c Config) Validate() error {
 	if d.Memory.CoreBudget < 0 {
 		return errors.New("agents.defaults.memory.core-budget must be a size such as 24KB")
 	}
+	if c.Agents.Coordination.AnswerTimeout < 0 {
+		return errors.New("agents.coordination.answer-timeout must be a duration such as 1h")
+	}
 	if d.Limits.CatchUpWindow < 0 {
 		return errors.New("agents.defaults.limits.catch-up-window must be a duration such as 12h")
 	}
@@ -574,6 +592,12 @@ func agentsFromViper(v *viper.Viper) AgentsConfig {
 		URL:     strings.TrimSpace(v.GetString("agents.approvals.hook.url")),
 		Mode:    strings.TrimSpace(v.GetString("agents.approvals.hook.mode")),
 		Timeout: days(v, "agents.approvals.hook.timeout"),
+	}
+	a.Coordination = Coordination{
+		Enabled:            v.GetBool("agents.coordination.enabled"),
+		MaxDepth:           v.GetInt("agents.coordination.max-depth"),
+		MaxRequestsPerRoot: v.GetInt("agents.coordination.max-requests-per-root"),
+		AnswerTimeout:      days(v, "agents.coordination.answer-timeout"),
 	}
 	d := &a.Defaults
 	d.Agent = v.GetString(p + "agent")

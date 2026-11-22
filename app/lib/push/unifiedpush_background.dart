@@ -63,6 +63,13 @@ PushMessage decodeUnifiedPush(Uint8List bytes) {
     // Push bypasses the RPC aggregator, so composite session_id here.
     final nodeId = data['node_id'];
     final sessionId = data['session_id'];
+    // An agent push names its thread and agent the same way.
+    if (nodeId != null && nodeId.isNotEmpty) {
+      for (final key in const ['pagent_thread_id', 'pagent_id']) {
+        final v = data[key];
+        if (v != null && v.isNotEmpty) data[key] = compositeId(nodeId, v);
+      }
+    }
     if (nodeId != null &&
         nodeId.isNotEmpty &&
         sessionId != null &&

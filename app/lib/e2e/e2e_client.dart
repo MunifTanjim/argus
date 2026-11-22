@@ -1065,6 +1065,11 @@ class E2EClient implements GatewayClient {
                 r,
           ],
         };
+      case 'pagent.usage' when res is Map<String, dynamic>:
+        return {
+          ...res,
+          'agent_id': compositeId(nodeId, '${res['agent_id'] ?? ''}'),
+        };
       case 'pagent.routine.pause' ||
           'pagent.routine.resume' when res is Map<String, dynamic>:
         return {
@@ -1130,6 +1135,14 @@ class E2EClient implements GatewayClient {
   Future<Object?> _routeByPAgentThread(String method, Object? params) async {
     final (nodeId, local) = _splitIdField(method, params, 'thread_id', 'thread');
     final res = await _callNodeDecoded(nodeId, method, local);
+    if (method == 'pagent.offer.start' && res is Map<String, dynamic>) {
+      return {
+        ...res,
+        'thread_id': compositeId(nodeId, '${res['thread_id'] ?? ''}'),
+        if (_compositeIf(nodeId, res['session_id']).isNotEmpty)
+          'session_id': _compositeIf(nodeId, res['session_id']),
+      };
+    }
     if (method != 'pagent.thread.timeline' || res is! Map<String, dynamic>) {
       return res;
     }

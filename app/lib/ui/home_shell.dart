@@ -77,15 +77,13 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final id = ref.read(pendingOpenThreadProvider);
     if (id == null) return;
     final state = ref.read(pagentsProvider);
-    for (final e in state.threads.entries) {
-      final thread = e.value.where((t) => t.id == id).firstOrNull;
-      if (thread == null) continue;
-      ref.read(pendingOpenThreadProvider.notifier).state = null;
-      Navigator.of(context, rootNavigator: true).push(
-        threadRoute(agentId: e.key, threadId: id, title: thread.title),
-      );
-      return;
-    }
+    final hit = state.findThread(id);
+    if (hit == null) return;
+    final (agentId, thread) = hit;
+    ref.read(pendingOpenThreadProvider.notifier).state = null;
+    Navigator.of(context, rootNavigator: true).push(
+      threadRoute(agentId: agentId, threadId: thread.id, title: thread.title),
+    );
   }
 
   // Deep-link a tapped notification's session. Keep the request until its

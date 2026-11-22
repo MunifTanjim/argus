@@ -85,6 +85,17 @@ String routineProgress(PAgentRoutine r) {
   ].where((x) => x.isNotEmpty).join(' · ');
 }
 
+/// Usage in words, like "3 sessions · $1.20 · 15.2k tokens". Cost and tokens
+/// are left out when the agent's CLI reports none.
+String usageText(PAgentUsageRow r) {
+  String k(int v) => v >= 1000 ? '${(v / 1000).toStringAsFixed(1)}k' : '$v';
+  return [
+    '${r.sessions} ${r.sessions == 1 ? 'session' : 'sessions'}',
+    if (r.cost > 0) '\$${r.cost.toStringAsFixed(2)}',
+    if (r.tokens > 0) '${k(r.tokens)} tokens',
+  ].join(' · ');
+}
+
 /// A routine's state in words.
 String routineStateText(PAgentRoutine r) => switch (r.state) {
   'paused' => r.pausedReason.isEmpty ? 'paused' : 'paused (${r.pausedReason})',

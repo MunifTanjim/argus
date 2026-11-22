@@ -235,6 +235,20 @@ argus agent usage scout --since 7d
 
 `set` changes one setting in the agent's `agent.yaml` and keeps the change in its history; an empty value goes back to the default. `usage` shows sessions, cost and tokens per agent, split by who started the work: you (chats and test runs), a routine, a check-back or an event. Cost and tokens appear only when the agent's coding CLI reports them.
 
+## Agents asking agents
+
+With `agents.coordination.enabled` on, an agent can ask another agent for work. Each agent lists the agents it may ask in its `agent.yaml`:
+
+```yaml
+can-message: [researcher, reviewer]
+```
+
+The list is empty by default. An agent that is not on the list, or does not exist, is refused the same way. Agents on this node are found first, then agents on your other nodes.
+
+The other agent does the work in a background run, started by the hand-off, and reports like any run. Its summary goes back word for word: it appears in the asking agent's thread under the answering agent's name, and the asking agent continues from it. If the run fails, or no answer comes within `answer-timeout` (1h), the asking thread records that there was no answer.
+
+A request can lead to further hand-offs, up to `max-depth` (3) deep and `max-requests-per-root` (12) in all. An agent is never asked again by a request it is already working on. Every refusal is recorded in the asking thread. Work started by a hand-off is unattended.
+
 ## Approvals
 
 Agent sessions run in the coding agent's normal permission mode, so it asks before actions that are not read-only. Argus answers those requests for agent sessions. It never sees what the coding agent runs without asking.

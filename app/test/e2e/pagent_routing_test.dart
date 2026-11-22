@@ -307,6 +307,57 @@ void main() {
     await f.client.close();
   });
 
+  test('usage, set and offers route to their node', () async {
+    final f = await _connect(
+      (m, p) => _json(null),
+      (m, p) => switch (m) {
+        'pagent.usage' => _json({
+          'agent_id': 'a1',
+          'rows': [],
+          'total': {'sessions': 2},
+        }),
+        'pagent.set' => _json({'commit': 'c1'}),
+        'pagent.offer.start' => _json({'thread_id': 't1', 'session_id': 's1'}),
+        _ => _json(null),
+      },
+    );
+    final usage = await f.client.call('pagent.usage', {
+      'agent_id': 'B:a1',
+      'since': '2026-11-15T00:00:00Z',
+    }) as Map;
+    expect(usage['agent_id'], 'B:a1');
+    expect(_params(f.b.requests.last.params)['agent_id'], 'a1');
+
+    final set = await f.client.call('pagent.set', {
+      'agent_id': 'B:a1',
+      'key': 'notify',
+      'value': 'off',
+    }) as Map;
+    expect(set['commit'], 'c1');
+    expect(_params(f.b.requests.last.params), {
+      'agent_id': 'a1',
+      'key': 'notify',
+      'value': 'off',
+    });
+
+    final start = await f.client.call('pagent.offer.start', {
+      'thread_id': 'B:t1',
+      'offer_id': 'of_1',
+    }) as Map;
+    expect(start, {'thread_id': 'B:t1', 'session_id': 'B:s1'});
+    expect(_params(f.b.requests.last.params), {
+      'thread_id': 't1',
+      'offer_id': 'of_1',
+    });
+    await f.client.call('pagent.offer.dismiss', {
+      'thread_id': 'B:t1',
+      'offer_id': 'of_1',
+    });
+    expect(f.b.requests.last.method, 'pagent.offer.dismiss');
+    expect(f.a.requests.where((r) => r.method.startsWith('pagent.')), isEmpty);
+    await f.client.close();
+  });
+
   test('routine calls route by agent and composite their results', () async {
     final f = await _connect(
       (m, p) => _json(null),

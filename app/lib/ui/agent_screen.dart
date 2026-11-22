@@ -108,6 +108,18 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
     await _refresh();
   }
 
+  Future<void> _setSetting(PAgent a, _SettingSpec spec, String value) async {
+    if (!_reachable(a)) return;
+    try {
+      await ref.read(pagentsApiProvider).setSetting(a.id, spec.key, value);
+    } catch (e) {
+      if (mounted) _say('set: ${actionError(e)}');
+      return;
+    }
+    final n = ref.read(agentSettingChoicesProvider.notifier);
+    n.state = {...n.state, '${a.id}|${spec.key}': value};
+  }
+
   void _openMemory(PAgent a) {
     if (!_reachable(a)) return;
     Navigator.of(context).push(agentMemoryRoute(a.id));
@@ -214,6 +226,21 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
                 agentId: agent.id,
                 onAction: (r, v) => _routineAction(agent, r, v),
               ),
+            const SizedBox(height: 16),
+            const _Heading('Usage'),
+            _UsageLine(agentId: agent.id, unreachable: agent.unreachable),
+            const SizedBox(height: 16),
+            const _Heading('Settings'),
+            for (final spec in _settings)
+              _SettingRow(
+                spec: spec,
+                choice: ref.watch(
+                  agentSettingChoicesProvider.select(
+                    (m) => m['${agent.id}|${spec.key}'],
+                  ),
+                ),
+                onChanged: (v) => _setSetting(agent, spec, v),
+              ),
             if (usage != null) ...[
               const SizedBox(height: 16),
               InkWell(
@@ -233,6 +260,90 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
         ),
       ),
     );
+  }
+}
+
+class _SettingSpec {
+  const _SettingSpec(this.key, this.title, this.options);
+  final String key;
+  final String title;
+  final List<(String, String)> options; // value, label
+}
+
+const _settings = [
+  _SettingSpec('notify', 'Notifications', [
+    ('all', 'All'),
+    ('needs-you', 'Needs you'),
+    ('off', 'Off'),
+  ]),
+  _SettingSpec('proactivity', 'Proactivity', [
+    ('off', 'Off'),
+    ('low', 'Low'),
+    ('default', 'Default'),
+    ('high', 'High'),
+  ]),
+  _SettingSpec('memory.mode', 'Memory', [
+    ('auto', 'Auto'),
+    ('review', 'Review'),
+    ('off', 'Off'),
+  ]),
+];
+
+/// One agent setting. The node does not report what an agent has set, so
+/// nothing is selected until the user picks here; picking the selected value
+/// again removes the setting, so the default applies.
+class _SettingRow extends StatelessWidget {
+  const _SettingRow({
+    required this.spec,
+    required this.choice,
+    required this.onChanged,
+  });
+
+  final _SettingSpec spec;
+  final String? choice;
+  final void Function(String value) onChanged;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(spec.title, style: const TextStyle(color: AppColors.dim)),
+        const SizedBox(height: 4),
+        SegmentedButton<String>(
+          key: ValueKey('setting-${spec.key}'),
+          emptySelectionAllowed: true,
+          showSelectedIcon: false,
+          segments: [
+            for (final (v, label) in spec.options)
+              ButtonSegment(value: v, label: Text(label)),
+          ],
+          selected: choice == null || choice!.isEmpty ? {} : {choice!},
+          onSelectionChanged: (s) => onChanged(s.isEmpty ? '' : s.first),
+        ),
+      ],
+    ),
+  );
+}
+
+class _UsageLine extends ConsumerWidget {
+  const _UsageLine({required this.agentId, required this.unreachable});
+
+  final String agentId;
+  final bool unreachable;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (unreachable) return const _Note(agentOffline);
+    final usage = ref.watch(agentUsageProvider(agentId));
+    final u = usage.value;
+    if (u == null) {
+      return usage.hasError
+          ? const _Note('usage unavailable')
+          : const _Note('loading usage…');
+    }
+    return _Note('Last 7 days · ${usageText(u.total)}');
   }
 }
 

@@ -262,6 +262,19 @@ func eventText(ev pagent.Event) string {
 		return "Sent the approved action to the agent"
 	case evDraftDiscarded:
 		return "Discarded a drafted action"
+	case evHandoffAsked:
+		return with("Asked "+cmp.Or(str("agent"), "an agent"), str("task"))
+	case evHandoffAnswered:
+		// The answer is kept word for word.
+		s := "Answer from " + cmp.Or(str("agent"), "an agent")
+		if t := strings.TrimSpace(str("text")); t != "" {
+			s += ": " + t
+		}
+		return s
+	case evHandoffRefused:
+		return cmp.Or(str("reason"), "Could not ask "+cmp.Or(str("agent"), "the agent"))
+	case evHandoffNoAnswer:
+		return with("No answer from "+cmp.Or(str("agent"), "the agent"), str("text"))
 	}
 	return cmp.Or(str("message"), ev.Kind)
 }

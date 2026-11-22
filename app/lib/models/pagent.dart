@@ -443,3 +443,81 @@ class PAgentRoutine {
     error: j['error'] as String? ?? '',
   );
 }
+
+/// The usage of the work one kind of starter began.
+class PAgentUsageRow {
+  const PAgentUsageRow({
+    this.startedBy = '',
+    this.sessions = 0,
+    this.cost = 0,
+    this.tokens = 0,
+  });
+  final String startedBy;
+  final int sessions;
+  final double cost;
+  final int tokens;
+
+  factory PAgentUsageRow.fromJson(Object? j) {
+    final m = j is Map ? j : const {};
+    return PAgentUsageRow(
+      startedBy: m['started_by'] as String? ?? '',
+      sessions: (m['sessions'] as num?)?.toInt() ?? 0,
+      cost: (m['cost'] as num?)?.toDouble() ?? 0,
+      tokens: (m['tokens'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+/// An agent's usage by starter, and in total. Cost and tokens count only what
+/// the agent's CLI reports.
+class PAgentUsage {
+  const PAgentUsage({this.rows = const [], this.total = const PAgentUsageRow()});
+  final List<PAgentUsageRow> rows;
+  final PAgentUsageRow total;
+
+  factory PAgentUsage.fromJson(Map<String, dynamic> j) => PAgentUsage(
+    rows: [
+      for (final r in (j['rows'] as List?) ?? const []) PAgentUsageRow.fromJson(r),
+    ],
+    total: PAgentUsageRow.fromJson(j['total']),
+  );
+}
+
+/// The id of the offer an argus entry carries, or '' when it is not one.
+String offerIdOf(Entry e) {
+  if (e.kind != EntryKind.argus || e.event?.kind != 'offer') return '';
+  final p = e.event?.payload;
+  return p is Map ? (p['offer_id'] as String? ?? '') : '';
+}
+
+/// The ids of the offers a timeline shows as started or dismissed.
+Set<String> decidedOffers(Iterable<Entry> entries) {
+  final out = <String>{};
+  for (final e in entries) {
+    final k = e.event?.kind;
+    if (e.kind != EntryKind.argus || (k != 'offer.started' && k != 'offer.dismissed')) {
+      continue;
+    }
+    final p = e.event?.payload;
+    final id = p is Map ? p['offer_id'] : null;
+    if (id is String && id.isNotEmpty) out.add(id);
+  }
+  return out;
+}
+
+/// What an argus entry says: the node's text, or for a brief, offer or health
+/// event the node left bare, the payload's own words.
+String argusRowText(Entry e) {
+  final kind = e.event?.kind ?? e.label ?? '';
+  final detail = e.detail ?? '';
+  if (detail.isNotEmpty && detail != kind) return detail;
+  final p = e.event?.payload is Map ? e.event!.payload as Map : const {};
+  String s(String k) => p[k] is String ? (p[k] as String).trim() : '';
+  final own = switch (kind) {
+    'brief' => s('text'),
+    'offer' => [s('title'), s('details')].where((x) => x.isNotEmpty).join(': '),
+    'health' => s('message'),
+    _ => '',
+  };
+  return own.isNotEmpty ? own : kind;
+}

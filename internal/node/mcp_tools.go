@@ -291,6 +291,18 @@ func mcpTools() []mcpTool {
 		},
 		{
 			Tool: mcphttp.Tool{
+				Name: "ask_agent",
+				Description: "Ask another agent to do work for you. agent is its name, and it must be one your can-message list allows; task says what to do, bounds what it may and may not do, done_when what a good answer looks like; context is optional background. " +
+					"The other agent works on it in a background run; its answer arrives as a new prompt in this conversation. End your turn after asking; do not wait or poll.",
+			},
+			props:       []mcpProp{required("agent", "string"), required("task", "string"), required("bounds", "string"), required("done_when", "string"), optional("context", "string")},
+			needsCaller: true,
+			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p askAgentParams) (any, error) {
+				return d.mcpAskAgent(ctx, caller, p)
+			}),
+		},
+		{
+			Tool: mcphttp.Tool{
 				Name: "report_run",
 				Description: "Report the result of the routine run you are doing; call it once, before you finish. Works only in routine runs. " +
 					"result is progress, no_change, blocked, needs_you or done; summary is one or two sentences for the user; actions_done, actions_pending, unverified and sources are lists of short strings; " +

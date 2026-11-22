@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 
 	"github.com/MunifTanjim/argus/internal/session"
@@ -49,7 +50,35 @@ const (
 	MethodOrchPeerParentEnded = "orch.peer.parent_ended"
 	// request: OrchPeerStateParams; result: nil. Needs cross_node_orch 2.
 	MethodOrchPeerState = "orch.peer.state"
+	// request: OrchPeerHandoffParams; result: nil. An agent of the sending node
+	// asks an agent of the receiver for work.
+	MethodOrchPeerHandoff = "orch.peer.handoff"
+	// request: OrchPeerHandoffAnswerParams; result: nil. The answer to a
+	// hand-off the receiver sent.
+	MethodOrchPeerHandoffAnswer = "orch.peer.handoff_answer"
 )
+
+// OrchPeerHandoffParams is a hand-off from an agent of the sending node.
+// Ancestors are the agents up the chain as "node:agent", the asker last.
+type OrchPeerHandoffParams struct {
+	HandoffID string          `json:"handoff_id"`
+	RootID    string          `json:"root_id"`
+	Depth     int             `json:"depth"`
+	Ancestors []string        `json:"ancestors"`
+	FromAgent string          `json:"from_agent"`
+	FromName  string          `json:"from_name"`
+	ToAgent   string          `json:"to_agent"`
+	Request   json.RawMessage `json:"request"`
+}
+
+// OrchPeerHandoffAnswerParams ends a hand-off: State is answered or
+// no_answer; Text is the answer verbatim, or why there is none.
+type OrchPeerHandoffAnswerParams struct {
+	HandoffID string `json:"handoff_id"`
+	State     string `json:"state"`
+	Result    string `json:"result,omitempty"`
+	Text      string `json:"text"`
+}
 
 // OrchPeerDeliverParams carries a message the sending node created, with its ID and timestamps.
 type OrchPeerDeliverParams struct {
