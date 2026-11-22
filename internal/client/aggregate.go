@@ -72,6 +72,9 @@ var pagentAddressed = map[string]bool{
 	api.MethodPAgentMemoryImport:    true,
 	api.MethodPAgentMemoryProposals: true,
 	api.MethodPAgentActivity:        true,
+	api.MethodPAgentSecretSet:       true,
+	api.MethodPAgentSecretList:      true,
+	api.MethodPAgentSecretRm:        true,
 
 	api.MethodPAgentRoutineList:       true,
 	api.MethodPAgentRoutineRun:        true,

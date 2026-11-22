@@ -198,6 +198,7 @@ type Node struct {
 	modPerms   map[string]*modPermission // by request id
 
 	approvals approvalState // agent approval cards, thread grants and denials
+	secrets   secretState   // the agent secret store's key
 
 	subsMu      sync.Mutex
 	conns       map[api.Notifier]*connSubs // per-connection transcript subscriptions

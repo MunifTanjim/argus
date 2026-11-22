@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -272,10 +273,10 @@ func (d *Node) recordDraft(ctx context.Context, sc approvalScope, a policy.Actio
 		"session_id": sc.sessionID,
 	}
 	if len(a.Input) > 0 && json.Valid(a.Input) {
-		payload["input"] = a.Input
+		payload["input"] = d.redactJSON(ctx, sc.agent.ID, a.Input)
 	}
 	if line, ok := a.ShellLine(); ok {
-		payload["command"] = line
+		payload["command"] = d.redact(ctx, sc.agent.ID, line)
 	}
 	if err := d.pagentEvent(ctx, sc.thread.ID, evDraft, sc.thread.StartedBy, payload, sc.sessionID, 0); err != nil {
 		d.log.Warn("pagent: record draft", "thread", sc.thread.ID, "err", err)
@@ -488,7 +489,10 @@ func (d *Node) saveAllowRule(ctx context.Context, a pagent.Agent, th string, r p
 }
 
 // enrichCard turns ix into an approval card.
-func enrichCard(ix *session.Interaction, c *approvalCard) {
+func (d *Node) enrichCard(ctx context.Context, ix *session.Interaction, c *approvalCard) {
+	agentID := c.scope.agent.ID
+	ix.ToolInput = d.redact(ctx, agentID, ix.ToolInput)
+	ix.Message = d.redact(ctx, agentID, ix.Message)
 	ix.Options = slices.Clone(approvalOptions)
 	ix.Classes = slices.Clone(c.action.Class)
 	ix.StartedBy = c.scope.thread.StartedBy
@@ -509,7 +513,7 @@ func (d *Node) approvalOverlay(s session.Session) session.Session {
 		return s
 	}
 	cp := *ix
-	enrichCard(&cp, c)
+	d.enrichCard(context.Background(), &cp, c)
 	s.Interaction = &cp
 	return s
 }
@@ -768,12 +772,12 @@ func (d *Node) handlePAgentDraftSend(ctx context.Context, params json.RawMessage
 		}
 		go func() {
 			defer unlock()
-			d.runDraft(th.ID, a.Dir, ev.ID, line)
+			d.runDraft(a, th.ID, ev.ID, line)
 		}()
 		return struct{}{}, nil
 	}
 	defer unlock()
-	send := api.PAgentSendParams{AgentID: a.ID, Text: "The user approved: " + draftAction(dp) + ". Do it now."}
+	send := api.PAgentSendParams{AgentID: a.ID, Text: "The user approved: " + secretRefs(draftAction(dp)) + ". Do it now."}
 	if th.Kind == threadChat && th.Status == pagent.ThreadActive {
 		send.ThreadID = th.ID
 	} else if latest, ok, err := d.pagents.LatestThread(ctx, a.ID, threadChat); err == nil && ok {
@@ -819,12 +823,18 @@ func draftAction(dp draftPayload) string {
 }
 
 // runDraft runs a shell draft in the agent's directory and records its output.
-func (d *Node) runDraft(threadID, dir string, eventID int64, line string) {
+func (d *Node) runDraft(a pagent.Agent, threadID string, eventID int64, line string) {
 	ctx, cancel := context.WithTimeout(context.Background(), draftTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "sh", "-c", line)
-	cmd.Dir = dir
+	secrets := d.agentSecrets(ctx, a.ID)
+	cmd := exec.CommandContext(ctx, "sh", "-c", pagent.Unredact(line, secrets))
+	cmd.Dir = a.Dir
+	cmd.Env = os.Environ()
+	for _, s := range secrets {
+		cmd.Env = append(cmd.Env, s.Name+"="+s.Value)
+	}
 	out, err := cmd.CombinedOutput()
+	out = []byte(pagent.Redact(string(out), secrets))
 	if len(out) > draftOutputMax {
 		out = append(out[:draftOutputMax:draftOutputMax], "\n[output truncated]"...)
 	}
@@ -872,3 +882,8 @@ func (d *Node) revokeOnce(threadID, key string) {
 		delete(d.approvals.once[threadID], key)
 	}
 }
+
+var secretMark = regexp.MustCompile(`«([A-Z_][A-Z0-9_]*)»`)
+
+// secretRefs turns redaction marks into variable references for the agent.
+func secretRefs(text string) string { return secretMark.ReplaceAllString(text, "$$$1") }

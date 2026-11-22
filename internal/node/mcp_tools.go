@@ -291,6 +291,16 @@ func mcpTools() []mcpTool {
 		},
 		{
 			Tool: mcphttp.Tool{
+				Name:        "request_secret",
+				Description: "Ask the user for a secret you need, such as an API token. name is the environment variable to store it under (like GH_TOKEN); description says what it is for. The value goes to the user's secret store, never to you: the call returns at once, end your turn, and you get a message naming the variable once it is stored. New sessions have it in their environment.",
+			},
+			props: []mcpProp{required("name", "string"), required("description", "string")}, needsCaller: true,
+			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p requestSecretParams) (any, error) {
+				return d.mcpRequestSecret(ctx, caller, p)
+			}),
+		},
+		{
+			Tool: mcphttp.Tool{
 				Name: "ask_agent",
 				Description: "Ask another agent to do work for you. agent is its name, and it must be one your can-message list allows; task says what to do, bounds what it may and may not do, done_when what a good answer looks like; context is optional background. " +
 					"The other agent works on it in a background run; its answer arrives as a new prompt in this conversation. End your turn after asking; do not wait or poll.",

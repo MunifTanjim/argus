@@ -49,3 +49,35 @@ type PAgentActivity struct {
 	Hook      string    `json:"hook,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// Agent secrets.
+const (
+	MethodPAgentSecretSet  = "pagent.secret.set"  // request: PAgentSecretSetParams; result: nil
+	MethodPAgentSecretList = "pagent.secret.list" // request: PAgentRef; result: PAgentSecretListResult
+	MethodPAgentSecretRm   = "pagent.secret.rm"   // request: PAgentSecretRef; result: nil
+)
+
+// PAgentSecretSetParams stores Value under Name (an environment variable
+// name) for the agent's sessions.
+type PAgentSecretSetParams struct {
+	AgentID     string `json:"agent_id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Value       string `json:"value"`
+}
+
+type PAgentSecretRef struct {
+	AgentID string `json:"agent_id"`
+	Name    string `json:"name"`
+}
+
+type PAgentSecretListResult struct {
+	Secrets []PAgentSecretInfo `json:"secrets"`
+}
+
+// PAgentSecretInfo describes a secret; its value is never sent.
+type PAgentSecretInfo struct {
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}

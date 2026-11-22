@@ -316,3 +316,19 @@ Every decision is recorded:
 argus agent activity scout
 argus agent activity scout --unattended
 ```
+
+## Secrets
+
+An agent can have secrets, such as API tokens. They are kept on the node, encrypted, and never written to the agent's files, memory or history.
+
+```sh
+argus agent secret set scout GH_TOKEN --description "GitHub token for issues"
+argus agent secret list scout
+argus agent secret rm scout GH_TOKEN
+```
+
+`set` reads the value without showing it, or from standard input when it is piped in; the value is never a command-line argument. The agent's sessions get each secret as an environment variable, and the agent's instructions list the names and descriptions only. An agent can also ask you for a secret it needs; your answer is stored the same way, and the agent is told only the variable's name. A secret given that way reaches the agent's next session.
+
+The agent and the tools it runs can read these variables. Secrets keep values out of transcripts, memory and history; they do not hide them from the agent. Where a known secret value would appear in approval requests, drafts, activity or memory capture, Argus shows `«NAME»` instead.
+
+Secrets reach Claude Code and pi sessions. Codex and OpenCode sessions run in a shared background service and don't get them.

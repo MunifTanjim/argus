@@ -319,7 +319,7 @@ func (d *Node) pagentEnsureSession(ctx context.Context, a pagent.Agent, th pagen
 	case !resumable(cli) || prev.AgentSessionID == "":
 		reason = "the previous session cannot be resumed"
 	default:
-		sid, err := d.resumeFn(ctx, cli, prev.AgentSessionID, a.Dir, "")
+		sid, err := d.resumeFn(d.withAgentSecrets(ctx, a.ID), cli, prev.AgentSessionID, a.Dir, "")
 		starting := errors.Is(err, errResumeStarting)
 		if err == nil || (starting && sid != "") {
 			if err := s.InsertThreadSession(ctx, pagent.ThreadSession{
@@ -378,6 +378,7 @@ func (d *Node) pagentInstructions(ctx context.Context, a pagent.Agent, th pagent
 	if err != nil {
 		return pagentErr("read memory: %v", err)
 	}
+	in.Secrets = d.secretList(ctx, a.ID)
 	if err := pagent.WriteInstructions(ctx, a.Dir, set.Agent, in); err != nil {
 		return pagentErr("write instructions: %v", err)
 	}
@@ -391,7 +392,7 @@ func (d *Node) pagentSpawn(ctx context.Context, a pagent.Agent, th pagent.Thread
 	if ps, ok := ad.(adapter.SessionIDPresetter); ok && ps.PresetsSessionID() {
 		presetID = uuid.NewString()
 	}
-	spawned, err := d.spawnFn(ctx, api.SpawnParams{Agent: cli, Cwd: a.Dir, Model: set.Model, Prompt: prompt}, presetID)
+	spawned, err := d.spawnFn(d.withAgentSecrets(ctx, a.ID), api.SpawnParams{Agent: cli, Cwd: a.Dir, Model: set.Model, Prompt: prompt}, presetID)
 	d.noteSpawn(ctx, a, err)
 	if err != nil {
 		return "", err

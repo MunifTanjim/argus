@@ -981,6 +981,10 @@ type RespondParams struct {
 	Kind        string `json:"kind,omitempty"`
 	OptionIndex int    `json:"option_index,omitempty"`
 	Text        string `json:"text,omitempty"`
+
+	// SecretValue answers a secret interaction. The node stores it and never
+	// types it into the session.
+	SecretValue string `json:"secret_value,omitempty"`
 }
 
 // HookResult is the node's reply to a hook.event call. Output is the

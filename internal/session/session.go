@@ -104,6 +104,9 @@ const (
 	// InteractionHandoff: a persistent agent asks the user to do a step it
 	// cannot (take over the terminal, then mark it done).
 	InteractionHandoff InteractionKind = "handoff"
+	// InteractionSecret: a persistent agent asks the user for a secret value,
+	// which is stored on the node and never shown to the agent.
+	InteractionSecret InteractionKind = "secret"
 )
 
 // QuestionSpec is one question within an AskUserQuestion interaction (a call may
@@ -166,6 +169,8 @@ type Interaction struct {
 	Classes []string `json:"classes,omitempty"`
 	// StartedBy is how the agent work that asks was started (you, routine, ...).
 	StartedBy string `json:"started_by,omitempty"`
+	// SecretName is the variable a secret interaction stores its value under.
+	SecretName string `json:"secret_name,omitempty"`
 }
 
 // Summary is a cached transcript digest for list views, computed node-side on hook

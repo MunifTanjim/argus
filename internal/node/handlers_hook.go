@@ -78,6 +78,9 @@ func (d *Node) handleSessionRespond(ctx context.Context, params json.RawMessage)
 	if ok && rid == handoffRequestID {
 		return nil, d.respondHandoff(ctx, s, p)
 	}
+	if ok && isSecretRequest(rid) {
+		return nil, d.respondSecret(ctx, s, rid, p)
+	}
 	if pd := d.claimPending(p.SessionID, rid); pd != nil {
 		pd.ch <- p
 		d.log.Info("respond delivered to parked decision", "session", p.SessionID, "request", rid, "kind", p.Kind)

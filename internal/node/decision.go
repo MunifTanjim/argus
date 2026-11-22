@@ -75,7 +75,7 @@ func (d *Node) awaitDecision(ctx context.Context, a adapter.Adapter, sid, id str
 				card = d.openCard(ctx, sc, id, v, false)
 				defer d.takeCard(card)
 				closed = card.closed
-				enrichCard(ix, card)
+				d.enrichCard(ctx, ix, card)
 			}
 		}
 	}

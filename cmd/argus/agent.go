@@ -43,7 +43,7 @@ are registered by name; where two nodes have an agent with the same name, use
 		agentCreate(dial), agentAdd(dial), agentList(dial), agentShow(dial),
 		agentRename(dial), agentForget(dial), agentPrimary(dial), agentChat(dial), agentThreads(dial), agentMemory(dial),
 		agentUsage(dial), agentSet(dial),
-		agentActivity(dial),
+		agentActivity(dial), agentSecret(dial),
 	)
 	return cmd
 }

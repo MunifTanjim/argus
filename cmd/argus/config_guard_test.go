@@ -29,6 +29,7 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"argus-managed":       true, // `hook` only: install marker, parsed and ignored
 		"argus-log-file":      true, // `start` only: detached child's log path, set by the TUI
 		"unattended":          true, // `agent activity` only: output filter
+		"description":         true, // `agent secret set` only: per-secret text
 		"redact":              true, // `view` only: offline viewer flag, not a node/client setting
 		"json":                true, // `project list` only: output format, not a node/client setting
 		"source":              true, // `workspace create` only: what the name argument is

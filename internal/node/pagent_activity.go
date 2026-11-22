@@ -23,10 +23,12 @@ func (d *Node) recordActivity(ctx context.Context, sc approvalScope, a policy.Ac
 	if d.pagents == nil {
 		return
 	}
+	secrets := d.agentSecrets(ctx, sc.agent.ID)
+	r := func(s string) string { return pagent.Redact(s, secrets) }
 	row := pagent.Activity{
 		AgentID: sc.agent.ID, ThreadID: sc.thread.ID, SessionID: sc.sessionID, StartedBy: sc.thread.StartedBy,
-		Tool: a.Tool, Target: a.Target, Class: strings.Join(a.Class, ","),
-		Decision: decision, DecidedBy: by, Rule: rule, Reason: reason, Hook: hook,
+		Tool: a.Tool, Target: r(a.Target), Class: strings.Join(a.Class, ","),
+		Decision: decision, DecidedBy: by, Rule: r(rule), Reason: r(reason), Hook: r(hook),
 	}
 	if _, err := d.pagents.InsertActivity(context.WithoutCancel(ctx), row); err != nil {
 		d.log.Warn("pagent: record activity", "agent", sc.agent.ID, "err", err)

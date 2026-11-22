@@ -251,7 +251,7 @@ func (d *Node) captureExtract(ctx context.Context, a pagent.Agent, set pagent.Se
 		return err
 	}
 
-	reply, err := ex.Extract(ctx, memory.BuildCapturePrompt(mem, user, topics, chunk))
+	reply, err := ex.Extract(ctx, d.redact(ctx, a.ID, memory.BuildCapturePrompt(mem, user, topics, chunk)))
 	if err != nil {
 		return err
 	}
