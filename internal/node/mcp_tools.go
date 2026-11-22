@@ -246,6 +246,41 @@ func mcpTools() []mcpTool {
 				return d.rename(ctx, p.SessionID, p.Name)
 			}),
 		},
+		{
+			Tool: mcphttp.Tool{
+				Name: "remember",
+				Description: "Save, change or forget one thing in your long-term memory. action is add, update or forget; text is the single-line fact (add, update); match is a substring of exactly one existing entry (update, forget); until is an optional YYYY-MM-DD date after which the fact no longer holds. " +
+					"scope agent (default) is your own memory; scope profile is shared with the user's other agents and always goes to the user for review. Depending on your memory settings the change is saved at once or left for the user to review. Works only in chats. Never save credentials.",
+			},
+			props: []mcpProp{
+				{name: "action", kind: "string", required: true, enum: enumOf("add", "update", "forget")},
+				optional("text", "string"), optional("match", "string"), optional("until", "string"),
+				{name: "scope", kind: "string", enum: enumOf("agent", "profile")},
+			}, needsCaller: true,
+			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p rememberParams) (any, error) {
+				return d.mcpRemember(ctx, caller, p)
+			}),
+		},
+		{
+			Tool: mcphttp.Tool{
+				Name:        "propose_instructions",
+				Description: "Propose a rewrite of your own instructions (your job description). instructions is the full new text; reason says why. It is never applied directly: the user reviews it and accepts or rejects.",
+			},
+			props: []mcpProp{required("instructions", "string"), required("reason", "string")}, needsCaller: true,
+			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p proposeInstructionsParams) (any, error) {
+				return d.mcpProposeInstructions(ctx, caller, p)
+			}),
+		},
+		{
+			Tool: mcphttp.Tool{
+				Name:        "request_handoff",
+				Description: "Ask the user to do a step you cannot, such as logging in or solving a captcha. reason says why; steps says what to do. The call returns at once; end your turn. The user may take over your terminal, and you get a message when they are done.",
+			},
+			props: []mcpProp{required("reason", "string"), required("steps", "string")}, needsCaller: true,
+			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p requestHandoffParams) (any, error) {
+				return d.mcpRequestHandoff(ctx, caller, p)
+			}),
+		},
 	}
 	return tools
 }

@@ -1647,6 +1647,9 @@ type PAgentMemoryProposal struct {
 	AgentID   string           `json:"agent_id"`
 	ThreadID  string           `json:"thread_id,omitempty"`
 	Source    string           `json:"source"`
+	Kind      string           `json:"kind,omitempty"` // "instructions" for an instruction rewrite
+	Text      string           `json:"text,omitempty"`
+	Reason    string           `json:"reason,omitempty"`
 	Ops       []PAgentMemoryOp `json:"ops"`
 	Log       string           `json:"log,omitempty"`
 	CreatedAt time.Time        `json:"created_at"`

@@ -54,6 +54,9 @@ func lockMemory(key string) func() {
 
 // memoryProposal is the ops column of a proposal row.
 type memoryProposal struct {
+	Kind   string               `json:"kind,omitempty"`
+	Text   string               `json:"text,omitempty"`
+	Reason string               `json:"reason,omitempty"`
 	Source string               `json:"source"`
 	Ops    []api.PAgentMemoryOp `json:"ops"`
 	Log    string               `json:"log,omitempty"`
@@ -738,6 +741,7 @@ func (d *Node) handlePAgentMemoryProposals(ctx context.Context, params json.RawM
 		}
 		res.Proposals = append(res.Proposals, api.PAgentMemoryProposal{
 			ID: pr.ID, AgentID: pr.AgentID, ThreadID: pr.ThreadID, Source: body.Source,
+			Kind: body.Kind, Text: body.Text, Reason: body.Reason,
 			Ops: body.Ops, Log: body.Log, CreatedAt: pr.CreatedAt,
 		})
 	}
@@ -779,13 +783,24 @@ func (d *Node) handlePAgentMemoryDecide(ctx context.Context, params json.RawMess
 		d.notifyConns(api.MethodPAgentChanged)
 		return api.PAgentMemoryDecideResult{}, nil
 	}
-	set := d.pagentSettings(a)
-	if set.MemoryMode == memoryModeOff {
-		return nil, pagentErr("memory is off for this agent")
-	}
 	var body memoryProposal
 	if err := json.Unmarshal(pr.Ops, &body); err != nil {
 		return nil, pagentErr("bad proposal: %v", err)
+	}
+	if body.Kind == proposalKindInstructions {
+		hash, err := d.applyInstructionsProposal(ctx, a, pr, body)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.DecideProposal(ctx, pr.ID, "accepted"); err != nil {
+			return nil, pagentErr("%v", err)
+		}
+		d.notifyConns(api.MethodPAgentChanged)
+		return api.PAgentMemoryDecideResult{Commit: hash}, nil
+	}
+	set := d.pagentSettings(a)
+	if set.MemoryMode == memoryModeOff {
+		return nil, pagentErr("memory is off for this agent")
 	}
 	res, err := d.commitMemory(ctx, a, set, pr.ThreadID, body.Source, fromAPIOps(body.Ops), body.Log)
 	if err != nil {

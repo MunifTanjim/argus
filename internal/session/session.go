@@ -101,6 +101,9 @@ const (
 	// InteractionIdle: Claude finished and is waiting for the next message, or a
 	// generic notification needing attention.
 	InteractionIdle InteractionKind = "idle"
+	// InteractionHandoff: a persistent agent asks the user to do a step it
+	// cannot (take over the terminal, then mark it done).
+	InteractionHandoff InteractionKind = "handoff"
 )
 
 // QuestionSpec is one question within an AskUserQuestion interaction (a call may
@@ -144,6 +147,8 @@ type Interaction struct {
 	// Questions holds the AskUserQuestion question(s) (>=1 when Kind is question).
 	Questions []QuestionSpec `json:"questions,omitempty"`
 	Plan      string         `json:"plan,omitempty"` // ExitPlanMode plan text
+	// Steps are the instructions of a handoff interaction.
+	Steps string `json:"steps,omitempty"`
 	// Options, when set, are server-built decision choices the client renders verbatim;
 	// the chosen Value is sent back unchanged and mapped to allow/deny + permission mode.
 	Options []DecisionOption `json:"options,omitempty"`
