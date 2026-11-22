@@ -16,7 +16,7 @@ func TestLockCmdRegistersExpectedSubcommands(t *testing.T) {
 
 	want := []string{
 		"local-disable", "log", "pin", "status", "unpin",
-		"init", "sign", "revoke-device", "add-signer", "remove-signer", "revoke-signer", "disable",
+		"init", "invite", "sign", "revoke-device", "add-signer", "remove-signer", "revoke-signer", "disable",
 	}
 	if len(subs) != len(want) {
 		names := make([]string, len(subs))

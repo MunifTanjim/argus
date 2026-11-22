@@ -1212,6 +1212,9 @@ type TerminalRenameParams struct {
 	Name       string `json:"name"`
 }
 
+// ErrMsgUnknownNode prefixes the gateway's error for a node it does not know.
+const ErrMsgUnknownNode = "unknown node"
+
 type RelayOpenParams struct {
 	NodeID string `json:"node_id"`
 }

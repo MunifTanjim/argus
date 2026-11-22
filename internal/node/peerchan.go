@@ -235,7 +235,7 @@ func (p *peerPool) open(pc *peerChan) error {
 	var res api.RelayOpenResult
 	if err := peer.CallContext(ctx, api.MethodRelayOpen, api.RelayOpenParams{NodeID: pc.nodeID}, &res); err != nil {
 		var rpcErr *api.RPCError
-		if errors.As(err, &rpcErr) && strings.HasPrefix(rpcErr.Message, "unknown node") {
+		if errors.As(err, &rpcErr) && strings.HasPrefix(rpcErr.Message, api.ErrMsgUnknownNode) {
 			return offline(pc.nodeID)
 		}
 		if nd, ok := p.d.roster.get(pc.nodeID); !ok || !nd.Online {
