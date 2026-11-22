@@ -169,7 +169,8 @@ func (s *Store) PurgeAgent(ctx context.Context, id string) error {
 	q := s.q.WithTx(tx)
 	for _, del := range []func(context.Context, string) error{
 		q.DeletePAgentEvents, q.DeletePAgentCursors, q.DeletePAgentSessions,
-		q.DeletePAgentProposals, q.DeletePAgentThreads, q.DeletePAgent,
+		q.DeletePAgentProposals, q.DeletePAgentRoutineRuns, q.DeletePAgentRoutineStates,
+		q.DeletePAgentWebhookSecrets, q.DeletePAgentThreads, q.DeletePAgent,
 	} {
 		if err := del(ctx, id); err != nil {
 			return fmt.Errorf("pagent: purge: %w", err)

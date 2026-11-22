@@ -80,6 +80,47 @@ type PagentMemoryProposal struct {
 	Decision  string
 }
 
+type PagentRoutineRun struct {
+	ID             string
+	AgentID        string
+	Slug           string
+	Occurrence     int64
+	StartedBy      string
+	Test           int64
+	State          string
+	LeaseUntil     int64
+	ThreadID       string
+	Result         string
+	Summary        string
+	ActionsDone    string
+	ActionsPending string
+	Unverified     string
+	Sources        string
+	Cost           float64
+	Tokens         int64
+	StartedAt      int64
+	EndedAt        int64
+	Error          string
+}
+
+type PagentRoutineState struct {
+	AgentID             string
+	Slug                string
+	DefHash             string
+	Enabled             int64
+	NextDueAt           int64
+	LastRunAt           int64
+	LastResult          string
+	ConsecutiveFailures int64
+	PausedReason        string
+	SessionsUsed        int64
+	CostUsed            float64
+	TokensUsed          int64
+	CheckBackAt         int64
+	AnchorAt            int64
+	UpdatedAt           int64
+}
+
 type PagentThread struct {
 	ID           string
 	AgentID      string
@@ -113,6 +154,13 @@ type PagentThreadSession struct {
 	StartedAt      int64
 	EndedAt        int64
 	EndReason      string
+}
+
+type PagentWebhookSecret struct {
+	AgentID    string
+	Slug       string
+	SecretHash string
+	CreatedAt  int64
 }
 
 type Project struct {
