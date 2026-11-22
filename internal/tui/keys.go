@@ -139,9 +139,13 @@ var terminalKeys = struct {
 }
 
 var agentKeys = struct {
-	Filter binding
+	Filter, NewChat, Memory, MakePrimary, UnsetPrimary binding
 }{
-	Filter: nb("filter-agents", "/", "filter"),
+	Filter:       nb("filter-agents", "/", "filter"),
+	NewChat:      nm("agent new-chat", "n", "new chat"),
+	Memory:       nm("agent memory", "m", "memory"),
+	MakePrimary:  nm("agent make-primary", "", "make primary"),
+	UnsetPrimary: nm("agent unset-primary", "", "unset primary"),
 }
 
 var nodeKeys = struct {

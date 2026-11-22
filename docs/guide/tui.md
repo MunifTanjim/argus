@@ -241,6 +241,10 @@ To run Lua code on a key, see [Lua](/getting-started/configuration#lua).
 <!-- keymap-commands:start -->
 | Command | Action | Sections | Built-in keys | Default mappings |
 |---|---|---|---|---|
+| `agent make-primary` |  | agent |  |  |
+| `agent memory` |  | agent |  | `m` |
+| `agent new-chat` |  | agent |  | `n` |
+| `agent unset-primary` |  | agent |  |  |
 | `answer note` |  | session-dock | `n` |  |
 | `answer submit` |  | session-dock | `<CR>` |  |
 | `back` |  | agent, changes, file, file-tree, history, home, logs, node, project, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, spawn, terminals, transcript, visual, workspace | `<Esc>` |  |
@@ -270,22 +274,22 @@ To run Lua code on a key, see [Lua](/getting-started/configuration#lua).
 | `focus up` | `client.pane.focus.up` | agent, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, transcript, visual, workspace | `<C-w><Up>` `<C-w>k` |  |
 | `fold close` |  | changes, file-tree, project-tree, transcript | `<Left>` `h` `zc` |  |
 | `fold open` |  | changes, file-tree, project-tree, transcript | `<Right>` `l` `zo` |  |
-| `goto bottom` |  | changes, file, file-tree, history, home, logs, project-tree, settings, sidebar-agents, sidebar-sessions, spawn, terminals, transcript, visual, workspace | `G` |  |
-| `goto top` |  | changes, file, file-tree, history, home, logs, project-tree, settings, sidebar-agents, sidebar-sessions, spawn, terminals, transcript, visual, workspace | `gg` |  |
+| `goto bottom` |  | agent, changes, file, file-tree, history, home, logs, project-tree, settings, sidebar-agents, sidebar-sessions, spawn, terminals, transcript, visual, workspace | `G` |  |
+| `goto top` |  | agent, changes, file, file-tree, history, home, logs, project-tree, settings, sidebar-agents, sidebar-sessions, spawn, terminals, transcript, visual, workspace | `gg` |  |
 | `help` |  | agent, changes (over the workspace pane), file (over the workspace pane), file-tree (over the workspace pane), history (project list), home, logs, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, workspace |  | `g?` |
 | `hover` |  | changes, file-tree, project-tree, sidebar-agents, sidebar-sessions |  | `K` |
-| `next` |  | changes, file-tree, history, home, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, spawn, terminals, transcript, workspace | `<Down>` `j` |  |
+| `next` |  | agent, changes, file-tree, history, home, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, spawn, terminals, transcript, workspace | `<Down>` `j` |  |
 | `next diff-file` |  | file |  | `]f` |
 | `next prompt` |  | transcript | `}` |  |
 | `node wakelock` |  | node, project-tree |  | `w` |
-| `open` |  | changes, file-tree, history, home, project-tree, sidebar-agents, sidebar-sessions, spawn, terminals, transcript, workspace | `<CR>` |  |
+| `open` |  | agent, changes, file-tree, history, home, project-tree, sidebar-agents, sidebar-sessions, spawn, terminals, transcript, workspace | `<CR>` |  |
 | `open live-screen` |  | session-dock, transcript |  | `<C-t>` |
 | `open palette` |  | agent, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, transcript, visual, workspace |  | `<C-k>` |
 | `open setup-log` |  | project-tree, workspace |  | `L` |
 | `open shell` |  | session-dock, transcript |  |  |
 | `open subagent` |  | session-dock, transcript |  |  |
 | `open tmux-pane` |  | home, workspace |  | `O` |
-| `prev` |  | changes, file-tree, history, home, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, spawn, terminals, transcript, workspace | `<Up>` `k` |  |
+| `prev` |  | agent, changes, file-tree, history, home, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, spawn, terminals, transcript, workspace | `<Up>` `k` |  |
 | `prev diff-file` |  | file |  | `[f` |
 | `prev prompt` |  | transcript | `{` |  |
 | `project forget` |  | project-tree |  | `F` |
@@ -295,10 +299,10 @@ To run Lua code on a key, see [Lua](/getting-started/configuration#lua).
 | `redaction list` |  | transcript |  | `D` |
 | `redaction remove` |  | transcript |  | `u` |
 | `redaction save` |  | transcript |  | `W` |
-| `refresh` |  | changes, file, file-tree, history, home, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, workspace |  | `gr` |
+| `refresh` |  | agent, changes, file, file-tree, history, home, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, workspace |  | `gr` |
 | `scroll down` |  | file, logs, settings, transcript | `<Down>` `j` |  |
-| `scroll half-page-down` |  | changes, file, file-tree, history, home, logs, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, spawn, terminals, transcript, visual, workspace | `<C-d>` |  |
-| `scroll half-page-up` |  | changes, file, file-tree, history, home, logs, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, spawn, terminals, transcript, visual, workspace | `<C-u>` |  |
+| `scroll half-page-down` |  | agent, changes, file, file-tree, history, home, logs, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, spawn, terminals, transcript, visual, workspace | `<C-d>` |  |
+| `scroll half-page-up` |  | agent, changes, file, file-tree, history, home, logs, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, spawn, terminals, transcript, visual, workspace | `<C-u>` |  |
 | `scroll page-down` |  | changes, file, file-tree, history, home, logs, project-tree, session-dock, settings, spawn, terminals, transcript, visual, workspace | `<C-f>` `<PageDown>` |  |
 | `scroll page-up` |  | changes, file, file-tree, history, home, logs, project-tree, session-dock, settings, spawn, terminals, transcript, visual, workspace | `<C-b>` `<PageUp>` |  |
 | `scroll up` |  | file, logs, settings, transcript | `<Up>` `k` |  |

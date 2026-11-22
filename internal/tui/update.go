@@ -216,6 +216,12 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reorder()
 		}
 		return m, nil
+	case agentViewMsg:
+		return m.updateAgentView(msg, msg.agentID)
+	case agentSentMsg:
+		return m.updateAgentView(msg, msg.agentID)
+	case agentPrimaryMsg:
+		return m.updateAgentView(msg, msg.agentID)
 	case terminalsMsg:
 		m.terminalsDone = true
 		m.terminalsErr = msg.err

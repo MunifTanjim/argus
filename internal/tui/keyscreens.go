@@ -126,7 +126,9 @@ var sectionLists = map[string]sectionList{
 		focus:     focusFor("sidebar-agents"),
 	},
 	"agent": {
-		own:   bindingsOf(listKeys.Back),
+		own: bindingsOf(listKeys.Up, listKeys.Down, listKeys.Top, listKeys.Bottom, listKeys.HalfUp, listKeys.HalfDown,
+			listKeys.Open, listKeys.Back, listKeys.Refresh, agentKeys.NewChat, agentKeys.Memory, agentKeys.MakePrimary,
+			agentKeys.UnsetPrimary),
 		focus: focusFor("agent"),
 	},
 	"workspace": {
