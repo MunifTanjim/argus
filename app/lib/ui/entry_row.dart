@@ -3,7 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../models/entry.dart';
-import '../models/pagent.dart' show argusEventText, memoryCommit;
+import '../models/pagent.dart' show undoCommit;
 import '../state/tool_detail.dart';
 import 'code_block.dart';
 import 'item_detail_screen.dart';
@@ -652,8 +652,8 @@ class _ArgusEventRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final e = entry;
-    final text = argusEventText(e);
-    final commit = memoryCommit(e);
+    final text = (e.detail ?? '').isNotEmpty ? e.detail! : (e.event?.kind ?? e.label ?? '');
+    final commit = undoCommit(e);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(

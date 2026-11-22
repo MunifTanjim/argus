@@ -31,6 +31,25 @@ Map<String, dynamic> _timeline({bool live = true}) => {
       },
     },
     {
+      'id': 'e4',
+      'kind': 'argus',
+      'timestamp': '2026-11-22T10:00:04Z',
+      'label': 'routine.changed',
+      'detail': 'Routine billing updated',
+      'event': {
+        'id': 5,
+        'kind': 'routine.changed',
+        'payload': {'commit': 'def456'},
+      },
+    },
+    {
+      'id': 'e5',
+      'kind': 'argus',
+      'timestamp': '2026-11-22T10:00:03Z',
+      'label': 'session.paused',
+      'event': {'id': 6, 'kind': 'session.paused'},
+    },
+    {
       'id': 'e3',
       'kind': 'argus',
       'timestamp': '2026-11-22T10:00:06Z',
@@ -167,7 +186,7 @@ void main() {
       ],
     });
     expect(liveSessionOf(tl), 'b');
-    expect(memoryCommit(Entry.fromJson({'id': 'x', 'kind': 'text'})), '');
+    expect(undoCommit(Entry.fromJson({'id': 'x', 'kind': 'text'})), '');
   });
 
   testWidgets('renders the timeline with argus events and marks it read', (tester) async {
@@ -175,7 +194,9 @@ void main() {
     expect(find.text('hello from the agent'), findsOneWidget);
     expect(find.text('  remembered a thing'), findsOneWidget);
     expect(find.text('  check-back set'), findsOneWidget);
-    expect(find.text('Undo'), findsOneWidget); // memory change only
+    expect(find.text('Undo'), findsNWidgets(2)); // memory and routine changes
+    expect(find.text('  Routine billing updated'), findsOneWidget);
+    expect(find.text('  session.paused'), findsOneWidget); // no detail: the kind
     final read = client.calls.firstWhere((c) => c.$1 == 'pagent.thread.markRead');
     expect(read.$2, {
       'thread_id': 'A:t1',
@@ -186,7 +207,7 @@ void main() {
   testWidgets('undo calls pagent.memory.undo with the commit and reloads', (tester) async {
     final client = await _pump(tester);
     final loads = client.calls.where((c) => c.$1 == 'pagent.thread.timeline').length;
-    await tester.tap(find.text('Undo'));
+    await tester.tap(find.text('Undo').first);
     await tester.pumpAndSettle();
     expect(
       client.calls.firstWhere((c) => c.$1 == 'pagent.memory.undo').$2,
@@ -195,6 +216,16 @@ void main() {
     expect(
       client.calls.where((c) => c.$1 == 'pagent.thread.timeline').length,
       loads + 1,
+    );
+  });
+
+  testWidgets('undo on a routine change reverts its commit', (tester) async {
+    final client = await _pump(tester);
+    await tester.tap(find.text('Undo').last);
+    await tester.pumpAndSettle();
+    expect(
+      client.calls.firstWhere((c) => c.$1 == 'pagent.memory.undo').$2,
+      {'agent_id': 'A:a1', 'commit': 'def456'},
     );
   });
 

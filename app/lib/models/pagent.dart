@@ -336,10 +336,14 @@ class PAgentAddResult {
   );
 }
 
-/// The commit an argus entry reports a memory change by, or '' when it is not
-/// one.
-String memoryCommit(Entry e) {
-  if (e.kind != EntryKind.argus || e.event?.kind != 'memory.changed') return '';
+/// The commit of a memory or routine change that an argus entry reports, or ''
+/// when it is not one.
+String undoCommit(Entry e) {
+  final kind = e.event?.kind;
+  if (e.kind != EntryKind.argus ||
+      (kind != 'memory.changed' && kind != 'routine.changed')) {
+    return '';
+  }
   final p = e.event?.payload;
   return p is Map ? (p['commit'] as String? ?? '') : '';
 }
@@ -438,61 +442,4 @@ class PAgentRoutine {
     used: PAgentRoutineBudget.fromJson(j['used']),
     error: j['error'] as String? ?? '',
   );
-}
-
-/// What an argus event says, in words. Routine and draft events are built from
-/// their payload; any other event keeps the node's text.
-String argusEventText(Entry e) {
-  final fallback = (e.detail ?? '').isNotEmpty ? e.detail! : (e.label ?? '');
-  final ev = e.event;
-  final p = ev?.payload is Map ? (ev!.payload as Map) : const {};
-  String s(String k) => p[k] is String ? p[k] as String : '';
-  final slug = s('routine');
-  String join(String head, [String tail = '']) =>
-      tail.isEmpty ? head : '$head: $tail';
-  switch (ev?.kind) {
-    case 'routine.result':
-      final r = s('result');
-      return join(
-        'Routine $slug${r.isEmpty ? '' : ' ($r)'}',
-        s('summary'),
-      );
-    case 'routine.needs_you':
-      return join('Routine $slug needs you', s('summary'));
-    case 'routine.completed':
-      return 'Routine $slug completed';
-    case 'routine.failing':
-      return join('Routine $slug is failing', s('error'));
-    case 'routine.error':
-      return join('Routine $slug', s('message'));
-    case 'routine.changed':
-      final a = s('action');
-      return 'Routine $slug ${a.isEmpty ? 'changed' : a}';
-    case 'routine.proposed':
-      return join('Routine $slug: change to review', s('reason'));
-    case 'routine.missed':
-      final n = (p['count'] as num?)?.toInt() ?? 1;
-      return n == 1
-          ? 'Routine $slug missed a run (${s('first')})'
-          : 'Routine $slug missed $n runs';
-    case 'routine.skipped':
-      return join('Routine $slug skipped a run', s('reason'));
-    case 'routine.stale':
-      return 'Routine $slug is overdue (due ${s('due')})';
-    case 'routine.paused':
-      final rs = [for (final r in (p['routines'] as List?) ?? const []) '$r'];
-      final reason = s('reason');
-      return [
-        rs.length == 1 ? 'Routine ${rs.first} paused' : 'Routines paused',
-        if (reason.isNotEmpty) '($reason)',
-        if (rs.length > 1) ': ${rs.join(', ')}',
-        if (s('message').isNotEmpty) '- ${s('message')}',
-      ].join(' ').replaceAll(' :', ':');
-    case 'draft':
-      final what = s('command').isNotEmpty
-          ? s('command')
-          : [s('tool'), s('target')].where((x) => x.isNotEmpty).join(' ');
-      return what.isEmpty ? 'Draft held for approval' : 'Draft held: $what';
-  }
-  return fallback;
 }

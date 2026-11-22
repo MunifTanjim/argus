@@ -1,4 +1,3 @@
-import 'package:argus/models/entry.dart';
 import 'package:argus/models/pagent.dart';
 import 'package:argus/state/pagents.dart';
 import 'package:argus/transport/jsonrpc.dart';
@@ -201,86 +200,6 @@ void main() {
       client.calls.firstWhere((x) => x.$1 == 'pagent.memory.decide').$2,
       {'proposal_id': 'A:mp1', 'accept': true},
     );
-  });
-
-  group('argusEventText', () {
-    String text(String kind, Map<String, dynamic> payload, {String detail = ''}) =>
-        argusEventText(
-          Entry.fromJson({
-            'id': 'e',
-            'kind': 'argus',
-            'label': kind,
-            if (detail.isNotEmpty) 'detail': detail,
-            'event': {'id': 1, 'kind': kind, 'payload': payload},
-          }),
-        );
-
-    test('routine events read as sentences', () {
-      expect(
-        text('routine.result', {'routine': 'billing', 'result': 'done', 'summary': 'sent 3 invoices'}),
-        'Routine billing (done): sent 3 invoices',
-      );
-      expect(
-        text('routine.needs_you', {'routine': 'billing', 'summary': 'login expired'}),
-        'Routine billing needs you: login expired',
-      );
-      expect(text('routine.completed', {'routine': 'billing'}), 'Routine billing completed');
-      expect(
-        text('routine.failing', {'routine': 'billing', 'error': 'timeout'}),
-        'Routine billing is failing: timeout',
-      );
-      expect(
-        text('routine.error', {'routine': 'billing', 'message': 'bad file'}),
-        'Routine billing: bad file',
-      );
-      expect(
-        text('routine.changed', {'routine': 'billing', 'action': 'updated'}),
-        'Routine billing updated',
-      );
-      expect(
-        text('routine.proposed', {'routine': 'billing', 'reason': 'new goal'}),
-        'Routine billing: change to review: new goal',
-      );
-      expect(
-        text('routine.skipped', {'routine': 'billing', 'reason': 'still running'}),
-        'Routine billing skipped a run: still running',
-      );
-      expect(
-        text('routine.stale', {'routine': 'billing', 'due': '2026-11-22T09:00:00Z'}),
-        'Routine billing is overdue (due 2026-11-22T09:00:00Z)',
-      );
-    });
-
-    test('missed counts and paused lists', () {
-      expect(
-        text('routine.missed', {'routine': 'b', 'count': 1, 'first': 'T1'}),
-        'Routine b missed a run (T1)',
-      );
-      expect(
-        text('routine.missed', {'routine': 'b', 'count': 3}),
-        'Routine b missed 3 runs',
-      );
-      expect(
-        text('routine.paused', {'reason': 'budget', 'routines': ['a']}),
-        'Routine a paused (budget)',
-      );
-      expect(
-        text('routine.paused', {'reason': 'away', 'routines': ['a', 'b']}),
-        'Routines paused (away): a, b',
-      );
-    });
-
-    test('drafts and unknown events', () {
-      expect(
-        text('draft', {'tool': 'Bash', 'target': 'git', 'command': 'git push'}),
-        'Draft held: git push',
-      );
-      expect(text('draft', {'tool': 'Write', 'target': '/x'}), 'Draft held: Write /x');
-      expect(
-        text('memory.changed', {'commit': 'c'}, detail: 'Memory: changed'),
-        'Memory: changed',
-      );
-    });
   });
 
   test('routineProgress and untilText', () {
