@@ -61,7 +61,7 @@ func fromNanos(n int64) time.Time {
 	if n == 0 {
 		return time.Time{}
 	}
-	return time.Unix(0, n)
+	return time.Unix(0, n).UTC()
 }
 
 func agentFrom(r gen.Pagent) Agent {
@@ -143,7 +143,20 @@ func (s *Store) ArchiveAgent(ctx context.Context, id string) error {
 
 // RestoreAgent fails when an active agent already has the name.
 func (s *Store) RestoreAgent(ctx context.Context, id string) error {
-	return affected(s.q.SetPAgentArchivedAt(ctx, gen.SetPAgentArchivedAtParams{ArchivedAt: 0, ID: id}))
+	a, ok, err := s.AgentByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrNotFound
+	}
+	if err := affected(s.q.SetPAgentArchivedAt(ctx, gen.SetPAgentArchivedAtParams{ArchivedAt: 0, ID: id})); err != nil {
+		if _, taken, _ := s.AgentByName(ctx, a.Name); taken {
+			return fmt.Errorf("agent name %s is taken", a.Name)
+		}
+		return err
+	}
+	return nil
 }
 
 // PurgeAgent deletes the agent and everything stored for it.
@@ -224,10 +237,19 @@ func (s *Store) SetAgentSessionID(ctx context.Context, sessionID, cli, agentSess
 
 // EndThreadSession records that the session ended; an already ended session is left as is.
 func (s *Store) EndThreadSession(ctx context.Context, sessionID, reason string) error {
-	_, err := s.q.EndPAgentThreadSession(ctx, gen.EndPAgentThreadSessionParams{
+	n, err := s.q.EndPAgentThreadSession(ctx, gen.EndPAgentThreadSessionParams{
 		EndedAt: s.now().UnixNano(), EndReason: reason, SessionID: sessionID,
 	})
-	return err
+	if err != nil || n > 0 {
+		return err
+	}
+	if _, ok, err := s.ThreadBySession(ctx, sessionID); err != nil || !ok {
+		if err == nil {
+			err = ErrNotFound
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *Store) ThreadSessions(ctx context.Context, threadID string) ([]ThreadSession, error) {

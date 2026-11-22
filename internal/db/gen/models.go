@@ -62,6 +62,24 @@ type Pagent struct {
 	CreatedAt  int64
 }
 
+type PagentCaptureCursor struct {
+	ThreadID    string
+	SessionID   string
+	EntryCount  int64
+	LastEntryID string
+	UpdatedAt   int64
+}
+
+type PagentMemoryProposal struct {
+	ID        string
+	AgentID   string
+	ThreadID  string
+	Ops       string
+	CreatedAt int64
+	DecidedAt int64
+	Decision  string
+}
+
 type PagentThread struct {
 	ID           string
 	AgentID      string
