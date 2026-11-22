@@ -3,8 +3,8 @@ package client
 import (
 	"encoding/json"
 	"log"
+	"sort"
 	"sync"
-	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -20,16 +20,18 @@ func (m *E2EClient) pagentOrigin(a api.PAgentInfo, nodeID string) api.PAgentInfo
 	return a
 }
 
-// fanoutPAgents merges every node's agents with composite ids. Agents last seen
-// on a node that is offline (within the grace window) or failed to answer are
-// included with status "unreachable". The merged Primary is the first non-empty
-// one in node order.
+// fanoutPAgents merges every node's agents with composite ids, ordered by node
+// id. Agents last seen on a node with no channel, or that failed to answer, are
+// included with status "unreachable" until the node answers again or is gone.
+// At most one agent is Primary: the first flagged one in node order.
 func (m *E2EClient) fanoutPAgents(raw json.RawMessage, out any) error {
 	chans := m.channelsSnapshot()
+	sort.Slice(chans, func(i, j int) bool { return chans[i].nodeID < chans[j].nodeID })
 	type res struct {
 		agents  []api.PAgentInfo
 		primary string
 		ok      bool
+		epoch   uint64
 	}
 	results := make([]res, len(chans))
 	var wg sync.WaitGroup
@@ -37,8 +39,15 @@ func (m *E2EClient) fanoutPAgents(raw json.RawMessage, out any) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			m.mu.Lock()
+			epoch := m.pagentEpoch[nc.nodeID]
+			m.mu.Unlock()
 			var r api.PAgentListResult
-			if err := m.callNode(nc.nodeID, api.MethodPAgentList, raw, &r); err != nil {
+			err := m.callNode(nc.nodeID, api.MethodPAgentList, raw, &r)
+			if m.pagentListHook != nil {
+				m.pagentListHook(nc.nodeID)
+			}
+			if err != nil {
 				log.Printf("client: warn: pagent.list on node %s failed: %v", nc.nodeID, err)
 				return
 			}
@@ -51,41 +60,62 @@ func (m *E2EClient) fanoutPAgents(raw json.RawMessage, out any) error {
 			if r.Primary != "" {
 				primary = session.CompositeID(nc.nodeID, r.Primary)
 			}
-			results[i] = res{agents: agents, primary: primary, ok: true}
+			results[i] = res{agents: agents, primary: primary, ok: true, epoch: epoch}
 		}()
 	}
 	wg.Wait()
 
-	merged := []api.PAgentInfo{}
-	primary := ""
 	m.mu.Lock()
-	seen := map[string]bool{}
+	byNode := map[string][]api.PAgentInfo{}
+	primaryOf := map[string]string{}
+	online := map[string]bool{}
 	for i, r := range results {
 		nodeID := chans[i].nodeID
-		seen[nodeID] = true
-		if r.ok {
+		online[nodeID] = true
+		// A node lost while its list was in flight bumped the epoch; its
+		// reply is stale and must not replace the cache.
+		if r.ok && m.pagentEpoch[nodeID] == r.epoch && m.byNode[nodeID] != nil {
 			m.pagentCache[nodeID] = r.agents
-			delete(m.pagentLostAt, nodeID)
-			merged = append(merged, r.agents...)
-			if primary == "" {
-				primary = r.primary
-			}
+			byNode[nodeID] = r.agents
+			primaryOf[nodeID] = r.primary
 			continue
 		}
-		merged = append(merged, unreachableAgents(m.pagentCache[nodeID])...)
+		byNode[nodeID] = unreachableAgents(m.pagentCache[nodeID])
 	}
 	for nodeID, cached := range m.pagentCache {
-		if seen[nodeID] {
-			continue
+		if !online[nodeID] {
+			byNode[nodeID] = unreachableAgents(cached)
 		}
-		if lost, ok := m.pagentLostAt[nodeID]; !ok || time.Since(lost) > m.offlineGrace {
-			delete(m.pagentCache, nodeID)
-			delete(m.pagentLostAt, nodeID)
-			continue
-		}
-		merged = append(merged, unreachableAgents(cached)...)
 	}
 	m.mu.Unlock()
+
+	nodeIDs := make([]string, 0, len(byNode))
+	for id := range byNode {
+		nodeIDs = append(nodeIDs, id)
+	}
+	sort.Strings(nodeIDs)
+	merged := []api.PAgentInfo{}
+	primary := ""
+	for _, id := range nodeIDs {
+		for _, a := range byNode[id] {
+			if a.Primary {
+				if primary == "" {
+					primary = a.ID
+				} else {
+					a.Primary = false
+				}
+			}
+			merged = append(merged, a)
+		}
+	}
+	if primary == "" {
+		for _, id := range nodeIDs {
+			if primaryOf[id] != "" {
+				primary = primaryOf[id]
+				break
+			}
+		}
+	}
 	return assign(out, api.PAgentListResult{Agents: merged, Primary: primary})
 }
 
@@ -103,34 +133,37 @@ func pagentIDEmpty(raw json.RawMessage) bool {
 	return id == ""
 }
 
-// clearPAgentPrimary unsets the primary on every node.
-func (m *E2EClient) clearPAgentPrimary(raw json.RawMessage) error {
+// unsetPAgentPrimary clears the primary on every connected node except skip.
+func (m *E2EClient) unsetPAgentPrimary(skip string) error {
 	var firstErr error
 	for _, nc := range m.channelsSnapshot() {
-		if err := m.callNode(nc.nodeID, api.MethodPAgentSetPrimary, raw, nil); err != nil && firstErr == nil {
+		if nc.nodeID == skip {
+			continue
+		}
+		if err := m.callNode(nc.nodeID, api.MethodPAgentSetPrimary, api.PAgentPrimaryParams{}, nil); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 	return firstErr
 }
 
-func splitIDField(raw json.RawMessage, field, what string) (nodeID, local string, params json.RawMessage, err error) {
+func splitIDField(raw json.RawMessage, field, what string) (nodeID string, params json.RawMessage, err error) {
 	composite, err := stringField(raw, field)
 	if err != nil {
-		return "", "", nil, err
+		return "", nil, err
 	}
 	nodeID, local, ok := session.SplitCompositeID(composite)
 	if !ok {
-		return "", "", nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: what + " id is not gateway-qualified: " + composite}
+		return "", nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: what + " id is not gateway-qualified: " + composite}
 	}
 	params, err = setStringField(raw, field, local)
-	return nodeID, local, params, err
+	return nodeID, params, err
 }
 
 // routeByPAgent splits the composite agent_id, routes to its node, and
 // composites node-local ids in the result.
 func (m *E2EClient) routeByPAgent(method string, raw json.RawMessage, out any) error {
-	nodeID, _, params, err := splitIDField(raw, "agent_id", "agent")
+	nodeID, params, err := splitIDField(raw, "agent_id", "agent")
 	if err != nil {
 		return err
 	}
@@ -146,6 +179,11 @@ func (m *E2EClient) routeByPAgent(method string, raw json.RawMessage, out any) e
 		}
 	}
 	switch method {
+	case api.MethodPAgentSetPrimary:
+		if err := m.callNode(nodeID, method, params, out); err != nil {
+			return err
+		}
+		return m.unsetPAgentPrimary(nodeID)
 	case api.MethodPAgentShow, api.MethodPAgentRename:
 		var info api.PAgentInfo
 		if err := m.callNode(nodeID, method, params, &info); err != nil {
@@ -182,7 +220,7 @@ func (m *E2EClient) routeByPAgent(method string, raw json.RawMessage, out any) e
 
 // routeByPAgentThread splits the composite thread_id and routes to its node.
 func (m *E2EClient) routeByPAgentThread(method string, raw json.RawMessage, out any) error {
-	nodeID, _, params, err := splitIDField(raw, "thread_id", "thread")
+	nodeID, params, err := splitIDField(raw, "thread_id", "thread")
 	if err != nil {
 		return err
 	}

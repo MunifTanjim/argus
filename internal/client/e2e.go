@@ -99,12 +99,13 @@ type E2EClient struct {
 	// Per-node session mirror, kept so the client can synthesize the events a node
 	// that went away can no longer send. nodeSessions maps nodeID -> stamped session
 	// id -> the last session seen for it; offlineTimers holds the per-node grace timer.
-	nodeSessions  map[string]map[string]session.Session
-	offlineTimers map[string]*time.Timer
-	offlineGrace  time.Duration
-	pagentCache   map[string][]api.PAgentInfo // nodeID -> last stamped pagent.list agents
-	pagentLostAt  map[string]time.Time        // nodeID -> when its channel was lost
-	opening       map[string]chan struct{}    // node id -> closed when its in-flight open finishes
+	nodeSessions   map[string]map[string]session.Session
+	offlineTimers  map[string]*time.Timer
+	offlineGrace   time.Duration
+	pagentCache    map[string][]api.PAgentInfo // nodeID -> last stamped pagent.list agents
+	pagentEpoch    map[string]uint64           // nodeID -> bumped on loseNode, invalidates in-flight lists
+	pagentListHook func(nodeID string)         // test hook: runs after a node's pagent.list returns
+	opening        map[string]chan struct{}    // node id -> closed when its in-flight open finishes
 
 	events chan api.Notification
 	kick   chan struct{} // buffered(1); nudges trustSyncLoop from the Peer read loop without blocking it
@@ -160,7 +161,7 @@ func newE2EClientWithGate(conn net.Conn, static e2e.KeyPair, genesisHash []byte,
 		opening:       map[string]chan struct{}{},
 		offlineGrace:  defaultOfflineGrace,
 		pagentCache:   map[string][]api.PAgentInfo{},
-		pagentLostAt:  map[string]time.Time{},
+		pagentEpoch:   map[string]uint64{},
 		events:        make(chan api.Notification, 256),
 		kick:          make(chan struct{}, 1),
 		tipMiss:       map[string]*tipMissState{},
@@ -575,7 +576,7 @@ func (m *E2EClient) Call(method string, params, out any) error {
 	case method == api.MethodPAgentList:
 		return m.fanoutPAgents(raw, out)
 	case method == api.MethodPAgentSetPrimary && pagentIDEmpty(raw):
-		return m.clearPAgentPrimary(raw)
+		return m.unsetPAgentPrimary("")
 	case pagentAddressed[method]:
 		return m.routeByPAgent(method, raw, out)
 	case pagentThreadAddressed[method]:
@@ -1542,11 +1543,9 @@ func (m *E2EClient) loseNode(nodeID string, gone bool) {
 	}
 	var events []registry.Event
 	sessions := m.nodeSessions[nodeID]
+	m.pagentEpoch[nodeID]++
 	if gone {
 		delete(m.pagentCache, nodeID)
-		delete(m.pagentLostAt, nodeID)
-	} else if len(m.pagentCache[nodeID]) > 0 {
-		m.pagentLostAt[nodeID] = time.Now()
 	}
 	if gone {
 		delete(m.nodeSessions, nodeID)

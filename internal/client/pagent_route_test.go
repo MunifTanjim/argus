@@ -2,9 +2,12 @@ package client
 
 import (
 	"encoding/json"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -132,7 +135,9 @@ func TestPAgentUnreachableWhenNodeLost(t *testing.T) {
 	if err := c.Call(api.MethodPAgentList, nil, &res); err != nil || res.Agents[0].Status != "working" {
 		t.Fatalf("err %v res %+v", err, res)
 	}
+	c.offlineGrace = time.Millisecond
 	c.loseNode("n1", false)
+	time.Sleep(20 * time.Millisecond)
 	res = api.PAgentListResult{}
 	if err := c.Call(api.MethodPAgentList, nil, &res); err != nil {
 		t.Fatal(err)
@@ -144,5 +149,149 @@ func TestPAgentUnreachableWhenNodeLost(t *testing.T) {
 	res = api.PAgentListResult{}
 	if err := c.Call(api.MethodPAgentList, nil, &res); err != nil || len(res.Agents) != 0 {
 		t.Fatalf("after gone: %v %+v", err, res.Agents)
+	}
+}
+
+func newPAgentNode(t *testing.T, id string, agents []api.PAgentInfo, primary string, calls *[]string, mu *sync.Mutex) *fakeNode {
+	t.Helper()
+	k, _ := e2e.GenerateKeyPair()
+	return &fakeNode{id: id, key: k, handle: func(method string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		switch method {
+		case api.MethodPAgentList:
+			b, _ := json.Marshal(api.PAgentListResult{Agents: agents, Primary: primary})
+			return b, nil, nil
+		case api.MethodPAgentSetPrimary:
+			var p api.PAgentPrimaryParams
+			_ = json.Unmarshal(params, &p)
+			mu.Lock()
+			*calls = append(*calls, id+"="+p.AgentID)
+			mu.Unlock()
+			return json.RawMessage(`null`), nil, nil
+		}
+		return json.RawMessage(`null`), nil, nil
+	}}
+}
+
+func connectMulti(t *testing.T, nodes ...*fakeNode) *E2EClient {
+	t.Helper()
+	g, conn := newFakeMultiGateway(t, nodes...)
+	t.Cleanup(func() { g.peer.Close() })
+	c, err := NewE2EClient(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func TestPAgentSetPrimaryUnsetsOtherNodes(t *testing.T) {
+	var mu sync.Mutex
+	var calls []string
+	a := newPAgentNode(t, "n1", nil, "", &calls, &mu)
+	b := newPAgentNode(t, "n2", nil, "", &calls, &mu)
+	c := connectMulti(t, a, b)
+
+	if err := c.Call(api.MethodPAgentSetPrimary, api.PAgentPrimaryParams{AgentID: "n2:a1"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	got := append([]string(nil), calls...)
+	calls = nil
+	mu.Unlock()
+	if len(got) != 2 || got[0] != "n2=a1" || got[1] != "n1=" {
+		t.Errorf("set calls = %v, want n2=a1 then n1=", got)
+	}
+	if err := c.Call(api.MethodPAgentSetPrimary, api.PAgentPrimaryParams{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) != 2 || calls[0] == "n1=a1" {
+		t.Errorf("unset calls = %v", calls)
+	}
+	for _, x := range calls {
+		if x != "n1=" && x != "n2=" {
+			t.Errorf("unset call %q not empty", x)
+		}
+	}
+}
+
+func TestPAgentListSinglePrimary(t *testing.T) {
+	var mu sync.Mutex
+	var calls []string
+	a := newPAgentNode(t, "n1", []api.PAgentInfo{{ID: "a1", Primary: true}}, "a1", &calls, &mu)
+	b := newPAgentNode(t, "n2", []api.PAgentInfo{{ID: "b1", Primary: true}}, "b1", &calls, &mu)
+	c := connectMulti(t, a, b)
+	var res api.PAgentListResult
+	if err := c.Call(api.MethodPAgentList, nil, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Agents) != 2 || res.Primary != "n1:a1" {
+		t.Fatalf("res %+v", res)
+	}
+	if !res.Agents[0].Primary || res.Agents[1].Primary {
+		t.Errorf("flags %+v", res.Agents)
+	}
+}
+
+func TestPAgentListInFlightLossStaysUnreachable(t *testing.T) {
+	f, clientConn := newFakeGatewayNode(t, "n1")
+	defer f.peer.Close()
+	f.handle = func(method string, _ json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		if method != api.MethodPAgentList {
+			return nil, nil, nil
+		}
+		b, _ := json.Marshal(api.PAgentListResult{Agents: []api.PAgentInfo{{ID: "a1", Status: "idle"}}})
+		return b, nil, nil
+	}
+	c, err := NewE2EClient(clientConn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	var res api.PAgentListResult
+	if err := c.Call(api.MethodPAgentList, nil, &res); err != nil {
+		t.Fatal(err)
+	}
+	c.pagentListHook = func(nodeID string) { c.loseNode(nodeID, false) }
+	for i := 0; i < 2; i++ {
+		res = api.PAgentListResult{}
+		if err := c.Call(api.MethodPAgentList, nil, &res); err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Agents) != 1 || res.Agents[0].Status != "unreachable" {
+			t.Fatalf("list %d = %+v", i, res.Agents)
+		}
+		c.pagentListHook = nil
+	}
+}
+
+func TestPAgentChangedStampedWithNodeID(t *testing.T) {
+	f, conn := newFakeGatewayNode(t, "n1")
+	defer f.peer.Close()
+	f.handle = func(string, json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		return json.RawMessage(`{}`), nil, &fakeNote{method: api.MethodPAgentChanged, params: json.RawMessage(`{}`)}
+	}
+	c, _ := NewE2EClient(conn)
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.callNode("n1", "sessions.refresh", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ev := <-c.Events():
+		if ev.Method != api.MethodPAgentChanged || string(ev.Params) != `{"node_id":"n1"}` {
+			t.Fatalf("got %s %s", ev.Method, ev.Params)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no pagent.changed")
 	}
 }
