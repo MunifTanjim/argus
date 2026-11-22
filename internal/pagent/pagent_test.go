@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/config"
+	"github.com/MunifTanjim/argus/internal/pagent/policy"
 )
 
 func TestDefinitionRoundTripPreservesUnknownKeys(t *testing.T) {
@@ -165,5 +166,28 @@ func TestImportInstructionFileSkipsGenerated(t *testing.T) {
 	got, ok, err := ImportInstructionFile(dir)
 	if err != nil || !ok || got != "be kind\n" {
 		t.Errorf("got %q %v %v", got, ok, err)
+	}
+}
+
+func TestDefinitionApprovalsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	src := "id: a1\nname: x\napprovals:\n  - {tool: Bash, target: git, decision: allow}\n"
+	if err := os.WriteFile(filepath.Join(dir, DefinitionFile), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d, err := LoadDefinition(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Approvals) != 1 || d.Approvals[0].Target != "git" || d.Approvals[0].Decision != "allow" {
+		t.Fatalf("approvals: %+v", d.Approvals)
+	}
+	d.Approvals = append(d.Approvals, policy.Rule{Tool: "Edit", Decision: "ask"})
+	if err := d.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	d2, err := LoadDefinition(dir)
+	if err != nil || len(d2.Approvals) != 2 || d2.Approvals[1].Tool != "Edit" {
+		t.Fatalf("reload: %v %+v", err, d2)
 	}
 }

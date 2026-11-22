@@ -12,6 +12,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/pagent/policy"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -36,6 +37,7 @@ type Definition struct {
 	Notify                string        `yaml:"notify,omitempty"`
 	Proactivity           string        `yaml:"proactivity,omitempty"`
 	CanMessage            []string      `yaml:"can-message,omitempty"`
+	Approvals             []policy.Rule `yaml:"approvals,omitempty"`
 
 	// doc is the parsed file this definition was loaded from.
 	doc *yaml.Node
@@ -51,7 +53,7 @@ type MemoryDef struct {
 var knownKeys = []string{
 	"id", "name", "description", "instructions", "agent", "model", "workdirs",
 	"skills", "timezone", "memory", "idle-close", "max-concurrent-sessions",
-	"notify", "proactivity", "can-message",
+	"notify", "proactivity", "can-message", "approvals",
 }
 
 // LoadDefinition reads agent.yaml from dir.
