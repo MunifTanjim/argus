@@ -145,3 +145,27 @@ func TestHeaderOverBudget(t *testing.T) {
 		t.Fatal("budget")
 	}
 }
+
+func TestApplyValidatesOpFields(t *testing.T) {
+	content := "- old fact (2026-01-01)\n"
+	cases := map[string]Op{
+		"until not a date":   {Action: "add", Text: "x", Until: "AKIAABCDEFGHIJKLMNOP"},
+		"until newline":      {Action: "add", Text: "x", Until: "2026-12-01\n- injected"},
+		"match newline":      {Action: "remove", Match: "old\nfact"},
+		"text newline":       {Action: "add", Text: "a\n- injected"},
+		"until partial date": {Action: "add", Text: "x", Until: "2026-1-1"},
+	}
+	for name, op := range cases {
+		out, applied, errs := Apply(content, []Op{op}, "2026-11-22")
+		if out != content || len(applied) != 0 || len(errs) != 1 || !strings.HasPrefix(errs[0].Error(), "invalid op: ") {
+			t.Errorf("%s: out %q applied %v errs %v", name, out, applied, errs)
+		}
+		if len(errs) == 1 && (strings.Contains(errs[0].Error(), "AKIA") || strings.Contains(errs[0].Error(), "injected")) {
+			t.Errorf("%s: error echoes value: %v", name, errs[0])
+		}
+	}
+	out, applied, errs := Apply(content, []Op{{Action: "add", Text: "y", Until: "2026-12-01"}}, "2026-11-22")
+	if len(applied) != 1 || len(errs) != 0 || !strings.Contains(out, "- y (2026-11-22) · until 2026-12-01") {
+		t.Fatalf("valid until: %q %v %v", out, applied, errs)
+	}
+}

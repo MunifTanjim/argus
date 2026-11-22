@@ -97,6 +97,16 @@ func memoryOpFile(f string) (string, error) {
 	return "", fmt.Errorf("unknown memory file %q", f)
 }
 
+// opSecret reports the first field of op that looks like a secret.
+func opSecret(op memory.Op) (rule, field string, bad bool) {
+	for _, f := range [][2]string{{"text", op.Text}, {"until", op.Until}, {"match", op.Match}, {"file", op.File}, {"action", op.Action}} {
+		if rule, bad := memory.LooksSecret(f[1]); bad {
+			return rule, f[0], true
+		}
+	}
+	return "", "", false
+}
+
 func (d *Node) pagentSettings(a pagent.Agent) pagent.Settings {
 	def, _ := pagent.LoadDefinition(a.Dir)
 	return pagent.Resolve(def, d.pagentCfg.Defaults)
@@ -108,6 +118,21 @@ func (d *Node) memoryEvent(ctx context.Context, threadID, kind string, payload a
 		return
 	}
 	d.logEvent(ctx, threadID, kind, payload, "")
+}
+
+// agentMemoryEvent records a memory event in threadID, or for a threadless
+// change in the agent's most recently active chat thread; with neither it
+// only logs.
+func (d *Node) agentMemoryEvent(ctx context.Context, a pagent.Agent, threadID, kind string, payload any) {
+	if threadID == "" {
+		th, ok, err := d.pagents.LatestThread(ctx, a.ID, threadChat)
+		if err != nil || !ok {
+			d.log.Info("pagent: memory event without a thread", "agent", a.ID, "kind", kind, "payload", payload)
+			return
+		}
+		threadID = th.ID
+	}
+	d.memoryEvent(ctx, threadID, kind, payload)
 }
 
 func joinErrs(errs []error) string {
@@ -132,9 +157,15 @@ func (d *Node) pagentApplyMemory(ctx context.Context, a pagent.Agent, threadID, 
 	var errs []error
 	blocked := ""
 	for _, op := range ops {
-		if rule, bad := memory.LooksSecret(op.Text); bad {
-			d.memoryEvent(ctx, threadID, evMemoryBlocked, map[string]string{"rule": rule, "text": memory.MaskSecrets(op.Text)})
+		if rule, field, bad := opSecret(op); bad {
+			d.agentMemoryEvent(ctx, a, threadID, evMemoryBlocked, map[string]string{
+				"rule": rule, "field": field, "text": memory.MaskSecrets(op.Text),
+			})
 			blocked = rule
+			continue
+		}
+		if err := memory.ValidateOp(op); err != nil {
+			errs = append(errs, err)
 			continue
 		}
 		f, err := memoryOpFile(op.File)
@@ -150,11 +181,11 @@ func (d *Node) pagentApplyMemory(ctx context.Context, a pagent.Agent, threadID, 
 		}
 	}
 	if rule, bad := memory.LooksSecret(logLine); bad {
-		d.memoryEvent(ctx, threadID, evMemoryBlocked, map[string]string{"rule": rule, "text": memory.MaskSecrets(logLine)})
+		d.agentMemoryEvent(ctx, a, threadID, evMemoryBlocked, map[string]string{"rule": rule, "text": memory.MaskSecrets(logLine)})
 		blocked, logLine = rule, ""
 	}
 	if len(errs) > 0 {
-		d.memoryEvent(ctx, threadID, evMemoryError, map[string]string{"message": joinErrs(errs)})
+		d.agentMemoryEvent(ctx, a, threadID, evMemoryError, map[string]string{"message": joinErrs(errs)})
 	}
 
 	stagedLog := ""
@@ -193,7 +224,7 @@ func (d *Node) stageMemory(ctx context.Context, a pagent.Agent, threadID, source
 	if err := d.pagents.InsertProposal(ctx, pagent.Proposal{ID: id, AgentID: a.ID, ThreadID: threadID, Ops: body}); err != nil {
 		return pagentErr("%v", err)
 	}
-	d.memoryEvent(ctx, threadID, evMemoryProposed, map[string]any{"proposal_id": id, "ops": toAPIOps(ops)})
+	d.agentMemoryEvent(ctx, a, threadID, evMemoryProposed, map[string]any{"proposal_id": id, "ops": toAPIOps(ops)})
 	d.notifyConns(api.MethodPAgentChanged)
 	return nil
 }
@@ -228,7 +259,7 @@ func (d *Node) memorySubject(ctx context.Context, source, threadID string) strin
 	if r := []rune(title); len(r) > memoryTitleRunes {
 		title = string(r[:memoryTitleRunes])
 	}
-	return fmt.Sprintf("memory: %s from %q", source, title)
+	return fmt.Sprintf(`memory: %s from "%s"`, source, title)
 }
 
 // commitHandEdits commits the user's uncommitted edits under paths and warns
@@ -245,7 +276,7 @@ func (d *Node) commitHandEdits(ctx context.Context, repo *agentgit.Repo, a pagen
 	}
 	for _, ln := range lines {
 		if rule, bad := memory.LooksSecret(ln); bad {
-			d.memoryEvent(ctx, threadID, evMemoryError, map[string]string{
+			d.agentMemoryEvent(ctx, a, threadID, evMemoryError, map[string]string{
 				"message": fmt.Sprintf("a hand edit looks like a secret (%s); it was committed and stays in history", rule),
 				"commit":  hash,
 			})
@@ -413,6 +444,18 @@ func (d *Node) commitMemory(ctx context.Context, a pagent.Agent, set pagent.Sett
 	archived := 0
 	logged := false
 
+	// The profile goes first: the work log line is written only with the
+	// agent commit, so retrying after a failure never logs it twice.
+	if len(profileOps) > 0 {
+		applied, errs, hash, err := d.commitProfile(ctx, a, threadID, source, profileOps, today)
+		if err != nil {
+			return res, err
+		}
+		res.applied = append(res.applied, applied...)
+		res.errs = append(res.errs, errs...)
+		res.profileCommit = hash
+	}
+
 	if len(agentOps) > 0 || logLine != "" {
 		defer lockMemory(a.ID)()
 		repo, err := agentgit.Open(ctx, a.Dir, d.pagentGitMode())
@@ -427,7 +470,7 @@ func (d *Node) commitMemory(ctx context.Context, a pagent.Agent, set pagent.Sett
 		if err != nil {
 			return res, pagentErr("%v", err)
 		}
-		res.applied, res.errs = applied, errs
+		res.applied, res.errs = append(res.applied, applied...), append(res.errs, errs...)
 		if changed[memoryFile] {
 			if archived, err = archiveOverBudget(memDir, set.CoreBudget); err != nil {
 				return res, pagentErr("%v", err)
@@ -447,18 +490,8 @@ func (d *Node) commitMemory(ctx context.Context, a pagent.Agent, set pagent.Sett
 		}
 	}
 
-	if len(profileOps) > 0 {
-		applied, errs, hash, err := d.commitProfile(ctx, a, threadID, source, profileOps, today)
-		if err != nil {
-			return res, err
-		}
-		res.applied = append(res.applied, applied...)
-		res.errs = append(res.errs, errs...)
-		res.profileCommit = hash
-	}
-
 	if len(res.errs) > 0 {
-		d.memoryEvent(ctx, threadID, evMemoryError, map[string]string{"message": joinErrs(res.errs)})
+		d.agentMemoryEvent(ctx, a, threadID, evMemoryError, map[string]string{"message": joinErrs(res.errs)})
 	}
 	if res.commit != "" || res.profileCommit != "" {
 		payload := map[string]any{
@@ -470,7 +503,7 @@ func (d *Node) commitMemory(ctx context.Context, a pagent.Agent, set pagent.Sett
 		if res.profileCommit != "" {
 			payload["profile_commit"] = res.profileCommit
 		}
-		d.memoryEvent(ctx, threadID, evMemoryChanged, payload)
+		d.agentMemoryEvent(ctx, a, threadID, evMemoryChanged, payload)
 		d.notifyConns(api.MethodPAgentChanged)
 	}
 	return res, nil
@@ -746,11 +779,15 @@ func (d *Node) handlePAgentMemoryDecide(ctx context.Context, params json.RawMess
 		d.notifyConns(api.MethodPAgentChanged)
 		return api.PAgentMemoryDecideResult{}, nil
 	}
+	set := d.pagentSettings(a)
+	if set.MemoryMode == memoryModeOff {
+		return nil, pagentErr("memory is off for this agent")
+	}
 	var body memoryProposal
 	if err := json.Unmarshal(pr.Ops, &body); err != nil {
 		return nil, pagentErr("bad proposal: %v", err)
 	}
-	res, err := d.commitMemory(ctx, a, d.pagentSettings(a), pr.ThreadID, body.Source, fromAPIOps(body.Ops), body.Log)
+	res, err := d.commitMemory(ctx, a, set, pr.ThreadID, body.Source, fromAPIOps(body.Ops), body.Log)
 	if err != nil {
 		return nil, err
 	}

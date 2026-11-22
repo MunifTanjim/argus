@@ -3,6 +3,7 @@ package memory
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Op is one memory edit. Action is add, update or remove. Match is a
@@ -13,6 +14,22 @@ type Op struct {
 	Match  string
 	Text   string
 	Until  string
+}
+
+// ValidateOp rejects an op with a multi-line field or an Until that is not a
+// YYYY-MM-DD date. Its errors never quote the op's values.
+func ValidateOp(op Op) error {
+	for _, f := range [][2]string{{"action", op.Action}, {"file", op.File}, {"match", op.Match}, {"text", op.Text}, {"until", op.Until}} {
+		if strings.ContainsAny(f[1], "\r\n") {
+			return fmt.Errorf("%s must be a single line", f[0])
+		}
+	}
+	if op.Until != "" {
+		if _, err := time.Parse(time.DateOnly, op.Until); err != nil {
+			return fmt.Errorf("until must be a YYYY-MM-DD date")
+		}
+	}
+	return nil
 }
 
 func cleanText(s string) (string, error) {
@@ -79,6 +96,10 @@ func Apply(content string, ops []Op, today string) (string, []Op, []error) {
 	var applied []Op
 	var errs []error
 	for _, op := range ops {
+		if err := ValidateOp(op); err != nil {
+			errs = append(errs, fmt.Errorf("invalid op: %w", err))
+			continue
+		}
 		var err error
 		es := entriesOf(rows)
 		switch op.Action {

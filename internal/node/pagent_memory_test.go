@@ -150,7 +150,8 @@ func TestApplyAutoCommitsAndEvents(t *testing.T) {
 		t.Fatalf("events = %+v", evs)
 	}
 
-	// Without a thread: plain subject, no thread trailer, no events.
+	// Without a thread: plain subject, no thread trailer, and the event goes
+	// to the most recently active chat thread.
 	if _, err := r.d.pagentApplyMemory(ctx, r.a, "", "agent", []memory.Op{{Action: "remove", Match: "tea"}}, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -158,8 +159,8 @@ func TestApplyAutoCommitsAndEvents(t *testing.T) {
 	if c.Subject != "memory: agent" || c.Trailers["Argus-Thread"] != "" {
 		t.Fatalf("threadless commit = %+v", c)
 	}
-	if len(r.events(t, evMemoryChanged)) != 1 {
-		t.Fatal("threadless apply recorded an event")
+	if evs := r.events(t, evMemoryChanged); len(evs) != 2 || evs[1]["commit"] != c.Hash {
+		t.Fatalf("threadless events = %+v", evs)
 	}
 
 	// A long title is cut to 50 characters.
@@ -287,6 +288,78 @@ func TestApplySecretBlocked(t *testing.T) {
 	}
 	if len(r.log(t, 0)) != 2 {
 		t.Fatal("blocked write committed")
+	}
+
+	// Until and Match are scanned too, and never echoed unmasked.
+	for _, op := range []memory.Op{
+		{Action: "add", Text: "x", Until: "AKIAABCDEFGHIJKLMNOP"},
+		{Action: "remove", Match: "sk-abcdefghijklmnopqrstuvwx"},
+	} {
+		if _, err := r.d.pagentApplyMemory(ctx, r.a, r.th, "agent", []memory.Op{op}, ""); err == nil || !strings.Contains(err.Error(), "looks like a secret") {
+			t.Fatalf("op %+v err = %v", op, err)
+		}
+	}
+	evs = r.events(t, evMemoryBlocked)
+	if len(evs) != 4 || evs[2]["field"] != "until" || evs[3]["field"] != "match" {
+		t.Fatalf("blocked events = %+v", evs)
+	}
+	raw, _ := r.s.Events(ctx, r.th, 0)
+	for _, ev := range raw {
+		if strings.Contains(string(ev.Payload), "AKIA") || strings.Contains(string(ev.Payload), "sk-abc") {
+			t.Fatalf("event leaks a secret: %s", ev.Payload)
+		}
+	}
+
+	// A malformed Until or a newline in any field is rejected; nothing is written.
+	before := r.read(t, "memory/MEMORY.md")
+	for _, op := range []memory.Op{
+		{Action: "add", Text: "x", Until: "next week"},
+		{Action: "add", Text: "x", Until: "2026-12-01\n- injected"},
+		{Action: "remove", Match: "likes\ntea"},
+		{Action: "add", Text: "y\n- injected"},
+	} {
+		_, err := r.d.pagentApplyMemory(ctx, r.a, r.th, "agent", []memory.Op{op}, "")
+		if err == nil || strings.Contains(err.Error(), "injected") {
+			t.Fatalf("op %+v err = %v", op, err)
+		}
+	}
+	if got := r.read(t, "memory/MEMORY.md"); got != before {
+		t.Fatalf("MEMORY.md changed: %q", got)
+	}
+	if len(r.log(t, 0)) != 2 {
+		t.Fatal("invalid op committed")
+	}
+}
+
+func TestDecideRefusedWhenOff(t *testing.T) {
+	r := newMemRig(t, 0)
+	r.setMode(t, "review")
+	r.apply(t, memory.Op{Action: "add", Text: "likes tea"})
+	props, _ := callPAgent[api.PAgentMemoryProposalsResult](t, r.d.handlePAgentMemoryProposals, api.PAgentRef{AgentID: r.a.ID})
+	r.setMode(t, "off")
+	_, err := callPAgent[api.PAgentMemoryDecideResult](t, r.d.handlePAgentMemoryDecide, api.PAgentMemoryDecideParams{ProposalID: props.Proposals[0].ID, Accept: true})
+	if rpcCode(err) != api.CodeInvalidRequest || !strings.Contains(err.Error(), "memory is off for this agent") {
+		t.Fatalf("decide err = %v", err)
+	}
+	if pending, _ := r.s.PendingProposals(context.Background(), r.a.ID); len(pending) != 1 {
+		t.Fatalf("pending = %+v", pending)
+	}
+	if got := r.read(t, "memory/MEMORY.md"); got != "" {
+		t.Fatalf("MEMORY.md = %q", got)
+	}
+}
+
+func TestThreadlessEventsWithoutChatOnlyLog(t *testing.T) {
+	r := newMemRig(t, 0)
+	ctx := context.Background()
+	if err := r.s.CloseThread(ctx, r.th); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.d.pagentApplyMemory(ctx, r.a, "", "tidy", []memory.Op{{Action: "add", Text: "x"}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if evs := r.events(t, evMemoryChanged); len(evs) != 0 {
+		t.Fatalf("event recorded without an active chat: %+v", evs)
 	}
 }
 
