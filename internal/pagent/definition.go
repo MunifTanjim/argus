@@ -42,7 +42,9 @@ type Definition struct {
 }
 
 type MemoryDef struct {
-	Mode string `yaml:"mode,omitempty"`
+	Mode         string        `yaml:"mode,omitempty"`
+	CaptureAfter time.Duration `yaml:"capture-after,omitempty"`
+	Extractor    string        `yaml:"extractor,omitempty"`
 }
 
 // knownKeys are the top-level keys that Definition manages.

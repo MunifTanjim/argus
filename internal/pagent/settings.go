@@ -60,6 +60,10 @@ func Resolve(def *Definition, d config.AgentDefaults) Settings {
 	set(&s.MemoryMode, def.Memory.Mode)
 	set(&s.Notify, def.Notify)
 	set(&s.Proactivity, def.Proactivity)
+	set(&s.Extractor, def.Memory.Extractor)
+	if def.Memory.CaptureAfter != 0 {
+		s.CaptureAfter = def.Memory.CaptureAfter
+	}
 	if def.IdleClose != 0 {
 		s.IdleClose = def.IdleClose
 	}

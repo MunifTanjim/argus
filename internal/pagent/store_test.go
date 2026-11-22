@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/MunifTanjim/argus/internal/config"
 	"testing"
 	"time"
 
@@ -316,5 +317,18 @@ func TestCaptureCursorRoundTrip(t *testing.T) {
 	c, ok, err := s.CaptureCursor(ctx, "th", "s")
 	if err != nil || !ok || c.EntryCount != 5 || c.LastEntryID != "e" || c.UpdatedAt.IsZero() {
 		t.Fatalf("cursor = %+v, ok = %v, err = %v", c, ok, err)
+	}
+}
+
+func TestResolveMemoryOverrides(t *testing.T) {
+	var d config.AgentDefaults
+	d.Memory.CaptureAfter, d.Memory.Extractor = 2*time.Minute, "claude"
+	s := Resolve(&Definition{Memory: MemoryDef{CaptureAfter: time.Minute, Extractor: "codex:o3"}}, d)
+	if s.CaptureAfter != time.Minute || s.Extractor != "codex:o3" {
+		t.Fatalf("settings = %+v", s)
+	}
+	s = Resolve(&Definition{}, d)
+	if s.CaptureAfter != 2*time.Minute || s.Extractor != "claude" {
+		t.Fatalf("settings = %+v", s)
 	}
 }

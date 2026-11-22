@@ -206,11 +206,15 @@ type claudeExtractor struct{ model string }
 func (e claudeExtractor) Extract(ctx context.Context, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, ExtractTimeout)
 	defer cancel()
-	args := []string{"-p", "--output-format", "json", "--max-turns", "1", "--tools", ""}
+	args := []string{
+		"-p", "--output-format", "json", "--max-turns", "1", "--tools", "",
+		"--setting-sources", "", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
+		"--no-session-persistence", "--permission-mode", "plan",
+	}
 	if e.model != "" {
 		args = append(args, "--model", e.model)
 	}
-	cmd := shell.NewCommandContext(ctx, "claude", args...).WithStdIn(strings.NewReader(prompt)).WithDir(os.TempDir())
+	cmd := shell.NewCommandContext(ctx, "claude", args...).WithStdIn(strings.NewReader(prompt)).WithDir(os.TempDir()).WithEnv(extractorEnv())
 	if err := cmd.Run(); err != nil {
 		return "", runError("claude", err, cmd.StdErr().String())
 	}
@@ -238,12 +242,12 @@ func (e codexExtractor) Extract(ctx context.Context, prompt string) (string, err
 	}
 	f.Close()
 	defer os.Remove(f.Name())
-	args := []string{"exec", "--skip-git-repo-check", "--sandbox", "read-only", "--output-last-message", f.Name()}
+	args := []string{"exec", "--skip-git-repo-check", "--sandbox", "read-only", "--ephemeral", "--output-last-message", f.Name()}
 	if e.model != "" {
 		args = append(args, "--model", e.model)
 	}
 	args = append(args, "-")
-	cmd := shell.NewCommandContext(ctx, "codex", args...).WithStdIn(strings.NewReader(prompt)).WithDir(os.TempDir())
+	cmd := shell.NewCommandContext(ctx, "codex", args...).WithStdIn(strings.NewReader(prompt)).WithDir(os.TempDir()).WithEnv(extractorEnv())
 	if err := cmd.Run(); err != nil {
 		return "", runError("codex", err, cmd.StdErr().String())
 	}
@@ -265,4 +269,10 @@ func runError(name string, err error, stderr string) error {
 		return fmt.Errorf("%s: %w: %s", name, err, msg)
 	}
 	return fmt.Errorf("%s: %w", name, err)
+}
+
+// extractorEnv is the environment of an extractor run, marked so it can be
+// told from a user's session.
+func extractorEnv() []string {
+	return append(os.Environ(), "ARGUS_EXTRACTOR=1")
 }
