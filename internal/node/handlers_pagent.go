@@ -229,6 +229,12 @@ func (d *Node) handlePAgentCreate(ctx context.Context, params json.RawMessage) (
 	if p.Model != "" {
 		def.Model = p.Model
 	}
+	if p.Description != "" {
+		def.Description = p.Description
+	}
+	if p.Instructions != "" {
+		def.Instructions = p.Instructions
+	}
 	if from != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, pagentErr("%v", err)

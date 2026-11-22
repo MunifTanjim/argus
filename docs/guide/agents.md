@@ -249,6 +249,8 @@ The other agent does the work in a background run, started by the hand-off, and 
 
 A request can lead to further hand-offs, up to `max-depth` (3) deep and `max-requests-per-root` (12) in all. An agent is never asked again by a request it is already working on. Every refusal is recorded in the asking thread. Work started by a hand-off is unattended.
 
+The primary agent can look over every agent on its node: what each did lately, its recent run results, and what waits for you. Any agent can propose a new agent, with a name, description and instructions; it is created only when you accept the proposal with the other memory proposals.
+
 ## Approvals
 
 Agent sessions run in the coding agent's normal permission mode, so it asks before actions that are not read-only. Argus answers those requests for agent sessions. It never sees what the coding agent runs without asking.

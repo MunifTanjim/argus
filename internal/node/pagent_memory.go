@@ -754,8 +754,11 @@ func (d *Node) handlePAgentMemoryProposals(ctx context.Context, params json.RawM
 			ops = []api.PAgentMemoryOp{}
 		}
 		summary := ""
-		if body.Kind == proposalKindRoutine {
+		switch body.Kind {
+		case proposalKindRoutine:
 			summary = routineProposalSummary(a, body)
+		case proposalKindAgent:
+			summary = agentProposalSummary(body)
 		}
 		res.Proposals = append(res.Proposals, api.PAgentMemoryProposal{
 			ID: pr.ID, AgentID: pr.AgentID, ThreadID: pr.ThreadID, Source: body.Source,
@@ -804,6 +807,16 @@ func (d *Node) handlePAgentMemoryDecide(ctx context.Context, params json.RawMess
 	var body memoryProposal
 	if err := json.Unmarshal(pr.Ops, &body); err != nil {
 		return nil, pagentErr("bad proposal: %v", err)
+	}
+	if body.Kind == proposalKindAgent {
+		if _, err := d.applyAgentProposal(ctx, body); err != nil {
+			return nil, err
+		}
+		if err := s.DecideProposal(ctx, pr.ID, "accepted"); err != nil {
+			return nil, pagentErr("%v", err)
+		}
+		d.notifyConns(api.MethodPAgentChanged)
+		return api.PAgentMemoryDecideResult{}, nil
 	}
 	if body.Kind == proposalKindInstructions || body.Kind == proposalKindRoutine {
 		apply := d.applyInstructionsProposal

@@ -1548,12 +1548,14 @@ type PAgentRoutineHookSecretResult struct {
 // PAgentCreateParams creates an agent directory and registers it. NodeID is a
 // gateway routing key the node ignores.
 type PAgentCreateParams struct {
-	Name   string `json:"name,omitempty"`
-	Dir    string `json:"dir,omitempty"`
-	Agent  string `json:"agent,omitempty"`
-	Model  string `json:"model,omitempty"`
-	From   string `json:"from,omitempty"`
-	NodeID string `json:"node_id,omitempty"`
+	Name         string `json:"name,omitempty"`
+	Dir          string `json:"dir,omitempty"`
+	Agent        string `json:"agent,omitempty"`
+	Model        string `json:"model,omitempty"`
+	From         string `json:"from,omitempty"`
+	NodeID       string `json:"node_id,omitempty"`
+	Description  string `json:"description,omitempty"`
+	Instructions string `json:"instructions,omitempty"`
 }
 
 // PAgentAddParams registers an existing agent directory.

@@ -39,7 +39,7 @@ func TestMCPToolsList(t *testing.T) {
 			t.Errorf("%s: incomplete definition", tool.Name)
 		}
 	}
-	want := "get_current_session list_sessions get_session spawn_session send_message reply_to_message respond_to_interaction get_session_output get_session_transcript kill_session rename_session remember propose_instructions request_handoff ask_agent report_run schedule_check_back routine_list routine_create routine_update routine_pause routine_resume routine_delete offer"
+	want := "get_current_session list_sessions get_session spawn_session send_message reply_to_message respond_to_interaction get_session_output get_session_transcript kill_session rename_session remember propose_instructions request_handoff ask_agent agents_overview propose_agent report_run schedule_check_back routine_list routine_create routine_update routine_pause routine_resume routine_delete offer"
 	if got := strings.Join(names, " "); got != want {
 		t.Fatalf("tools = %s", got)
 	}
