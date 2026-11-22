@@ -125,16 +125,25 @@ class PAgentTimelineSession {
     required this.sessionId,
     this.startIndex = 0,
     this.live = false,
+    this.cli = '',
+    this.agentSessionId = '',
+    this.transcriptPath = '',
   });
   final String sessionId;
   final int startIndex;
   final bool live;
+  final String cli;
+  final String agentSessionId;
+  final String transcriptPath;
 
   factory PAgentTimelineSession.fromJson(Map<String, dynamic> j) =>
       PAgentTimelineSession(
         sessionId: j['session_id'] as String? ?? '',
         startIndex: (j['start_index'] as num?)?.toInt() ?? 0,
         live: j['live'] as bool? ?? false,
+        cli: j['cli'] as String? ?? '',
+        agentSessionId: j['agent_session_id'] as String? ?? '',
+        transcriptPath: j['transcript_path'] as String? ?? '',
       );
 }
 

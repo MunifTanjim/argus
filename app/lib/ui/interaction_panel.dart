@@ -29,6 +29,8 @@ class InteractionPanel extends ConsumerStatefulWidget {
 class _InteractionPanelState extends ConsumerState<InteractionPanel> {
   late final RespondViewModel _vm;
   bool _denying = false;
+  // A handoff the user took over: Done is the next step, so it is highlighted.
+  bool _tookOver = false;
   final _text = TextEditingController();
   List<QuestionDraft>? _drafts;
 
@@ -249,6 +251,7 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
         );
         return;
       }
+      setState(() => _tookOver = true);
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => LiveScreenScreen(session: widget.session),
@@ -280,7 +283,7 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
           padding: const EdgeInsets.only(bottom: 8),
           child: _handoffButton(
             options[i],
-            primary: i == 0,
+            primary: _tookOver ? options[i].value == 'done' : i == 0,
             onTap: options[i].value == takeover
                 ? takeOver
                 : () => _respond(

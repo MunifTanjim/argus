@@ -11,6 +11,33 @@ import 'session_detail_screen.dart';
 import 'theme.dart';
 import 'transcript_feed.dart';
 
+/// Where an entry's tool details are read: its timeline entry id is prefixed
+/// `s<index>:` naming the session it came from. The live session that writes
+/// that transcript serves them; otherwise the transcript file does.
+ToolDetailRef timelineDetailRef(
+  String nodeId,
+  List<PAgentTimelineSession> sessions,
+  String entryId,
+) {
+  final m = RegExp(r'^s(\d+):').firstMatch(entryId);
+  final i = m == null ? -1 : int.parse(m[1]!);
+  if (i < 0 || i >= sessions.length || sessions[i].transcriptPath.isEmpty) {
+    return const ToolDetailRef();
+  }
+  final s = sessions[i];
+  final agent = s.cli.isEmpty ? null : s.cli;
+  for (var j = sessions.length - 1; j >= 0; j--) {
+    if (sessions[j].live && sessions[j].transcriptPath == s.transcriptPath) {
+      return ToolDetailRef.live(sessions[j].sessionId, agent: agent);
+    }
+  }
+  return ToolDetailRef.history(
+    nodeId: nodeId,
+    transcriptPath: s.transcriptPath,
+    agent: agent,
+  );
+}
+
 /// Opens a thread's timeline.
 Route<void> threadRoute({
   required String agentId,
@@ -153,11 +180,10 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
             : const CircularProgressIndicator(),
       );
     } else {
-      final live = tl.sessions.isEmpty ? '' : tl.sessions.last.sessionId;
+      final nodeId = agent?.nodeId ?? '';
       body = TranscriptFeed(
-        detailRef: live.isEmpty
-            ? const ToolDetailRef()
-            : ToolDetailRef.live(live),
+        detailRef: const ToolDetailRef(),
+        detailRefOf: (e) => timelineDetailRef(nodeId, tl.sessions, e.id),
         entries: tl.entries,
         emptyText: 'Empty thread.',
         onUndoMemory: _undo,

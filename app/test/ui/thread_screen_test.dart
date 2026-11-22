@@ -89,6 +89,61 @@ Future<FakeGatewayClient> _pump(
 }
 
 void main() {
+  group('timelineDetailRef', () {
+    const live = PAgentTimelineSession(
+      sessionId: 'A:s2',
+      live: true,
+      cli: 'claude',
+      transcriptPath: '/t/b.jsonl',
+    );
+    const ended = PAgentTimelineSession(
+      sessionId: 'A:s1',
+      cli: 'codex',
+      transcriptPath: '/t/a.jsonl',
+    );
+    const none = PAgentTimelineSession(sessionId: 'A:s0');
+    const sessions = [ended, live, none];
+
+    test('a live session serves its entries', () {
+      final r = timelineDetailRef('A', sessions, 's1:e7');
+      expect(r.isHistory, false);
+      expect(r.sessionId, 'A:s2');
+      expect(r.agent, 'claude');
+    });
+
+    test('an ended session reads its transcript file', () {
+      final r = timelineDetailRef('A', sessions, 's0:e3');
+      expect(r.isHistory, true);
+      expect(r.nodeId, 'A');
+      expect(r.transcriptPath, '/t/a.jsonl');
+      expect(r.agent, 'codex');
+    });
+
+    test('the live session of the same transcript wins for an older entry', () {
+      final r = timelineDetailRef(
+        'A',
+        const [
+          PAgentTimelineSession(
+            sessionId: 'A:s1',
+            cli: 'claude',
+            transcriptPath: '/t/b.jsonl',
+          ),
+          live,
+        ],
+        's0:e1',
+      );
+      expect(r.sessionId, 'A:s2');
+    });
+
+    test('an entry without a known source gets an empty reference', () {
+      for (final id in ['argus-1', 's2:e1', 's9:e1']) {
+        final r = timelineDetailRef('A', sessions, id);
+        expect(r.sessionId, isNull, reason: id);
+        expect(r.transcriptPath, isNull, reason: id);
+      }
+    });
+  });
+
   test('timestampNanos keeps nanosecond precision', () {
     expect(
       timestampNanos('2026-11-22T10:00:00.123456789Z'),

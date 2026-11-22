@@ -93,8 +93,8 @@ void main() {
     expect(find.text('Handoff'), findsOneWidget);
     expect(find.textContaining('Log in to the registry'), findsOneWidget);
     expect(find.textContaining('npm login'), findsOneWidget);
-    expect(find.text('Take over'), findsOneWidget);
-    expect(find.text('Done'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Take over'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, 'Done'), findsOneWidget);
   });
 
   testWidgets('Done responds with the done option and the request id', (tester) async {
@@ -131,6 +131,8 @@ void main() {
     expect(obs.routes.length, before + 1);
     expect(repo.calls, isEmpty);
     tester.takeException(); // the pushed live screen needs a terminal
+    expect(find.widgetWithText(FilledButton, 'Done'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, 'Take over'), findsOneWidget);
   });
 
   testWidgets('Take over without a terminal says so', (tester) async {
