@@ -3,6 +3,7 @@ package e2e
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -257,5 +258,90 @@ func TestFinishRejectsTamperedMsg2(t *testing.T) {
 	msg2[len(msg2)-1] ^= 0x01
 	if _, err := init.Finish(msg2); err == nil {
 		t.Fatal("Finish must reject a tampered msg2 (initiator authenticates the responder)")
+	}
+}
+
+func inviteSetup(t *testing.T) (client, node KeyPair, prologue, inviteID []byte) {
+	t.Helper()
+	node, _ = GenerateKeyPair()
+	client, _ = GenerateKeyPair()
+	return client, node, []byte("argus-e2e/v1|invite"), []byte("0123456789abcdef")
+}
+
+func TestInviteHandshakeRoundTrip(t *testing.T) {
+	client, node, prologue, inviteID := inviteSetup(t)
+	psk := bytes.Repeat([]byte{7}, 32)
+	init, msg1, err := NewInviteInitiator(client, node.Public, prologue, psk, inviteID)
+	if err != nil {
+		t.Fatalf("NewInviteInitiator: %v", err)
+	}
+	var gotPayload []byte
+	nodeSess, clientStatic, payload, msg2, err := RespondInvite(node, prologue, msg1, func(p []byte) ([]byte, bool) {
+		gotPayload = p
+		return psk, true
+	})
+	if err != nil {
+		t.Fatalf("RespondInvite: %v", err)
+	}
+	if !bytes.Equal(payload, inviteID) || !bytes.Equal(gotPayload, inviteID) {
+		t.Fatalf("payload = %q, lookup saw %q, want %q", payload, gotPayload, inviteID)
+	}
+	if !bytes.Equal(clientStatic, client.Public) {
+		t.Fatal("clientStatic != client.Public")
+	}
+	clientSess, err := init.Finish(msg2)
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	blob, err := clientSess.Seal([]byte("ping"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := nodeSess.Open(blob)
+	if err != nil || string(got) != "ping" {
+		t.Fatalf("Open = %q, %v", got, err)
+	}
+}
+
+func TestInviteHandshakeWrongPSKFailsFinish(t *testing.T) {
+	client, node, prologue, inviteID := inviteSetup(t)
+	init, msg1, err := NewInviteInitiator(client, node.Public, prologue, bytes.Repeat([]byte{1}, 32), inviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, msg2, err := RespondInvite(node, prologue, msg1, func([]byte) ([]byte, bool) {
+		return bytes.Repeat([]byte{2}, 32), true
+	})
+	if err != nil {
+		t.Fatalf("RespondInvite: %v", err)
+	}
+	if _, err := init.Finish(msg2); err == nil {
+		t.Fatal("Finish succeeded with mismatched psk")
+	}
+}
+
+func TestInviteHandshakeUnknownInvite(t *testing.T) {
+	client, node, prologue, inviteID := inviteSetup(t)
+	_, msg1, err := NewInviteInitiator(client, node.Public, prologue, bytes.Repeat([]byte{1}, 32), inviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, msg2, err := RespondInvite(node, prologue, msg1, func([]byte) ([]byte, bool) { return nil, false })
+	if !errors.Is(err, ErrUnknownInvite) {
+		t.Fatalf("err = %v, want ErrUnknownInvite", err)
+	}
+	if msg2 != nil {
+		t.Fatal("msg2 written for unknown invite")
+	}
+}
+
+func TestInviteHandshakeNotInteroperableWithIK(t *testing.T) {
+	client, node, prologue, inviteID := inviteSetup(t)
+	_, msg1, err := NewInviteInitiator(client, node.Public, prologue, bytes.Repeat([]byte{1}, 32), inviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := Respond(node, prologue, msg1); err == nil {
+		t.Fatal("IK responder accepted IKpsk2 msg1")
 	}
 }
