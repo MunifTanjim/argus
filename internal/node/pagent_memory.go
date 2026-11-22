@@ -742,12 +742,16 @@ func (d *Node) handlePAgentMemoryProposals(ctx context.Context, params json.RawM
 		res.Proposals = append(res.Proposals, api.PAgentMemoryProposal{
 			ID: pr.ID, AgentID: pr.AgentID, ThreadID: pr.ThreadID, Source: body.Source,
 			Kind: body.Kind, Text: body.Text, Reason: body.Reason,
-			Ops: body.Ops, Log: body.Log, CreatedAt: pr.CreatedAt,
+			Ops: ops, Log: body.Log, CreatedAt: pr.CreatedAt,
 		})
 	}
 	return res, nil
 }
 
+		ops := body.Ops
+		if ops == nil {
+			ops = []api.PAgentMemoryOp{}
+		}
 func (d *Node) handlePAgentMemoryDecide(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.PAgentMemoryDecideParams](params)
 	if err != nil {

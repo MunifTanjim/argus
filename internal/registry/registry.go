@@ -901,6 +901,11 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	r.clearEnded(pKey)
 	r.clearEnded(u.AgentSessionID)
 	if u.Status != "" {
+		// A turn starting after the agent's turn ended means the user took over
+		// and typed: a pending handoff is finished.
+		if u.Status == session.StatusWorking && (s.Status == session.StatusIdle || s.Interaction != nil && s.Interaction.Kind == session.InteractionIdle) {
+			r.dropHandoffLocked(s.ID)
+		}
 		setStatus(s, u.Status)
 		// A status decision (re)sets the pending interaction, but a bare Notification
 		// must not clobber a richer one (see mergeInteraction). Stop opts out via

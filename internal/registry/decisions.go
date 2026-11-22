@@ -93,3 +93,48 @@ func (r *Registry) view(s *session.Session) session.Session {
 	v.StatusSince = q.since
 	return v
 }
+
+// Decision returns the pending decision requestID of session id.
+func (r *Registry) Decision(id, requestID string) (session.Interaction, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	q := r.decisions[id]
+	if q == nil {
+		return session.Interaction{}, false
+	}
+	i := q.index(requestID)
+	if i < 0 {
+		return session.Interaction{}, false
+	}
+	return q.items[i], true
+}
+
+// OtherPending reports whether session id waits on anything besides the
+// decision requestID: another queued decision, or a permission, question or
+// plan of its own.
+func (r *Registry) OtherPending(id, requestID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if q := r.decisions[id]; q != nil {
+		for _, ix := range q.items {
+			if ix.RequestID != requestID {
+				return true
+			}
+		}
+	}
+	s := r.sessions[id]
+	return s != nil && s.InteractionPending()
+}
+
+// dropHandoffLocked removes a queued handoff decision of session id. Caller
+// holds r.mu.
+func (r *Registry) dropHandoffLocked(id string) {
+	q := r.decisions[id]
+	if q == nil {
+		return
+	}
+	q.items = slices.DeleteFunc(q.items, func(ix session.Interaction) bool { return ix.Kind == session.InteractionHandoff })
+	if len(q.items) == 0 {
+		delete(r.decisions, id)
+	}
+}

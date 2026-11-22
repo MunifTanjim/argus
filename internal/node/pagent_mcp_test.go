@@ -8,6 +8,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/agentgit"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/pagent"
+	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -131,5 +132,84 @@ func TestRequestHandoffInteraction(t *testing.T) {
 	}
 	if got, _ = r.d.reg.Get(s.ID); got.Interaction != nil || len(sent) != 1 || sent[0] != "The user finished: continue." {
 		t.Fatalf("after done: %+v sent=%v", got, sent)
+	}
+}
+
+func handoffRig(t *testing.T) (*memRig, session.Session, *[]string) {
+	t.Helper()
+	r := newMemRig(t, 0)
+	r.d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%1", AgentSessionID: "c1", Status: session.StatusWorking})
+	s, _ := r.d.reg.FindByAgentSession("claude", "c1")
+	caller := callerRef{Local: &session.Session{ID: s.ID, PAgentID: r.a.ID, PAgentThreadID: r.th}}
+	if _, err := r.d.mcpRequestHandoff(context.Background(), caller, requestHandoffParams{Reason: "login", Steps: "sign in"}); err != nil {
+		t.Fatal(err)
+	}
+	sent := &[]string{}
+	r.d.deliverFn = func(_ context.Context, _ session.Session, text string) error {
+		*sent = append(*sent, text)
+		return nil
+	}
+	return r, s, sent
+}
+
+func TestHandoffAndPermissionAnsweredByRequestID(t *testing.T) {
+	r, s, sent := handoffRig(t)
+	ctx := context.Background()
+	r.d.reg.PushDecision(s.ID, session.Interaction{Kind: session.InteractionPermission, RequestID: "perm1"})
+	// A permission answer must not reach the handoff.
+	r.d.reg.DropDecision(s.ID, "perm1")
+	r.d.reg.PushDecision(s.ID, session.Interaction{Kind: session.InteractionPermission, RequestID: "perm1"})
+	_, err := r.d.handleSessionRespond(ctx, mustJSON(api.RespondParams{SessionID: s.ID, RequestID: "perm1", OptionValue: "allow"}))
+	if err != nil && strings.Contains(err.Error(), "handoff") {
+		t.Fatalf("permission answer went to handoff: %v", err)
+	}
+	if len(*sent) != 0 {
+		t.Fatalf("sent = %v", *sent)
+	}
+	if _, ok := r.d.reg.Decision(s.ID, handoffRequestID); !ok {
+		t.Fatal("handoff dropped by permission answer")
+	}
+	r.d.reg.DropDecision(s.ID, "perm1")
+	if _, err := r.d.handleSessionRespond(ctx, mustJSON(api.RespondParams{SessionID: s.ID, RequestID: handoffRequestID, OptionValue: "done"})); err != nil {
+		t.Fatal(err)
+	}
+	if len(*sent) != 1 {
+		t.Fatalf("sent = %v", *sent)
+	}
+}
+
+func TestHandoffDoneRefusedWhilePermissionPending(t *testing.T) {
+	r, s, sent := handoffRig(t)
+	r.d.reg.PushDecision(s.ID, session.Interaction{Kind: session.InteractionPermission, RequestID: "perm1"})
+	_, err := r.d.handleSessionRespond(context.Background(), mustJSON(api.RespondParams{SessionID: s.ID, RequestID: handoffRequestID, OptionValue: "done"}))
+	if err == nil || !strings.Contains(err.Error(), "answer the agent's pending request first") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, ok := r.d.reg.Decision(s.ID, handoffRequestID); !ok || len(*sent) != 0 {
+		t.Fatal("handoff changed")
+	}
+}
+
+func TestHandoffDroppedWhenNewTurnStarts(t *testing.T) {
+	r, s, sent := handoffRig(t)
+	ctx := context.Background()
+	hook := func(st session.Status) {
+		r.d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", Server: session.TmuxServerDefault, PaneID: "%1", AgentSessionID: "c1", Status: st})
+	}
+	hook(session.StatusWorking) // tool call return in the same turn
+	if _, ok := r.d.reg.Decision(s.ID, handoffRequestID); !ok {
+		t.Fatal("dropped within the turn")
+	}
+	hook(session.StatusIdle) // agent ends its turn
+	if _, ok := r.d.reg.Decision(s.ID, handoffRequestID); !ok {
+		t.Fatal("dropped at turn end")
+	}
+	hook(session.StatusWorking) // user typed in the terminal
+	if _, ok := r.d.reg.Decision(s.ID, handoffRequestID); ok {
+		t.Fatal("not dropped")
+	}
+	_, err := r.d.handleSessionRespond(ctx, mustJSON(api.RespondParams{SessionID: s.ID, RequestID: handoffRequestID, OptionValue: "done"}))
+	if err == nil || !strings.Contains(err.Error(), "no pending handoff") || len(*sent) != 0 {
+		t.Fatalf("err = %v sent = %v", err, *sent)
 	}
 }

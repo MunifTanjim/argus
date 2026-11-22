@@ -75,7 +75,7 @@ func (d *Node) handleSessionRespond(ctx context.Context, params json.RawMessage)
 	if rid == "" && ok && s.Interaction != nil {
 		rid = s.Interaction.RequestID
 	}
-	if ok && s.Interaction != nil && s.Interaction.Kind == session.InteractionHandoff {
+	if ok && rid == handoffRequestID {
 		return nil, d.respondHandoff(ctx, s, p)
 	}
 	if pd := d.claimPending(p.SessionID, rid); pd != nil {

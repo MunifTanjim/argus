@@ -169,6 +169,9 @@ func (d *Node) mcpRequestHandoff(ctx context.Context, caller callerRef, p reques
 	if _, _, err := d.pagentCaller(ctx, caller); err != nil {
 		return nil, err
 	}
+	if _, ok := d.reg.Get(caller.Local.ID); !ok {
+		return nil, fmt.Errorf("session not found")
+	}
 	d.reg.PushDecision(caller.Local.ID, session.Interaction{
 		Kind:      session.InteractionHandoff,
 		Message:   strings.TrimSpace(p.Reason),
@@ -185,14 +188,20 @@ func (d *Node) mcpRequestHandoff(ctx context.Context, caller callerRef, p reques
 // respondHandoff answers a pending handoff interaction. done resumes the
 // session; takeover is a client action and changes nothing here.
 func (d *Node) respondHandoff(ctx context.Context, s session.Session, p api.RespondParams) error {
+	ix, ok := d.reg.Decision(s.ID, handoffRequestID)
+	if !ok {
+		return fmt.Errorf("no pending handoff")
+	}
 	switch p.OptionValue {
 	case handoffTakeover:
 		return nil
 	case handoffDone:
-		d.reg.DropDecision(s.ID, s.Interaction.RequestID)
-		ix := *s.Interaction
-		cur, ok := d.reg.Get(s.ID)
-		if !ok {
+		if d.reg.OtherPending(s.ID, handoffRequestID) {
+			return fmt.Errorf("answer the agent's pending request first")
+		}
+		d.reg.DropDecision(s.ID, handoffRequestID)
+		cur, found := d.reg.Get(s.ID)
+		if !found {
 			return nil
 		}
 		if err := d.deliver(ctx, cur, handoffDoneMessage); err != nil {
