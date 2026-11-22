@@ -178,6 +178,9 @@ func (d *Node) handlePAgentThreadSend(ctx context.Context, params json.RawMessag
 	if !a.ArchivedAt.IsZero() {
 		return nil, pagentErr("agent %q is archived", a.Name)
 	}
+	// Held across a resume or spawn and the first delivery (up to
+	// pagentReadyTimeout), so concurrent sends to the agent never start
+	// duplicate sessions; they and idle close wait meanwhile.
 	defer d.pagentLock(a.ID)()
 	th, err := d.sendThread(ctx, s, a, p)
 	if err != nil {
@@ -316,7 +319,8 @@ func (d *Node) pagentEnsureSession(ctx context.Context, a pagent.Agent, th pagen
 		reason = "the previous session cannot be resumed"
 	default:
 		sid, err := d.resumeFn(ctx, cli, prev.AgentSessionID, a.Dir, "")
-		if err == nil {
+		starting := errors.Is(err, errResumeStarting)
+		if err == nil || (starting && sid != "") {
 			if err := s.InsertThreadSession(ctx, pagent.ThreadSession{
 				ThreadID: th.ID, SessionID: sid, CLI: cli, AgentSessionID: prev.AgentSessionID,
 				TranscriptPath: prev.TranscriptPath, StartedBy: startedByYou,
@@ -324,6 +328,18 @@ func (d *Node) pagentEnsureSession(ctx context.Context, a pagent.Agent, th pagen
 				return "", false, pagentErr("%v", err)
 			}
 			d.logEvent(ctx, th.ID, "session.resumed", map[string]string{"session_id": sid}, sid)
+		}
+		if starting {
+			// The resumed pane is still launching: track it, so the next send
+			// finds it, rather than starting a second session.
+			if sid != "" {
+				if _, ok := d.reg.Get(sid); !ok {
+					d.pagentPending.Store(sid, now)
+				}
+			}
+			return "", false, &api.RPCError{Code: api.CodeNotReady, Message: "agent session is starting; try again shortly"}
+		}
+		if err == nil {
 			return sid, true, d.pagentDeliver(ctx, sid, firstPrompt, pagentReadyTimeout)
 		}
 		d.log.Warn("pagent: resume failed", "thread", th.ID, "agent_session", prev.AgentSessionID, "err", err)
@@ -379,6 +395,27 @@ func (d *Node) pagentStarting(sid string, now time.Time) bool {
 		return false
 	}
 	return true
+}
+
+// pagentStartingCount counts the agent's thread sessions that are starting.
+func (d *Node) pagentStartingCount(ctx context.Context, agentID string) int {
+	threads, err := d.pagents.ListThreads(ctx, agentID)
+	if err != nil {
+		return 0
+	}
+	now, n := d.pagentNow(), 0
+	for _, th := range threads {
+		links, err := d.pagents.ThreadSessions(ctx, th.ID)
+		if err != nil {
+			continue
+		}
+		for _, l := range links {
+			if l.EndedAt.IsZero() && d.pagentStarting(l.SessionID, now) {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // resumable reports whether a thread session of cli is resumed in place.
@@ -506,7 +543,8 @@ func (d *Node) pagentMakeRoom(ctx context.Context, a pagent.Agent, limit int) er
 		return nil
 	}
 	live := d.pagentLive(ctx, d.pagents, a.ID)
-	need := len(live) - limit + 1
+	running := len(live) + d.pagentStartingCount(ctx, a.ID)
+	need := running - limit + 1
 	if need <= 0 {
 		return nil
 	}
@@ -524,7 +562,7 @@ func (d *Node) pagentMakeRoom(ctx context.Context, a pagent.Agent, limit int) er
 		}
 	}
 	if len(idle) < need {
-		return pagentErr("agent busy: %d sessions running", len(live))
+		return pagentErr("agent busy: %d sessions running", running)
 	}
 	slices.SortStableFunc(idle, func(x, y candidate) int {
 		return cmp.Or(x.since.Compare(y.since), x.ls.Link.StartedAt.Compare(y.ls.Link.StartedAt))

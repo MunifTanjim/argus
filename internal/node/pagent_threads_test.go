@@ -295,8 +295,8 @@ func TestPAgentExcerptBounded(t *testing.T) {
 		{Kind: transcript.EntryText, Text: big},
 		{Kind: transcript.EntryUser, Text: big},
 	})
-	body := strings.TrimPrefix(got, excerptHeader)
-	if len(body) > excerptBytes+64 || strings.Contains(got, "first") || !strings.Contains(got, "You: x") {
+	body := strings.TrimSuffix(strings.TrimPrefix(got, excerptHeader+"\n\n"), "\n\n---")
+	if len(body) > excerptBytes || strings.Contains(got, "first") || !strings.Contains(got, "You: x") {
 		t.Fatalf("excerpt len %d: %.80q", len(body), got)
 	}
 	if renderExcerpt(nil) != "" {
@@ -491,5 +491,53 @@ func TestSendWhileSessionStartsIsNotReady(t *testing.T) {
 	r.d.pagentNow = func() time.Time { return time.Now().Add(time.Minute) }
 	if res, err := r.send(t, api.PAgentSendParams{Text: "later"}); err != nil || res.SessionID == "argus:%99" || len(r.resumes) != 1 {
 		t.Fatalf("res = %+v, err = %v, resumes = %d", res, err, len(r.resumes))
+	}
+}
+
+func TestSendResumeStillStartingIsNotReady(t *testing.T) {
+	r := newThreadRig(t)
+	first, err := r.send(t, api.PAgentSendParams{Text: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preset := r.spawns[0].presetID
+	r.end(first.SessionID)
+	r.d.resumeFn = func(context.Context, string, string, string, string) (string, error) {
+		r.mu.Lock()
+		r.resumes = append(r.resumes, resumeCall{})
+		r.mu.Unlock()
+		return "argus:%50", errResumeStarting
+	}
+
+	_, err = r.send(t, api.PAgentSendParams{Text: "back?"})
+	if rpcCode(err) != api.CodeNotReady {
+		t.Fatalf("err = %v", err)
+	}
+	links := r.links(t, first.ThreadID)
+	if len(r.spawns) != 1 || len(links) != 2 || links[0].EndReason == "resume-failed" ||
+		links[1].SessionID != "argus:%50" || links[1].AgentSessionID != preset {
+		t.Fatalf("spawns = %d, links = %+v", len(r.spawns), links)
+	}
+	// While it launches, a send neither resumes again nor spawns, and the
+	// launching session counts toward the limit.
+	if _, err := r.send(t, api.PAgentSendParams{Text: "still?"}); rpcCode(err) != api.CodeNotReady || len(r.resumes) != 1 {
+		t.Fatalf("err = %v, resumes = %d", err, len(r.resumes))
+	}
+	r.d.pagentCfg.Defaults.MaxConcurrentSessions = 1
+	if _, err := r.send(t, api.PAgentSendParams{Text: "other", New: true}); err == nil || !strings.Contains(err.Error(), "agent busy: 1 sessions running") {
+		t.Fatalf("limit err = %v", err)
+	}
+	r.d.pagentCfg.Defaults.MaxConcurrentSessions = 0
+
+	r.d.reg.ApplyHook(registry.HookUpdate{
+		Agent: "claude", Server: session.TmuxServerArgus, PaneID: "%50",
+		AgentSessionID: preset, Cwd: r.agent.Dir, Status: session.StatusIdle,
+	})
+	res, err := r.send(t, api.PAgentSendParams{ThreadID: first.ThreadID, Text: "now"})
+	if err != nil || res.SessionID != "argus:%50" || len(r.delivered) != 1 || r.delivered[0] != "argus:%50=now" {
+		t.Fatalf("res = %+v, err = %v, delivered = %v", res, err, r.delivered)
+	}
+	if ev := r.events(t, first.ThreadID); len(ev) != 2 || ev[1].Kind != "session.resumed" {
+		t.Fatalf("events = %+v", ev)
 	}
 }

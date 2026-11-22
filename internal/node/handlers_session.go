@@ -706,6 +706,20 @@ func (d *Node) handleSessionResume(ctx context.Context, params json.RawMessage) 
 // id); an empty existingID is a fresh launch keyed by the pane. An in-flight guard
 // stops a concurrent duplicate launch of the same session.
 func (d *Node) spawnAndAdopt(ctx context.Context, agent, agentSessionID, cwd, existingID string) (string, error) {
+	sid, err := d.resumeAdopt(ctx, agent, agentSessionID, cwd, existingID)
+	if errors.Is(err, errResumeStarting) {
+		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "session is starting; try again in a moment"}
+	}
+	return sid, err
+}
+
+// errResumeStarting reports a resume whose pane is launched but not adopted
+// yet; resumeAdopt returns the launching session's id with it.
+var errResumeStarting = errors.New("session is starting")
+
+// resumeAdopt is spawnAndAdopt returning errResumeStarting, with the launching
+// session's id, while the launch is in flight.
+func (d *Node) resumeAdopt(ctx context.Context, agent, agentSessionID, cwd, existingID string) (string, error) {
 	if cwd == "" {
 		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "cannot open terminal: session working directory is unknown"}
 	}
@@ -734,7 +748,7 @@ func (d *Node) spawnAndAdopt(ctx context.Context, agent, agentSessionID, cwd, ex
 		if live, ok := d.controllableFor(id, agent, agentSessionID); ok {
 			return live, nil
 		}
-		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "session is starting; try again in a moment"}
+		return id, errResumeStarting
 	}
 
 	name, args, ok := d.adapterFor(agent).ResumeCommand(agentSessionID)
@@ -765,7 +779,7 @@ func (d *Node) spawnAndAdopt(ctx context.Context, agent, agentSessionID, cwd, ex
 
 	live, ok := d.waitControllable(sid, agent, agentSessionID)
 	if !ok {
-		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "session is starting; try again in a moment"}
+		return sid, errResumeStarting
 	}
 	return live, nil
 }

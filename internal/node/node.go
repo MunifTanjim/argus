@@ -126,7 +126,8 @@ type Node struct {
 	pagentLocks       sync.Map         // agent id -> *sync.Mutex; serializes session starts per agent
 	pagentPending     sync.Map         // spawned session id -> time.Time; not registered yet
 
-	// resumeFn relaunches a past agent session; defaults to (*Node).spawnAndAdopt.
+	// resumeFn relaunches a past agent session; defaults to (*Node).resumeAdopt.
+	// errResumeStarting comes with the launching session's id.
 	resumeFn func(ctx context.Context, agent, agentSessionID, cwd, existingID string) (string, error)
 	// killFn ends a session; defaults to (*Node).killSession.
 	killFn func(ctx context.Context, s session.Session) error
@@ -565,7 +566,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	}
 	d.restoreMirrorFn = d.restoreMirror
 	d.spawnFn = d.spawn
-	d.resumeFn = d.spawnAndAdopt
+	d.resumeFn = d.resumeAdopt
 	d.killFn = d.killSession
 	d.pagentNow = time.Now
 
