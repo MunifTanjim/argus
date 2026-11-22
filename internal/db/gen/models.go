@@ -54,6 +54,49 @@ type OrchPeerOutbox struct {
 	LastAttemptAt int64
 }
 
+type Pagent struct {
+	ID         string
+	Name       string
+	Dir        string
+	ArchivedAt int64
+	CreatedAt  int64
+}
+
+type PagentThread struct {
+	ID           string
+	AgentID      string
+	Kind         string
+	StartedBy    string
+	Title        string
+	Status       string
+	ReadPosition int64
+	CreatedAt    int64
+	LastActiveAt int64
+}
+
+type PagentThreadEvent struct {
+	ID            int64
+	ThreadID      string
+	Kind          string
+	StartedBy     string
+	Payload       string
+	AnchorSession string
+	AnchorIndex   int64
+	CreatedAt     int64
+}
+
+type PagentThreadSession struct {
+	ThreadID       string
+	SessionID      string
+	Cli            string
+	AgentSessionID string
+	TranscriptPath string
+	StartedBy      string
+	StartedAt      int64
+	EndedAt        int64
+	EndReason      string
+}
+
 type Project struct {
 	ID         string
 	Name       string
