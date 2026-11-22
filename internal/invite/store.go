@@ -19,6 +19,10 @@ const MaxTTL = 30 * 24 * time.Hour
 // retention is how long used, revoked and expired invites stay in the store.
 const retention = 7 * 24 * time.Hour
 
+// ChannelIdleTimeout is how long an issuer keeps an invite channel open
+// waiting for its redeem request; until then the invite has no other channel.
+const ChannelIdleTimeout = 30 * time.Second
+
 type State string
 
 const (
@@ -178,6 +182,14 @@ func (s *Store) Secret(id []byte) ([]byte, bool) {
 		return nil, false
 	}
 	return slices.Clone(inv.Secret), true
+}
+
+// Pending reports whether id is a pending, unexpired invite.
+func (s *Store) Pending(id []byte) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	inv := s.find(id)
+	return inv != nil && inv.State == StatePending && !inv.Expired(s.now())
 }
 
 // Consume marks a pending, unexpired invite used and persists it.

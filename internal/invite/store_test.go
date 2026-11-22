@@ -217,6 +217,32 @@ func TestStoreCorruptFile(t *testing.T) {
 	}
 }
 
+func TestStorePending(t *testing.T) {
+	s, clk, _ := newTestStore(t)
+	pending, _ := s.Create(time.Hour)
+	used, _ := s.Create(time.Hour)
+	revoked, _ := s.Create(time.Hour)
+	expiring, _ := s.Create(time.Minute)
+	if err := s.Consume(used.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Revoke(revoked.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !s.Pending(pending.ID) || !s.Pending(expiring.ID) {
+		t.Fatal("pending invites must report pending")
+	}
+	clk.advance(2 * time.Minute)
+	for name, id := range map[string][]byte{"used": used.ID, "revoked": revoked.ID, "expired": expiring.ID, "unknown": make([]byte, 16)} {
+		if s.Pending(id) {
+			t.Fatalf("%s invite reported pending", name)
+		}
+	}
+	if !s.Pending(pending.ID) {
+		t.Fatal("unexpired pending invite must stay pending")
+	}
+}
+
 func TestStoreFailedSaveKeepsState(t *testing.T) {
 	s, _, path := newTestStore(t)
 	pending, _ := s.Create(time.Hour)

@@ -2,12 +2,15 @@ package node
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/invite"
+	"github.com/MunifTanjim/argus/internal/keyfmt"
 )
 
 func invalidRequest(msg string) *api.RPCError {
@@ -101,4 +104,69 @@ func (d *Node) handleLockInviteRevoke(_ context.Context, params json.RawMessage)
 		return nil, invalidRequest(err.Error())
 	}
 	return nil, nil
+}
+
+func (d *Node) inviteDispatch(id, clientStatic []byte) api.DispatchFunc {
+	return func(_ context.Context, method string, params json.RawMessage) (any, error) {
+		if method != api.MethodLockInviteRedeem {
+			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+		}
+		p, err := api.Decode[api.LockInviteRedeemParams](params)
+		if err != nil {
+			return nil, invalidRequest("invalid params: " + err.Error())
+		}
+		res, rerr := d.redeemInvite(id, clientStatic, p)
+		if rerr != nil {
+			return nil, rerr
+		}
+		return res, nil
+	}
+}
+
+// redeemInvite consumes invite id and authorizes clientStatic plus the extra key.
+// The invite is consumed and persisted before any trust-log append, so a crash
+// can lose a redemption but never allow a second one.
+func (d *Node) redeemInvite(id, clientStatic []byte, p api.LockInviteRedeemParams) (api.LockInviteRedeemResult, *api.RPCError) {
+	if len(p.ExtraKeys) > 1 {
+		return api.LockInviteRedeemResult{}, invalidRequest("at most one extra key")
+	}
+	for _, k := range p.ExtraKeys {
+		if len(k) != keyfmt.Len {
+			return api.LockInviteRedeemResult{}, invalidRequest("extra key must be a 32-byte identity pubkey")
+		}
+	}
+	st, rerr := d.requireSigner()
+	if rerr != nil {
+		return api.LockInviteRedeemResult{}, rerr
+	}
+	if err := d.invites.Consume(id); err != nil {
+		if invite.IsRejection(err) {
+			return api.LockInviteRedeemResult{}, invalidRequest(err.Error())
+		}
+		return api.LockInviteRedeemResult{}, &api.RPCError{Code: api.CodeInternalError, Message: "consume invite: " + err.Error()}
+	}
+	keys := append([][]byte{clientStatic}, p.ExtraKeys...)
+	var changed bool
+	for _, k := range keys {
+		c, err := st.AuthorizeDevice(k, d.signer)
+		changed = changed || c
+		if err != nil {
+			if changed {
+				d.afterTrustChange()
+			}
+			return api.LockInviteRedeemResult{}, &api.RPCError{Code: api.CodeInternalError, Message: "append: " + err.Error()}
+		}
+	}
+	if err := d.invites.RecordKeys(id, keys); err != nil {
+		d.log.Warn("recording invite keys failed", "err", err)
+	}
+	if changed {
+		d.afterTrustChange()
+	}
+	fps := make([]string, len(keys))
+	for i, k := range keys {
+		fps[i] = base64.StdEncoding.EncodeToString(k[:8])
+	}
+	d.log.Info("redeemed invite", "invite", hex.EncodeToString(id), "authorized", fps)
+	return api.LockInviteRedeemResult{Tip: st.Tip()}, nil
 }

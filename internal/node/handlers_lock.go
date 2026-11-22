@@ -193,13 +193,19 @@ func (d *Node) lockDevice(params json.RawMessage, authorize bool) (any, error) {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "append: " + err.Error()}
 	}
 	if changed {
-		if werr := d.persistTrust(); werr != nil {
-			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
-		}
-		d.reevaluateTrustChannels()
-		d.announceTrustChange()
+		d.afterTrustChange()
 	}
 	return api.LockDeviceResult{Tip: st.Tip(), Changed: changed}, nil
+}
+
+// afterTrustChange persists the chain, drops channels it no longer authorizes,
+// and pushes it to the gateway after a local append.
+func (d *Node) afterTrustChange() {
+	if werr := d.persistTrust(); werr != nil {
+		d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
+	}
+	d.reevaluateTrustChannels()
+	d.announceTrustChange()
 }
 
 // handleLockAddSigner adds a trusted signer (lock.addSigner). Idempotent.
@@ -240,11 +246,7 @@ func (d *Node) lockSigner(params json.RawMessage, add bool) (any, error) {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "append: " + err.Error()}
 	}
 	if changed {
-		if werr := d.persistTrust(); werr != nil {
-			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
-		}
-		d.reevaluateTrustChannels()
-		d.announceTrustChange()
+		d.afterTrustChange()
 	}
 	return api.LockDeviceResult{Tip: st.Tip(), Changed: changed}, nil
 }
@@ -268,11 +270,7 @@ func (d *Node) handleLockDisable(_ context.Context, params json.RawMessage) (any
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "disable: " + derr.Error()}
 	}
 	if changed {
-		if werr := d.persistTrust(); werr != nil {
-			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
-		}
-		d.reevaluateTrustChannels()
-		d.announceTrustChange()
+		d.afterTrustChange()
 	}
 	return api.LockDisableResult{Tip: st.Tip(), Disabled: st.Disabled()}, nil
 }
@@ -409,11 +407,7 @@ func (d *Node) handleLockRevokeSignerFinish(_ context.Context, params json.RawMe
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "revocation did not take effect (finalized chain lost fork-choice); re-run --finish"}
 	}
 	if changed {
-		if werr := d.persistTrust(); werr != nil {
-			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
-		}
-		d.reevaluateTrustChannels()
-		d.announceTrustChange()
+		d.afterTrustChange()
 	}
 	return api.LockRevokeSignerFinishResult{Tip: st.Tip()}, nil
 }

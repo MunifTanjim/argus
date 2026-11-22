@@ -210,16 +210,29 @@ func ChannelPrologue(nodeID, chanID string) []byte {
 	return []byte("argus-e2e/v1|" + nodeID + "|" + chanID)
 }
 
+// MethodE2EInviteHandshake carries a Noise IKpsk2 handshake message for an
+// invite channel, which serves only lock.inviteRedeem.
+const MethodE2EInviteHandshake = "e2e.inviteHandshake"
+
 // MarshalHandshakeFrame carries a raw Noise handshake message unsealed — there is
 // no session yet.
 func MarshalHandshakeFrame(chanID string, handshake []byte) ([]byte, error) {
+	return marshalHandshakeFrame(MethodE2EHandshake, chanID, handshake)
+}
+
+// MarshalInviteHandshakeFrame is MarshalHandshakeFrame for an invite channel.
+func MarshalInviteHandshakeFrame(chanID string, handshake []byte) ([]byte, error) {
+	return marshalHandshakeFrame(MethodE2EInviteHandshake, chanID, handshake)
+}
+
+func marshalHandshakeFrame(method, chanID string, handshake []byte) ([]byte, error) {
 	body, err := json.Marshal(base64.StdEncoding.EncodeToString(handshake))
 	if err != nil {
 		return nil, err
 	}
 	return json.Marshal(message{
 		JSONRPC: jsonrpcVersion,
-		Method:  MethodE2EHandshake,
+		Method:  method,
 		Route:   &RouteHeader{ChanID: chanID},
 		Body:    json.RawMessage(body),
 	})

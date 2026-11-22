@@ -180,6 +180,7 @@ const (
 	MethodLockInviteCreate       = "lock.inviteCreate"       // request: LockInviteCreateParams; result: LockInviteCreateResult
 	MethodLockInviteList         = "lock.inviteList"         // request: no params; result: LockInviteListResult
 	MethodLockInviteRevoke       = "lock.inviteRevoke"       // request: LockInviteRevokeParams; result: nil
+	MethodLockInviteRedeem       = "lock.inviteRedeem"       // invite channel only; request: LockInviteRedeemParams; result: LockInviteRedeemResult
 )
 
 // WorkspaceNode is one git worktree (or a plain project's single directory) in
@@ -1422,6 +1423,16 @@ type LockInviteListResult struct {
 
 type LockInviteRevokeParams struct {
 	ID []byte `json:"id"`
+}
+
+// LockInviteRedeemParams authorizes the invite channel's client key plus at most
+// one extra key.
+type LockInviteRedeemParams struct {
+	ExtraKeys [][]byte `json:"extra_keys,omitempty"`
+}
+
+type LockInviteRedeemResult struct {
+	Tip []byte `json:"tip"`
 }
 
 // LockPinParams pins a node to a trust-log genesis hash.
