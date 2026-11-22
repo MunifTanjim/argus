@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -174,8 +173,7 @@ func (d *Node) planCreate(ctx context.Context, p api.WorkspaceCreateParams, main
 		if err != nil {
 			return createPlan{}, err
 		}
-		// Head names are not unique across forks (patch-1), so the local branch is keyed by number.
-		return createPlan{branch: prBranch(pr.Number), target: pr.BaseBranch, pr: pr.Number}, nil
+		return createPlan{branch: prBranch(pr), target: pr.BaseBranch, pr: pr.Number}, nil
 	case api.SourceIssue:
 		prov, err := d.forgeFor(ctx, mainDir)
 		if err != nil {
@@ -205,7 +203,12 @@ func (d *Node) addWorktree(ctx context.Context, p api.WorkspaceCreateParams, pla
 		}
 		return "", fmt.Errorf("unknown branch: %s", plan.branch)
 	case api.SourcePR:
-		// The start point is irrelevant: CheckoutPR moves the worktree to the PR head.
+		// gh pr checkout reuses an existing branch; adding on it lets git refuse
+		// one checked out elsewhere. Otherwise the start point is irrelevant:
+		// CheckoutPR moves the worktree to the PR head.
+		if gittree.RefExists(ctx, mainDir, "refs/heads/"+plan.branch) {
+			return "", gittree.AddWorktree(ctx, mainDir, path, plan.branch, "")
+		}
 		return "", gittree.AddWorktreeDetached(ctx, mainDir, path, "HEAD")
 	}
 	if gittree.RefExists(ctx, mainDir, "refs/heads/"+plan.branch) {
@@ -235,8 +238,13 @@ func startRef(ctx context.Context, mainDir, target string) (ref, warning string)
 	return target, "fetch failed; branched from local " + target
 }
 
-func prBranch(number int) string {
-	return "pr-" + strconv.Itoa(number)
+// prBranch names a PR's local branch after its head. Fork heads are not unique
+// across forks (patch-1), so they are prefixed with the fork owner.
+func prBranch(pr forge.PullRequest) string {
+	if pr.ForkOwner != "" {
+		return pr.ForkOwner + "/" + pr.HeadBranch
+	}
+	return pr.HeadBranch
 }
 
 func renderIssueBranch(tmpl string, is forge.Issue) (string, error) {

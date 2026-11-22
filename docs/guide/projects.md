@@ -97,7 +97,7 @@ The worktree path template has these variables:
 | Variable | Value |
 |---|---|
 | `.Repo.Name` | The name of the directory of the main worktree |
-| `.Branch.Name` | The branch name. A workspace from a PR uses the branch `pr-<number>`. |
+| `.Branch.Name` | The branch name. A workspace from a PR uses the head branch of the PR, or `<owner>/<branch>` when the PR is from a fork. |
 | `.Branch.Slug` | The branch name with each `/` replaced by `-` |
 
 The issue branch template has these variables:

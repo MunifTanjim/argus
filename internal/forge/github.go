@@ -29,10 +29,16 @@ type ghPR struct {
 	HeadRefName string   `json:"headRefName"`
 	BaseRefName string   `json:"baseRefName"`
 	URL         string   `json:"url"`
+	HeadOwner   ghAuthor `json:"headRepositoryOwner"`
+	IsCrossRepo bool     `json:"isCrossRepository"`
 }
 
 func (p ghPR) toPR() PullRequest {
-	return PullRequest{Number: p.Number, Title: p.Title, Author: p.Author.Login, HeadBranch: p.HeadRefName, BaseBranch: p.BaseRefName, URL: p.URL}
+	pr := PullRequest{Number: p.Number, Title: p.Title, Author: p.Author.Login, HeadBranch: p.HeadRefName, BaseBranch: p.BaseRefName, URL: p.URL}
+	if p.IsCrossRepo {
+		pr.ForkOwner = p.HeadOwner.Login
+	}
+	return pr
 }
 
 type ghIssue struct {
@@ -47,7 +53,7 @@ func (i ghIssue) toIssue() Issue {
 	return Issue{Number: i.Number, Title: i.Title, Body: i.Body, Author: i.Author.Login, URL: i.URL}
 }
 
-const prFields = "number,title,author,headRefName,baseRefName,url"
+const prFields = "number,title,author,headRefName,headRepositoryOwner,isCrossRepository,baseRefName,url"
 
 func (github) ListPRs(ctx context.Context, repoDir string) ([]PullRequest, error) {
 	var raw []ghPR
