@@ -177,7 +177,7 @@ func (d *Node) handlePAgentOfferStart(ctx context.Context, params json.RawMessag
 	if err != nil {
 		return nil, err
 	}
-	d.logEvent(ctx, th.ID, evOfferStarted, map[string]string{"offer_id": offer.OfferID}, "")
+	d.logEvent(ctx, th.ID, evOfferStarted, map[string]string{"offer_id": offer.OfferID, "title": offer.Title}, "")
 	return res, nil
 }
 
@@ -196,6 +196,6 @@ func (d *Node) handlePAgentOfferDismiss(ctx context.Context, params json.RawMess
 	if decided != "" {
 		return nil, pagentErr("offer was already %s", decided)
 	}
-	d.logEvent(ctx, th.ID, evOfferDismissed, map[string]string{"offer_id": offer.OfferID}, "")
+	d.logEvent(ctx, th.ID, evOfferDismissed, map[string]string{"offer_id": offer.OfferID, "title": offer.Title}, "")
 	return struct{}{}, nil
 }

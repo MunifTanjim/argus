@@ -262,6 +262,17 @@ func eventText(ev pagent.Event) string {
 		return "Sent the approved action to the agent"
 	case evDraftDiscarded:
 		return "Discarded a drafted action"
+	case evBrief:
+		// The brief is kept whole.
+		return cmp.Or(str("text"), "Brief")
+	case evOffer:
+		return with("Offer: "+cmp.Or(str("title"), "an offer"), str("details"))
+	case evOfferStarted:
+		return with("Started the offer", str("title"))
+	case evOfferDismissed:
+		return with("Dismissed the offer", str("title"))
+	case evHealth:
+		return "Health: " + cmp.Or(str("message"), str("key"), "problem")
 	case evHandoffAsked:
 		return with("Asked "+cmp.Or(str("agent"), "an agent"), str("task"))
 	case evHandoffAnswered:

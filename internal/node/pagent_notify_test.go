@@ -108,10 +108,11 @@ func TestNotifyPolicyTable(t *testing.T) {
 
 	r := newNotifyRig(t)
 	ctx := context.Background()
+	r.d.SetIdentity("home", "")
 	r.d.pagentNotify(ctx, r.a, r.chat, NotifyResult, "routine", "scout: inbox progress", "two mails")
 	r.d.pagentNotify(ctx, r.a, r.chat, NotifyNeedsYou, "routine", "scout: inbox needs you", "log in please")
 	got := r.pushes(t, 1)
-	if len(got) != 1 || got[0].Title != "scout: inbox needs you" || got[0].Data["pagent_id"] != r.a.ID || got[0].Data["pagent_thread_id"] != r.chat {
+	if len(got) != 1 || got[0].Title != "scout: inbox needs you" || got[0].Data["pagent_id"] != r.a.ID || got[0].Data["pagent_thread_id"] != r.chat || got[0].Data["node_id"] != "home" {
 		t.Fatalf("pushes: %+v", got)
 	}
 	r.d.pagentCfg.Defaults.Notify = "all"

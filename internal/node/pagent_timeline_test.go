@@ -184,6 +184,11 @@ func TestEventTextReadsPayloads(t *testing.T) {
 		{evHandoffAnswered, `{"agent":"researcher","text":"3 March.\nSource: the press page."}`, "Answer from researcher: 3 March.\nSource: the press page."},
 		{evHandoffRefused, `{"agent":"x","reason":"can't ask \"x\": it is not an agent you may message"}`, `can't ask "x": it is not an agent you may message`},
 		{evHandoffNoAnswer, `{"agent":"researcher","text":"no answer within 1h"}`, "No answer from researcher: no answer within 1h"},
+		{evBrief, `{"run_id":"rr1","text":"Morning.\nThe mail site needs your login."}`, "Morning.\nThe mail site needs your login."},
+		{evOffer, `{"offer_id":"of1","title":"Tidy the inbox","details":"120 unread","prompt":"Please tidy my inbox."}`, "Offer: Tidy the inbox: 120 unread"},
+		{evOfferStarted, `{"offer_id":"of1","title":"Tidy the inbox"}`, "Started the offer: Tidy the inbox"},
+		{evOfferDismissed, `{"offer_id":"of1"}`, "Dismissed the offer"},
+		{evHealth, `{"key":"cli-missing","message":"claude is not installed on this node"}`, "Health: claude is not installed on this node"},
 		{"other.kind", `{}`, "other.kind"},
 	} {
 		if got := eventText(pagent.Event{Kind: c.kind, Payload: json.RawMessage(c.payload)}); got != c.want {

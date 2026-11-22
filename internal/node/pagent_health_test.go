@@ -170,3 +170,25 @@ func TestAgentSet(t *testing.T) {
 		t.Fatalf("unset notify: %q", s.Notify)
 	}
 }
+
+func TestAgentInfoSettings(t *testing.T) {
+	r := newRunRig(t)
+	r.d.pagentCfg.Defaults.Notify, r.d.pagentCfg.Defaults.Proactivity, r.d.pagentCfg.Defaults.Memory.Mode = "needs-you", "default", "auto"
+	show := func() map[string]api.PAgentSetting {
+		info, err := callPAgent[api.PAgentInfo](t, r.d.handlePAgentShow, api.PAgentRef{AgentID: r.a.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.Settings
+	}
+	got := show()
+	if got["notify"] != (api.PAgentSetting{Value: "needs-you"}) || got["proactivity"] != (api.PAgentSetting{Value: "default"}) || got["memory_mode"] != (api.PAgentSetting{Value: "auto"}) {
+		t.Fatalf("defaults: %+v", got)
+	}
+	if _, err := callPAgent[api.PAgentSetResult](t, r.d.handlePAgentSet, api.PAgentSetParams{AgentID: r.a.ID, Key: "notify", Value: "all"}); err != nil {
+		t.Fatal(err)
+	}
+	if got = show(); got["notify"] != (api.PAgentSetting{Value: "all", Explicit: true}) || got["proactivity"].Explicit {
+		t.Fatalf("after set: %+v", got)
+	}
+}

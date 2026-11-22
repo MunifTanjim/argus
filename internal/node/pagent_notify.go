@@ -210,7 +210,8 @@ func (d *Node) sendPagentPush(ctx context.Context, p pagentPush) {
 	if sinks == nil {
 		return
 	}
-	data := map[string]string{"pagent_id": p.agent.ID, "pagent_kind": p.kind}
+	// node_id qualifies the ids for clients that see several nodes.
+	data := map[string]string{"pagent_id": p.agent.ID, "pagent_kind": p.kind, "node_id": d.id}
 	if p.threadID != "" {
 		data["pagent_thread_id"] = p.threadID
 	}

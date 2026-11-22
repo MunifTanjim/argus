@@ -1615,6 +1615,8 @@ type PAgentInfo struct {
 	Status      string `json:"status"`
 	NodeID      string `json:"node_id,omitempty"`
 	NodeLabel   string `json:"node_label,omitempty"`
+	// Settings are notify, proactivity and memory_mode as they apply.
+	Settings map[string]PAgentSetting `json:"settings,omitempty"`
 }
 
 // PAgentSendParams sends Text to a chat thread of the agent: ThreadID when

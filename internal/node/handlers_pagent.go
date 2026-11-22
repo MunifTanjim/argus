@@ -90,6 +90,7 @@ func (d *Node) pagentInfo(ctx context.Context, s *pagent.Store, a pagent.Agent, 
 	if def != nil {
 		info.Description = def.Description
 	}
+	info.Settings = agentSettings(def, set)
 	return info
 }
 

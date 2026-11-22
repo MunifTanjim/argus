@@ -264,3 +264,17 @@ func (d *Node) handlePAgentSet(ctx context.Context, params json.RawMessage) (any
 	d.notifyConns(api.MethodPAgentChanged)
 	return api.PAgentSetResult{Commit: hash}, nil
 }
+
+// agentSettings are the settings clients show: each value as it applies and
+// whether agent.yaml sets it.
+func agentSettings(def *pagent.Definition, set pagent.Settings) map[string]api.PAgentSetting {
+	var notify, proactivity, mode string
+	if def != nil {
+		notify, proactivity, mode = def.Notify, def.Proactivity, def.Memory.Mode
+	}
+	return map[string]api.PAgentSetting{
+		"notify":      {Value: set.Notify, Explicit: notify != ""},
+		"proactivity": {Value: set.Proactivity, Explicit: proactivity != ""},
+		"memory_mode": {Value: set.MemoryMode, Explicit: mode != ""},
+	}
+}

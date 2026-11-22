@@ -56,3 +56,10 @@ type PAgentSetParams struct {
 type PAgentSetResult struct {
 	Commit string `json:"commit,omitempty"`
 }
+
+// PAgentSetting is one agent setting as it applies: Value is the resolved
+// value, Explicit whether the agent's agent.yaml sets it (else the default).
+type PAgentSetting struct {
+	Value    string `json:"value"`
+	Explicit bool   `json:"explicit,omitempty"`
+}
