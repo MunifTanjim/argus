@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/MunifTanjim/argus/internal/api"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -76,6 +77,7 @@ func contractComponents(m model) []component {
 		sidebarSessionsComp{},
 		agentsSidebarComp{},
 		agentComp{agentID: "n1:a"},
+		newThreadComp(api.PAgentThreadInfo{ID: "n1:t", AgentID: "n1:a"}),
 		m.right.fileTree,
 		m.right.changes,
 		homeComp{},

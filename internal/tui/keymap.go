@@ -583,7 +583,7 @@ func textInputOnly(cmd string) bool { return !keySetNames[cmd] }
 // entity: the rest of such a command is an action, not an argument.
 var entityNames = map[string]bool{
 	"project": true, "workspace": true, "session": true, "transcript": true,
-	"redaction": true, "answer": true, "tab": true, "agent": true,
+	"redaction": true, "answer": true, "tab": true, "agent": true, "thread": true, "memory": true,
 }
 
 // commandArgs maps the first word of every command to the rest of each

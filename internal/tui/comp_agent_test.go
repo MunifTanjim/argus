@@ -73,17 +73,12 @@ func TestAgentViewRendersThreadsAndMemory(t *testing.T) {
 	}
 }
 
-func TestAgentViewEnterOpensThreadSession(t *testing.T) {
+func TestAgentViewEnterOpensThread(t *testing.T) {
 	m := loadedAgentView(t, agentViewClient())
-	c := &ctx{m: &m}
-	m.baseComp().handleKey(c, keyMsg("enter"))
-	if len(c.actions) == 0 || c.actions[0].kind != actOpenSession || c.actions[0].id != "n1:s1" {
-		t.Fatalf("enter opens the thread's session: %v", actionKinds(c))
-	}
 	m = typeKeys(m, "j")
-	m, _ = upd(m, keyMsg("enter"))
-	if m.flash != "thread view comes next" {
-		t.Fatalf("a thread without a session: flash = %q", m.flash)
+	m, cmd := upd(m, keyMsg("enter"))
+	if th, ok := m.main.top().(threadComp); !ok || th.threadID != "n1:t2" || cmd == nil {
+		t.Fatalf("enter opens the thread view: top = %T", m.main.top())
 	}
 }
 
@@ -110,8 +105,8 @@ func TestAgentViewNewChatSends(t *testing.T) {
 	if p != (api.PAgentSendParams{AgentID: "n1:u", Text: "hello there", New: true}) {
 		t.Fatalf("send params = %+v", p)
 	}
-	if tr, ok := m.baseComp().(transcriptComp); !ok || tr.sessionID != "n1:s9" {
-		t.Fatalf("the new thread opens: base = %T", m.baseComp())
+	if th, ok := m.main.top().(threadComp); !ok || th.threadID != "n1:t9" {
+		t.Fatalf("the new thread opens: top = %T", m.main.top())
 	}
 }
 

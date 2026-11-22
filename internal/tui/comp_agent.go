@@ -61,15 +61,6 @@ func openAgent(c *ctx, id string) tea.Cmd {
 	return c.m.loadAgentViewCmd(id)
 }
 
-// openThread opens a thread: its live session for now.
-func openThread(c *ctx, t api.PAgentThreadInfo) {
-	if t.SessionID != "" {
-		c.openSession(t.SessionID)
-		return
-	}
-	c.setFlash("thread view comes next")
-}
-
 // openAgentMemory opens the agent's memory view.
 func openAgentMemory(c *ctx, _ string) { c.setFlash("memory view comes next") }
 
@@ -155,8 +146,8 @@ func agentReply(c *ctx, msg tea.Msg) tea.Cmd {
 			c.setFlash("send failed: " + msg.err.Error())
 			return nil
 		}
-		openThread(c, api.PAgentThreadInfo{ID: msg.res.ThreadID, AgentID: msg.agentID, SessionID: msg.res.SessionID})
-		return c.m.loadPAgentsCmd()
+		return tea.Batch(openThread(c, api.PAgentThreadInfo{ID: msg.res.ThreadID, AgentID: msg.agentID, SessionID: msg.res.SessionID}),
+			c.m.loadPAgentsCmd())
 	case agentPrimaryMsg:
 		if msg.err != nil {
 			c.setFlash("primary: " + msg.err.Error())
@@ -202,7 +193,7 @@ func (a agentComp) footer(c *ctx) []binding {
 
 func (a agentComp) footerPrompt(*ctx) string {
 	if a.chat.on() {
-		return a.chat.view()
+		return a.chat.view("new chat")
 	}
 	return ""
 }
@@ -248,7 +239,7 @@ func (a agentComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, b
 		a.cursor = cursorBy(a.cursor, a.pageStep(c), n)
 	case m.matches(msg, k.Open):
 		if a.cursor < n {
-			openThread(c, threads[a.cursor])
+			return a, openThread(c, threads[a.cursor]), true
 		}
 	case m.matches(msg, agentKeys.NewChat, agentKeys.Memory, agentKeys.MakePrimary, agentKeys.UnsetPrimary) && offline:
 		c.setFlash(agentOffline)
@@ -281,7 +272,7 @@ func (a agentComp) click(c *ctx, t hitTarget, focused bool) (component, tea.Cmd)
 	switch {
 	case t.index >= len(threads):
 	case focused && t.index == a.cursor:
-		openThread(c, threads[t.index])
+		return a, openThread(c, threads[t.index])
 	default:
 		a.cursor = t.index
 	}
@@ -409,7 +400,7 @@ func agoText(t time.Time) string {
 	return r + " ago"
 }
 
-// chatPrompt is the one-line prompt that starts a chat with an agent.
+// chatPrompt is the one-line prompt that sends an agent a message.
 type chatPrompt struct {
 	id    string
 	input textinput.Model
@@ -439,6 +430,6 @@ func (p chatPrompt) handleKey(msg tea.KeyPressMsg) (chatPrompt, tea.Cmd, string)
 	return p, cmd, ""
 }
 
-func (p chatPrompt) view() string {
-	return asstStyle.Render("new chat: " + p.input.View() + "  enter send · esc cancel")
+func (p chatPrompt) view(label string) string {
+	return asstStyle.Render(label + ": " + p.input.View() + "  enter send · esc cancel")
 }

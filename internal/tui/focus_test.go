@@ -154,6 +154,7 @@ func sectionStates() []sectionState {
 		{"session dock", "session-dock", func() model { return withFocus(waitingSession(), sessionDock) }},
 		{"Agents tab", "sidebar-agents", calmAgentsModel},
 		{"agent view", "agent", agentViewModel},
+		{"thread view", "thread", threadViewModel},
 	}
 }
 

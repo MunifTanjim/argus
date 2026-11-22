@@ -143,6 +143,11 @@ var sectionLists = map[string]sectionList{
 		own:   append(slices.Clone(summaryKeys), listKeys.TabPrev, listKeys.TabNext, nodeKeys.Wakelock),
 		focus: focusFor("node"),
 	},
+	"thread": {
+		own: bindingsOf(slices.Concat(transcriptViewKeys, []any{detailKeys, sessionKeys.FocusPrompt, threadKeys.OpenSession,
+			memoryKeys.Undo, listKeys.Refresh})...),
+		focus: focusFor("thread"),
+	},
 	"file": {
 		own:   bindingsOf(fileViewKeys, sessionKeys.FocusPrompt),
 		focus: focusFor("file"),

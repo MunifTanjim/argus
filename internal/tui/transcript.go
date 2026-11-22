@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -376,6 +377,8 @@ func (m tview) entryContent(e transcript.Entry, expanded, full bool, iw int) (st
 		return turnEndLine(e, iw), nil
 	case transcript.EntrySystem:
 		return systemRow(e, expanded, iw)
+	case transcript.EntryArgus:
+		return m.argusRow(e, iw)
 	case transcript.EntryShell:
 		return m.shellRow(e, expanded, iw)
 	case transcript.EntryCompact:
@@ -541,6 +544,19 @@ func systemRow(e transcript.Entry, expanded bool, iw int) (string, []cardSpan) {
 		spans = append(spans, textSpan(body, e.Detail))
 	}
 	return head, spans
+}
+
+// argusRow is an Argus event in an agent thread: dim, with the undo key on a
+// memory change.
+func (m tview) argusRow(e transcript.Entry, iw int) (string, []cardSpan) {
+	head := Icon.System.Render() + " " + StyleSecondary.Render("Argus") + "  " + StyleDim.Render(clockTime(e.Timestamp))
+	if text := cmp.Or(e.Detail, e.Label); text != "" {
+		head += "  " + StyleDim.Render(text)
+	}
+	if memoryCommit(e) != "" && screenHas("thread", memoryKeys.Undo.name) {
+		head += "  " + StyleDim.Render(m.c.m.keyTextOn("thread", memoryKeys.Undo)+" undo")
+	}
+	return truncateLine(head, iw), chromeSpans(1)
 }
 
 func (m tview) shellRow(e transcript.Entry, expanded bool, iw int) (string, []cardSpan) {

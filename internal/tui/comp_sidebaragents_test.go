@@ -128,6 +128,8 @@ type pagentClient struct {
 	memory   *api.PAgentMemoryShowResult // nil: pagent.memory.show is missing
 	commits  []api.PAgentMemoryCommit
 	sent     api.PAgentSendResult
+	timeline api.PAgentTimeline
+	undoErr  error
 	notFound bool // every pagent RPC is missing
 }
 
@@ -150,6 +152,10 @@ func (c *pagentClient) Call(method string, params, out any) error {
 		*out.(*api.PAgentMemoryLogResult) = api.PAgentMemoryLogResult{Commits: c.commits}
 	case api.MethodPAgentThreadSend:
 		*out.(*api.PAgentSendResult) = c.sent
+	case api.MethodPAgentThreadTimeline:
+		*out.(*api.PAgentTimeline) = c.timeline
+	case api.MethodPAgentMemoryUndo:
+		return c.undoErr
 	}
 	return nil
 }

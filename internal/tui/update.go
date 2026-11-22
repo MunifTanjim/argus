@@ -191,9 +191,11 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case histSubagentMsg:
 		return m.updateTranscript(msg, reads(msg.addr))
 	case toolDetailMsg:
-		return m.updateTranscript(msg, func(t transcriptComp) bool {
-			return t.owner() == msg.owner && t.toolBodies[msg.toolID].loading
-		})
+		match := func(t transcriptComp) bool { return t.owner() == msg.owner && t.toolBodies[msg.toolID].loading }
+		if t, ok := m.main.top().(threadComp); ok && m.transcriptAt(match) < 0 && match(t.tr) {
+			return m.updateThreadView(msg, t.threadID)
+		}
+		return m.updateTranscript(msg, match)
 	case transcriptDeltaMsg:
 		return m.updateDelta(msg)
 	case spawnNodesMsg:
@@ -216,6 +218,10 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reorder()
 		}
 		return m, nil
+	case threadTimelineMsg:
+		return m.updateThreadView(msg, msg.threadID)
+	case threadActionMsg:
+		return m.updateThreadView(msg, msg.threadID)
 	case agentViewMsg:
 		return m.updateAgentView(msg, msg.agentID)
 	case agentSentMsg:
@@ -459,7 +465,7 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 		return m.loadProjects()
 	}
 	if n.Method == api.MethodPAgentChanged {
-		return m.loadPAgentsCmd()
+		return tea.Batch(m.loadPAgentsCmd(), m.reloadThreadViewsCmd())
 	}
 	if n.Method == api.MethodTerminalChanged {
 		return m.loadTerminalsCmd()

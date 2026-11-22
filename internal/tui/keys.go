@@ -148,6 +148,18 @@ var agentKeys = struct {
 	UnsetPrimary: nm("agent unset-primary", "", "unset primary"),
 }
 
+var threadKeys = struct {
+	OpenSession binding
+}{
+	OpenSession: nm("thread open-session", "o", "session"),
+}
+
+var memoryKeys = struct {
+	Undo binding
+}{
+	Undo: nm("memory undo", "u", "undo"),
+}
+
 var nodeKeys = struct {
 	Wakelock binding
 }{
@@ -442,7 +454,7 @@ var settingsKeys = struct {
 
 func keySets() []any {
 	return []any{listKeys, projectsKeys, fileViewKeys, transcriptKeys, redactListKeys,
-		detailKeys, visualKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, agentKeys, upgradeKeys, spawnKeys,
+		detailKeys, visualKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, agentKeys, threadKeys, memoryKeys, upgradeKeys, spawnKeys,
 		settingsKeys}
 }
 
