@@ -14,6 +14,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/agentgit"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/atomicfile"
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/pagent"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -28,6 +29,21 @@ func (d *Node) SetAgentStore(s *pagent.Store, cfg config.AgentsConfig) {
 
 func pagentErr(format string, args ...any) error {
 	return &api.RPCError{Code: api.CodeInvalidRequest, Message: fmt.Sprintf(format, args...)}
+}
+
+// validAgentName reports whether name is safe to use as a directory name.
+func validAgentName(name string) bool {
+	if name == "" || len(name) > 64 || name[0] == '.' || strings.Contains(name, "..") {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (d *Node) pagentStore() (*pagent.Store, error) {
@@ -166,8 +182,8 @@ func (d *Node) handlePAgentCreate(ctx context.Context, params json.RawMessage) (
 	if name == "" && dir != "" {
 		name = filepath.Base(dir)
 	}
-	if name == "" {
-		return nil, pagentErr("name is required")
+	if !validAgentName(name) {
+		return nil, pagentErr("invalid agent name")
 	}
 	if dir == "" {
 		dir = filepath.Join(d.pagentCfg.DefaultDir, name)
@@ -294,6 +310,9 @@ func (d *Node) handlePAgentAdd(ctx context.Context, params json.RawMessage) (any
 	if def.Name == "" {
 		def.Name = filepath.Base(dir)
 	}
+	if !validAgentName(def.Name) {
+		return nil, pagentErr("invalid agent name")
+	}
 	if def.ID == "" {
 		def.ID = pagent.NewID()
 	}
@@ -400,8 +419,8 @@ func (d *Node) handlePAgentRename(ctx context.Context, params json.RawMessage) (
 		return nil, err
 	}
 	name := strings.TrimSpace(p.Name)
-	if name == "" {
-		return nil, pagentErr("name is required")
+	if !validAgentName(name) {
+		return nil, pagentErr("invalid agent name")
 	}
 	if name != a.Name {
 		if _, ok, err := s.AgentByName(ctx, name); err != nil {
@@ -460,6 +479,11 @@ func (d *Node) handlePAgentForget(ctx context.Context, params json.RawMessage) (
 	if err != nil {
 		return nil, pagentErr("%v", err)
 	}
+	if d.primaryID(ctx, s) == a.ID {
+		if err := d.writePrimary(""); err != nil {
+			return nil, pagentErr("%v", err)
+		}
+	}
 	d.notifyConns(api.MethodPAgentChanged)
 	return struct{}{}, nil
 }
@@ -482,14 +506,18 @@ func (d *Node) handlePAgentSetPrimary(ctx context.Context, params json.RawMessag
 			return nil, pagentErr("agent %q is archived", a.Name)
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(d.pagentPrimaryFile), 0o755); err != nil {
-		return nil, pagentErr("%v", err)
-	}
-	if err := os.WriteFile(d.pagentPrimaryFile, []byte(p.AgentID), 0o644); err != nil {
+	if err := d.writePrimary(p.AgentID); err != nil {
 		return nil, pagentErr("%v", err)
 	}
 	d.notifyConns(api.MethodPAgentChanged)
 	return struct{}{}, nil
+}
+
+func (d *Node) writePrimary(id string) error {
+	if err := os.MkdirAll(filepath.Dir(d.pagentPrimaryFile), 0o755); err != nil {
+		return err
+	}
+	return atomicfile.Write(d.pagentPrimaryFile, []byte(id))
 }
 
 // copyTree copies src into dst. transform, when set, rewrites each file's

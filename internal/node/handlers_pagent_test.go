@@ -314,3 +314,47 @@ func TestPAgentCreateFromCopiesButNotMemory(t *testing.T) {
 		t.Fatalf("definition = %+v", def)
 	}
 }
+
+func TestPAgentInvalidNamesRefused(t *testing.T) {
+	d, _, root := pagentNode(t)
+	info, err := callPAgent[api.PAgentInfo](t, d.handlePAgentCreate, api.PAgentCreateParams{Name: "scout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"../x", "a/b", ".hidden", "a..b", "has space", strings.Repeat("a", 65)} {
+		_, err := callPAgent[api.PAgentInfo](t, d.handlePAgentCreate, api.PAgentCreateParams{Name: name})
+		if rpcCode(err) != api.CodeInvalidRequest || !strings.Contains(err.Error(), "invalid agent name") {
+			t.Errorf("create %q err = %v", name, err)
+		}
+		if _, err := callPAgent[api.PAgentInfo](t, d.handlePAgentRename, api.PAgentRenameParams{AgentID: info.ID, Name: name}); rpcCode(err) != api.CodeInvalidRequest {
+			t.Errorf("rename %q err = %v", name, err)
+		}
+		dir := filepath.Join(root, "adddir")
+		_ = os.MkdirAll(dir, 0o755)
+		if _, err := callPAgent[api.PAgentAddResult](t, d.handlePAgentAdd, api.PAgentAddParams{Dir: dir, Name: name}); rpcCode(err) != api.CodeInvalidRequest {
+			t.Errorf("add %q err = %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "x")); err == nil {
+		t.Fatal("escaped default dir")
+	}
+}
+
+func TestPAgentForgetClearsPrimary(t *testing.T) {
+	d, _, _ := pagentNode(t)
+	info, _ := callPAgent[api.PAgentInfo](t, d.handlePAgentCreate, api.PAgentCreateParams{Name: "scout"})
+	if _, err := callPAgent[struct{}](t, d.handlePAgentSetPrimary, api.PAgentPrimaryParams{AgentID: info.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := callPAgent[struct{}](t, d.handlePAgentForget, api.PAgentForgetParams{AgentID: info.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(d.pagentPrimaryFile); err != nil || len(b) != 0 {
+		t.Fatalf("primary file = %q, %v", b, err)
+	}
+	// Restoring the agent must not make it primary again.
+	res, err := callPAgent[api.PAgentAddResult](t, d.handlePAgentAdd, api.PAgentAddParams{Dir: info.Dir})
+	if err != nil || res.Agent.Primary {
+		t.Fatalf("restored = %+v, %v", res, err)
+	}
+}
