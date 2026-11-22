@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -356,5 +357,31 @@ func TestPAgentForgetClearsPrimary(t *testing.T) {
 	res, err := callPAgent[api.PAgentAddResult](t, d.handlePAgentAdd, api.PAgentAddParams{Dir: info.Dir})
 	if err != nil || res.Agent.Primary {
 		t.Fatalf("restored = %+v, %v", res, err)
+	}
+}
+
+func TestPAgentCreateAddNodeTarget(t *testing.T) {
+	d, _, root := pagentNode(t)
+	d.SetIdentity("home", "")
+	d.roster.apply(api.NodeEvent{Type: api.NodeEventAdded, Node: api.NodeDescriptor{
+		ID: "b", Capabilities: api.NodeCapabilities{CrossNodeOrch: crossNodeOrchVersion},
+	}})
+
+	// Naming this node handles the call locally.
+	info, err := callPAgent[api.PAgentInfo](t, d.handlePAgentCreate, api.PAgentCreateParams{Name: "local", NodeID: "home"})
+	if err != nil || info.Name != "local" {
+		t.Fatalf("create on self = %+v, %v", info, err)
+	}
+	// A roster node that is offline is forwarded to, and fails there.
+	_, err = callPAgent[api.PAgentInfo](t, d.handlePAgentCreate, api.PAgentCreateParams{Name: "far", NodeID: "b"})
+	if !errors.Is(err, errPeerOffline) {
+		t.Fatalf("create on b: err = %v, want offline", err)
+	}
+	_, err = callPAgent[api.PAgentAddResult](t, d.handlePAgentAdd, api.PAgentAddParams{Dir: filepath.Join(root, "x"), NodeID: "b"})
+	if !errors.Is(err, errPeerOffline) {
+		t.Fatalf("add on b: err = %v, want offline", err)
+	}
+	if _, err = callPAgent[api.PAgentInfo](t, d.handlePAgentCreate, api.PAgentCreateParams{Name: "z", NodeID: "nope"}); err == nil {
+		t.Fatal("unknown node accepted")
 	}
 }

@@ -147,10 +147,33 @@ func (d *Node) adoptAgentDir(ctx context.Context, dir string) {
 	}
 }
 
+// pagentTarget resolves the node a create/add names. remote is true when it is
+// another node; a call that came from a peer is always handled locally.
+func (d *Node) pagentTarget(ctx context.Context, ref string) (remote bool, node string, err error) {
+	if ref == "" {
+		return false, d.id, nil
+	}
+	if _, onPeer := peerNodeFrom(ctx); onPeer {
+		return false, d.id, nil
+	}
+	node, err = d.resolveNode(ref)
+	if err != nil {
+		return false, "", pagentErr("%v", err)
+	}
+	return node != d.id, node, nil
+}
+
 func (d *Node) handlePAgentCreate(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.PAgentCreateParams](params)
 	if err != nil {
 		return nil, err
+	}
+	if remote, node, err := d.pagentTarget(ctx, p.NodeID); err != nil {
+		return nil, err
+	} else if remote {
+		p.NodeID = ""
+		var out api.PAgentInfo
+		return out, d.forward(ctx, node, api.MethodPAgentCreate, p, &out)
 	}
 	s, err := d.pagentStore()
 	if err != nil {
@@ -253,6 +276,13 @@ func (d *Node) handlePAgentAdd(ctx context.Context, params json.RawMessage) (any
 	p, err := api.Decode[api.PAgentAddParams](params)
 	if err != nil {
 		return nil, err
+	}
+	if remote, node, err := d.pagentTarget(ctx, p.NodeID); err != nil {
+		return nil, err
+	} else if remote {
+		p.NodeID = ""
+		var out api.PAgentAddResult
+		return out, d.forward(ctx, node, api.MethodPAgentAdd, p, &out)
 	}
 	s, err := d.pagentStore()
 	if err != nil {
