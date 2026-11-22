@@ -27,6 +27,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/mcphttp"
 	"github.com/MunifTanjim/argus/internal/orch"
 	"github.com/MunifTanjim/argus/internal/pagent"
+	"github.com/MunifTanjim/argus/internal/pagent/memory"
 	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/push"
@@ -125,6 +126,12 @@ type Node struct {
 	pagentNow         func() time.Time // clock of idle close and session start grace; tests replace it
 	pagentLocks       sync.Map         // agent id -> *sync.Mutex; serializes session starts per agent
 	pagentPending     sync.Map         // spawned session id -> time.Time; not registered yet
+
+	// extractorFor picks the memory extractor for an agent's settings; nil when
+	// none is available. Tests replace it.
+	extractorFor func(set pagent.Settings) memory.Extractor
+	captureMu    sync.Mutex
+	captureErrAt map[string]time.Time // thread id -> last memory.error and capture retry gate
 
 	// resumeFn relaunches a past agent session; defaults to (*Node).resumeAdopt.
 	// errResumeStarting comes with the launching session's id.
@@ -569,6 +576,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	d.resumeFn = d.resumeAdopt
 	d.killFn = d.killSession
 	d.pagentNow = time.Now
+	d.extractorFor = defaultExtractor
 
 	srv := api.NewServer()
 	d.registerHandlers(srv)
@@ -711,6 +719,7 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 		defer stopPAgentEvents()
 		go d.pagentWatch(ctx, pagentEvents)
 		go d.pagentIdleLoop(ctx)
+		go d.pagentCaptureLoop(ctx)
 	}
 
 	return d.server.ServeContext(ctx, l)

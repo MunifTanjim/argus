@@ -151,6 +151,29 @@ func (q *Queries) GetPAgentByName(ctx context.Context, name string) (Pagent, err
 	return i, err
 }
 
+const getPAgentCaptureCursor = `-- name: GetPAgentCaptureCursor :one
+SELECT thread_id, session_id, entry_count, last_entry_id, updated_at
+FROM pagent_capture_cursor WHERE thread_id = ? AND session_id = ?
+`
+
+type GetPAgentCaptureCursorParams struct {
+	ThreadID  string
+	SessionID string
+}
+
+func (q *Queries) GetPAgentCaptureCursor(ctx context.Context, arg GetPAgentCaptureCursorParams) (PagentCaptureCursor, error) {
+	row := q.db.QueryRowContext(ctx, getPAgentCaptureCursor, arg.ThreadID, arg.SessionID)
+	var i PagentCaptureCursor
+	err := row.Scan(
+		&i.ThreadID,
+		&i.SessionID,
+		&i.EntryCount,
+		&i.LastEntryID,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getPAgentProposal = `-- name: GetPAgentProposal :one
 SELECT id, agent_id, thread_id, ops, created_at, decided_at, decision
 FROM pagent_memory_proposal WHERE id = ?
@@ -793,4 +816,32 @@ func (q *Queries) TouchPAgentThread(ctx context.Context, arg TouchPAgentThreadPa
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const upsertPAgentCaptureCursor = `-- name: UpsertPAgentCaptureCursor :exec
+INSERT INTO pagent_capture_cursor (thread_id, session_id, entry_count, last_entry_id, updated_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (thread_id, session_id) DO UPDATE SET
+    entry_count = excluded.entry_count,
+    last_entry_id = excluded.last_entry_id,
+    updated_at = excluded.updated_at
+`
+
+type UpsertPAgentCaptureCursorParams struct {
+	ThreadID    string
+	SessionID   string
+	EntryCount  int64
+	LastEntryID string
+	UpdatedAt   int64
+}
+
+func (q *Queries) UpsertPAgentCaptureCursor(ctx context.Context, arg UpsertPAgentCaptureCursorParams) error {
+	_, err := q.db.ExecContext(ctx, upsertPAgentCaptureCursor,
+		arg.ThreadID,
+		arg.SessionID,
+		arg.EntryCount,
+		arg.LastEntryID,
+		arg.UpdatedAt,
+	)
+	return err
 }

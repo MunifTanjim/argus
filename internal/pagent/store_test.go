@@ -301,3 +301,20 @@ func TestProposalsPendingAndDecide(t *testing.T) {
 		t.Fatal("missing proposal found")
 	}
 }
+
+func TestCaptureCursorRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newStore(t)
+	if _, ok, err := s.CaptureCursor(ctx, "th", "s"); err != nil || ok {
+		t.Fatalf("ok = %v, err = %v", ok, err)
+	}
+	for _, n := range []int{2, 5} {
+		if err := s.SetCaptureCursor(ctx, CaptureCursor{ThreadID: "th", SessionID: "s", EntryCount: n, LastEntryID: "e"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c, ok, err := s.CaptureCursor(ctx, "th", "s")
+	if err != nil || !ok || c.EntryCount != 5 || c.LastEntryID != "e" || c.UpdatedAt.IsZero() {
+		t.Fatalf("cursor = %+v, ok = %v, err = %v", c, ok, err)
+	}
+}

@@ -395,3 +395,33 @@ func (s *Store) DecideProposal(ctx context.Context, id, decision string) error {
 		DecidedAt: s.now().UnixNano(), Decision: decision, ID: id,
 	}))
 }
+
+// CaptureCursor marks how much of a thread session's transcript memory
+// capture has read: the first EntryCount entries, the last having LastEntryID.
+type CaptureCursor struct {
+	ThreadID, SessionID, LastEntryID string
+	EntryCount                       int
+	UpdatedAt                        time.Time
+}
+
+func (s *Store) CaptureCursor(ctx context.Context, threadID, sessionID string) (CaptureCursor, bool, error) {
+	r, err := s.q.GetPAgentCaptureCursor(ctx, gen.GetPAgentCaptureCursorParams{ThreadID: threadID, SessionID: sessionID})
+	return one(r, err, func(r gen.PagentCaptureCursor) CaptureCursor {
+		return CaptureCursor{
+			ThreadID: r.ThreadID, SessionID: r.SessionID, LastEntryID: r.LastEntryID,
+			EntryCount: int(r.EntryCount), UpdatedAt: fromNanos(r.UpdatedAt),
+		}
+	})
+}
+
+// SetCaptureCursor stores c; a zero UpdatedAt means now.
+func (s *Store) SetCaptureCursor(ctx context.Context, c CaptureCursor) error {
+	at := c.UpdatedAt
+	if at.IsZero() {
+		at = s.now()
+	}
+	return s.q.UpsertPAgentCaptureCursor(ctx, gen.UpsertPAgentCaptureCursorParams{
+		ThreadID: c.ThreadID, SessionID: c.SessionID, EntryCount: int64(c.EntryCount),
+		LastEntryID: c.LastEntryID, UpdatedAt: at.UnixNano(),
+	})
+}

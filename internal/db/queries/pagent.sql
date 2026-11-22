@@ -113,6 +113,18 @@ ORDER BY id;
 -- name: DeletePAgentEvents :exec
 DELETE FROM pagent_thread_event WHERE thread_id IN (SELECT id FROM pagent_thread WHERE agent_id = ?);
 
+-- name: GetPAgentCaptureCursor :one
+SELECT thread_id, session_id, entry_count, last_entry_id, updated_at
+FROM pagent_capture_cursor WHERE thread_id = ? AND session_id = ?;
+
+-- name: UpsertPAgentCaptureCursor :exec
+INSERT INTO pagent_capture_cursor (thread_id, session_id, entry_count, last_entry_id, updated_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (thread_id, session_id) DO UPDATE SET
+    entry_count = excluded.entry_count,
+    last_entry_id = excluded.last_entry_id,
+    updated_at = excluded.updated_at;
+
 -- name: DeletePAgentCursors :exec
 DELETE FROM pagent_capture_cursor WHERE thread_id IN (SELECT id FROM pagent_thread WHERE agent_id = ?);
 
