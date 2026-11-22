@@ -50,6 +50,7 @@ func (d *Node) withCaps(s session.Session) session.Session {
 	q, ok := d.adapterFor(s.Agent).(adapter.PromptQueuer)
 	s.CanPrompt = s.TakesPrompt(ok && q.QueuesPrompts(s))
 	s.Parent = d.parentRef(s)
+	s.PAgentID, s.PAgentThreadID = d.pagentTag(s)
 	return s
 }
 

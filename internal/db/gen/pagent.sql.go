@@ -74,11 +74,7 @@ type EndPAgentThreadSessionParams struct {
 }
 
 func (q *Queries) EndPAgentThreadSession(ctx context.Context, arg EndPAgentThreadSessionParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, endPAgentThreadSession,
-		arg.EndedAt,
-		arg.EndReason,
-		arg.SessionID,
-	)
+	result, err := q.db.ExecContext(ctx, endPAgentThreadSession, arg.EndedAt, arg.EndReason, arg.SessionID)
 	if err != nil {
 		return 0, err
 	}
@@ -172,10 +168,7 @@ type GetPAgentThreadByAgentSessionParams struct {
 }
 
 func (q *Queries) GetPAgentThreadByAgentSession(ctx context.Context, arg GetPAgentThreadByAgentSessionParams) (PagentThread, error) {
-	row := q.db.QueryRowContext(ctx, getPAgentThreadByAgentSession,
-		arg.Cli,
-		arg.AgentSessionID,
-	)
+	row := q.db.QueryRowContext(ctx, getPAgentThreadByAgentSession, arg.Cli, arg.AgentSessionID)
 	var i PagentThread
 	err := row.Scan(
 		&i.ID,
@@ -342,10 +335,7 @@ type LatestPAgentThreadParams struct {
 }
 
 func (q *Queries) LatestPAgentThread(ctx context.Context, arg LatestPAgentThreadParams) (PagentThread, error) {
-	row := q.db.QueryRowContext(ctx, latestPAgentThread,
-		arg.AgentID,
-		arg.Kind,
-	)
+	row := q.db.QueryRowContext(ctx, latestPAgentThread, arg.AgentID, arg.Kind)
 	var i PagentThread
 	err := row.Scan(
 		&i.ID,
@@ -442,10 +432,7 @@ type ListPAgentThreadEventsParams struct {
 }
 
 func (q *Queries) ListPAgentThreadEvents(ctx context.Context, arg ListPAgentThreadEventsParams) ([]PagentThreadEvent, error) {
-	rows, err := q.db.QueryContext(ctx, listPAgentThreadEvents,
-		arg.ThreadID,
-		arg.ID,
-	)
+	rows, err := q.db.QueryContext(ctx, listPAgentThreadEvents, arg.ThreadID, arg.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -554,6 +541,22 @@ func (q *Queries) ListPAgentThreads(ctx context.Context, agentID string) ([]Page
 	return items, nil
 }
 
+const releasePAgentAgentSession = `-- name: ReleasePAgentAgentSession :exec
+UPDATE pagent_thread_session SET agent_session_id = ''
+WHERE cli = ? AND agent_session_id = ? AND agent_session_id != '' AND session_id != ?
+`
+
+type ReleasePAgentAgentSessionParams struct {
+	Cli            string
+	AgentSessionID string
+	SessionID      string
+}
+
+func (q *Queries) ReleasePAgentAgentSession(ctx context.Context, arg ReleasePAgentAgentSessionParams) error {
+	_, err := q.db.ExecContext(ctx, releasePAgentAgentSession, arg.Cli, arg.AgentSessionID, arg.SessionID)
+	return err
+}
+
 const renamePAgent = `-- name: RenamePAgent :execrows
 UPDATE pagent SET name = ? WHERE id = ?
 `
@@ -564,10 +567,7 @@ type RenamePAgentParams struct {
 }
 
 func (q *Queries) RenamePAgent(ctx context.Context, arg RenamePAgentParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, renamePAgent,
-		arg.Name,
-		arg.ID,
-	)
+	result, err := q.db.ExecContext(ctx, renamePAgent, arg.Name, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -584,10 +584,7 @@ type SetPAgentArchivedAtParams struct {
 }
 
 func (q *Queries) SetPAgentArchivedAt(ctx context.Context, arg SetPAgentArchivedAtParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, setPAgentArchivedAt,
-		arg.ArchivedAt,
-		arg.ID,
-	)
+	result, err := q.db.ExecContext(ctx, setPAgentArchivedAt, arg.ArchivedAt, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -597,7 +594,7 @@ func (q *Queries) SetPAgentArchivedAt(ctx context.Context, arg SetPAgentArchived
 const setPAgentSessionAgentID = `-- name: SetPAgentSessionAgentID :execrows
 UPDATE pagent_thread_session
 SET cli = ?, agent_session_id = ?, transcript_path = ?
-WHERE session_id = ?
+WHERE session_id = ? AND ended_at = 0
 `
 
 type SetPAgentSessionAgentIDParams struct {
@@ -620,6 +617,33 @@ func (q *Queries) SetPAgentSessionAgentID(ctx context.Context, arg SetPAgentSess
 	return result.RowsAffected()
 }
 
+const setPAgentSessionEndReason = `-- name: SetPAgentSessionEndReason :execrows
+UPDATE pagent_thread_session
+SET end_reason = ?1,
+    ended_at = CASE WHEN ended_at = 0 THEN ?2 ELSE ended_at END
+WHERE thread_id = ?3 AND session_id = ?4
+`
+
+type SetPAgentSessionEndReasonParams struct {
+	EndReason string
+	EndedAt   int64
+	ThreadID  string
+	SessionID string
+}
+
+func (q *Queries) SetPAgentSessionEndReason(ctx context.Context, arg SetPAgentSessionEndReasonParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setPAgentSessionEndReason,
+		arg.EndReason,
+		arg.EndedAt,
+		arg.ThreadID,
+		arg.SessionID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setPAgentThreadReadPosition = `-- name: SetPAgentThreadReadPosition :execrows
 UPDATE pagent_thread SET read_position = ? WHERE id = ?
 `
@@ -630,10 +654,7 @@ type SetPAgentThreadReadPositionParams struct {
 }
 
 func (q *Queries) SetPAgentThreadReadPosition(ctx context.Context, arg SetPAgentThreadReadPositionParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, setPAgentThreadReadPosition,
-		arg.ReadPosition,
-		arg.ID,
-	)
+	result, err := q.db.ExecContext(ctx, setPAgentThreadReadPosition, arg.ReadPosition, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -650,10 +671,7 @@ type SetPAgentThreadStatusParams struct {
 }
 
 func (q *Queries) SetPAgentThreadStatus(ctx context.Context, arg SetPAgentThreadStatusParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, setPAgentThreadStatus,
-		arg.Status,
-		arg.ID,
-	)
+	result, err := q.db.ExecContext(ctx, setPAgentThreadStatus, arg.Status, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -670,10 +688,7 @@ type TouchPAgentThreadParams struct {
 }
 
 func (q *Queries) TouchPAgentThread(ctx context.Context, arg TouchPAgentThreadParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, touchPAgentThread,
-		arg.LastActiveAt,
-		arg.ID,
-	)
+	result, err := q.db.ExecContext(ctx, touchPAgentThread, arg.LastActiveAt, arg.ID)
 	if err != nil {
 		return 0, err
 	}

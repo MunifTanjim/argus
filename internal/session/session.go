@@ -264,6 +264,11 @@ type Session struct {
 	// Parent is the session that spawned this one through argus, when known.
 	Parent *ParentRef `json:"parent,omitempty"`
 
+	// PAgentID and PAgentThreadID name the persistent agent and thread the
+	// session runs for, when it does. Node-computed on emit.
+	PAgentID       string `json:"pagent_id,omitempty"`
+	PAgentThreadID string `json:"pagent_thread_id,omitempty"`
+
 	// Origin fields — populated only when surfaced through a gateway.
 	NodeID    string `json:"node_id,omitempty"`    // originating node (also composite ID prefix)
 	NodeLabel string `json:"node_label,omitempty"` // human-friendly name (e.g. hostname)

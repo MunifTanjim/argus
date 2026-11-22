@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -151,6 +152,47 @@ func TestThreadByAgentSession(t *testing.T) {
 		if err := s.InsertThreadSession(ctx, ThreadSession{ThreadID: "t1", SessionID: id, CLI: "claude", StartedBy: "you"}); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestAgentSessionMovesToNewThreadSession(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newStore(t)
+	seedAgent(t, s)
+	if err := s.InsertThread(ctx, Thread{ID: "t1", AgentID: "a1", Kind: "chat", StartedBy: "you"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.InsertThreadSession(ctx, ThreadSession{ThreadID: "t1", SessionID: "s1", CLI: "claude", AgentSessionID: "x", TranscriptPath: "/x", StartedBy: "you"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EndThreadSession(ctx, "s1", "ended"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAgentSessionID(ctx, "s1", "claude", "y", ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("set on ended session err = %v", err)
+	}
+	if err := s.InsertThreadSession(ctx, ThreadSession{ThreadID: "t1", SessionID: "s2", CLI: "claude", AgentSessionID: "x", StartedBy: "you"}); err != nil {
+		t.Fatal(err)
+	}
+	ss, _ := s.ThreadSessions(ctx, "t1")
+	if len(ss) != 2 || ss[0].AgentSessionID != "" || ss[0].TranscriptPath != "/x" || ss[1].AgentSessionID != "x" {
+		t.Fatalf("sessions = %+v", ss)
+	}
+	if err := s.SetEndReason(ctx, "t1", "s1", "resume-failed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetEndReason(ctx, "t1", "s2", "idle-closed"); err != nil {
+		t.Fatal(err)
+	}
+	ss, _ = s.ThreadSessions(ctx, "t1")
+	if ss[0].EndReason != "resume-failed" || ss[1].EndReason != "idle-closed" || ss[1].EndedAt.IsZero() {
+		t.Fatalf("sessions = %+v", ss)
+	}
+	if err := s.SetEndReason(ctx, "t1", "nope", "x"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown err = %v", err)
+	}
+	if th, ok, err := s.Thread(ctx, "t1"); err != nil || !ok || th.AgentID != "a1" {
+		t.Fatalf("thread = %+v %v %v", th, ok, err)
 	}
 }
 

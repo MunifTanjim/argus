@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/bundle"
 	"github.com/MunifTanjim/argus/internal/transcript"
@@ -1436,6 +1437,10 @@ const (
 	MethodPAgentForget     = "pagent.forget"     // request: PAgentForgetParams; result: nil
 	MethodPAgentSetPrimary = "pagent.setPrimary" // request: PAgentPrimaryParams; result: nil (empty AgentID unsets)
 	MethodPAgentChanged    = "pagent.changed"    // notification, no params
+
+	MethodPAgentThreadSend     = "pagent.thread.send"     // request: PAgentSendParams; result: PAgentSendResult
+	MethodPAgentThreadList     = "pagent.thread.list"     // request: PAgentRef; result: PAgentThreadsResult
+	MethodPAgentThreadMarkRead = "pagent.thread.markRead" // request: PAgentMarkReadParams; result: nil
 )
 
 // PAgentCreateParams creates an agent directory and registers it. NodeID is a
@@ -1506,4 +1511,45 @@ type PAgentInfo struct {
 	Status      string `json:"status"`
 	NodeID      string `json:"node_id,omitempty"`
 	NodeLabel   string `json:"node_label,omitempty"`
+}
+
+// PAgentSendParams sends Text to a chat thread of the agent: ThreadID when
+// set, else a new thread when New, else the most recently active chat thread
+// (or a new one).
+type PAgentSendParams struct {
+	AgentID  string `json:"agent_id"`
+	ThreadID string `json:"thread_id,omitempty"`
+	Text     string `json:"text"`
+	New      bool   `json:"new,omitempty"`
+}
+
+type PAgentSendResult struct {
+	ThreadID  string `json:"thread_id"`
+	SessionID string `json:"session_id"`
+}
+
+type PAgentThreadsResult struct {
+	Threads []PAgentThreadInfo `json:"threads"`
+}
+
+// PAgentThreadInfo describes a thread. SessionID and SessionStatus name its
+// live session, when it has one.
+type PAgentThreadInfo struct {
+	ID            string    `json:"id"`
+	AgentID       string    `json:"agent_id"`
+	Kind          string    `json:"kind"`
+	StartedBy     string    `json:"started_by"`
+	Title         string    `json:"title"`
+	Status        string    `json:"status"`
+	Unread        bool      `json:"unread,omitempty"`
+	LastActiveAt  time.Time `json:"last_active_at"`
+	SessionID     string    `json:"session_id,omitempty"`
+	SessionStatus string    `json:"session_status,omitempty"`
+}
+
+// PAgentMarkReadParams marks a thread read up to Position, a time in Unix
+// nanoseconds (a thread's LastActiveAt); zero means now.
+type PAgentMarkReadParams struct {
+	ThreadID string `json:"thread_id"`
+	Position int64  `json:"position,omitempty"`
 }

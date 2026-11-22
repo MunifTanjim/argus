@@ -91,27 +91,11 @@ func (d *Node) pagentInfo(ctx context.Context, s *pagent.Store, a pagent.Agent, 
 	return info
 }
 
-// liveSessions returns the registry sessions of the agent's threads that have
-// not ended.
+// pagentLiveSessions returns the live sessions of the agent's threads.
 func (d *Node) pagentLiveSessions(ctx context.Context, s *pagent.Store, agentID string) []session.Session {
-	threads, err := s.ListThreads(ctx, agentID)
-	if err != nil {
-		return nil
-	}
 	var out []session.Session
-	for _, th := range threads {
-		links, err := s.ThreadSessions(ctx, th.ID)
-		if err != nil {
-			continue
-		}
-		for _, l := range links {
-			if !l.EndedAt.IsZero() {
-				continue
-			}
-			if sess, ok := d.reg.Get(l.SessionID); ok {
-				out = append(out, sess)
-			}
-		}
+	for _, ls := range d.pagentLive(ctx, s, agentID) {
+		out = append(out, ls.Session)
 	}
 	return out
 }

@@ -121,7 +121,15 @@ type Node struct {
 
 	pagents           *pagent.Store // nil = pagent.* disabled
 	pagentCfg         config.AgentsConfig
-	pagentPrimaryFile string // node state file holding the primary agent id
+	pagentPrimaryFile string           // node state file holding the primary agent id
+	pagentNow         func() time.Time // clock of idle close and session start grace; tests replace it
+	pagentLocks       sync.Map         // agent id -> *sync.Mutex; serializes session starts per agent
+	pagentPending     sync.Map         // spawned session id -> time.Time; not registered yet
+
+	// resumeFn relaunches a past agent session; defaults to (*Node).spawnAndAdopt.
+	resumeFn func(ctx context.Context, agent, agentSessionID, cwd, existingID string) (string, error)
+	// killFn ends a session; defaults to (*Node).killSession.
+	killFn func(ctx context.Context, s session.Session) error
 
 	orch            *orch.Store // nil = orch.* and message.* disabled
 	orchPrev        map[string]session.Status
@@ -557,6 +565,9 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	}
 	d.restoreMirrorFn = d.restoreMirror
 	d.spawnFn = d.spawn
+	d.resumeFn = d.spawnAndAdopt
+	d.killFn = d.killSession
+	d.pagentNow = time.Now
 
 	srv := api.NewServer()
 	d.registerHandlers(srv)
@@ -692,6 +703,13 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	if d.orch != nil {
 		go d.orchLoop(ctx)
 		go d.outboxLoop(ctx)
+	}
+
+	if d.pagents != nil {
+		pagentEvents, stopPAgentEvents := d.reg.Subscribe()
+		defer stopPAgentEvents()
+		go d.pagentWatch(ctx, pagentEvents)
+		go d.pagentIdleLoop(ctx)
 	}
 
 	return d.server.ServeContext(ctx, l)

@@ -190,6 +190,11 @@ func (s *Store) InsertThread(ctx context.Context, t Thread) error {
 	})
 }
 
+func (s *Store) Thread(ctx context.Context, id string) (Thread, bool, error) {
+	r, err := s.q.GetPAgentThread(ctx, id)
+	return one(r, err, threadFrom)
+}
+
 // LatestThread returns the active thread of kind most recently active.
 func (s *Store) LatestThread(ctx context.Context, agentID, kind string) (Thread, bool, error) {
 	r, err := s.q.LatestPAgentThread(ctx, gen.LatestPAgentThreadParams{AgentID: agentID, Kind: kind})
@@ -221,18 +226,54 @@ func (s *Store) CloseThread(ctx context.Context, id string) error {
 	return affected(s.q.SetPAgentThreadStatus(ctx, gen.SetPAgentThreadStatusParams{Status: ThreadClosed, ID: id}))
 }
 
-// InsertThreadSession stores ts, setting StartedAt.
+// InsertThreadSession stores ts, setting StartedAt. An agent session id
+// belongs to one thread session: a row that held ts.AgentSessionID gives it up.
 func (s *Store) InsertThreadSession(ctx context.Context, ts ThreadSession) error {
-	return s.q.InsertPAgentThreadSession(ctx, gen.InsertPAgentThreadSessionParams{
-		ThreadID: ts.ThreadID, SessionID: ts.SessionID, Cli: ts.CLI, AgentSessionID: ts.AgentSessionID,
-		TranscriptPath: ts.TranscriptPath, StartedBy: ts.StartedBy, StartedAt: s.now().UnixNano(),
+	return s.inTx(ctx, func(q *gen.Queries) error {
+		if err := q.ReleasePAgentAgentSession(ctx, gen.ReleasePAgentAgentSessionParams{
+			Cli: ts.CLI, AgentSessionID: ts.AgentSessionID, SessionID: ts.SessionID,
+		}); err != nil {
+			return err
+		}
+		return q.InsertPAgentThreadSession(ctx, gen.InsertPAgentThreadSessionParams{
+			ThreadID: ts.ThreadID, SessionID: ts.SessionID, Cli: ts.CLI, AgentSessionID: ts.AgentSessionID,
+			TranscriptPath: ts.TranscriptPath, StartedBy: ts.StartedBy, StartedAt: s.now().UnixNano(),
+		})
 	})
 }
 
+// SetAgentSessionID records the agent session of the session's open thread
+// session, taking the id from any row that held it.
 func (s *Store) SetAgentSessionID(ctx context.Context, sessionID, cli, agentSessionID, transcriptPath string) error {
-	return affected(s.q.SetPAgentSessionAgentID(ctx, gen.SetPAgentSessionAgentIDParams{
-		Cli: cli, AgentSessionID: agentSessionID, TranscriptPath: transcriptPath, SessionID: sessionID,
+	return s.inTx(ctx, func(q *gen.Queries) error {
+		if err := q.ReleasePAgentAgentSession(ctx, gen.ReleasePAgentAgentSessionParams{
+			Cli: cli, AgentSessionID: agentSessionID, SessionID: sessionID,
+		}); err != nil {
+			return err
+		}
+		return affected(q.SetPAgentSessionAgentID(ctx, gen.SetPAgentSessionAgentIDParams{
+			Cli: cli, AgentSessionID: agentSessionID, TranscriptPath: transcriptPath, SessionID: sessionID,
+		}))
+	})
+}
+
+// SetEndReason sets the end reason of a thread session, ending it if open.
+func (s *Store) SetEndReason(ctx context.Context, threadID, sessionID, reason string) error {
+	return affected(s.q.SetPAgentSessionEndReason(ctx, gen.SetPAgentSessionEndReasonParams{
+		EndReason: reason, EndedAt: s.now().UnixNano(), ThreadID: threadID, SessionID: sessionID,
 	}))
+}
+
+func (s *Store) inTx(ctx context.Context, fn func(*gen.Queries) error) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := fn(s.q.WithTx(tx)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // EndThreadSession records that the session ended; an already ended session is left as is.

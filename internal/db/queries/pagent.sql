@@ -64,10 +64,20 @@ VALUES (?, ?, ?, ?, ?, ?, ?);
 -- name: SetPAgentSessionAgentID :execrows
 UPDATE pagent_thread_session
 SET cli = ?, agent_session_id = ?, transcript_path = ?
-WHERE session_id = ?;
+WHERE session_id = ? AND ended_at = 0;
+
+-- name: ReleasePAgentAgentSession :exec
+UPDATE pagent_thread_session SET agent_session_id = ''
+WHERE cli = ? AND agent_session_id = ? AND agent_session_id != '' AND session_id != ?;
 
 -- name: EndPAgentThreadSession :execrows
 UPDATE pagent_thread_session SET ended_at = ?, end_reason = ? WHERE session_id = ? AND ended_at = 0;
+
+-- name: SetPAgentSessionEndReason :execrows
+UPDATE pagent_thread_session
+SET end_reason = sqlc.arg(end_reason),
+    ended_at = CASE WHEN ended_at = 0 THEN sqlc.arg(ended_at) ELSE ended_at END
+WHERE thread_id = sqlc.arg(thread_id) AND session_id = sqlc.arg(session_id);
 
 -- name: ListPAgentThreadSessions :many
 SELECT thread_id, session_id, cli, agent_session_id, transcript_path, started_by, started_at, ended_at, end_reason
