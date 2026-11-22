@@ -561,6 +561,10 @@ log authorizes the key.
 | Initiator | the client                                     |
 | Payloads  | Both handshake messages have an empty payload. |
 
+These parameters are for `e2e.handshake`. An invite channel uses
+`e2e.inviteHandshake` with different parameters. See
+[Invite handshake](#invite-handshake).
+
 The prologue is:
 
 ```
@@ -606,6 +610,54 @@ Both sides follow the Noise specification:
 A refused client gets no error frame. It sees only its own timeout. The client
 default timeout for message 2 is 10 seconds. The app uses 15 seconds.
 
+### Invite handshake
+
+A new machine that holds an invite has no authorized key yet. It opens an
+invite channel to the issuing node instead. The channel proves the invite
+secret and serves one `lock.inviteRedeem` request.
+
+| Item      | Value                                                          |
+| --------- | -------------------------------------------------------------- |
+| Protocol  | `Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s`                        |
+| Initiator | the new machine, with its node identity                        |
+| PSK       | the invite secret (32 bytes), placement 2                      |
+| Payloads  | message 1 carries the invite id (16 bytes); message 2 is empty |
+
+The prologue, nonces, cipher state order, and sealed records are the same as
+for `e2e.handshake`. Message 1 is 112 bytes: ephemeral key (32), encrypted
+static key (48), and the encrypted invite id with its tag (32). Message 2 is
+48 bytes.
+
+1. The client calls `relay.open` for the issuing node and gets a `chan_id`.
+2. The client sends message 1 in an `e2e.inviteHandshake` frame. The shape is
+   the same as `e2e.handshake`.
+
+   ```json
+   {"jsonrpc":"2.0","method":"e2e.inviteHandshake","route":{"chan_id":"c12"},"body":"<base64(msg1)>"}
+   ```
+
+3. The node reads the invite id from message 1 and looks up its secret. The
+   node drops the frame and sends nothing in these cases:
+   - The node is quarantined.
+   - The node does not know the invite id.
+   - Another channel for the same invite has sent its request and is still
+     open.
+   - A channel with this `chan_id` already exists.
+   - 8 channels for pending invites are open.
+
+   An open channel for the same invite that has not sent its request is
+   closed and replaced by the new one. The trust log does not need to
+   authorize the client key.
+4. Otherwise, the node sends message 2 in an `e2e.inviteHandshake` frame. A
+   wrong secret makes the client fail to read message 2.
+5. The client sends one sealed `lock.inviteRedeem` request. See
+   [Locked mode control](#locked-mode-control).
+6. The node closes the channel after the response. It also closes a channel
+   that sends no request within 30 seconds.
+
+An invite that is used, revoked, or expired still gets a channel, so the
+redeem can report why. The channel starts no `session.event` stream.
+
 ### Sealed records
 
 `seal` turns one message into one or more records:
@@ -633,7 +685,7 @@ new channel.
 
 The node serves every method on a channel except `lock.*`. It returns
 `-32601` for `lock.*`. It acts only on sealed requests, that is, frames with
-both `id` and `method`.
+both `id` and `method`. An invite channel serves only `lock.inviteRedeem`.
 
 ## Aggregation
 
@@ -1887,7 +1939,8 @@ first.
 ### Locked mode control
 
 These methods are served on the unix socket only. On any other path, the node
-returns `-32601`.
+returns `-32601`. The exception is `lock.inviteRedeem`, which is served only on
+an invite channel.
 
 | Method                    | Params                                      | Result                                        |
 | ------------------------- | ------------------------------------------- | --------------------------------------------- |
@@ -1905,6 +1958,10 @@ returns `-32601`.
 | `lock.revokeSignerStart`  | `{ revoked, replaces?, fork_from? }`        | `{ blob }`                                    |
 | `lock.revokeSignerCosign` | `{ blob }`                                  | `{ blob }`                                    |
 | `lock.revokeSignerFinish` | `{ blob }`                                  | `{ tip }`                                     |
+| `lock.inviteCreate`       | `{ ttl_seconds }`                           | `LockInviteCreateResult`                      |
+| `lock.inviteList`         | none                                        | `{ invites: LockInviteInfo[] }`               |
+| `lock.inviteRevoke`       | `{ id }`                                    | `null`                                        |
+| `lock.inviteRedeem`       | `{ extra_keys? }`                           | `{ tip }`                                     |
 
 - `gen_disablements` is a number: the count of disablement secrets to create.
   All other keys, hashes, secrets, and blobs are `bytes`.
@@ -1914,6 +1971,14 @@ returns `-32601`.
   state.
 - `lock.disable` does not need a trusted signer, but the node must have a
   signer key.
+
+`lock.inviteCreate` needs a trusted signer that is pinned. `ttl_seconds` must
+be from 1 to 2592000 (30 days). `lock.inviteRevoke`
+fails for a used invite. `lock.inviteRedeem` marks the invite used, then
+authorizes the client key of the invite channel and each key in `extra_keys`.
+`extra_keys` holds at most one 32-byte key. A failed redeem returns `-32600`
+with a message such as `invite already used`, `invite revoked`, or
+`invite expired`, or an error from the locked-mode state of the issuing node.
 
 A revoke-signer blob is the wire form of a `revoke-signer` entry. It holds the
 fork point, the revoked keys, the replacements, and the co-signs so far.
@@ -1937,6 +2002,24 @@ LockStatusResult {
   pin_genesis?:     bytes
   seen_genesis?:    bytes    // genesis that caused the quarantine
   pin_source?:      "config" | "file"
+}
+
+LockInviteCreateResult {
+  invite_id:       bytes     // 16 bytes
+  secret:          bytes     // 32 bytes
+  expires_at:      string    // RFC 3339
+  node_id:         string
+  identity_pubkey: bytes
+  genesis:         bytes
+}
+
+LockInviteInfo {
+  id:         bytes
+  created_at: string
+  expires_at: string
+  state:      "pending" | "used" | "revoked" | "expired"
+  used_at?:   string
+  keys?:      bytes[]  // keys the redeem authorized
 }
 
 LockLogEntry {

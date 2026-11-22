@@ -39,3 +39,8 @@ func (d *Node) StartOrchForTest(ctx context.Context) (wait func()) {
 	wg.Go(func() { d.outboxLoop(ctx) })
 	return wg.Wait
 }
+
+// RosterNodeForTest returns this node's roster entry for nodeID. Test-only.
+func (d *Node) RosterNodeForTest(nodeID string) (api.NodeDescriptor, bool) {
+	return d.roster.get(nodeID)
+}

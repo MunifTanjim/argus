@@ -99,4 +99,5 @@ names the node, the agent, and the agent's own session id, like
   queue. Argus sends them in order when the node returns.
 - In [locked mode](/guide/e2ee#locked-mode), a node opens channels to another
   node only if the trust log authorizes its key. Authorize each node with
-  `argus lock init` or `argus lock sign <node>`.
+  `argus lock init` or `argus lock sign <node>`. To add a new machine, use
+  [`argus lock invite`](/guide/e2ee#invite-a-machine).
