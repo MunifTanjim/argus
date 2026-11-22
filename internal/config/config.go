@@ -164,7 +164,9 @@ type AgentsConfig struct {
 	ProfileDir string
 	SkillsDir  string
 	Primary    string
-	Defaults   AgentDefaults
+	// WebhookListen is the address of the node's routine webhook listener; empty disables it.
+	WebhookListen string
+	Defaults      AgentDefaults
 }
 
 // AgentDefaults are the settings an agent inherits when its own definition
@@ -287,6 +289,7 @@ var defaults = map[string]any{
 	"agents.profile-dir":                              "",
 	"agents.skills-dir":                               "",
 	"agents.primary":                                  "",
+	"agents.webhook.listen-addr":                      "",
 	"agents.defaults.agent":                           "claude",
 	"agents.defaults.model":                           "",
 	"agents.defaults.timezone":                        "auto",
@@ -506,6 +509,8 @@ func agentsFromViper(v *viper.Viper) AgentsConfig {
 		ProfileDir: resolveDir(v.GetString("agents.profile-dir"), "profile"),
 		SkillsDir:  resolveDir(v.GetString("agents.skills-dir"), "skills"),
 		Primary:    v.GetString("agents.primary"),
+
+		WebhookListen: strings.TrimSpace(v.GetString("agents.webhook.listen-addr")),
 	}
 	d := &a.Defaults
 	d.Agent = v.GetString(p + "agent")

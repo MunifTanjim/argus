@@ -139,14 +139,15 @@ type Node struct {
 	tidyIdle     map[string]string    // agent id -> memory commit at the last tidy that changed nothing
 
 	// routineStartFn starts a claimed routine run; tests replace it.
-	routineStartFn func(ctx context.Context, a pagent.Agent, r routine.Routine, run pagent.RoutineRun) error
-	routineMu      sync.Mutex
-	routineCache   map[string]map[string]routineFile // agent id -> slug -> parsed file
-	routineErrSent map[string]string                 // agent id/slug -> key of the last routine.error
-	routineSkip    map[string]string                 // agent id/slug -> reason of the current skip streak
-	routineStale   map[string]time.Time              // agent id/slug -> due time of the last stale notice
-	routineRuns    sync.Map                          // run id -> *runCtl; runs this process executes
-	routineWG      sync.WaitGroup                    // run goroutines
+	routineStartFn  func(ctx context.Context, a pagent.Agent, r routine.Routine, run pagent.RoutineRun) error
+	routineMu       sync.Mutex
+	routineCache    map[string]map[string]routineFile // agent id -> slug -> parsed file
+	routineErrSent  map[string]string                 // agent id/slug -> key of the last routine.error
+	routineSkip     map[string]string                 // agent id/slug -> reason of the current skip streak
+	routineStale    map[string]time.Time              // agent id/slug -> due time of the last stale notice
+	routineRuns     sync.Map                          // run id -> *runCtl; runs this process executes
+	routineWG       sync.WaitGroup                    // run goroutines
+	routinePayloads sync.Map                          // run id -> webhook body of a run not started yet
 
 	clientMu        sync.Mutex
 	lastClientAt    time.Time // when a client was last attached
@@ -742,6 +743,12 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 		go d.pagentCaptureLoop(ctx)
 		go d.pagentTidyLoop(ctx)
 		go d.pagentRoutineLoop(ctx)
+		stopWebhooks, err := d.serveWebhooks(ctx)
+		if err != nil {
+			d.log.Warn("pagent: routine webhooks disabled", "err", err)
+		} else {
+			defer stopWebhooks()
+		}
 	}
 
 	return d.server.ServeContext(ctx, l)

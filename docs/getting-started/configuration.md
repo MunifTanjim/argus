@@ -68,6 +68,7 @@ overrides the `agents.defaults` values.
 | `agents.profile-dir` | data directory `profile` | Where the profile is kept. |
 | `agents.skills-dir` | data directory `skills` | Where shared skills are kept. |
 | `agents.primary` | none | The agent that receives requests when none is named. |
+| `agents.webhook.listen-addr` | none (off) | Address, such as `127.0.0.1:7420`, where the node accepts routine webhooks. Reachability from other machines is up to your network. |
 | `agents.defaults.agent` | `claude` | The coding agent that runs the sessions. |
 | `agents.defaults.model` | none | The model of the sessions. |
 | `agents.defaults.timezone` | `auto` | The timezone of schedules and quiet hours. |

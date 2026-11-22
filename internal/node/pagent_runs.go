@@ -99,7 +99,11 @@ func (c *runCtl) ids() (threadID, sessionID string) {
 
 // routineStart is the scheduler's start of a claimed run.
 func (d *Node) routineStart(ctx context.Context, a pagent.Agent, r routine.Routine, run pagent.RoutineRun) error {
-	d.startRun(ctx, a, r, run, "")
+	payload := ""
+	if v, ok := d.routinePayloads.LoadAndDelete(run.ID); ok {
+		payload = v.(string)
+	}
+	d.startRun(ctx, a, r, run, payload)
 	return nil
 }
 
