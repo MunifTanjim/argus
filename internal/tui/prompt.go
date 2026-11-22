@@ -878,6 +878,8 @@ func promptHeading(agent string, ix *session.Interaction) string {
 			s += " · " + toolDisplayName(agent, ix.ToolName)
 		}
 		return StyleAccentBold.Render(Icon.SystemErr.Glyph + " " + s)
+	case session.InteractionHandoff:
+		return StyleAccentBold.Render(Icon.Output.Glyph + " Your turn")
 	default: // plan
 		return StyleAccentBold.Render(Icon.Output.Glyph + " Plan approval")
 	}
@@ -890,6 +892,15 @@ func interactionBody(m model, agent string, ix *session.Interaction, width int) 
 		if ix.Plan != "" {
 			return m.renderMD(ix.Plan, width-2)
 		}
+	case session.InteractionHandoff:
+		var parts []string
+		if ix.Message != "" {
+			parts = append(parts, hardWrap(StyleSecondary.Render(ix.Message), width-2))
+		}
+		if ix.Steps != "" {
+			parts = append(parts, m.renderMD(ix.Steps, width-2))
+		}
+		return strings.Join(parts, "\n")
 	case session.InteractionPermission:
 		var parts []string
 		if ix.Message != "" {

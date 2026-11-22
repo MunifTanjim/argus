@@ -74,6 +74,11 @@ func dockSummary(agent string, ix *session.Interaction) string {
 		return "Permission request"
 	case session.InteractionPlan:
 		return "Review plan"
+	case session.InteractionHandoff:
+		if ix.Message != "" {
+			return "Your turn: " + ix.Message
+		}
+		return "Your turn"
 	default: // idle
 		if ix.Message != "" {
 			return ix.Message

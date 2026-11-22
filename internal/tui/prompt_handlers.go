@@ -225,6 +225,9 @@ func (d dockComp) submitDecision(c *ctx, ix *session.Interaction) (dockComp, tea
 		return d, nil
 	}
 	o := ix.Options[sel]
+	if ix.Kind == session.InteractionHandoff && o.Value == handoffTakeover {
+		return d.takeOver(c, ix)
+	}
 	p := api.RespondParams{Kind: string(ix.Kind), RequestID: ix.RequestID, OptionValue: o.Value}
 	if o.Reject {
 		p.Reason = strings.TrimSpace(d.reason.Value())
@@ -233,6 +236,27 @@ func (d dockComp) submitDecision(c *ctx, ix *session.Interaction) (dockComp, tea
 	c.focusOn(mainPane)
 	d.resetPromptState()
 	return d, c.m.respondCmd(id, p)
+}
+
+// The handoff answers that the node knows.
+const (
+	handoffTakeover = "takeover"
+	handoffDone     = "done"
+)
+
+// takeOver opens the live screen for a handoff and leaves the request
+// pending, with Done highlighted for the user's return.
+func (d dockComp) takeOver(c *ctx, ix *session.Interaction) (dockComp, tea.Cmd) {
+	cmd := openLiveScreen(c)
+	if cmd == nil {
+		return d, nil
+	}
+	for i, o := range ix.Options {
+		if o.Value == handoffDone {
+			d.decisionSel = i
+		}
+	}
+	return d, cmd
 }
 
 // submitChecked submits, first asking for confirmation when questions that may

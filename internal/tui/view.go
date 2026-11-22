@@ -86,6 +86,8 @@ func interactionHint(agent string, ix *session.Interaction) string {
 		return StyleBlockedBold.Render("question")
 	case session.InteractionPlan:
 		return StyleBlockedBold.Render("plan approval")
+	case session.InteractionHandoff:
+		return StyleBlockedBold.Render("your turn")
 	default: // idle / generic notification
 		if ix.Message != "" {
 			return StyleAccentBold.Render(truncate(ix.Message, 50))
