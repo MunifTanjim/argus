@@ -393,3 +393,27 @@ func TestRevertBusyLeavesUserRevertAlone(t *testing.T) {
 		t.Fatal("a.md touched")
 	}
 }
+
+func TestAddedLines(t *testing.T) {
+	setupEnv(t)
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "a")
+	r, _ := Open(ctx, dir, "nested")
+	write(t, filepath.Join(dir, "m.md"), "one\ntwo\n")
+	first, err := r.CommitPaths(ctx, "add", nil, []string{"m.md"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "m.md"), "one\nthree\n++ plus\n")
+	second, err := r.CommitPaths(ctx, "edit", nil, []string{"m.md"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.AddedLines(ctx, second)
+	if err != nil || strings.Join(got, "|") != "three|++ plus" {
+		t.Fatalf("AddedLines = %q, %v", got, err)
+	}
+	if got, err := r.AddedLines(ctx, first); err != nil || strings.Join(got, "|") != "one|two" {
+		t.Fatalf("root AddedLines = %q, %v", got, err)
+	}
+}

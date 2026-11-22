@@ -1442,6 +1442,12 @@ const (
 	MethodPAgentThreadList     = "pagent.thread.list"     // request: PAgentRef; result: PAgentThreadsResult
 	MethodPAgentThreadMarkRead = "pagent.thread.markRead" // request: PAgentMarkReadParams; result: nil
 	MethodPAgentThreadTimeline = "pagent.thread.timeline" // request: PAgentTimelineParams; result: PAgentTimeline
+
+	MethodPAgentMemoryShow      = "pagent.memory.show"      // request: PAgentRef; result: PAgentMemoryShowResult
+	MethodPAgentMemoryLog       = "pagent.memory.log"       // request: PAgentMemoryLogParams; result: PAgentMemoryLogResult
+	MethodPAgentMemoryUndo      = "pagent.memory.undo"      // request: PAgentMemoryUndoParams; result: PAgentMemoryUndoResult
+	MethodPAgentMemoryProposals = "pagent.memory.proposals" // request: PAgentRef; result: PAgentMemoryProposalsResult
+	MethodPAgentMemoryDecide    = "pagent.memory.decide"    // request: PAgentMemoryDecideParams; result: PAgentMemoryDecideResult
 )
 
 // PAgentCreateParams creates an agent directory and registers it. NodeID is a
@@ -1572,4 +1578,90 @@ type PAgentTimelineSession struct {
 	SessionID  string `json:"session_id"`
 	StartIndex int    `json:"start_index"`
 	Live       bool   `json:"live,omitempty"`
+}
+
+// PAgentMemoryOp is one memory edit. Action is add, update or remove; File is
+// MEMORY.md (when empty), USER.md, PROFILE.md or topics/<name>.md; Match is a
+// substring of the entry an update or remove targets.
+type PAgentMemoryOp struct {
+	Action string `json:"action"`
+	File   string `json:"file,omitempty"`
+	Match  string `json:"match,omitempty"`
+	Text   string `json:"text,omitempty"`
+	Until  string `json:"until,omitempty"`
+}
+
+// PAgentMemoryShowResult holds the agent's memory files. Usage is the size of
+// MEMORY.md in bytes and Budget its limit.
+type PAgentMemoryShowResult struct {
+	Memory  string   `json:"memory"`
+	User    string   `json:"user"`
+	Profile string   `json:"profile"`
+	Topics  []string `json:"topics"`
+	Usage   int64    `json:"usage"`
+	Budget  int64    `json:"budget"`
+}
+
+// PAgentMemoryLogParams lists memory commits, newest first; Profile lists the
+// shared profile's commits instead. Limit 0 means all.
+type PAgentMemoryLogParams struct {
+	AgentID string `json:"agent_id"`
+	Limit   int    `json:"limit,omitempty"`
+	Profile bool   `json:"profile,omitempty"`
+}
+
+// PAgentMemoryCommit is one memory change. Source is capture, agent, tidy,
+// you or run.
+type PAgentMemoryCommit struct {
+	Hash     string    `json:"hash"`
+	Subject  string    `json:"subject"`
+	Source   string    `json:"source,omitempty"`
+	ThreadID string    `json:"thread_id,omitempty"`
+	When     time.Time `json:"when"`
+}
+
+type PAgentMemoryLogResult struct {
+	Commits []PAgentMemoryCommit `json:"commits"`
+}
+
+// PAgentMemoryUndoParams reverts Commit (a full hash or unique prefix) of the
+// agent's memory, or of the shared profile when Profile is set.
+type PAgentMemoryUndoParams struct {
+	AgentID string `json:"agent_id"`
+	Commit  string `json:"commit"`
+	Profile bool   `json:"profile,omitempty"`
+}
+
+type PAgentMemoryUndoResult struct {
+	Commit string `json:"commit"`
+}
+
+type PAgentMemoryProposalsResult struct {
+	Proposals []PAgentMemoryProposal `json:"proposals"`
+}
+
+// PAgentMemoryProposal is a staged change awaiting accept or reject. Log is a
+// work-log line written on accept.
+type PAgentMemoryProposal struct {
+	ID        string           `json:"id"`
+	AgentID   string           `json:"agent_id"`
+	ThreadID  string           `json:"thread_id,omitempty"`
+	Source    string           `json:"source"`
+	Ops       []PAgentMemoryOp `json:"ops"`
+	Log       string           `json:"log,omitempty"`
+	CreatedAt time.Time        `json:"created_at"`
+}
+
+type PAgentMemoryDecideParams struct {
+	ProposalID string `json:"proposal_id"`
+	Accept     bool   `json:"accept"`
+}
+
+// PAgentMemoryDecideResult reports an accept: the commit(s) made, how many
+// ops applied, and why the others were rejected against the current files.
+type PAgentMemoryDecideResult struct {
+	Commit        string   `json:"commit,omitempty"`
+	ProfileCommit string   `json:"profile_commit,omitempty"`
+	Applied       int      `json:"applied"`
+	Rejected      []string `json:"rejected,omitempty"`
 }

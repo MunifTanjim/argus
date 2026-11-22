@@ -367,3 +367,24 @@ func gitMessage(stderr string) string {
 	}
 	return last
 }
+
+// AddedLines returns the lines that commit hash added, in diff order.
+func (r *Repo) AddedLines(ctx context.Context, hash string) ([]string, error) {
+	out, err := mustGit(ctx, r.Dir, "show", "--format=", "--unified=0", "--no-color", "--no-ext-diff", "--end-of-options", hash)
+	if err != nil {
+		return nil, err
+	}
+	var lines []string
+	inHunk := false
+	for _, ln := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(ln, "diff --git "):
+			inHunk = false
+		case strings.HasPrefix(ln, "@@"):
+			inHunk = true
+		case inHunk && strings.HasPrefix(ln, "+"):
+			lines = append(lines, ln[1:])
+		}
+	}
+	return lines, nil
+}

@@ -214,6 +214,40 @@ func (m *E2EClient) routeByPAgent(method string, raw json.RawMessage, out any) e
 			}
 		}
 		return assign(out, r)
+	case api.MethodPAgentMemoryLog:
+		var r api.PAgentMemoryLogResult
+		if err := m.callNode(nodeID, method, params, &r); err != nil {
+			return err
+		}
+		for i := range r.Commits {
+			if r.Commits[i].ThreadID != "" {
+				r.Commits[i].ThreadID = session.CompositeID(nodeID, r.Commits[i].ThreadID)
+			}
+		}
+		return assign(out, r)
+	case api.MethodPAgentMemoryProposals:
+		var r api.PAgentMemoryProposalsResult
+		if err := m.callNode(nodeID, method, params, &r); err != nil {
+			return err
+		}
+		for i := range r.Proposals {
+			pr := &r.Proposals[i]
+			pr.ID = session.CompositeID(nodeID, pr.ID)
+			pr.AgentID = session.CompositeID(nodeID, pr.AgentID)
+			if pr.ThreadID != "" {
+				pr.ThreadID = session.CompositeID(nodeID, pr.ThreadID)
+			}
+		}
+		return assign(out, r)
+	}
+	return m.callNode(nodeID, method, params, out)
+}
+
+// routeByPAgentProposal splits the composite proposal_id and routes to its node.
+func (m *E2EClient) routeByPAgentProposal(method string, raw json.RawMessage, out any) error {
+	nodeID, params, err := splitIDField(raw, "proposal_id", "proposal")
+	if err != nil {
+		return err
 	}
 	return m.callNode(nodeID, method, params, out)
 }

@@ -1,6 +1,9 @@
 package memory
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestLooksSecret(t *testing.T) {
 	pos := map[string]string{
@@ -53,5 +56,22 @@ func TestRedact(t *testing.T) {
 	got := Redact("use abc123 and abc123456 with x", map[string]string{"TOKEN": "abc123", "LONG": "abc123456", "EMPTY": ""})
 	if want := "use «TOKEN» and «LONG» with x"; got != want {
 		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestMaskSecrets(t *testing.T) {
+	in := "key AKIAABCDEFGHIJKLMNOP and card 4111 1111 1111 1111 ok"
+	got := MaskSecrets(in)
+	if strings.Contains(got, "AKIA") || strings.Contains(got, "4111") {
+		t.Fatalf("not masked: %q", got)
+	}
+	if got != "key «aws-access-key» and card «credit-card» ok" {
+		t.Fatalf("masked = %q", got)
+	}
+	if got := MaskSecrets("-----BEGIN RSA PRIVATE KEY-----"); got != "«private-key»" {
+		t.Fatalf("private key masked = %q", got)
+	}
+	if MaskSecrets("plain text") != "plain text" {
+		t.Fatal("plain text changed")
 	}
 }

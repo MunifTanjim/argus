@@ -1,6 +1,7 @@
 package node
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -170,9 +171,29 @@ func lastStartedBy(links []pagent.ThreadSession, t time.Time) int {
 }
 
 func eventText(ev pagent.Event) string {
-	var m map[string]string
-	_ = json.Unmarshal(ev.Payload, &m)
+	var raw map[string]json.RawMessage
+	_ = json.Unmarshal(ev.Payload, &raw)
+	m := map[string]string{}
+	for k, v := range raw {
+		var s string
+		if json.Unmarshal(v, &s) == nil {
+			m[k] = s
+		}
+	}
 	switch ev.Kind {
+	case evMemoryChanged:
+		return "Memory: " + cmp.Or(m["summary"], "changed")
+	case evMemoryProposed:
+		var ops []json.RawMessage
+		_ = json.Unmarshal(raw["ops"], &ops)
+		if len(ops) == 1 {
+			return "Memory: 1 change to review"
+		}
+		return fmt.Sprintf("Memory: %d changes to review", len(ops))
+	case evMemoryBlocked:
+		return fmt.Sprintf("Memory: not saved, looks like a secret (%s)", m["rule"])
+	case evMemoryError:
+		return "Memory: " + cmp.Or(m["message"], "error")
 	case "session.started":
 		return "Session started"
 	case "session.resumed":

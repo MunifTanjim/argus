@@ -113,6 +113,64 @@ func TestPAgentAddressedRoutesToNode(t *testing.T) {
 	}
 }
 
+func TestPAgentMemoryRoutesByAgentAndProposal(t *testing.T) {
+	f, clientConn := newFakeGatewayNode(t, "n1")
+	defer f.peer.Close()
+	var gotAgent, gotProposal string
+	f.handle = func(method string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		switch method {
+		case api.MethodPAgentMemoryProposals:
+			var p api.PAgentRef
+			_ = json.Unmarshal(params, &p)
+			gotAgent = p.AgentID
+			b, _ := json.Marshal(api.PAgentMemoryProposalsResult{Proposals: []api.PAgentMemoryProposal{{ID: "mp1", AgentID: "a1", ThreadID: "t1"}}})
+			return b, nil, nil
+		case api.MethodPAgentMemoryLog:
+			b, _ := json.Marshal(api.PAgentMemoryLogResult{Commits: []api.PAgentMemoryCommit{{Hash: "abc", ThreadID: "t1"}, {Hash: "def"}}})
+			return b, nil, nil
+		case api.MethodPAgentMemoryDecide:
+			var p api.PAgentMemoryDecideParams
+			_ = json.Unmarshal(params, &p)
+			gotProposal = p.ProposalID
+			b, _ := json.Marshal(api.PAgentMemoryDecideResult{Applied: 1})
+			return b, nil, nil
+		}
+		return nil, nil, nil
+	}
+	c, err := NewE2EClient(clientConn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	var props api.PAgentMemoryProposalsResult
+	if err := c.Call(api.MethodPAgentMemoryProposals, api.PAgentRef{AgentID: "n1:a1"}, &props); err != nil {
+		t.Fatal(err)
+	}
+	if pr := props.Proposals[0]; gotAgent != "a1" || pr.ID != "n1:mp1" || pr.AgentID != "n1:a1" || pr.ThreadID != "n1:t1" {
+		t.Errorf("proposal %+v node agent %q", pr, gotAgent)
+	}
+	var log api.PAgentMemoryLogResult
+	if err := c.Call(api.MethodPAgentMemoryLog, api.PAgentMemoryLogParams{AgentID: "n1:a1"}, &log); err != nil {
+		t.Fatal(err)
+	}
+	if log.Commits[0].ThreadID != "n1:t1" || log.Commits[1].ThreadID != "" {
+		t.Errorf("log %+v", log)
+	}
+	var dr api.PAgentMemoryDecideResult
+	if err := c.Call(api.MethodPAgentMemoryDecide, api.PAgentMemoryDecideParams{ProposalID: props.Proposals[0].ID, Accept: true}, &dr); err != nil {
+		t.Fatal(err)
+	}
+	if gotProposal != "mp1" || dr.Applied != 1 {
+		t.Errorf("decide %+v node proposal %q", dr, gotProposal)
+	}
+	if err := c.Call(api.MethodPAgentMemoryDecide, api.PAgentMemoryDecideParams{ProposalID: "mp1"}, nil); err == nil {
+		t.Error("unqualified proposal id accepted")
+	}
+}
+
 func TestPAgentUnreachableWhenNodeLost(t *testing.T) {
 	f, clientConn := newFakeGatewayNode(t, "n1")
 	defer f.peer.Close()

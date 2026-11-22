@@ -33,12 +33,39 @@ func LooksSecret(s string) (string, bool) {
 		}
 	}
 	for _, m := range cardRe.FindAllString(s, -1) {
-		digits := strings.NewReplacer(" ", "", "-", "").Replace(m)
-		if len(digits) >= 13 && len(digits) <= 19 && luhn(digits) {
+		if isCard(m) {
 			return "credit-card", true
 		}
 	}
 	return "", false
+}
+
+// MaskSecrets replaces each secret-looking value in s with «rule».
+func MaskSecrets(s string) string {
+	for _, r := range secretRules {
+		s = r.re.ReplaceAllStringFunc(s, func(m string) string {
+			// Keep a leading boundary character the rule matched.
+			if m != "" && !isAlnum(m[0]) && r.re.MatchString(m[1:]) {
+				return m[:1] + "«" + r.name + "»"
+			}
+			return "«" + r.name + "»"
+		})
+	}
+	return cardRe.ReplaceAllStringFunc(s, func(m string) string {
+		if isCard(m) {
+			return "«credit-card»"
+		}
+		return m
+	})
+}
+
+func isAlnum(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
+
+func isCard(m string) bool {
+	digits := strings.NewReplacer(" ", "", "-", "").Replace(m)
+	return len(digits) >= 13 && len(digits) <= 19 && luhn(digits)
 }
 
 func luhn(digits string) bool {

@@ -581,6 +581,8 @@ func (m *E2EClient) Call(method string, params, out any) error {
 		return m.routeByPAgent(method, raw, out)
 	case pagentThreadAddressed[method]:
 		return m.routeByPAgentThread(method, raw, out)
+	case method == api.MethodPAgentMemoryDecide:
+		return m.routeByPAgentProposal(method, raw, out)
 	case method == api.MethodTerminalList:
 		return m.fanoutTerminals(raw, out)
 	case terminalAddressed[method], method == api.MethodTerminalOpen && hasTerminalID(raw):

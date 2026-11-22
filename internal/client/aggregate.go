@@ -65,6 +65,11 @@ var pagentAddressed = map[string]bool{
 	api.MethodPAgentSetPrimary: true,
 	api.MethodPAgentThreadSend: true,
 	api.MethodPAgentThreadList: true,
+
+	api.MethodPAgentMemoryShow:      true,
+	api.MethodPAgentMemoryLog:       true,
+	api.MethodPAgentMemoryUndo:      true,
+	api.MethodPAgentMemoryProposals: true,
 }
 
 // pagentThreadAddressed methods route by a composite thread_id.
