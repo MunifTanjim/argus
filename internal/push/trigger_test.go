@@ -373,3 +373,19 @@ func TestWatchDelayedRendersLatestSnapshot(t *testing.T) {
 		t.Fatalf("delayed body = %q, want latest snapshot %q", body, "Plan ready to review")
 	}
 }
+
+func TestWatchSkipsHandoff(t *testing.T) {
+	// A persistent agent's hand-off request is pushed by the node under the
+	// agent's notification policy, not by Watch.
+	handoff := ev(registry.EventUpdated, "s1", session.StatusAwaitingInput)
+	handoff.Session.Interaction = &session.Interaction{Kind: session.InteractionHandoff}
+	perm := ev(registry.EventUpdated, "s2", session.StatusAwaitingInput)
+	perm.Session.Interaction = &session.Interaction{Kind: session.InteractionPermission}
+	sent := runWatch(t, []registry.Event{
+		ev(registry.EventAdded, "s1", session.StatusWorking), handoff,
+		ev(registry.EventAdded, "s2", session.StatusWorking), perm,
+	})
+	if len(sent) != 1 {
+		t.Fatalf("fired %d times, want 1 (the permission only)", len(sent))
+	}
+}

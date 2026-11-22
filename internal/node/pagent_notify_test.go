@@ -10,6 +10,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/pagent"
 	"github.com/MunifTanjim/argus/internal/push"
+	"github.com/MunifTanjim/argus/internal/session"
 )
 
 type recordSink struct {
@@ -221,4 +222,35 @@ func TestRunResultPushes(t *testing.T) {
 	if len(got) != 1 || got[0].Body != "s-needs_you" || got[0].Data["pagent_thread_id"] == "" {
 		t.Fatalf("pushes: %+v", got)
 	}
+}
+
+func TestHandoffPushesOnce(t *testing.T) {
+	r := newMemRig(t, 0)
+	sink := &recordSink{}
+	sinks := []push.Sink{sink}
+	r.d.ownerSinks.Store(&sinks)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, stop := r.d.reg.Subscribe()
+	defer stop()
+	done := make(chan struct{})
+	go func() { push.Watch(ctx, events, push.Sinks{Immediate: []push.Sink{sink}}, nil); close(done) }()
+
+	hookSession(r.d, "%1", "c1")
+	s, _ := r.d.reg.FindByAgentSession("claude", "c1")
+	caller := callerRef{Local: &session.Session{ID: s.ID, PAgentID: r.a.ID, PAgentThreadID: r.th}}
+	if _, err := r.d.mcpRequestHandoff(ctx, caller, requestHandoffParams{Reason: "log in to the bank", Steps: "sign in"}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for len(sink.all()) < 1 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	got := sink.all()
+	if len(got) != 1 || got[0].Data["pagent_thread_id"] != r.th || got[0].Body != "log in to the bank" {
+		t.Fatalf("pushes: %+v", got)
+	}
+	cancel()
+	<-done
 }

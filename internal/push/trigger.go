@@ -19,6 +19,13 @@ type Sinks struct {
 	Delay     time.Duration
 }
 
+// argusNotified reports whether s awaits an interaction the node notifies
+// about itself, under the agent's notification policy: a persistent agent's
+// hand-off request.
+func argusNotified(s session.Session) bool {
+	return s.Interaction != nil && s.Interaction.Kind == session.InteractionHandoff
+}
+
 // Watch fires on each transition into StatusAwaitingInput (once per transition).
 // Replay events only record status, never notify, so a restart doesn't
 // re-announce every already-waiting session.
@@ -70,6 +77,9 @@ func Watch(ctx context.Context, events <-chan registry.Event, sinks Sinks, log *
 			if !inAttention(prev[e.id]) {
 				continue // no longer needs attention (e.g. answered at the boundary)
 			}
+			if argusNotified(e.sess) {
+				continue
+			}
 			n := notificationFor(e.sess)
 			for _, sink := range sinks.Delayed {
 				sink.Notify(ctx, n)
@@ -95,7 +105,7 @@ func Watch(ctx context.Context, events <-chan registry.Event, sinks Sinks, log *
 			}
 			was := prev[s.ID]
 			prev[s.ID] = s.Status
-			if s.Status == session.StatusAwaitingInput && was != session.StatusAwaitingInput {
+			if s.Status == session.StatusAwaitingInput && was != session.StatusAwaitingInput && !argusNotified(s) {
 				log.Info("push: session awaiting input, notifying",
 					"session", s.ID, "from", string(was), "type", string(ev.Type), "repo", s.Repo)
 				n := notificationFor(s)
