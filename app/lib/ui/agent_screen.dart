@@ -5,6 +5,7 @@ import '../models/pagent.dart';
 import '../state/pagents.dart';
 import '../state/projects_api.dart' show actionError;
 import 'agent_badge.dart';
+import 'agent_memory_screen.dart';
 import 'pagent_style.dart';
 import 'theme.dart';
 import 'thread_screen.dart';
@@ -71,6 +72,11 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
     if (mounted) await _refresh();
   }
 
+  void _openMemory(PAgent a) {
+    if (!_reachable(a)) return;
+    Navigator.of(context).push(agentMemoryRoute(a.id));
+  }
+
   Future<void> _setPrimary(PAgent a, bool primary) async {
     if (!_reachable(a)) return;
     try {
@@ -125,10 +131,12 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
           ),
           PopupMenuButton<String>(
             onSelected: (v) => switch (v) {
+              'memory' => _openMemory(agent),
               'primary' => _setPrimary(agent, !primary),
               _ => null,
             },
             itemBuilder: (_) => [
+              const PopupMenuItem(value: 'memory', child: Text('Memory')),
               PopupMenuItem(
                 value: 'primary',
                 child: Text(primary ? 'Unset primary' : 'Make primary'),
@@ -163,14 +171,17 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
                 ),
             if (usage != null) ...[
               const SizedBox(height: 16),
-              _Heading(
-                [
+              InkWell(
+                onTap: () => _openMemory(agent),
+                child: _Heading(
+                  [
                   'Memory',
                   kbSize(usage.usage) +
                       (usage.budget > 0 ? ' / ${kbSize(usage.budget)}' : ''),
                   if (usage.last != null)
                     'last change ${agoText(usage.last!)}',
-                ].join(' · '),
+                  ].join(' · '),
+                ),
               ),
             ],
           ],
