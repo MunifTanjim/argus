@@ -545,3 +545,62 @@ String argusRowText(Entry e) {
   final text = p['text'] is String ? p['text'] as String : '';
   return (agent: agent.isEmpty ? 'Agent' : agent, text: text);
 }
+
+/// The id of the draft event an argus entry carries, or 0 when it is not one.
+int draftIdOf(Entry e) =>
+    e.kind == EntryKind.argus && e.event?.kind == 'draft' ? e.event!.id : 0;
+
+/// The ids of the draft events a timeline shows as sent or discarded.
+Set<int> decidedDrafts(Iterable<Entry> entries) {
+  final out = <int>{};
+  for (final e in entries) {
+    final k = e.event?.kind;
+    if (e.kind != EntryKind.argus || (k != 'draft.sent' && k != 'draft.discarded')) {
+      continue;
+    }
+    final p = e.event?.payload;
+    final id = p is Map ? p['event_id'] : null;
+    if (id is num) out.add(id.toInt());
+  }
+  return out;
+}
+
+/// One approval decision on an agent's action. [decidedBy] is floor, policy,
+/// hook, rule, grant, default, user or expiry.
+class PAgentActivity {
+  const PAgentActivity({
+    required this.id,
+    this.threadId = '',
+    this.sessionId = '',
+    this.startedBy = '',
+    this.tool = '',
+    this.target = '',
+    this.decision = '',
+    this.decidedBy = '',
+    this.reason = '',
+    required this.createdAt,
+  });
+  final int id;
+  final String threadId;
+  final String sessionId;
+  final String startedBy;
+  final String tool;
+  final String target;
+  final String decision;
+  final String decidedBy;
+  final String reason;
+  final DateTime createdAt;
+
+  factory PAgentActivity.fromJson(Map<String, dynamic> j) => PAgentActivity(
+    id: (j['id'] as num?)?.toInt() ?? 0,
+    threadId: j['thread_id'] as String? ?? '',
+    sessionId: j['session_id'] as String? ?? '',
+    startedBy: j['started_by'] as String? ?? '',
+    tool: j['tool'] as String? ?? '',
+    target: j['target'] as String? ?? '',
+    decision: j['decision'] as String? ?? '',
+    decidedBy: j['decided_by'] as String? ?? '',
+    reason: j['reason'] as String? ?? '',
+    createdAt: _time(j['created_at']),
+  );
+}

@@ -47,7 +47,15 @@ TmuxServerKind tmuxServerFromWire(String? s) {
   }
 }
 
-enum InteractionKind { permission, question, plan, idle, handoff, unknown }
+enum InteractionKind {
+  permission,
+  question,
+  plan,
+  idle,
+  handoff,
+  secret,
+  unknown,
+}
 
 InteractionKind interactionKindFromWire(String? s) {
   switch (s) {
@@ -61,6 +69,8 @@ InteractionKind interactionKindFromWire(String? s) {
       return InteractionKind.idle;
     case 'handoff':
       return InteractionKind.handoff;
+    case 'secret':
+      return InteractionKind.secret;
     default:
       return InteractionKind.unknown;
   }

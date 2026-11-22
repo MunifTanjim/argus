@@ -142,6 +142,15 @@ class Interaction {
   /// Identifies the pending request this interaction shows; responds echo it.
   final String? requestId;
 
+  /// Warning classes of an agent action: outward, irreversible, security.
+  final List<String> classes;
+
+  /// How the agent work that asks was started (you, routine, ...).
+  final String? startedBy;
+
+  /// The variable a secret request stores its value under.
+  final String? secretName;
+
   const Interaction({
     required this.kind,
     this.message,
@@ -154,6 +163,9 @@ class Interaction {
     this.cancelInterrupts = false,
     this.allowUnanswered = false,
     this.requestId,
+    this.classes = const [],
+    this.startedBy,
+    this.secretName,
   });
 
   factory Interaction.fromJson(Map<String, dynamic> j) => Interaction(
@@ -174,6 +186,9 @@ class Interaction {
         cancelInterrupts: j['cancel_interrupts'] as bool? ?? false,
         allowUnanswered: j['allow_unanswered'] as bool? ?? false,
         requestId: j['request_id'] as String?,
+        classes: [for (final c in (j['classes'] as List?) ?? const []) '$c'],
+        startedBy: j['started_by'] as String?,
+        secretName: j['secret_name'] as String?,
       );
 }
 

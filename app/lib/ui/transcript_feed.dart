@@ -134,6 +134,7 @@ class TranscriptFeed extends ConsumerStatefulWidget {
     this.onUndoMemory,
     this.detailRefOf,
     this.offerActions,
+    this.draftActions,
   });
 
   /// Addresses the transcript so tool rows can fetch their bodies on demand.
@@ -148,6 +149,9 @@ class TranscriptFeed extends ConsumerStatefulWidget {
 
   /// Start and Dismiss on an agent's open offers (agent threads only).
   final OfferActions? offerActions;
+
+  /// Send and Discard on an agent's open drafts (agent threads only).
+  final DraftActions? draftActions;
 
   /// Offers an undo on memory-change events (agent threads only).
   final void Function(String commit)? onUndoMemory;
@@ -347,6 +351,7 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
               entry: entry,
               onUndoMemory: widget.onUndoMemory,
               offerActions: widget.offerActions,
+              draftActions: widget.draftActions,
               expanded: _expanded.contains(entry.id),
               onToggle: () => setState(() {
                 if (!_expanded.remove(entry.id)) _expanded.add(entry.id);

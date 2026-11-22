@@ -3,7 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../models/entry.dart';
-import '../models/pagent.dart' show argusRowText, handoffAnswerOf, offerIdOf, undoCommit;
+import '../models/pagent.dart' show argusRowText, draftIdOf, handoffAnswerOf, offerIdOf, undoCommit;
 import '../state/tool_detail.dart';
 import 'code_block.dart';
 import 'item_detail_screen.dart';
@@ -83,6 +83,20 @@ class OfferActions {
   final void Function(String offerId) onDismiss;
 }
 
+/// What the user can do with an agent's drafted actions in a thread.
+class DraftActions {
+  const DraftActions({
+    required this.isOpen,
+    required this.onSend,
+    required this.onDiscard,
+  });
+
+  /// Whether the draft is still waiting for an answer.
+  final bool Function(int eventId) isOpen;
+  final void Function(int eventId) onSend;
+  final void Function(int eventId) onDiscard;
+}
+
 class EntryRow extends StatelessWidget {
   const EntryRow({
     super.key,
@@ -92,6 +106,7 @@ class EntryRow extends StatelessWidget {
     this.onToggle,
     this.onUndoMemory,
     this.offerActions,
+    this.draftActions,
   });
 
   final ToolDetailRef detailRef;
@@ -106,6 +121,9 @@ class EntryRow extends StatelessWidget {
   /// Offers Start and Dismiss on an agent's open offers; null leaves offers
   /// as plain text.
   final OfferActions? offerActions;
+
+  /// Send and Discard on an agent's open drafts; null leaves them as text.
+  final DraftActions? draftActions;
 
   @override
   Widget build(BuildContext context) {
@@ -163,6 +181,7 @@ class EntryRow extends StatelessWidget {
           entry: e,
           onUndo: onUndoMemory,
           offers: offerActions,
+          drafts: draftActions,
         );
       case EntryKind.unknown:
         return const SizedBox.shrink();
@@ -669,10 +688,16 @@ class _CompactDivider extends StatelessWidget {
 /// Argus's own event in an agent thread: dim, with an undo on a memory or
 /// routine change, and Start and Dismiss on an open offer.
 class _ArgusEventRow extends StatelessWidget {
-  const _ArgusEventRow({required this.entry, this.onUndo, this.offers});
+  const _ArgusEventRow({
+    required this.entry,
+    this.onUndo,
+    this.offers,
+    this.drafts,
+  });
   final Entry entry;
   final void Function(String commit)? onUndo;
   final OfferActions? offers;
+  final DraftActions? drafts;
 
   @override
   Widget build(BuildContext context) {
@@ -684,6 +709,8 @@ class _ArgusEventRow extends StatelessWidget {
     final commit = undoCommit(e);
     final offerId = offerIdOf(e);
     final open = offerId.isNotEmpty && (offers?.isOpen(offerId) ?? false);
+    final draftId = draftIdOf(e);
+    final draftOpen = draftId != 0 && (drafts?.isOpen(draftId) ?? false);
     // A brief is the point of its event, so it shows whole.
     final lines = kind == 'brief' ? null : 2;
     return Padding(
@@ -722,6 +749,26 @@ class _ArgusEventRow extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: 4, left: 19),
               child: appMarkdown(text),
+            ),
+          if (draftOpen)
+            Padding(
+              padding: const EdgeInsets.only(left: 13),
+              child: Row(
+                children: [
+                  FilledButton(
+                    onPressed: () => drafts!.onSend(draftId),
+                    style: FilledButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: const Text('Send'),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () => drafts!.onDiscard(draftId),
+                    child: const Text('Discard'),
+                  ),
+                ],
+              ),
             ),
           if (open)
             Padding(

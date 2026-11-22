@@ -51,6 +51,20 @@ Map<String, dynamic> optionRespond({
   };
 }
 
+/// A secret request answered with its value. The value goes only into this
+/// request.
+Map<String, dynamic> secretRespond({
+  required String sessionId,
+  required String value,
+  String? requestId,
+}) => {
+  'session_id': sessionId,
+  'kind': 'secret',
+  ..._requestId(requestId),
+  'option_value': 'save',
+  'secret_value': value,
+};
+
 /// One question's committed answer: `String` (single), `List<String>` (multi),
 /// or the custom text. Null when unanswered. Mirrors the TUI's questionAnswer.
 Object? _answer(QuestionSpec q, QuestionDraft d) {

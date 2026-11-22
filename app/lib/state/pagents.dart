@@ -209,6 +209,35 @@ class PAgentsApi {
     return res['commit'] as String? ?? '';
   }
 
+  /// Runs a drafted action: [eventId] is the id of its draft event.
+  Future<void> sendDraft(String threadId, int eventId) => _call(
+    'pagent.draft.send',
+    {'thread_id': threadId, 'event_id': eventId},
+  );
+
+  Future<void> discardDraft(String threadId, int eventId) => _call(
+    'pagent.draft.discard',
+    {'thread_id': threadId, 'event_id': eventId},
+  );
+
+  /// The agent's approval decisions, newest first; [unattended] keeps only
+  /// work the user did not start.
+  Future<List<PAgentActivity>> activity(
+    String agentId, {
+    bool unattended = false,
+    int limit = 20,
+  }) async {
+    final res = await _map('pagent.activity', {
+      'agent_id': agentId,
+      if (unattended) 'unattended': true,
+      'limit': limit,
+    });
+    return [
+      for (final a in (res['activity'] as List?) ?? const [])
+        if (a is Map<String, dynamic>) PAgentActivity.fromJson(a),
+    ];
+  }
+
   /// Sends the offer's prompt to its thread.
   Future<PAgentSendResult> startOffer(String threadId, String offerId) async =>
       PAgentSendResult.fromJson(
@@ -279,6 +308,13 @@ final agentUsageProvider = FutureProvider.autoDispose
       return ref
           .read(pagentsApiProvider)
           .usage(agentId, since: DateTime.now().subtract(const Duration(days: 7)));
+    });
+
+/// The agent's recent approval decisions, all or only unattended work.
+final agentActivityProvider = FutureProvider.autoDispose
+    .family<List<PAgentActivity>, (String, bool)>((ref, key) {
+      ref.watch(pagentsProvider.select((s) => s.agents));
+      return ref.read(pagentsApiProvider).activity(key.$1, unattended: key.$2);
     });
 
 /// The agent's routines. Reloads when the agent list changes.

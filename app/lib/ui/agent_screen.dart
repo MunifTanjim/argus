@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/pagent.dart';
+import '../state/approval_text.dart';
 import '../state/pagents.dart';
 import '../state/projects_api.dart' show actionError;
 import 'agent_badge.dart';
@@ -29,6 +30,8 @@ class AgentScreen extends ConsumerStatefulWidget {
 }
 
 class _AgentScreenState extends ConsumerState<AgentScreen> {
+  bool _unattended = false;
+
   @override
   void initState() {
     super.initState();
@@ -229,6 +232,21 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
             const _Heading('Usage'),
             _UsageLine(agentId: agent.id, unreachable: agent.unreachable),
             const SizedBox(height: 16),
+            const _Heading('Activity'),
+            if (agent.unreachable)
+              const _Note(agentOffline)
+            else ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilterChip(
+                  label: const Text('Unattended only'),
+                  selected: _unattended,
+                  onSelected: (v) => setState(() => _unattended = v),
+                ),
+              ),
+              _ActivityList(agentId: agent.id, unattended: _unattended),
+            ],
+            const SizedBox(height: 16),
             const _Heading('Settings'),
             for (final spec in _settings)
               _SettingRow(
@@ -254,6 +272,47 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ActivityList extends ConsumerWidget {
+  const _ActivityList({required this.agentId, required this.unattended});
+
+  final String agentId;
+  final bool unattended;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final res = ref.watch(agentActivityProvider((agentId, unattended)));
+    final list = res.value;
+    if (list == null) {
+      return res.hasError
+          ? const _Note('activity unavailable')
+          : const _Note('loading activity…');
+    }
+    if (list.isEmpty) return const _Note('no activity');
+    return Column(
+      children: [
+        for (final a in list)
+          ListTile(
+            dense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            title: Text(
+              [a.tool, a.target].where((x) => x.isNotEmpty).join(' '),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text(
+              [
+                '${a.decision} by ${a.decidedBy}',
+                if (a.startedBy.isNotEmpty && a.startedBy != 'you')
+                  startedByLabel(a.startedBy),
+                agoText(a.createdAt),
+              ].where((x) => x.isNotEmpty).join(' · '),
+            ),
+          ),
+      ],
     );
   }
 }

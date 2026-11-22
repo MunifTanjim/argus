@@ -9,6 +9,7 @@ import '../models/entry.dart';
 import '../models/enums.dart';
 import '../models/session.dart';
 import '../state/respond_params.dart';
+import '../state/approval_text.dart';
 import '../state/projects_api.dart' show actionError;
 import '../state/respond_view_model.dart';
 import 'live_screen_screen.dart';
@@ -32,6 +33,7 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
   // A handoff the user took over: Done is the next step, so it is highlighted.
   bool _tookOver = false;
   final _text = TextEditingController();
+  final _secret = TextEditingController();
   List<QuestionDraft>? _drafts;
 
   @override
@@ -56,6 +58,8 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
     _vm.respond.removeListener(_onCommand);
     _vm.dispose();
     _text.dispose();
+    _secret.clear();
+    _secret.dispose();
     super.dispose();
   }
 
@@ -75,6 +79,7 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
       case Ok():
         setState(() => _denying = false);
         _text.clear();
+        _secret.clear();
       case Error(:final error):
         ScaffoldMessenger.of(
           context,
@@ -108,6 +113,8 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
         return const [];
       case InteractionKind.handoff:
         return _handoff(ix);
+      case InteractionKind.secret:
+        return _secretRequest(ix);
       case InteractionKind.question:
         return _questions(ix);
       case InteractionKind.unknown:
@@ -132,6 +139,19 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
       Text(heading,
           style: const TextStyle(
               color: AppColors.secondary, fontWeight: FontWeight.w700)),
+      for (final w in classWarnings(ix.classes))
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text('⚠ $w',
+              style: const TextStyle(
+                  color: AppColors.blocked, fontWeight: FontWeight.w700)),
+        ),
+      if (startedByLabel(ix.startedBy).isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(startedByLabel(ix.startedBy),
+              style: const TextStyle(color: AppColors.dim)),
+        ),
     ];
     if ((ix.message ?? '').isNotEmpty) {
       detail.add(const SizedBox(height: 8));
@@ -226,6 +246,90 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
           child: const Text('Send'),
         ),
       ],
+      if (_busy)
+        const Padding(
+          padding: EdgeInsets.only(top: 12),
+          child: LinearProgressIndicator(),
+        ),
+    ];
+  }
+
+  /// A persistent agent asks for a secret value. It is stored on the node and
+  /// the agent hears only its variable name; the field is hidden and cleared
+  /// once sent, and the value is never kept anywhere else.
+  List<Widget> _secretRequest(Interaction ix) {
+    final name = ix.secretName ?? '';
+    final options = ix.options.isNotEmpty
+        ? ix.options
+        : const [
+            DecisionOption(label: 'Save', value: 'save'),
+            DecisionOption(label: 'Decline', value: 'decline', reject: true),
+          ];
+    return [
+      _scrollBody([
+        Text(
+          name.isEmpty ? 'Secret requested' : 'Secret requested · $name',
+          style: const TextStyle(
+            color: AppColors.secondary,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        if ((ix.message ?? '').isNotEmpty) ...[
+          const SizedBox(height: 8),
+          appMarkdown(ix.message!),
+        ],
+        const SizedBox(height: 8),
+        Text(
+          'Kept on this node; the agent sees only \$$name.',
+          style: const TextStyle(color: AppColors.dim),
+        ),
+      ]),
+      const SizedBox(height: 12),
+      TextField(
+        key: const ValueKey('secret-value'),
+        controller: _secret,
+        obscureText: true,
+        enableSuggestions: false,
+        autocorrect: false,
+        enableIMEPersonalizedLearning: false,
+        autofillHints: null,
+        decoration: const InputDecoration(
+          hintText: 'Value (hidden)',
+          border: OutlineInputBorder(),
+        ),
+        onChanged: (_) => setState(() {}),
+      ),
+      const SizedBox(height: 12),
+      for (var i = 0; i < options.length; i++)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: options[i].reject
+              ? OutlinedButton(
+                  onPressed: _busy
+                      ? null
+                      : () => _respond(
+                          optionRespond(
+                            sessionId: _sid,
+                            kind: 'secret',
+                            value: options[i].value,
+                            requestId: ix.requestId,
+                          ),
+                        ),
+                  child: Text(options[i].label),
+                )
+              : FilledButton(
+                  onPressed: _busy || _secret.text.isEmpty
+                      ? null
+                      : () => _respond(
+                          secretRespond(
+                            sessionId: _sid,
+                            value: _secret.text,
+                            requestId: ix.requestId,
+                          ),
+                        ),
+                  child: Text(options[i].label),
+                ),
+        ),
       if (_busy)
         const Padding(
           padding: EdgeInsets.only(top: 12),

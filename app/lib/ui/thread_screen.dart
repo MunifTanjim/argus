@@ -6,7 +6,7 @@ import '../state/pagents.dart';
 import '../state/projects_api.dart' show actionError;
 import '../state/sessions.dart';
 import '../state/tool_detail.dart';
-import 'entry_row.dart' show OfferActions;
+import 'entry_row.dart' show DraftActions, OfferActions;
 import 'pagent_style.dart';
 import 'session_detail_screen.dart';
 import 'theme.dart';
@@ -170,6 +170,20 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
     await _load();
   }
 
+  Future<void> _draft(int eventId, bool send) async {
+    final api = ref.read(pagentsApiProvider);
+    try {
+      if (send) {
+        await api.sendDraft(widget.threadId, eventId);
+      } else {
+        await api.discardDraft(widget.threadId, eventId);
+      }
+    } catch (e) {
+      if (mounted) _say('${send ? 'send' : 'discard'}: ${actionError(e)}');
+    }
+    await _load();
+  }
+
   void _openSession() {
     final id = _timeline == null ? '' : liveSessionOf(_timeline!);
     final session = id.isEmpty ? null : ref.read(sessionsProvider)[id];
@@ -197,12 +211,18 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
     } else {
       final nodeId = agent?.nodeId ?? '';
       final decided = decidedOffers(tl.entries);
+      final draftsDone = decidedDrafts(tl.entries);
       body = TranscriptFeed(
         detailRef: const ToolDetailRef(),
         detailRefOf: (e) => timelineDetailRef(nodeId, tl.sessions, e.id),
         entries: tl.entries,
         emptyText: 'Empty thread.',
         onUndoMemory: _undo,
+        draftActions: DraftActions(
+          isOpen: (id) => !draftsDone.contains(id),
+          onSend: (id) => _draft(id, true),
+          onDiscard: (id) => _draft(id, false),
+        ),
         offerActions: OfferActions(
           isOpen: (id) => !decided.contains(id),
           onStart: (id) => _offer(id, true),
