@@ -53,7 +53,7 @@ func Scaffold(ctx context.Context, dir string, def *Definition, gitMode string, 
 	if err != nil {
 		return nil, err
 	}
-	exclude := slices.Clone(instructionFiles)
+	exclude := append(slices.Clone(instructionFiles), SkillExcludes...)
 	// Git does not track empty directories, and rejects them as pathspecs.
 	paths := []string{DefinitionFile, "memory"}
 	tracked := []string{"skills", "routines"}

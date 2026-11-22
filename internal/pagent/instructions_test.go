@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestInstructionFileName(t *testing.T) {
@@ -108,7 +109,7 @@ func TestGatherReadsLastLogLines(t *testing.T) {
 	if in.Memory != "mem" || in.User != "usr" || in.Profile != "prof" {
 		t.Fatalf("files: %+v", in)
 	}
-	if strings.Join(in.Topics, ",") != "a.md,b.md" {
+	if strings.Join(in.Topics, ",") != "memory/topics/a.md,memory/topics/b.md" {
 		t.Fatalf("topics: %v", in.Topics)
 	}
 	if in.CoreBudget != 100 || in.Def != def {
@@ -133,5 +134,61 @@ func TestWriteInstructions(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
 	if err != nil || !strings.Contains(string(data), "hello") {
 		t.Fatalf("%v %q", err, data)
+	}
+}
+
+func TestLogAcrossMonths(t *testing.T) {
+	dir := t.TempDir()
+	mk := func(p, c string) {
+		full := filepath.Join(dir, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("memory/log/2026-09.md", "sep1\n")
+	mk("memory/log/2026-10.md", "oct1\noct2\n")
+	mk("memory/log/2026-11.md", "nov1\n")
+	in, err := GatherInput(dir, &Definition{}, Settings{}, "", 3, 100, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(in.LogLines, "|"); got != "oct1|oct2|nov1" {
+		t.Fatalf("log lines: %q", got)
+	}
+	in, _ = GatherInput(dir, &Definition{}, Settings{}, "", 10, 100, time.Now())
+	if got := strings.Join(in.LogLines, "|"); got != "oct1|oct2|nov1" {
+		t.Fatalf("only the two newest months: %q", got)
+	}
+}
+
+func TestTopicsListedWithPath(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "memory", "topics"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "memory", "topics", "a.md"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in, err := GatherInput(dir, &Definition{}, Settings{}, "", 3, 100, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(in.Topics, ",") != "memory/topics/a.md" {
+		t.Fatalf("topics: %v", in.Topics)
+	}
+}
+
+func TestTruncateWithoutNewline(t *testing.T) {
+	mem := strings.Repeat("é", 2000) // 4000 bytes, no newline
+	out := truncateMemory(mem, 1024)
+	body, _, _ := strings.Cut(out, "\n(memory truncated")
+	if len(body) > 1024 || len(body) == 0 || !utf8.ValidString(body) {
+		t.Fatalf("body %d bytes, valid=%v", len(body), utf8.ValidString(body))
+	}
+	if !strings.Contains(out, "(memory truncated:") {
+		t.Fatalf("no note: %q", out[len(out)-60:])
 	}
 }

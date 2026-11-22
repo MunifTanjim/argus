@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
+	"github.com/MunifTanjim/argus/internal/agentgit"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/pagent"
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -69,6 +71,8 @@ func (d *Node) pagentEvent(ctx context.Context, threadID, kind, startedBy string
 	d.notifyConns(api.MethodPAgentChanged)
 	return nil
 }
+
+const evSkillsMissing = "skills.missing"
 
 func (d *Node) logEvent(ctx context.Context, threadID, kind string, payload any, anchorSession string) {
 	if err := d.pagentEvent(ctx, threadID, kind, startedByYou, payload, anchorSession, 0); err != nil {
@@ -295,6 +299,7 @@ func (d *Node) pagentEnsureSession(ctx context.Context, a pagent.Agent, th pagen
 	if !ok {
 		return "", false, pagentErr("unknown agent CLI %q", cli)
 	}
+	d.pagentPrepareShared(ctx, a, th, def, cli)
 	in, err := pagent.GatherInput(a.Dir, def, set, d.pagentCfg.ProfileDir, set.LogEntries, set.CoreBudget, now)
 	if err != nil {
 		return "", false, pagentErr("read memory: %v", err)
@@ -751,4 +756,44 @@ func (d *Node) handlePAgentThreadMarkRead(ctx context.Context, params json.RawMe
 	}
 	d.notifyConns(api.MethodPAgentChanged)
 	return struct{}{}, nil
+}
+
+// pagentPrepareShared creates the shared profile and skills repositories on
+// first use and places the agent's skills for cli. Failures are logged: they
+// must not keep a chat from starting.
+func (d *Node) pagentPrepareShared(ctx context.Context, a pagent.Agent, th pagent.Thread, def *pagent.Definition, cli string) {
+	if d.pagentCfg.ProfileDir != "" {
+		unlock := lockMemory(profileLockKey)
+		_, err := d.profileRepo(ctx)
+		unlock()
+		if err != nil {
+			d.log.Warn("pagent: profile repository", "err", err)
+		}
+	}
+	if dir := d.pagentCfg.SkillsDir; dir != "" {
+		err := os.MkdirAll(dir, 0o755)
+		if err == nil {
+			_, err = agentgit.Open(ctx, dir, agentgit.ModeNested)
+		}
+		if err != nil {
+			d.log.Warn("pagent: skills repository", "err", err)
+		}
+	}
+	if repo, err := agentgit.Open(ctx, a.Dir, d.pagentGitMode()); err != nil {
+		d.log.Warn("pagent: exclude skills", "agent", a.ID, "err", err)
+	} else if err := repo.EnsureExcluded(ctx, pagent.SkillExcludes); err != nil {
+		d.log.Warn("pagent: exclude skills", "agent", a.ID, "err", err)
+	}
+	missing, err := pagent.PlaceSkills(a.Dir, cli, d.pagentCfg.SkillsDir, def)
+	if err != nil {
+		d.log.Warn("pagent: place skills", "agent", a.ID, "err", err)
+	}
+	if len(missing) > 0 {
+		if err := d.pagentEvent(ctx, th.ID, evSkillsMissing, startedByYou, map[string]any{
+			"skills":  missing,
+			"message": "Skills not found: " + strings.Join(missing, ", "),
+		}, "", 0); err != nil {
+			d.log.Warn("pagent: skills.missing", "agent", a.ID, "skills", missing, "err", err)
+		}
+	}
 }

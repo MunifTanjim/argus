@@ -246,21 +246,10 @@ func (d *Node) captureExtract(ctx context.Context, a pagent.Agent, set pagent.Se
 		}
 		return errors.New("no extractor available")
 	}
-	memDir := filepath.Join(a.Dir, memoryDir)
-	mem, err := readFileOptional(filepath.Join(memDir, memoryFile))
+	mem, user, topics, err := readMemoryContext(a)
 	if err != nil {
 		return err
 	}
-	user, err := readFileOptional(filepath.Join(memDir, userFile))
-	if err != nil {
-		return err
-	}
-	var topics []string
-	files, _ := filepath.Glob(filepath.Join(memDir, "topics", "*.md"))
-	for _, f := range files {
-		topics = append(topics, "topics/"+filepath.Base(f))
-	}
-	slices.Sort(topics)
 
 	reply, err := ex.Extract(ctx, memory.BuildCapturePrompt(mem, user, topics, chunk))
 	if err != nil {
@@ -290,4 +279,22 @@ func (d *Node) captureExtract(ctx context.Context, a pagent.Agent, set pagent.Se
 		return err
 	}
 	return nil
+}
+
+// readMemoryContext reads the agent's memory, user file and topic file names
+// (as memory-relative paths) for an extractor prompt.
+func readMemoryContext(a pagent.Agent) (mem, user string, topics []string, err error) {
+	memDir := filepath.Join(a.Dir, memoryDir)
+	if mem, err = readFileOptional(filepath.Join(memDir, memoryFile)); err != nil {
+		return
+	}
+	if user, err = readFileOptional(filepath.Join(memDir, userFile)); err != nil {
+		return
+	}
+	files, _ := filepath.Glob(filepath.Join(memDir, "topics", "*.md"))
+	for _, f := range files {
+		topics = append(topics, "topics/"+filepath.Base(f))
+	}
+	slices.Sort(topics)
+	return mem, user, topics, nil
 }

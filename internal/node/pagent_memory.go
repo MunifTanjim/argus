@@ -152,7 +152,16 @@ func joinErrs(errs []error) string {
 // otherwise they are applied and committed with logLine appended to the work
 // log. applied counts the ops committed.
 func (d *Node) pagentApplyMemory(ctx context.Context, a pagent.Agent, threadID, source string, ops []memory.Op, logLine string) (applied int, err error) {
+	return d.pagentApplyMemoryMode(ctx, a, threadID, source, ops, logLine, false)
+}
+
+// pagentApplyMemoryMode is pagentApplyMemory; forceReview stages every op as
+// a proposal whatever the memory mode is (but not when memory is off).
+func (d *Node) pagentApplyMemoryMode(ctx context.Context, a pagent.Agent, threadID, source string, ops []memory.Op, logLine string, forceReview bool) (applied int, err error) {
 	set := d.pagentSettings(a)
+	if forceReview && set.MemoryMode != memoryModeOff {
+		set.MemoryMode = memoryModeReview
+	}
 	if set.MemoryMode == memoryModeOff {
 		return 0, pagentErr("memory is off for this agent")
 	}
@@ -739,6 +748,10 @@ func (d *Node) handlePAgentMemoryProposals(ctx context.Context, params json.RawM
 			d.log.Warn("pagent: bad proposal", "id", pr.ID, "err", err)
 			continue
 		}
+		ops := body.Ops
+		if ops == nil {
+			ops = []api.PAgentMemoryOp{}
+		}
 		res.Proposals = append(res.Proposals, api.PAgentMemoryProposal{
 			ID: pr.ID, AgentID: pr.AgentID, ThreadID: pr.ThreadID, Source: body.Source,
 			Kind: body.Kind, Text: body.Text, Reason: body.Reason,
@@ -748,10 +761,6 @@ func (d *Node) handlePAgentMemoryProposals(ctx context.Context, params json.RawM
 	return res, nil
 }
 
-		ops := body.Ops
-		if ops == nil {
-			ops = []api.PAgentMemoryOp{}
-		}
 func (d *Node) handlePAgentMemoryDecide(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.PAgentMemoryDecideParams](params)
 	if err != nil {
@@ -822,4 +831,58 @@ func (d *Node) handlePAgentMemoryDecide(ctx context.Context, params json.RawMess
 		out.Rejected = append(out.Rejected, e.Error())
 	}
 	return out, nil
+}
+
+const maxMemoryImportBytes = 256 << 10
+
+func (d *Node) handlePAgentMemoryImport(ctx context.Context, params json.RawMessage) (any, error) {
+	p, err := api.Decode[api.PAgentMemoryImportParams](params)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(p.Content) == "" {
+		return nil, pagentErr("nothing to import")
+	}
+	if len(p.Content) > maxMemoryImportBytes {
+		return nil, pagentErr("import is larger than %d KB", maxMemoryImportBytes>>10)
+	}
+	s, err := d.pagentStore()
+	if err != nil {
+		return nil, err
+	}
+	a, err := d.pagentFind(ctx, s, p.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	set := d.pagentSettings(a)
+	if set.MemoryMode == memoryModeOff {
+		return nil, pagentErr("memory is off for this agent")
+	}
+	ex := d.extractorFor(set)
+	if ex == nil {
+		return nil, pagentErr("no extractor available")
+	}
+	mem, user, topics, err := readMemoryContext(a)
+	if err != nil {
+		return nil, pagentErr("%v", err)
+	}
+	reply, err := ex.Extract(ctx, memory.BuildImportPrompt(mem, user, topics, p.Content))
+	if err != nil {
+		return nil, pagentErr("extract: %v", err)
+	}
+	res, err := memory.ParseCapture(reply)
+	if err != nil {
+		return nil, pagentErr("%v", err)
+	}
+	ops := make([]memory.Op, len(res.Ops))
+	for i, o := range res.Ops {
+		ops[i] = o.Op
+	}
+	if len(ops) == 0 {
+		return api.PAgentMemoryImportResult{}, nil
+	}
+	if _, err := d.pagentApplyMemoryMode(ctx, a, "", "you", ops, "", true); err != nil {
+		return nil, err
+	}
+	return api.PAgentMemoryImportResult{Staged: len(ops)}, nil
 }

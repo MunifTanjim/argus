@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/MunifTanjim/argus/internal/atomicfile"
 )
@@ -107,7 +108,9 @@ func truncateMemory(mem string, budget int64) string {
 	if i := strings.LastIndex(cut, "\n"); i >= 0 {
 		cut = cut[:i]
 	} else {
-		cut = ""
+		for len(cut) > 0 && !utf8.ValidString(cut) {
+			cut = cut[:len(cut)-1]
+		}
 	}
 	over := kb(int64(len(mem)) - budget)
 	return strings.TrimRight(cut, "\n") + fmt.Sprintf("\n(memory truncated: %d KB over budget)", over)
@@ -165,7 +168,7 @@ func GatherInput(dir string, def *Definition, s Settings, profileDir string, log
 		return in, err
 	}
 	for _, t := range topics {
-		in.Topics = append(in.Topics, filepath.Base(t))
+		in.Topics = append(in.Topics, "memory/topics/"+filepath.Base(t))
 	}
 	slices.Sort(in.Topics)
 
@@ -175,14 +178,16 @@ func GatherInput(dir string, def *Definition, s Settings, profileDir string, log
 	}
 	if len(logs) > 0 && logEntries > 0 {
 		slices.Sort(logs)
-		text, err := readOptional(logs[len(logs)-1])
-		if err != nil {
-			return in, err
-		}
 		var lines []string
-		for _, l := range strings.Split(text, "\n") {
-			if strings.TrimSpace(l) != "" {
-				lines = append(lines, l)
+		for _, f := range logs[max(0, len(logs)-2):] {
+			text, err := readOptional(f)
+			if err != nil {
+				return in, err
+			}
+			for _, l := range strings.Split(text, "\n") {
+				if strings.TrimSpace(l) != "" {
+					lines = append(lines, l)
+				}
 			}
 		}
 		if len(lines) > logEntries {

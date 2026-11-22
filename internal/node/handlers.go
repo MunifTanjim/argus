@@ -101,6 +101,7 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodPAgentMemoryLog, d.handlePAgentMemoryLog)
 	srv.Handle(api.MethodPAgentMemoryUndo, d.handlePAgentMemoryUndo)
 	srv.Handle(api.MethodPAgentMemoryProposals, d.handlePAgentMemoryProposals)
+	srv.Handle(api.MethodPAgentMemoryImport, d.handlePAgentMemoryImport)
 	srv.Handle(api.MethodPAgentMemoryDecide, d.handlePAgentMemoryDecide)
 	srv.Handle(api.MethodProjectSetHidden, d.handleProjectSetHidden)
 	srv.Handle(api.MethodProjectSetPinned, d.handleProjectSetPinned)

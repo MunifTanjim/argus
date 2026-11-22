@@ -529,3 +529,52 @@ func TestApplyRejectsUnknownFile(t *testing.T) {
 		t.Fatal("no error event")
 	}
 }
+
+func TestProfileIncluded(t *testing.T) {
+	r := newMemRig(t, 24<<10)
+	if err := os.MkdirAll(r.d.pagentCfg.ProfileDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r.d.pagentCfg.ProfileDir, "PROFILE.md"), []byte("Lives in Lisbon."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	def, _ := pagent.LoadDefinition(r.a.Dir)
+	set := r.d.pagentSettings(r.a)
+	in, err := pagent.GatherInput(r.a.Dir, def, set, r.d.pagentCfg.ProfileDir, set.LogEntries, set.CoreBudget, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pagent.RenderInstructions(in), "Lives in Lisbon.") {
+		t.Fatal("profile missing from instructions")
+	}
+}
+
+func TestImportGoesToReview(t *testing.T) {
+	r := newMemRig(t, 24<<10)
+	ex := &stubExtractor{reply: `{"ops":[{"action":"add","file":"MEMORY.md","text":"Prefers dark mode"}],"log":""}`}
+	r.d.extractorFor = func(pagent.Settings) memory.Extractor { return ex }
+	before := r.read(t, "memory/MEMORY.md")
+
+	res, err := callPAgent[api.PAgentMemoryImportResult](t, r.d.handlePAgentMemoryImport, api.PAgentMemoryImportParams{AgentID: r.a.ID, Content: "- likes dark mode"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Staged != 1 {
+		t.Fatalf("staged = %d", res.Staged)
+	}
+	if len(ex.prompts) != 1 || !strings.Contains(ex.prompts[0], "extract durable facts from this exported memory") || !strings.Contains(ex.prompts[0], "likes dark mode") {
+		t.Fatalf("prompt = %v", ex.prompts)
+	}
+	if got := r.read(t, "memory/MEMORY.md"); got != before {
+		t.Fatalf("memory applied directly: %q", got)
+	}
+	props, err := callPAgent[api.PAgentMemoryProposalsResult](t, r.d.handlePAgentMemoryProposals, api.PAgentRef{AgentID: r.a.ID})
+	if err != nil || len(props.Proposals) != 1 || props.Proposals[0].Ops[0].Text != "Prefers dark mode" {
+		t.Fatalf("proposals = %+v, %v", props, err)
+	}
+
+	r.setMode(t, "off")
+	if _, err := callPAgent[api.PAgentMemoryImportResult](t, r.d.handlePAgentMemoryImport, api.PAgentMemoryImportParams{AgentID: r.a.ID, Content: "x"}); err == nil {
+		t.Fatal("import with memory off succeeded")
+	}
+}

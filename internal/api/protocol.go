@@ -1447,6 +1447,7 @@ const (
 	MethodPAgentMemoryLog       = "pagent.memory.log"       // request: PAgentMemoryLogParams; result: PAgentMemoryLogResult
 	MethodPAgentMemoryUndo      = "pagent.memory.undo"      // request: PAgentMemoryUndoParams; result: PAgentMemoryUndoResult
 	MethodPAgentMemoryProposals = "pagent.memory.proposals" // request: PAgentRef; result: PAgentMemoryProposalsResult
+	MethodPAgentMemoryImport    = "pagent.memory.import"    // request: PAgentMemoryImportParams; result: PAgentMemoryImportResult
 	MethodPAgentMemoryDecide    = "pagent.memory.decide"    // request: PAgentMemoryDecideParams; result: PAgentMemoryDecideResult
 )
 
@@ -1634,6 +1635,18 @@ type PAgentMemoryUndoParams struct {
 
 type PAgentMemoryUndoResult struct {
 	Commit string `json:"commit"`
+}
+
+// PAgentMemoryImportParams carries memory exported from another assistant.
+// What the extractor finds is staged for review, whatever the memory mode.
+type PAgentMemoryImportParams struct {
+	AgentID string `json:"agent_id"`
+	Content string `json:"content"`
+}
+
+// PAgentMemoryImportResult reports how many changes were staged.
+type PAgentMemoryImportResult struct {
+	Staged int `json:"staged"`
 }
 
 type PAgentMemoryProposalsResult struct {

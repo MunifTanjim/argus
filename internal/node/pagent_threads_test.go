@@ -541,3 +541,40 @@ func TestSendResumeStillStartingIsNotReady(t *testing.T) {
 		t.Fatalf("events = %+v", ev)
 	}
 }
+
+func TestSessionStartPlacesSkills(t *testing.T) {
+	r := newThreadRig(t)
+	shared := filepath.Join(t.TempDir(), "skills")
+	r.d.pagentCfg.SkillsDir = shared
+	if err := os.MkdirAll(filepath.Join(shared, "web"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	def, err := pagent.LoadDefinition(r.agent.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def.Skills = []string{"web", "ghost"}
+	if err := def.Save(r.agent.Dir); err != nil {
+		t.Fatal(err)
+	}
+	res, err := r.send(t, api.PAgentSendParams{Text: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.Readlink(filepath.Join(r.agent.Dir, ".claude", "skills", "web")); err != nil || got != filepath.Join(shared, "web") {
+		t.Fatalf("link = %q, %v", got, err)
+	}
+	found := 0
+	for _, ev := range r.events(t, res.ThreadID) {
+		if ev.Kind == "skills.missing" && strings.Contains(string(ev.Payload), "ghost") {
+			found++
+		}
+	}
+	if found != 1 {
+		t.Fatalf("skills.missing events = %d", found)
+	}
+	ign, _ := os.ReadFile(filepath.Join(r.agent.Dir, ".gitignore"))
+	if !strings.Contains(string(ign), ".claude/skills/") {
+		t.Fatalf(".gitignore = %q", ign)
+	}
+}
