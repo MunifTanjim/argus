@@ -28,6 +28,8 @@ var sectionOffers = func() map[string]offer {
 	return map[string]offer{
 		"project-tree":     {keys: helpQuit},
 		"sidebar-sessions": {keys: helpQuit},
+		"sidebar-agents":   {keys: helpQuit},
+		"agent":            {keys: helpQuit},
 		"workspace":        {keys: helpQuit},
 		"project":          {keys: helpQuit},
 		"node":             {keys: helpQuit},
@@ -116,6 +118,16 @@ var sectionLists = map[string]sectionList{
 			listKeys.WorkspaceOnly, listKeys.Rename, listKeys.Kill, projectsKeys.Spawn, projectsKeys.Refresh),
 		container: bindingsOf(leftSidebarTabKeys...),
 		focus:     focusFor("sidebar-sessions"),
+	},
+	"sidebar-agents": {
+		own: bindingsOf(projectsKeys.Back, projectsKeys.Up, projectsKeys.Down, projectsKeys.Top, projectsKeys.Bottom,
+			projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Enter, projectsKeys.Hover, agentKeys.Filter, projectsKeys.Refresh),
+		container: bindingsOf(leftSidebarTabKeys...),
+		focus:     focusFor("sidebar-agents"),
+	},
+	"agent": {
+		own:   bindingsOf(listKeys.Back),
+		focus: focusFor("agent"),
 	},
 	"workspace": {
 		own: bindingsOf(slices.Concat(treeKeys, leftSidebarKeys, []any{projectsKeys.Up, projectsKeys.Down,

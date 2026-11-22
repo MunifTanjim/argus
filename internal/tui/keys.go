@@ -138,6 +138,12 @@ var terminalKeys = struct {
 	Kill:   nm("terminal kill", "dd", "kill"),
 }
 
+var agentKeys = struct {
+	Filter binding
+}{
+	Filter: nb("filter-agents", "/", "filter"),
+}
+
 var nodeKeys = struct {
 	Wakelock binding
 }{
@@ -432,7 +438,7 @@ var settingsKeys = struct {
 
 func keySets() []any {
 	return []any{listKeys, projectsKeys, fileViewKeys, transcriptKeys, redactListKeys,
-		detailKeys, visualKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, upgradeKeys, spawnKeys,
+		detailKeys, visualKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, agentKeys, upgradeKeys, spawnKeys,
 		settingsKeys}
 }
 

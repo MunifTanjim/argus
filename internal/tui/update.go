@@ -212,6 +212,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pagentsMsg:
 		if msg.err == nil {
 			m.pagentNames = msg.names
+			m.pagents, m.pagentPrimary, m.pagentThreads = msg.agents, msg.primary, msg.threads
 			m.reorder()
 		}
 		return m, nil

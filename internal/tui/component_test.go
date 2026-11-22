@@ -74,6 +74,8 @@ func contractComponents(m model) []component {
 	return []component{
 		m.left.tree,
 		sidebarSessionsComp{},
+		agentsSidebarComp{},
+		agentComp{agentID: "n1:a"},
 		m.right.fileTree,
 		m.right.changes,
 		homeComp{},

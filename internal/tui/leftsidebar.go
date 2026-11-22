@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 // leftTab is the left sidebar's tab.
@@ -14,9 +16,10 @@ type leftTab int
 const (
 	leftProjects leftTab = iota
 	leftSessions
+	leftAgents
 )
 
-var leftTabNames = []string{"Projects", "Sessions"}
+var leftTabNames = []string{"Projects", "Sessions", "Agents"}
 
 // key is the tab's name in tui.json.
 func (t leftTab) key() string { return strings.ToLower(leftTabNames[t]) }
@@ -30,13 +33,17 @@ type leftSidebarState struct {
 	tab      leftTab
 	tree     projectTreeComp
 	sessions sidebarSessionsComp
+	agents   agentsSidebarComp
 	hidden   bool // the user toggled it off
 	width    int  // 0 = default
 }
 
 func (l leftSidebarState) current() component {
-	if l.tab == leftSessions {
+	switch l.tab {
+	case leftSessions:
 		return l.sessions
+	case leftAgents:
+		return l.agents
 	}
 	return l.tree
 }
@@ -47,6 +54,8 @@ func (l leftSidebarState) store(comp component) leftSidebarState {
 		l.tree = comp
 	case sidebarSessionsComp:
 		l.sessions = comp
+	case agentsSidebarComp:
+		l.agents = comp
 	}
 	return l
 }
@@ -97,13 +106,25 @@ func (l leftSidebarState) resize(c *ctx, d int) leftSidebarState {
 
 func (l leftSidebarState) view(c *ctx, w, h int) string {
 	focused := c.m.focused == leftSidebar && len(c.m.popups) == 0
+	margin := strings.Repeat(" ", screenMargin)
 	strip := tabStrip(leftTabNames, int(l.tab), focused)
-	if l.tab == leftProjects {
-		strip += l.tree.titleSuffix()
-	} else {
-		strip += l.sessions.titleSuffix(c)
+	var suffix string
+	switch l.tab {
+	case leftProjects:
+		suffix = l.tree.titleSuffix()
+	case leftSessions:
+		suffix = l.sessions.titleSuffix(c)
+	case leftAgents:
+		suffix = l.agents.titleSuffix(c)
+	}
+	// A suffix that does not fit after the strip takes the row under it.
+	var below string
+	if lipgloss.Width(strip+suffix) <= w {
+		strip += suffix
+	} else if text := strings.TrimSpace(xansi.Strip(suffix)); text != "" {
+		below = margin + truncateLine(StyleDim.Render(text), max(1, w))
 	}
 	c.hitTabs(screenMargin, 0, 2, leftTabNames...)
-	head := strings.Repeat(" ", screenMargin) + truncateLine(strip, max(1, w)) + "\n\n"
+	head := margin + truncateLine(strip, max(1, w)) + "\n" + below + "\n"
 	return head + l.current().view(c.below(2), w, max(1, h-2))
 }

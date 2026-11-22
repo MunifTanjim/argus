@@ -60,14 +60,17 @@ type model struct {
 	rebuilding    bool
 	rebuildQueued bool // a rebuild waits for the running one to end
 	sessions      map[string]session.Session
-	killCounts    map[string]killCountMsg // session id -> the count its kill prompt waits for
-	order         []string                // session IDs, sorted for stable display
-	activeOnly    bool                    // the session lists show only active and awaiting-input sessions
-	sessionFilter string                  // the session lists show only the sessions that match it
-	groupBy       groupBy                 // the home sessions list's grouping dimension ("" is host)
-	pagentNames   map[string]string       // persistent agent id (composite on a gateway) -> name, from pagent.list
-	statePath     string                  // tui.json; empty: UI state is not saved (tests, viewer)
-	terminals     []api.Terminal          // every node's terminals, from the last load
+	killCounts    map[string]killCountMsg           // session id -> the count its kill prompt waits for
+	order         []string                          // session IDs, sorted for stable display
+	activeOnly    bool                              // the session lists show only active and awaiting-input sessions
+	sessionFilter string                            // the session lists show only the sessions that match it
+	groupBy       groupBy                           // the home sessions list's grouping dimension ("" is host)
+	pagentNames   map[string]string                 // persistent agent id (composite on a gateway) -> name, from pagent.list
+	pagents       []api.PAgentInfo                  // persistent agents, from pagent.list
+	pagentPrimary string                            // the primary agent's id, or empty
+	pagentThreads map[string][]api.PAgentThreadInfo // agent id -> its threads, from pagent.thread.list
+	statePath     string                            // tui.json; empty: UI state is not saved (tests, viewer)
+	terminals     []api.Terminal                    // every node's terminals, from the last load
 	terminalsErr  error
 	terminalsDone bool                 // a terminal load has finished
 	nodeInfo      []api.NodeInfo       // nodes and their capabilities, from the last load

@@ -198,7 +198,7 @@ func TestSidebarSessionsFilter(t *testing.T) {
 	if m.sessionFilter != "" {
 		t.Errorf("the home list's filter changed to %q", m.sessionFilter)
 	}
-	if !strings.Contains(ansi.Strip(m.View().Content), "Projects  Sessions  /ga") {
+	if !strings.Contains(ansi.Strip(m.View().Content), "Projects  Sessions  Agents  /ga") {
 		t.Errorf("the strip does not name the filter")
 	}
 	// Esc clears the filter before it leaves the sidebar.
@@ -341,7 +341,7 @@ func TestSidebarSessionsWorkspaceOnly(t *testing.T) {
 	if got := sidebarListed(m); !slices.Equal(got, []string{"n1:a", "n1:c"}) {
 		t.Fatalf("zw lists %v, want the open session's workspace", got)
 	}
-	if !strings.Contains(ansi.Strip(m.View().Content), "Projects  Sessions  workspace") {
+	if lines := strings.Split(ansi.Strip(m.View().Content), "\n"); !strings.Contains(lines[2]+lines[3], "workspace") {
 		t.Errorf("the strip does not name the workspace filter")
 	}
 	m = typeKeys(m, "/be")
