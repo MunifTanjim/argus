@@ -242,6 +242,39 @@ void main() {
     expect(find.text('  Health: disk is almost full'), findsOneWidget);
   });
 
+  testWidgets('a hand-off answer shows the agent and its full answer', (tester) async {
+    await _pumpThread(tester, [
+      _argus('e1', 'handoff.asked', {'agent': 'ledger', 'task': 'totals'}, detail: 'Asked ledger: totals', sec: 1),
+      _argus(
+        'e2',
+        'handoff.answered',
+        {'agent': 'ledger', 'text': 'Line one.\n\nLine **two** is the total.'},
+        detail: 'Answer from ledger',
+        sec: 2,
+      ),
+      _argus('e3', 'handoff.refused', {'agent': 'vault'}, detail: 'vault refused', sec: 3),
+      _argus('e4', 'handoff.no_answer', {'agent': 'ledger'}, detail: 'ledger did not answer', sec: 4),
+    ]);
+    expect(find.text('  Asked ledger: totals'), findsOneWidget);
+    expect(find.byKey(const ValueKey('handoff-answer')), findsOneWidget);
+    expect(find.text('ledger'), findsOneWidget);
+    expect(find.textContaining('answered'), findsOneWidget);
+    expect(find.textContaining('Line one.'), findsOneWidget);
+    expect(find.textContaining('is the total.'), findsOneWidget);
+    expect(find.text('  vault refused'), findsOneWidget);
+    expect(find.text('  ledger did not answer'), findsOneWidget);
+  });
+
+  test('handoffAnswerOf reads the agent and text', () {
+    Entry e(String kind, Map<String, dynamic> p) =>
+        Entry.fromJson(_argus('x', kind, p));
+    final a = handoffAnswerOf(e('handoff.answered', {'agent': ' ledger ', 'text': 'hi'}));
+    expect(a?.agent, 'ledger');
+    expect(a?.text, 'hi');
+    expect(handoffAnswerOf(e('handoff.answered', {}))?.agent, 'Agent');
+    expect(handoffAnswerOf(e('handoff.asked', {})), isNull);
+  });
+
   testWidgets('an open offer can be started', (tester) async {
     final client = await _pumpThread(tester, [_offer]);
     expect(find.text('  Offer: Tidy the inbox: about 10 minutes'), findsOneWidget);

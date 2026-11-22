@@ -319,7 +319,9 @@ class _ReviewTabState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              p.isRoutine
+              p.isAgent
+                  ? 'New agent'
+                  : p.isRoutine
                   ? 'Routine change'
                   : p.isInstructions
                   ? 'Instruction rewrite'
@@ -334,6 +336,10 @@ class _ReviewTabState
                 p.source,
                 style: const TextStyle(color: AppColors.dim, fontSize: 12),
               ),
+            if (p.isAgent) ...[
+              const SizedBox(height: 6),
+              Text(p.summary.isEmpty ? 'create an agent' : p.summary),
+            ],
             if (p.isRoutine && (p.slug.isNotEmpty || p.summary.isNotEmpty)) ...[
               const SizedBox(height: 6),
               Text([p.slug, p.summary].where((x) => x.isNotEmpty).join(' · ')),

@@ -307,6 +307,47 @@ void main() {
     await f.client.close();
   });
 
+  test('activity, secrets and drafts route to their node', () async {
+    final f = await _connect(
+      (m, p) => _json(null),
+      (m, p) => switch (m) {
+        'pagent.activity' => _json({
+          'activity': [
+            {'id': 1, 'thread_id': 't1', 'session_id': 's1'},
+            {'id': 2},
+          ],
+        }),
+        'pagent.secret.list' => _json({'names': ['K']}),
+        _ => _json(null),
+      },
+    );
+    final act = await f.client.call('pagent.activity', {
+      'agent_id': 'B:a1',
+    }) as Map;
+    final rows = (act['activity'] as List).cast<Map>();
+    expect(rows[0]['thread_id'], 'B:t1');
+    expect(rows[0]['session_id'], 'B:s1');
+    expect(rows[1].containsKey('thread_id'), false);
+    expect(_params(f.b.requests.last.params)['agent_id'], 'a1');
+
+    await f.client.call('pagent.secret.list', {'agent_id': 'B:a1'});
+    expect(f.b.requests.last.method, 'pagent.secret.list');
+    await f.client.call('pagent.secret.set', {
+      'agent_id': 'B:a1',
+      'name': 'K',
+      'value': 'v',
+    });
+    expect(_params(f.b.requests.last.params)['agent_id'], 'a1');
+
+    await f.client.call('pagent.draft.send', {
+      'thread_id': 'B:t1',
+      'event_id': 4,
+    });
+    expect(_params(f.b.requests.last.params)['thread_id'], 't1');
+    expect(f.a.requests.where((r) => r.method.startsWith('pagent.')), isEmpty);
+    await f.client.close();
+  });
+
   test('usage, set and offers route to their node', () async {
     final f = await _connect(
       (m, p) => _json(null),

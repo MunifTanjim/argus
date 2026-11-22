@@ -1065,6 +1065,23 @@ class E2EClient implements GatewayClient {
                 r,
           ],
         };
+      case 'pagent.activity' when res is Map<String, dynamic>:
+        return {
+          ...res,
+          'activity': [
+            for (final a in (res['activity'] as List?) ?? const [])
+              if (a is Map<String, dynamic>)
+                {
+                  ...a,
+                  if (_compositeIf(nodeId, a['thread_id']).isNotEmpty)
+                    'thread_id': _compositeIf(nodeId, a['thread_id']),
+                  if (_compositeIf(nodeId, a['session_id']).isNotEmpty)
+                    'session_id': _compositeIf(nodeId, a['session_id']),
+                }
+              else
+                a,
+          ],
+        };
       case 'pagent.usage' when res is Map<String, dynamic>:
         return {
           ...res,

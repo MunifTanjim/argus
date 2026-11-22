@@ -300,6 +300,7 @@ class PAgentMemoryProposal {
 
   bool get isInstructions => kind == 'instructions';
   bool get isRoutine => kind == 'routine';
+  bool get isAgent => kind == 'agent';
 
   factory PAgentMemoryProposal.fromJson(Map<String, dynamic> j) =>
       PAgentMemoryProposal(
@@ -531,4 +532,16 @@ Set<String> decidedOffers(Iterable<Entry> entries) {
 String argusRowText(Entry e) {
   final detail = e.detail ?? '';
   return detail.isNotEmpty ? detail : (e.event?.kind ?? e.label ?? '');
+}
+
+/// The answering agent's name and the answer of a `handoff.answered` entry, or
+/// null for any other entry.
+({String agent, String text})? handoffAnswerOf(Entry e) {
+  if (e.kind != EntryKind.argus || e.event?.kind != 'handoff.answered') {
+    return null;
+  }
+  final p = e.event?.payload is Map ? e.event!.payload as Map : const {};
+  final agent = p['agent'] is String ? (p['agent'] as String).trim() : '';
+  final text = p['text'] is String ? p['text'] as String : '';
+  return (agent: agent.isEmpty ? 'Agent' : agent, text: text);
 }

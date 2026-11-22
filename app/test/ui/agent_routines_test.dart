@@ -161,6 +161,15 @@ void main() {
           return {
             'proposals': [
               {
+                'id': 'A:mp2',
+                'agent_id': 'A:a1',
+                'kind': 'agent',
+                'summary': 'create agent "ledger" in /work/ledger',
+                'reason': 'a helper for the books',
+                'ops': [],
+                'created_at': '2026-11-22T10:00:00Z',
+              },
+              {
                 'id': 'A:mp1',
                 'agent_id': 'A:a1',
                 'kind': 'routine',
@@ -191,14 +200,17 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Review'));
     await tester.pumpAndSettle();
+    expect(find.text('New agent'), findsOneWidget);
+    expect(find.text('create agent "ledger" in /work/ledger'), findsOneWidget);
+    expect(find.text('a helper for the books'), findsOneWidget);
     expect(find.text('Routine change'), findsOneWidget);
     expect(find.text('billing · change goal billing: outcome, verify'), findsOneWidget);
     expect(find.text('tighten the check'), findsOneWidget);
-    await tester.tap(find.text('Accept'));
+    await tester.tap(find.text('Accept').first);
     await tester.pumpAndSettle();
     expect(
       client.calls.firstWhere((x) => x.$1 == 'pagent.memory.decide').$2,
-      {'proposal_id': 'A:mp1', 'accept': true},
+      {'proposal_id': 'A:mp2', 'accept': true},
     );
   });
 

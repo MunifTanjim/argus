@@ -3,7 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../models/entry.dart';
-import '../models/pagent.dart' show argusRowText, offerIdOf, undoCommit;
+import '../models/pagent.dart' show argusRowText, handoffAnswerOf, offerIdOf, undoCommit;
 import '../state/tool_detail.dart';
 import 'code_block.dart';
 import 'item_detail_screen.dart';
@@ -677,6 +677,8 @@ class _ArgusEventRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final e = entry;
+    final answer = handoffAnswerOf(e);
+    if (answer != null) return _HandoffAnswer(entry: e, answer: answer);
     final kind = e.event?.kind;
     final text = argusRowText(e);
     final commit = undoCommit(e);
@@ -745,4 +747,41 @@ class _ArgusEventRow extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Another agent's answer to a hand-off: its name, then the answer in full.
+class _HandoffAnswer extends StatelessWidget {
+  const _HandoffAnswer({required this.entry, required this.answer});
+  final Entry entry;
+  final ({String agent, String text}) answer;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Column(
+      key: const ValueKey('handoff-answer'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.reply, size: 13, color: AppColors.accent),
+            const SizedBox(width: 6),
+            Text(
+              answer.agent,
+              style: _mono.copyWith(
+                color: AppColors.text,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            Text('  ·  answered  ·  ${_clockTime(entry.timestamp)}', style: _monoDim),
+          ],
+        ),
+        if (answer.text.trim().isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, left: 19),
+            child: appMarkdown(answer.text),
+          ),
+      ],
+    ),
+  );
 }
