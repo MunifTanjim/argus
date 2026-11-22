@@ -26,7 +26,7 @@ func (d *Node) SetAgentStore(s *pagent.Store, cfg config.AgentsConfig) {
 	d.pagentCfg = cfg
 	d.pagentPrimaryFile = config.GetStatePath("pagent-primary")
 	d.lastClientFile = config.GetStatePath("pagent-last-client")
-	d.routineStartFn = d.routineStartStub
+	d.routineStartFn = d.routineStart
 }
 
 func pagentErr(format string, args ...any) error {

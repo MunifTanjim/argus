@@ -50,8 +50,8 @@ func TestMCPListenerServesTools(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Result.Tools) != 14 {
-		t.Fatalf("tools = %d, want 14", len(out.Result.Tools))
+	if len(out.Result.Tools) != len(mcpToolSet) {
+		t.Fatalf("tools = %d, want %d", len(out.Result.Tools), len(mcpToolSet))
 	}
 
 	bad, err := postToolsList(port, "wrong")

@@ -30,7 +30,7 @@ func codexMeta(id string) map[string]json.RawMessage {
 	return rawMeta(map[string]string{"sessionId": id})
 }
 
-func TestMCPToolsListHasFourteenTools(t *testing.T) {
+func TestMCPToolsList(t *testing.T) {
 	_, b := toolNode(t)
 	var names []string
 	for _, tool := range b.Tools() {
@@ -39,7 +39,7 @@ func TestMCPToolsListHasFourteenTools(t *testing.T) {
 			t.Errorf("%s: incomplete definition", tool.Name)
 		}
 	}
-	want := "get_current_session list_sessions get_session spawn_session send_message reply_to_message respond_to_interaction get_session_output get_session_transcript kill_session rename_session remember propose_instructions request_handoff"
+	want := "get_current_session list_sessions get_session spawn_session send_message reply_to_message respond_to_interaction get_session_output get_session_transcript kill_session rename_session remember propose_instructions request_handoff report_run"
 	if got := strings.Join(names, " "); got != want {
 		t.Fatalf("tools = %s", got)
 	}

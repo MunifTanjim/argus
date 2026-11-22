@@ -299,13 +299,8 @@ func (d *Node) pagentEnsureSession(ctx context.Context, a pagent.Agent, th pagen
 	if !ok {
 		return "", false, pagentErr("unknown agent CLI %q", cli)
 	}
-	d.pagentPrepareShared(ctx, a, th, def, cli)
-	in, err := pagent.GatherInput(a.Dir, def, set, d.pagentCfg.ProfileDir, set.LogEntries, set.CoreBudget, now)
-	if err != nil {
-		return "", false, pagentErr("read memory: %v", err)
-	}
-	if err := pagent.WriteInstructions(ctx, a.Dir, cli, in); err != nil {
-		return "", false, pagentErr("write instructions: %v", err)
+	if err := d.pagentInstructions(ctx, a, th, def, set, ""); err != nil {
+		return "", false, err
 	}
 	if err := d.pagentMakeRoom(ctx, a, set.MaxConcurrentSessions); err != nil {
 		return "", false, err
@@ -360,32 +355,57 @@ func (d *Node) pagentEnsureSession(ctx context.Context, a pagent.Agent, th pagen
 			prompt = seed + "\n\n" + firstPrompt
 		}
 	}
+	sid, err := d.pagentSpawn(ctx, a, th, set, ad, prompt, startedByYou)
+	if err != nil {
+		return "", false, err
+	}
+	if prev == nil {
+		d.logEvent(ctx, th.ID, "session.started", map[string]string{"session_id": sid}, sid)
+	} else {
+		d.logEvent(ctx, th.ID, "session.continued", map[string]string{"session_id": sid, "reason": reason}, sid)
+	}
+	return sid, true, nil
+}
+
+// pagentInstructions prepares the agent's shared repositories and skills and
+// writes its instruction file, with runSection appended for a run.
+func (d *Node) pagentInstructions(ctx context.Context, a pagent.Agent, th pagent.Thread, def *pagent.Definition, set pagent.Settings, runSection string) error {
+	d.pagentPrepareShared(ctx, a, th, def, set.Agent)
+	in, err := pagent.GatherInput(a.Dir, def, set, d.pagentCfg.ProfileDir, set.LogEntries, set.CoreBudget, d.pagentNow())
+	if err != nil {
+		return pagentErr("read memory: %v", err)
+	}
+	in.RunSection = runSection
+	if err := pagent.WriteInstructions(ctx, a.Dir, set.Agent, in); err != nil {
+		return pagentErr("write instructions: %v", err)
+	}
+	return nil
+}
+
+// pagentSpawn starts a new session of the agent with prompt and links it to th.
+func (d *Node) pagentSpawn(ctx context.Context, a pagent.Agent, th pagent.Thread, set pagent.Settings, ad adapter.Adapter, prompt, startedBy string) (string, error) {
+	cli := set.Agent
 	var presetID string
 	if ps, ok := ad.(adapter.SessionIDPresetter); ok && ps.PresetsSessionID() {
 		presetID = uuid.NewString()
 	}
 	spawned, err := d.spawnFn(ctx, api.SpawnParams{Agent: cli, Cwd: a.Dir, Model: set.Model, Prompt: prompt}, presetID)
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
 	agentSID := presetID
 	if _, headless := ad.(adapter.Spawner); headless {
 		_, agentSID, _ = strings.Cut(spawned.SessionID, ":")
 	}
 	if _, ok := d.reg.Get(spawned.SessionID); !ok {
-		d.pagentPending.Store(spawned.SessionID, now)
+		d.pagentPending.Store(spawned.SessionID, d.pagentNow())
 	}
-	if err := s.InsertThreadSession(ctx, pagent.ThreadSession{
-		ThreadID: th.ID, SessionID: spawned.SessionID, CLI: cli, AgentSessionID: agentSID, StartedBy: startedByYou,
+	if err := d.pagents.InsertThreadSession(ctx, pagent.ThreadSession{
+		ThreadID: th.ID, SessionID: spawned.SessionID, CLI: cli, AgentSessionID: agentSID, StartedBy: startedBy,
 	}); err != nil {
-		return "", false, pagentErr("%v", err)
+		return "", pagentErr("%v", err)
 	}
-	if prev == nil {
-		d.logEvent(ctx, th.ID, "session.started", map[string]string{"session_id": spawned.SessionID}, spawned.SessionID)
-	} else {
-		d.logEvent(ctx, th.ID, "session.continued", map[string]string{"session_id": spawned.SessionID, "reason": reason}, spawned.SessionID)
-	}
-	return spawned.SessionID, true, nil
+	return spawned.SessionID, nil
 }
 
 // pagentStarting reports whether sid was spawned less than pagentStartGrace
@@ -664,6 +684,9 @@ func (d *Node) pagentTrack(ctx context.Context, ev registry.Event, prev map[stri
 		delete(prev, s.ID)
 	} else {
 		prev[s.ID] = s.Status
+	}
+	if ended {
+		d.runSessionEnded(s.ID)
 	}
 	th, ok, err := d.pagents.ThreadBySession(ctx, s.ID)
 	if err != nil || !ok {

@@ -26,10 +26,15 @@ type mcpProp struct {
 	required   bool
 	enum       func(d *Node) []string
 	values     map[string]any // schema of an object's values
+	items      map[string]any // schema of an array's items
 }
 
 func required(name, kind string) mcpProp { return mcpProp{name: name, kind: kind, required: true} }
 func optional(name, kind string) mcpProp { return mcpProp{name: name, kind: kind} }
+
+func stringList(name string) mcpProp {
+	return mcpProp{name: name, kind: "array", items: map[string]any{"type": "string"}}
+}
 
 const idNote = "IDs name an agent conversation, like home:claude:5f1c0e2a-9b1d-4c1e-8f00-2a6d3c4b5e61 (node id, agent, then the agent's own session id). An ID can belong to any connected node, and the call goes to that node."
 
@@ -74,6 +79,9 @@ func (t mcpTool) inputSchema(d *Node) json.RawMessage {
 		}
 		if p.values != nil {
 			prop["additionalProperties"] = p.values
+		}
+		if p.items != nil {
+			prop["items"] = p.items
 		}
 		props[p.name] = prop
 	}
@@ -279,6 +287,23 @@ func mcpTools() []mcpTool {
 			props: []mcpProp{required("reason", "string"), required("steps", "string")}, needsCaller: true,
 			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p requestHandoffParams) (any, error) {
 				return d.mcpRequestHandoff(ctx, caller, p)
+			}),
+		},
+		{
+			Tool: mcphttp.Tool{
+				Name: "report_run",
+				Description: "Report the result of the routine run you are doing; call it once, before you finish. Works only in routine runs. " +
+					"result is progress, no_change, blocked, needs_you or done; summary is one or two sentences for the user; actions_done, actions_pending, unverified and sources are lists of short strings; " +
+					"next_check_in is an optional duration such as 4h until you want to run again.",
+			},
+			props: []mcpProp{
+				{name: "result", kind: "string", required: true, enum: enumOf(resultProgress, resultNoChange, resultBlocked, resultNeedsYou, resultDone)},
+				required("summary", "string"),
+				stringList("actions_done"), stringList("actions_pending"), stringList("unverified"), stringList("sources"),
+				optional("next_check_in", "string"),
+			}, needsCaller: true,
+			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p reportRunParams) (any, error) {
+				return d.mcpReportRun(ctx, caller, p)
 			}),
 		},
 	}

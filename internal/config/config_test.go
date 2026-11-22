@@ -478,7 +478,7 @@ func TestAgentsDefaults(t *testing.T) {
 	}
 	l := d.Limits
 	if l.MinInterval != 15*time.Minute || l.MaxEnabledRoutines != 20 || l.MaxCheckBacks != 10 || l.RunTimeout != time.Hour ||
-		l.MaxRunsPerHour != 12 || l.CatchUpWindow != 12*time.Hour || l.PauseAfterAway != 7*24*time.Hour {
+		l.MaxRunsPerHour != 12 || l.MaxConsecutiveFailures != 10 || l.CatchUpWindow != 12*time.Hour || l.PauseAfterAway != 7*24*time.Hour {
 		t.Errorf("limits = %+v", l)
 	}
 	if err := load(t, "").Validate(); err != nil {

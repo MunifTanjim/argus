@@ -59,11 +59,6 @@ func (d *Node) pagentRoutineLoop(ctx context.Context) {
 	}
 }
 
-// routineStartStub stands in for starting a run until runs are implemented.
-func (d *Node) routineStartStub(ctx context.Context, _ pagent.Agent, _ routine.Routine, run pagent.RoutineRun) error {
-	return d.pagents.SetRunState(ctx, run.ID, pagent.RunFailed, "runs not implemented")
-}
-
 // agentNotice records an agent-level event in the agent's most recently
 // active chat thread; without one it only logs.
 func (d *Node) agentNotice(ctx context.Context, a pagent.Agent, kind string, payload any) {
