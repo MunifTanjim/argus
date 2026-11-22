@@ -100,7 +100,7 @@ func NextDue(r Routine, after, anchor time.Time, loc *time.Location) (time.Time,
 			if err != nil {
 				continue
 			}
-			if t := sch.Next(after.In(loc)); !t.IsZero() {
+			if t := cronNext(sch, after, loc); !t.IsZero() {
 				consider(t)
 			}
 		case s.Every != "":
@@ -125,6 +125,41 @@ func NextDue(r Routine, after, anchor time.Time, loc *time.Location) (time.Time,
 		}
 	}
 	return best, !best.IsZero()
+}
+
+// cronNext returns the first cron time strictly after `after`, matching the
+// schedule against wall-clock time in loc. A wall time repeated by a DST
+// fall-back runs once, at its first instant. A wall time skipped by a
+// spring-forward runs at the start of the new offset.
+func cronNext(sch cron.Schedule, after time.Time, loc *time.Location) time.Time {
+	wall := func(t time.Time) time.Time {
+		t = t.In(loc)
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), 0, time.UTC)
+	}
+	w := wall(after)
+	for range 16 {
+		w = sch.Next(w)
+		if w.IsZero() {
+			return time.Time{}
+		}
+		t := time.Date(w.Year(), w.Month(), w.Day(), w.Hour(), w.Minute(), w.Second(), 0, loc)
+		if wall(t) != w {
+			// non-existent wall time: use the first instant of the new offset
+			_, newOff := t.Add(3 * time.Hour).Zone()
+			for p := t.Add(-3 * time.Hour); p.Before(t.Add(3 * time.Hour)); p = p.Add(time.Minute) {
+				if _, o := p.Zone(); o == newOff {
+					t = p
+					break
+				}
+			}
+		} else if p := t.Add(-time.Hour); wall(p) == w {
+			t = p // ambiguous wall time: keep the first occurrence
+		}
+		if t.After(after) {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 // DueBetween lists due times in (from, to] in order.

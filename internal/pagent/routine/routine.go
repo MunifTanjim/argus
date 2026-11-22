@@ -2,10 +2,14 @@
 package routine
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"github.com/MunifTanjim/argus/internal/atomicfile"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -47,6 +51,11 @@ type Routine struct {
 
 const fileExt = ".yaml"
 
+var slugRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+
+// ValidSlug reports whether s is usable as a routine file name.
+func ValidSlug(s string) bool { return slugRE.MatchString(s) }
+
 func defaults() Routine {
 	return Routine{
 		Does: "act", Until: "stopped", Timezone: "auto",
@@ -56,8 +65,13 @@ func defaults() Routine {
 
 // Parse decodes a routine file, applying defaults for omitted fields.
 func Parse(slug string, data []byte) (Routine, error) {
+	if !ValidSlug(slug) {
+		return Routine{}, fmt.Errorf("invalid routine slug %q", slug)
+	}
 	r := defaults()
-	if err := yaml.Unmarshal(data, &r); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&r); err != nil && !errors.Is(err, io.EOF) {
 		return Routine{}, err
 	}
 	r.Slug = slug
@@ -100,8 +114,8 @@ func Load(dir string) ([]Routine, []error) {
 
 // Save writes r to dir/<slug>.yaml.
 func Save(dir string, r Routine) error {
-	if r.Slug == "" {
-		return errors.New("routine: empty slug")
+	if !ValidSlug(r.Slug) {
+		return fmt.Errorf("routine: invalid slug %q", r.Slug)
 	}
 	data, err := yaml.Marshal(r)
 	if err != nil {
@@ -110,7 +124,7 @@ func Save(dir string, r Routine) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, r.Slug+fileExt), data, 0o644)
+	return atomicfile.Replace(filepath.Join(dir, r.Slug+fileExt), data)
 }
 
 // Limits are the caps Validate enforces; the caller fills them from config.
@@ -142,6 +156,9 @@ func Validate(r Routine, lim Limits) error {
 		if c != nil {
 			return c
 		}
+	}
+	if r.Budget.Sessions < 0 || r.Budget.Cost < 0 || r.Budget.Tokens < 0 {
+		return errors.New("budget values must not be negative")
 	}
 	if r.Until == "outcome" && strings.TrimSpace(r.Outcome) == "" {
 		return errors.New("outcome is required when until is outcome")

@@ -521,7 +521,7 @@ func (q *Queries) SetPAgentRoutineEnabled(ctx context.Context, arg SetPAgentRout
 }
 
 const setPAgentRoutineRunState = `-- name: SetPAgentRoutineRunState :execrows
-UPDATE pagent_routine_run SET state = ?, error = ?, ended_at = ? WHERE id = ?
+UPDATE pagent_routine_run SET state = ?, error = ?, ended_at = ? WHERE id = ? AND state IN ('claimed', 'running', 'queued')
 `
 
 type SetPAgentRoutineRunStateParams struct {
@@ -545,7 +545,7 @@ func (q *Queries) SetPAgentRoutineRunState(ctx context.Context, arg SetPAgentRou
 }
 
 const setPAgentRoutineRunThread = `-- name: SetPAgentRoutineRunThread :execrows
-UPDATE pagent_routine_run SET thread_id = ?, state = 'running', lease_until = ? WHERE id = ?
+UPDATE pagent_routine_run SET thread_id = ?, state = 'running', lease_until = ? WHERE id = ? AND state IN ('claimed', 'running', 'queued')
 `
 
 type SetPAgentRoutineRunThreadParams struct {

@@ -249,3 +249,22 @@ func TestRoutineStatePartialUpdates(t *testing.T) {
 		t.Fatalf("state: %+v", st[0])
 	}
 }
+
+func TestSetRunStateGuarded(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newStore(t)
+	r, _, _ := s.ClaimOccurrence(ctx, "ag1", "r", time.Unix(1, 0), "routine", false)
+	if err := s.SetRunState(ctx, r.ID, RunDone, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRunState(ctx, r.ID, RunFailed, "late"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("late state change: %v", err)
+	}
+	if err := s.SetRunThread(ctx, r.ID, "th", time.Unix(9, 0)); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("thread on finished run: %v", err)
+	}
+	got, _, _ := s.RoutineRun(ctx, r.ID)
+	if got.State != RunDone {
+		t.Fatal(got.State)
+	}
+}

@@ -45,10 +45,10 @@ ON CONFLICT (agent_id, slug, occurrence) DO NOTHING;
 SELECT * FROM pagent_routine_run WHERE id = ?;
 
 -- name: SetPAgentRoutineRunState :execrows
-UPDATE pagent_routine_run SET state = ?, error = ?, ended_at = ? WHERE id = ?;
+UPDATE pagent_routine_run SET state = ?, error = ?, ended_at = ? WHERE id = ? AND state IN ('claimed', 'running', 'queued');
 
 -- name: SetPAgentRoutineRunThread :execrows
-UPDATE pagent_routine_run SET thread_id = ?, state = 'running', lease_until = ? WHERE id = ?;
+UPDATE pagent_routine_run SET thread_id = ?, state = 'running', lease_until = ? WHERE id = ? AND state IN ('claimed', 'running', 'queued');
 
 -- name: RenewPAgentRoutineRunLease :execrows
 UPDATE pagent_routine_run SET lease_until = ? WHERE id = ? AND state IN ('claimed', 'running');

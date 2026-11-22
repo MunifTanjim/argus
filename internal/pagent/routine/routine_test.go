@@ -225,3 +225,70 @@ func TestParseDurationDays(t *testing.T) {
 		t.Fatalf("every 1d: %v", err)
 	}
 }
+
+func TestNextDueCronFallBack(t *testing.T) {
+	ny, _ := time.LoadLocation("America/New_York")
+	r := valid()
+	r.Starts = []Start{{Schedule: "30 1 * * *"}}
+	after := time.Date(2026, 10, 31, 12, 0, 0, 0, ny)
+	first, _ := NextDue(r, after, time.Time{}, ny)
+	if first.UTC().Format(time.RFC3339) != "2026-11-01T05:30:00Z" {
+		t.Fatalf("first %v", first.UTC())
+	}
+	for _, from := range []time.Time{first, first.Add(30 * time.Minute), first.Add(time.Hour)} {
+		next, _ := NextDue(r, from, time.Time{}, ny)
+		if next.UTC().Format(time.RFC3339) != "2026-11-02T06:30:00Z" {
+			t.Fatalf("from %v: next %v", from.UTC(), next.UTC())
+		}
+	}
+	due := DueBetween(r, after, after.Add(72*time.Hour), time.Time{}, ny)
+	if len(due) != 3 {
+		t.Fatalf("due %v", due)
+	}
+}
+
+func TestNextDueCronSpringForward(t *testing.T) {
+	ny, _ := time.LoadLocation("America/New_York")
+	r := valid()
+	r.Starts = []Start{{Schedule: "30 2 * * *"}}
+	after := time.Date(2026, 3, 7, 12, 0, 0, 0, ny)
+	d1, _ := NextDue(r, after, time.Time{}, ny)
+	if got := d1.In(ny).Format("2006-01-02 15:04"); got != "2026-03-08 03:00" {
+		t.Fatalf("gap day local %s", got)
+	}
+	d2, _ := NextDue(r, d1, time.Time{}, ny)
+	if got := d2.In(ny).Format("2006-01-02 15:04"); got != "2026-03-09 02:30" {
+		t.Fatalf("next day local %s", got)
+	}
+}
+
+func TestSlugValidation(t *testing.T) {
+	for _, bad := range []string{"../x", "a/b", "_x", ".x", "", "A", "a b", "-a"} {
+		r := valid()
+		r.Slug = bad
+		if err := Save(t.TempDir(), r); err == nil {
+			t.Errorf("Save %q should fail", bad)
+		}
+		if _, err := Parse(bad, []byte("what: x\n")); err == nil {
+			t.Errorf("Parse %q should fail", bad)
+		}
+	}
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "Bad Name.yaml"), []byte("what: x\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "good-1.yaml"), []byte("what: x\n"), 0o644)
+	got, errs := Load(dir)
+	if len(got) != 1 || got[0].Slug != "good-1" || len(errs) != 1 {
+		t.Fatalf("%v %v", got, errs)
+	}
+}
+
+func TestParseUnknownKeyAndBudget(t *testing.T) {
+	if _, err := Parse("a", []byte("what: x\nenable: false\n")); err == nil {
+		t.Fatal("unknown key should fail")
+	}
+	r := valid()
+	r.Budget.Cost = -1
+	if Validate(r, Limits{}) == nil {
+		t.Fatal("negative budget should fail")
+	}
+}
