@@ -328,6 +328,7 @@ type agentChatResult struct {
 	ThreadID  string `json:"thread_id"`
 	SessionID string `json:"session_id"`
 	Reply     string `json:"reply,omitempty"`
+	Waiting   bool   `json:"waiting,omitempty"`
 }
 
 func agentChat(dial callerFor) *cobra.Command {
@@ -363,8 +364,18 @@ func agentChat(dial callerFor) *cobra.Command {
 				if wait {
 					return errors.New("--wait needs a message")
 				}
-				shell.StdOutF("open the TUI and choose the agent: argus\n")
+				const hint = "open the TUI and choose the agent: argus"
+				if asJSON {
+					return printJSON(map[string]string{"hint": hint})
+				}
+				shell.StdOutF("%s\n", hint)
 				return nil
+			}
+			baseThread, baseline := "", 0
+			if wait {
+				if baseThread, baseline, err = chatBaseline(call, a.ID, newThread); err != nil {
+					return err
+				}
 			}
 			var sent api.PAgentSendResult
 			if err := call(api.MethodPAgentThreadSend, api.PAgentSendParams{AgentID: a.ID, Text: message, New: newThread}, &sent); err != nil {
@@ -372,7 +383,10 @@ func agentChat(dial callerFor) *cobra.Command {
 			}
 			res := agentChatResult{ThreadID: sent.ThreadID, SessionID: sent.SessionID}
 			if wait {
-				if res.Reply, err = waitForReply(cmd.Context(), call, a.ID, sent, message); err != nil {
+				if sent.ThreadID != baseThread {
+					baseline = 0
+				}
+				if res.Reply, res.Waiting, err = waitForReply(cmd.Context(), call, a.ID, sent.ThreadID, baseline); err != nil {
 					return err
 				}
 			}
@@ -380,7 +394,12 @@ func agentChat(dial callerFor) *cobra.Command {
 				return printJSON(res)
 			}
 			if wait {
-				shell.StdOutF("%s\n", res.Reply)
+				if res.Reply != "" {
+					shell.StdOutF("%s\n", res.Reply)
+				}
+				if res.Waiting {
+					shell.StdOutF("agent is waiting for you\n")
+				}
 			} else {
 				shell.StdOutF("%s\n", sent.ThreadID)
 			}
@@ -388,10 +407,48 @@ func agentChat(dial callerFor) *cobra.Command {
 		})
 }
 
-// waitForReply polls the thread until its session stops working and the
-// timeline holds text after the user entry carrying message, then returns
-// that text.
-func waitForReply(ctx context.Context, call caller, agentID string, sent api.PAgentSendResult, message string) (string, error) {
+// userEntries counts the user entries of a thread's timeline.
+func userEntries(entries []transcript.Entry) int {
+	n := 0
+	for _, e := range entries {
+		if e.Kind == transcript.EntryUser {
+			n++
+		}
+	}
+	return n
+}
+
+// chatBaseline returns the thread a send without --new continues and how many
+// user entries its timeline holds, so a reply can be told from earlier ones.
+func chatBaseline(call caller, agentID string, newThread bool) (string, int, error) {
+	if newThread {
+		return "", 0, nil
+	}
+	var threads api.PAgentThreadsResult
+	if err := call(api.MethodPAgentThreadList, api.PAgentRef{AgentID: agentID}, &threads); err != nil {
+		return "", 0, err
+	}
+	var latest *api.PAgentThreadInfo
+	for i, t := range threads.Threads {
+		if t.Kind == "chat" && t.Status == "active" && (latest == nil || t.LastActiveAt.After(latest.LastActiveAt)) {
+			latest = &threads.Threads[i]
+		}
+	}
+	if latest == nil {
+		return "", 0, nil
+	}
+	var tl api.PAgentTimeline
+	if err := call(api.MethodPAgentThreadTimeline, api.PAgentTimelineParams{ThreadID: latest.ID}, &tl); err != nil {
+		return "", 0, err
+	}
+	return latest.ID, userEntries(tl.Entries), nil
+}
+
+// waitForReply polls the thread until its session has stopped and the
+// timeline holds text after the first user entry beyond baseline user
+// entries. A session waiting on the user returns what is there, with waiting
+// set.
+func waitForReply(ctx context.Context, call caller, agentID, threadID string, baseline int) (reply string, waiting bool, err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -400,39 +457,48 @@ func waitForReply(ctx context.Context, call caller, agentID string, sent api.PAg
 	for {
 		var threads api.PAgentThreadsResult
 		if err := call(api.MethodPAgentThreadList, api.PAgentRef{AgentID: agentID}, &threads); err != nil {
-			return "", err
+			return "", false, err
 		}
-		working := false
+		status := ""
 		for _, t := range threads.Threads {
-			if t.ID == sent.ThreadID && t.SessionStatus == "working" {
-				working = true
+			if t.ID == threadID {
+				status = t.SessionStatus
 			}
 		}
-		if !working {
+		if status != "working" && status != "starting" {
 			var tl api.PAgentTimeline
-			if err := call(api.MethodPAgentThreadTimeline, api.PAgentTimelineParams{ThreadID: sent.ThreadID}, &tl); err != nil {
-				return "", err
+			if err := call(api.MethodPAgentThreadTimeline, api.PAgentTimelineParams{ThreadID: threadID}, &tl); err != nil {
+				return "", false, err
 			}
-			if reply, ok := replyAfter(tl.Entries, message); ok {
-				return reply, nil
+			text, ok := replyAfterUser(tl.Entries, baseline)
+			if status == "awaiting_input" {
+				return text, true, nil
+			}
+			if ok {
+				return text, false, nil
 			}
 		}
 		select {
 		case <-ctx.Done():
-			return "", errors.New("timed out waiting for the reply")
+			return "", false, errors.New("timed out waiting for the reply")
 		case <-time.After(agentWaitPoll):
 		}
 	}
 }
 
-// replyAfter returns the text entries following the last user entry that
-// contains message.
-func replyAfter(entries []transcript.Entry, message string) (string, bool) {
-	start := -1
+// replyAfterUser returns the text entries following the first user entry
+// beyond the first baseline ones.
+func replyAfterUser(entries []transcript.Entry, baseline int) (string, bool) {
+	seen, start := 0, -1
 	for i, e := range entries {
-		if e.Kind == transcript.EntryUser && strings.Contains(e.Text, strings.TrimSpace(message)) {
-			start = i
+		if e.Kind != transcript.EntryUser {
+			continue
 		}
+		if seen == baseline {
+			start = i
+			break
+		}
+		seen++
 	}
 	if start < 0 {
 		return "", false

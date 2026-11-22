@@ -20,7 +20,7 @@ type fakeAgentNode struct {
 	timeline  api.PAgentTimeline
 	calls     []string
 	params    map[string][]any
-	timelines int
+	timelines []api.PAgentTimeline // served in order, last repeats; overrides timeline
 }
 
 func (f *fakeAgentNode) call(method string, params, out any) error {
@@ -45,7 +45,14 @@ func (f *fakeAgentNode) call(method string, params, out any) error {
 		}
 		*out.(*api.PAgentThreadsResult) = r
 	case api.MethodPAgentThreadTimeline:
-		*out.(*api.PAgentTimeline) = f.timeline
+		tl := f.timeline
+		if len(f.timelines) > 0 {
+			tl = f.timelines[0]
+			if len(f.timelines) > 1 {
+				f.timelines = f.timelines[1:]
+			}
+		}
+		*out.(*api.PAgentTimeline) = tl
 	}
 	return nil
 }
@@ -121,21 +128,31 @@ func TestAgentChatPrimaryFallback(t *testing.T) {
 	}
 }
 
-func TestAgentChatWaitPrintsReply(t *testing.T) {
+func fastAgentPoll(t *testing.T) {
 	old := agentWaitPoll
 	agentWaitPoll = time.Millisecond
 	t.Cleanup(func() { agentWaitPoll = old })
+}
+
+func chatThread(status string) api.PAgentThreadsResult {
+	return api.PAgentThreadsResult{Threads: []api.PAgentThreadInfo{{ID: "th1", Kind: "chat", Status: "active", SessionStatus: status}}}
+}
+
+func userText(s string) transcript.Entry {
+	return transcript.Entry{Kind: transcript.EntryUser, Text: s}
+}
+func replyText(s string) transcript.Entry {
+	return transcript.Entry{Kind: transcript.EntryText, Text: s}
+}
+
+func TestAgentChatWaitPrintsReply(t *testing.T) {
+	fastAgentPoll(t)
 	f := twoAgents()
-	f.threads = []api.PAgentThreadsResult{
-		{Threads: []api.PAgentThreadInfo{{ID: "th1", SessionStatus: "working"}}},
-		{Threads: []api.PAgentThreadInfo{{ID: "th1", SessionStatus: "awaiting_input"}}},
+	f.threads = []api.PAgentThreadsResult{chatThread("idle"), chatThread("working"), chatThread("idle")}
+	f.timelines = []api.PAgentTimeline{
+		{Entries: []transcript.Entry{userText("older"), replyText("old reply")}}, // baseline
+		{Entries: []transcript.Entry{userText("older"), replyText("old reply"), userText("context\n\nhi there"), replyText("the reply")}},
 	}
-	f.timeline = api.PAgentTimeline{ThreadID: "th1", Entries: []transcript.Entry{
-		{Kind: transcript.EntryUser, Text: "older"},
-		{Kind: transcript.EntryText, Text: "old reply"},
-		{Kind: transcript.EntryUser, Text: "hi there"},
-		{Kind: transcript.EntryText, Text: "the reply"},
-	}}
 	out, _, err := execAgent(t, f, "chat", "scout", "hi there", "--wait")
 	if err != nil {
 		t.Fatal(err)
@@ -143,11 +160,22 @@ func TestAgentChatWaitPrintsReply(t *testing.T) {
 	if strings.TrimSpace(out) != "the reply" {
 		t.Fatalf("out = %q", out)
 	}
-	if len(f.params[api.MethodPAgentThreadList]) < 2 {
+	if len(f.params[api.MethodPAgentThreadList]) < 3 {
 		t.Fatal("did not poll while working")
 	}
+}
 
-	out, _, err = execAgent(t, f, "chat", "scout", "hi there", "--wait", "--json")
+func TestAgentChatWaitIgnoresEarlierIdenticalMessage(t *testing.T) {
+	fastAgentPoll(t)
+	f := twoAgents()
+	f.threads = []api.PAgentThreadsResult{chatThread("idle")}
+	f.timelines = []api.PAgentTimeline{
+		{Entries: []transcript.Entry{userText("continue"), replyText("old reply")}}, // baseline
+		{Entries: []transcript.Entry{userText("continue"), replyText("old reply")}}, // new prompt not recorded yet
+		{Entries: []transcript.Entry{userText("continue"), replyText("old reply"), userText("continue")}},
+		{Entries: []transcript.Entry{userText("continue"), replyText("old reply"), userText("continue"), replyText("new reply")}},
+	}
+	out, _, err := execAgent(t, f, "chat", "scout", "continue", "--wait", "--json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,8 +183,43 @@ func TestAgentChatWaitPrintsReply(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &res); err != nil {
 		t.Fatal(err)
 	}
-	if res != (agentChatResult{ThreadID: "th1", SessionID: "home:claude:s1", Reply: "the reply"}) {
+	if res != (agentChatResult{ThreadID: "th1", SessionID: "home:claude:s1", Reply: "new reply"}) {
 		t.Fatalf("res = %+v", res)
+	}
+}
+
+func TestAgentChatWaitWaitingOnInteraction(t *testing.T) {
+	fastAgentPoll(t)
+	f := twoAgents()
+	f.threads = []api.PAgentThreadsResult{chatThread("idle"), chatThread("awaiting_input")}
+	f.timelines = []api.PAgentTimeline{
+		{},
+		{Entries: []transcript.Entry{userText("go"), replyText("partial")}},
+	}
+	out, _, err := execAgent(t, f, "chat", "scout", "go", "--wait")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "partial") || !strings.Contains(out, "agent is waiting for you") {
+		t.Fatalf("out = %q", out)
+	}
+
+	f.threads = []api.PAgentThreadsResult{chatThread("idle"), chatThread("awaiting_input")}
+	f.timelines = []api.PAgentTimeline{{}, {Entries: []transcript.Entry{userText("go")}}}
+	out, _, err = execAgent(t, f, "chat", "scout", "go", "--wait", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res agentChatResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil || !res.Waiting {
+		t.Fatalf("out = %q, err = %v", out, err)
+	}
+}
+
+func TestAgentChatHintJSON(t *testing.T) {
+	out, _, err := execAgent(t, twoAgents(), "chat", "--json")
+	if err != nil || !strings.Contains(out, `"hint"`) {
+		t.Fatalf("out = %q, err = %v", out, err)
 	}
 }
 
