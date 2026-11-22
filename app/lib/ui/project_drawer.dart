@@ -5,10 +5,12 @@ import '../models/project.dart';
 import '../state/gateway.dart';
 import '../state/left_sidebar.dart';
 import '../state/navigation.dart';
+import '../state/pagents.dart';
 import '../state/project_tree.dart';
 import '../state/projects.dart';
 import '../state/projects_api.dart';
 import '../state/sessions.dart';
+import 'agents_sidebar_list.dart';
 import 'nerd_icon.dart';
 import 'node_screen.dart';
 import 'project_actions.dart';
@@ -33,6 +35,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
   // after unmount, as when the other tab was showing the whole time.
   late final TextEditingController _filter;
   late final TextEditingController _sessionsFilter;
+  late final TextEditingController _agentsFilter;
 
   @override
   void initState() {
@@ -41,12 +44,16 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
     _sessionsFilter = TextEditingController(
       text: ref.read(sidebarSessionsFilterProvider),
     );
+    _agentsFilter = TextEditingController(
+      text: ref.read(sidebarAgentsFilterProvider),
+    );
   }
 
   @override
   void dispose() {
     _filter.dispose();
     _sessionsFilter.dispose();
+    _agentsFilter.dispose();
     super.dispose();
   }
 
@@ -118,7 +125,9 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
             _tabs(tab),
             _search(tab),
             Expanded(
-              child: tab == LeftSidebarTab.sessions
+              child: tab == LeftSidebarTab.agents
+                  ? AgentsSidebarList(onOpen: _close)
+                  : tab == LeftSidebarTab.sessions
                   ? SidebarSessionsList(onOpen: _close)
                   : RefreshIndicator(
                       onRefresh: _refresh,
@@ -192,7 +201,15 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
             icon: const Icon(Icons.add),
             onPressed: _newSession,
           ),
-        ] else
+        ] else if (ref.watch(leftSidebarTabProvider) == LeftSidebarTab.agents)
+          IconButton(
+            tooltip: 'Refresh',
+            icon: const Icon(Icons.refresh),
+            onPressed: () => ref
+                .read(pagentsProvider.notifier)
+                .load(ref.read(pagentsClientProvider)),
+          )
+        else
           PopupMenuButton<String>(
             tooltip: 'Tree options',
             onSelected: (v) {
@@ -261,6 +278,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
       segments: const [
         ButtonSegment(value: LeftSidebarTab.projects, label: Text('Projects')),
         ButtonSegment(value: LeftSidebarTab.sessions, label: Text('Sessions')),
+        ButtonSegment(value: LeftSidebarTab.agents, label: Text('Agents')),
       ],
       selected: {tab},
       onSelectionChanged: (s) =>
@@ -274,7 +292,11 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
       height: 36,
       child: TextField(
         key: ValueKey(tab),
-        controller: tab == LeftSidebarTab.projects ? _filter : _sessionsFilter,
+        controller: switch (tab) {
+          LeftSidebarTab.projects => _filter,
+          LeftSidebarTab.sessions => _sessionsFilter,
+          LeftSidebarTab.agents => _agentsFilter,
+        },
         style: const TextStyle(fontSize: 13),
         decoration: InputDecoration(
           isDense: true,
@@ -282,9 +304,11 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
           fillColor: AppColors.canvas,
           prefixIcon: const Icon(Icons.search, size: 16, color: AppColors.dim),
           prefixIconConstraints: const BoxConstraints(minWidth: 40),
-          hintText: tab == LeftSidebarTab.projects
-              ? 'Filter projects'
-              : 'Filter sessions',
+          hintText: switch (tab) {
+            LeftSidebarTab.projects => 'Filter projects',
+            LeftSidebarTab.sessions => 'Filter sessions',
+            LeftSidebarTab.agents => 'Filter agents',
+          },
           hintStyle: const TextStyle(fontSize: 13, color: AppColors.dim),
           contentPadding: const EdgeInsets.symmetric(vertical: 10),
           border: OutlineInputBorder(
@@ -292,9 +316,13 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
             borderSide: BorderSide.none,
           ),
         ),
-        onChanged: tab == LeftSidebarTab.projects
-            ? ref.read(treeViewProvider.notifier).setFilter
-            : (q) => ref.read(sidebarSessionsFilterProvider.notifier).state = q,
+        onChanged: switch (tab) {
+          LeftSidebarTab.projects => ref.read(treeViewProvider.notifier).setFilter,
+          LeftSidebarTab.sessions => (q) =>
+              ref.read(sidebarSessionsFilterProvider.notifier).state = q,
+          LeftSidebarTab.agents => (q) =>
+              ref.read(sidebarAgentsFilterProvider.notifier).state = q,
+        },
       ),
     ),
   );

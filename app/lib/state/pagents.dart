@@ -172,22 +172,64 @@ class PAgentsApi {
   }
 }
 
-final pagentsApiProvider = Provider<PAgentsApi>(
-  (ref) => PAgentsApi(() => ref.read(gatewayProvider)?.client),
+/// The connected client, or null. Tests override it.
+final pagentsClientProvider = Provider<GatewayClient?>(
+  (ref) => ref.read(gatewayProvider)?.client,
 );
+
+final pagentsApiProvider = Provider<PAgentsApi>(
+  (ref) => PAgentsApi(() => ref.read(pagentsClientProvider)),
+);
+
+/// The size of an agent's core memory, its budget, and when it last changed
+/// (null when unknown).
+class AgentMemoryUsage {
+  const AgentMemoryUsage({this.usage = 0, this.budget = 0, this.last});
+  final int usage;
+  final int budget;
+  final DateTime? last;
+}
+
+/// The agent's memory usage, or null when the node has no memory to show.
+/// Reloads when the agent list changes.
+final agentMemoryUsageProvider = FutureProvider.autoDispose
+    .family<AgentMemoryUsage?, String>((ref, agentId) async {
+      ref.watch(pagentsProvider.select((s) => s.agents));
+      final api = ref.read(pagentsApiProvider);
+      final PAgentMemory mem;
+      try {
+        mem = await api.memory(agentId);
+      } catch (_) {
+        return null;
+      }
+      DateTime? last;
+      try {
+        final log = await api.memoryLog(agentId, limit: 1);
+        if (log.isNotEmpty) last = log.first.when;
+      } catch (_) {}
+      return AgentMemoryUsage(usage: mem.usage, budget: mem.budget, last: last);
+    });
 
 class PAgentsState {
   const PAgentsState({
     this.agents = const [],
     this.primary = '',
+    this.threads = const {},
     this.loaded = false,
     this.error,
   });
 
   final List<PAgent> agents;
+  // Each reachable agent's threads; an agent not listed has none loaded yet.
+  final Map<String, List<PAgentThread>> threads;
   final String primary; // the primary agent's composite id, or empty
   final bool loaded;
   final String? error; // the last load failed; agents are the last good list
+
+  bool isPrimary(PAgent a) => a.primary || (a.id.isNotEmpty && a.id == primary);
+
+  bool unread(String agentId) =>
+      (threads[agentId] ?? const []).any((t) => t.unread);
 
   PAgent? get primaryAgent {
     for (final a in agents) {
@@ -211,9 +253,33 @@ class PAgentsNotifier extends Notifier<PAgentsState> {
     try {
       final res = PAgentList.fromJson(await client.call('pagent.list', {}));
       if (gen != _generation) return;
+      final threads = <String, List<PAgentThread>>{};
+      await Future.wait([
+        for (final a in res.agents)
+          if (!a.unreachable)
+            () async {
+              try {
+                final r = await client.call('pagent.thread.list', {
+                  'agent_id': a.id,
+                });
+                final list = r is Map ? r['threads'] : null;
+                threads[a.id] = [
+                  if (list is List)
+                    for (final t in list)
+                      if (t is Map<String, dynamic>) PAgentThread.fromJson(t),
+                ];
+              } catch (_) {
+                // Keep what was known; the agent screen reports its own errors.
+                final known = state.threads[a.id];
+                if (known != null) threads[a.id] = known;
+              }
+            }(),
+      ]);
+      if (gen != _generation) return;
       state = PAgentsState(
         agents: res.agents,
         primary: res.primary,
+        threads: threads,
         loaded: true,
       );
     } catch (e) {
@@ -221,6 +287,7 @@ class PAgentsNotifier extends Notifier<PAgentsState> {
       state = PAgentsState(
         agents: state.agents,
         primary: state.primary,
+        threads: state.threads,
         loaded: state.loaded,
         error: '$e',
       );
