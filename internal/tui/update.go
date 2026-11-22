@@ -24,7 +24,7 @@ func (m model) Init() tea.Cmd {
 	if t, ok := m.baseComp().(transcriptComp); ok && m.viewer {
 		return tea.Batch(m.fetchHistTranscript(t.history.addr()), m.kittyCheckCmd())
 	}
-	return tea.Batch(m.refreshCmd(), m.fetchProjects(), m.loadTerminalsCmd(), m.kittyCheckCmd())
+	return tea.Batch(m.refreshCmd(), m.fetchProjects(), m.loadPAgentsCmd(), m.loadTerminalsCmd(), m.kittyCheckCmd())
 }
 
 // refreshCmd asks the node to rescan; results stream back as registry events.
@@ -138,7 +138,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.connected {
 			// Reconnected: resync authoritatively; live events resume on their own.
 			m.reconnecting = false
-			cmd := tea.Batch(m.resyncCmd(), m.loadProjects(), m.loadTerminalsCmd(), m.resubscribeLive(""))
+			cmd := tea.Batch(m.resyncCmd(), m.loadProjects(), m.loadPAgentsCmd(), m.loadTerminalsCmd(), m.resubscribeLive(""))
 			return m, cmd
 		}
 		m.reconnecting = true // keep the last-known list visible meanwhile
@@ -207,6 +207,12 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spawnResultMsg:
 		if msg.err != nil {
 			m.flash = "spawn failed: " + msg.err.Error()
+		}
+		return m, nil
+	case pagentsMsg:
+		if msg.err == nil {
+			m.pagentNames = msg.names
+			m.reorder()
 		}
 		return m, nil
 	case terminalsMsg:
@@ -445,6 +451,9 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 	if n.Method == api.MethodProjectChanged {
 		return m.loadProjects()
 	}
+	if n.Method == api.MethodPAgentChanged {
+		return m.loadPAgentsCmd()
+	}
 	if n.Method == api.MethodTerminalChanged {
 		return m.loadTerminalsCmd()
 	}
@@ -618,7 +627,7 @@ func (m *model) cycleGroupBy() {
 	sel := m.rootSessionID()
 	m.groupBy = m.groupBy.next()
 	m.refilter(sel)
-	m.flash = "grouped by " + string(m.groupBy)
+	m.flash = "grouped by " + m.groupBy.title()
 	if m.statePath == "" {
 		return
 	}

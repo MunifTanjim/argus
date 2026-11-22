@@ -65,6 +65,7 @@ type model struct {
 	activeOnly    bool                    // the session lists show only active and awaiting-input sessions
 	sessionFilter string                  // the session lists show only the sessions that match it
 	groupBy       groupBy                 // the home sessions list's grouping dimension ("" is host)
+	pagentNames   map[string]string       // persistent agent id (composite on a gateway) -> name, from pagent.list
 	statePath     string                  // tui.json; empty: UI state is not saved (tests, viewer)
 	terminals     []api.Terminal          // every node's terminals, from the last load
 	terminalsErr  error

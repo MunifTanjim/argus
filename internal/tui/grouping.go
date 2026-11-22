@@ -21,10 +21,11 @@ const (
 	groupByWorkspace groupBy = "workspace"
 	groupByAgent     groupBy = "agent"
 	groupByStatus    groupBy = "status"
+	groupByPAgent    groupBy = "pagent"
 )
 
 // groupByCycle is every dimension, in the order the cycle key steps through.
-var groupByCycle = []groupBy{groupByHost, groupByProject, groupByWorkspace, groupByAgent, groupByStatus}
+var groupByCycle = []groupBy{groupByHost, groupByProject, groupByWorkspace, groupByAgent, groupByStatus, groupByPAgent}
 
 func parseGroupBy(s string) (groupBy, bool) {
 	g := groupBy(s)
@@ -119,6 +120,19 @@ func (m model) sessionSection(s session.Session) sectionInfo {
 			return otherSection(StyledIcon{Glyph: glyphRobotSolid})
 		}
 		return sectionInfo{key: name, title: name, rank: rankGroup, icon: StyledIcon{glyphRobotSolid, accent}}
+	case groupByPAgent:
+		icon := StyledIcon{Glyph: glyphRobotSolid}
+		if s.PAgentID == "" {
+			sec := otherSection(icon)
+			sec.key, sec.title = "", "no agent"
+			return sec
+		}
+		id := pagentCompositeID(s)
+		title := m.pagentNames[id]
+		if title == "" {
+			title = s.PAgentID
+		}
+		return sectionInfo{key: title + "\x00pagent:" + id, title: title, rank: rankGroup, icon: icon}
 	case groupByStatus:
 		i := slices.Index(statusOrder, s.Status)
 		if i < 0 {
@@ -129,6 +143,24 @@ func (m model) sessionSection(s session.Session) sectionInfo {
 	default:
 		return sectionInfo{key: s.NodeLabel, title: hostName(s.NodeLabel), rank: rankGroup, icon: Icon.Node, namesHost: true}
 	}
+}
+
+// pagentCompositeID is the session's agent id as pagent.list reports it. The
+// client composites list ids with the node id but leaves a session's PAgentID
+// node-local, so the two are matched by (NodeID, PAgentID).
+func pagentCompositeID(s session.Session) string {
+	if s.NodeID == "" {
+		return s.PAgentID
+	}
+	return session.CompositeID(s.NodeID, s.PAgentID)
+}
+
+// groupByTitle names a dimension in flashes.
+func (g groupBy) title() string {
+	if g == groupByPAgent {
+		return "persistent agent"
+	}
+	return string(g)
 }
 
 func (m model) workspaceOf(wsID string) (api.ProjectNode, api.WorkspaceNode, bool) {

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -120,7 +121,7 @@ func TestGroupByCycle(t *testing.T) {
 		g = g.next()
 		seen = append(seen, g)
 	}
-	want := []groupBy{groupByProject, groupByWorkspace, groupByAgent, groupByStatus, groupByHost}
+	want := []groupBy{groupByProject, groupByWorkspace, groupByAgent, groupByStatus, groupByPAgent, groupByHost}
 	if !slices.Equal(seen, want) {
 		t.Fatalf("cycle = %q, want %q", seen, want)
 	}
@@ -223,11 +224,11 @@ func TestCycleGroupByKey(t *testing.T) {
 	if g, _ := loadGroupBy(m.statePath); g != groupByProject {
 		t.Fatalf("saved %q, want project", g)
 	}
-	for range 4 {
+	for range 5 {
 		m = typeKeys(m, "zg")
 	}
 	if m.groupBy != groupByHost {
-		t.Fatalf("five presses should return to host, got %q", m.groupBy)
+		t.Fatalf("six presses should return to host, got %q", m.groupBy)
 	}
 }
 
@@ -291,5 +292,46 @@ func TestSectionHeaderIcons(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGroupByCycleIncludesPAgent(t *testing.T) {
+	if !slices.Contains(groupByCycle, groupByPAgent) {
+		t.Fatal("cycle lacks pagent")
+	}
+	if g, ok := parseGroupBy("pagent"); !ok || g != groupByPAgent {
+		t.Fatalf("parseGroupBy(pagent) = %q, %v", g, ok)
+	}
+	if groupByPAgent.title() != "persistent agent" || groupByHost.title() != "host" {
+		t.Fatal("unexpected titles")
+	}
+}
+
+func TestGroupByPAgentSections(t *testing.T) {
+	idle := session.StatusIdle
+	mk := func(id, label, pa string) session.Session {
+		s := gs(id, label, "", "", idle)
+		s.PAgentID = pa
+		return s
+	}
+	m := groupedModel(groupByPAgent,
+		mk("a:1", "alpha", "x1"), mk("a:2", "alpha", "x2"), mk("b:1", "beta", "x1"), mk("a:3", "alpha", ""))
+	m.pagentNames = map[string]string{"alpha:x1": "Zed", "alpha:x2": "Amy", "beta:x1": "Bob"}
+	m.reorder()
+	want := []string{"Amy", "Bob", "Zed", "no agent"}
+	if got := sectionTitles(m); !slices.Equal(got, want) {
+		t.Fatalf("titles = %q, want %q", got, want)
+	}
+}
+
+func TestPAgentsMsgStoresNames(t *testing.T) {
+	m := groupedModel(groupByPAgent)
+	m, _ = upd(m, pagentsMsg{names: map[string]string{"n:1": "Amy"}})
+	if m.pagentNames["n:1"] != "Amy" {
+		t.Fatalf("names = %v", m.pagentNames)
+	}
+	m, _ = upd(m, pagentsMsg{err: errors.New("boom")})
+	if m.pagentNames["n:1"] != "Amy" {
+		t.Fatal("an error should keep the last names")
 	}
 }
