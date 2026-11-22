@@ -200,8 +200,12 @@ func TestOuterBusyDuringMerge(t *testing.T) {
 	}
 	write(t, filepath.Join(r.Dir, "memory.md"), "x\n")
 	write(t, filepath.Join(r.GitDir, "MERGE_HEAD"), "0000\n")
+	before := count(t, outer)
 	if _, err := r.CommitPaths(ctx, "x", nil, []string{"memory.md"}, true); !errors.Is(err, ErrBusy) {
 		t.Fatalf("err = %v, want ErrBusy", err)
+	}
+	if after := count(t, outer); after != before {
+		t.Fatalf("commit created while busy")
 	}
 }
 
@@ -260,7 +264,10 @@ func TestRevertConflictAborts(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(t, p, "one\n")
-	first, _ := r.CommitPaths(ctx, "one", nil, []string{"memory.md"}, true)
+	first, err := r.CommitPaths(ctx, "one", nil, []string{"memory.md"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	write(t, p, "two\n")
 	if _, err := r.CommitPaths(ctx, "two", nil, []string{"memory.md"}, true); err != nil {
 		t.Fatal(err)
@@ -344,5 +351,45 @@ func TestEnsureExcludedOuter(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join(r.GitDir, "info", "exclude"))
 	if err != nil || !strings.Contains(string(b), "agents/a/tmp/\n") {
 		t.Fatalf("exclude = %q, %v", b, err)
+	}
+}
+
+func TestOuterHookFailureReturnsError(t *testing.T) {
+	outer := newRepo(t)
+	ctx := context.Background()
+	r, _ := Open(ctx, filepath.Join(outer, "agents", "a"), "outer")
+	hook := filepath.Join(r.GitDir, "hooks", "pre-commit")
+	write(t, hook, "#!/bin/sh\necho nope >&2\nexit 1\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(r.Dir, "memory.md"), "x\n")
+	before := count(t, outer)
+	hash, err := r.CommitPaths(ctx, "x", nil, []string{"memory.md"}, true)
+	if err == nil || hash != "" {
+		t.Fatalf("CommitPaths = %q, %v; want hook error", hash, err)
+	}
+	if after := count(t, outer); after != before {
+		t.Fatal("commit created despite failing hook")
+	}
+}
+
+func TestRevertBusyLeavesUserRevertAlone(t *testing.T) {
+	setupEnv(t)
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "a")
+	r, _ := Open(ctx, dir, "nested")
+	write(t, filepath.Join(dir, "a.md"), "a\n")
+	a, _ := r.CommitPaths(ctx, "a", nil, []string{"a.md"}, true)
+	marker := filepath.Join(r.GitDir, "REVERT_HEAD")
+	write(t, marker, a+"\n")
+	if _, err := r.Revert(ctx, a); !errors.Is(err, ErrBusy) {
+		t.Fatalf("err = %v, want ErrBusy", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal("REVERT_HEAD removed")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "a.md")); err != nil {
+		t.Fatal("a.md touched")
 	}
 }

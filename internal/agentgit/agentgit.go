@@ -101,33 +101,35 @@ func (r *Repo) CommitPaths(ctx context.Context, subject string, trailers []Trail
 }
 
 func (r *Repo) commitPaths(ctx context.Context, subject string, trailers []Trailer, paths []string, argus bool) (string, error) {
-	if r.Outer {
-		for _, m := range busyMarkers {
-			if _, err := os.Lstat(filepath.Join(r.GitDir, m)); err == nil {
-				return "", ErrBusy
-			}
-		}
+	if r.Outer && r.busy() {
+		return "", ErrBusy
 	}
 	paths = r.knownPaths(ctx, paths)
 	if len(paths) == 0 {
 		return "", nil
 	}
-	if _, err := mustGit(ctx, r.Dir, append([]string{"add", "--all", "--"}, paths...)...); err != nil {
+	if _, err := mustGit(ctx, r.Dir, append([]string{"--literal-pathspecs", "add", "--all", "--"}, paths...)...); err != nil {
 		return "", err
 	}
-	if _, ok := runGit(ctx, r.Dir, append([]string{"diff", "--cached", "--quiet", "--"}, paths...)...); ok {
+	if _, ok := runGit(ctx, r.Dir, append([]string{"--literal-pathspecs", "diff", "--cached", "--quiet", "--"}, paths...)...); ok {
 		return "", nil
 	}
-	args := []string{}
+	args := []string{"--literal-pathspecs"}
 	if argus {
 		args = append(args, argusIdentity...)
 	}
-	args = append(args, "commit", "--quiet", "--only", "--no-verify", "--no-gpg-sign", "-m", subject)
+	args = append(args, "commit", "--quiet", "--only")
+	// The Argus identity cannot sign as the user, and unattended commits must
+	// not wait on a passphrase prompt. Hooks always run.
+	if argus && !r.Outer {
+		args = append(args, "--no-gpg-sign")
+	}
+	args = append(args, "-m", subject)
 	if len(trailers) > 0 {
 		var b strings.Builder
 		for _, t := range trailers {
 			if t.Value != "" {
-				fmt.Fprintf(&b, "%s: %s\n", t.Key, t.Value)
+				fmt.Fprintf(&b, "%s: %s\n", t.Key, strings.Join(strings.Fields(t.Value), " "))
 			}
 		}
 		if b.Len() > 0 {
@@ -140,6 +142,17 @@ func (r *Repo) commitPaths(ctx context.Context, subject string, trailers []Trail
 		return "", err
 	}
 	return mustGit(ctx, r.Dir, "rev-parse", "HEAD")
+}
+
+// busy reports whether a merge, rebase, cherry-pick, revert or bisect is in
+// progress.
+func (r *Repo) busy() bool {
+	for _, m := range append([]string{"REVERT_HEAD"}, busyMarkers...) {
+		if _, err := os.Lstat(filepath.Join(r.GitDir, m)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // knownPaths drops paths that neither exist nor are tracked, which git
@@ -175,6 +188,9 @@ func (r *Repo) CommitUserEdits(ctx context.Context, paths []string, agentName, a
 // aborted and reported as ErrConflict.
 func (r *Repo) Revert(ctx context.Context, hash string) (string, error) {
 	defer lock(r.GitDir)()
+	if r.busy() {
+		return "", ErrBusy
+	}
 	args := append(append([]string{}, argusIdentity...), "revert", "--no-edit", "--end-of-options", hash)
 	if _, err := mustGit(ctx, r.Dir, args...); err != nil {
 		if _, statErr := os.Lstat(filepath.Join(r.GitDir, "REVERT_HEAD")); statErr == nil {
@@ -244,7 +260,7 @@ func (r *Repo) BlameSources(ctx context.Context, path string) (map[int]string, e
 	result := map[int]string{}
 	for _, ln := range strings.Split(out, "\n") {
 		f := strings.Fields(ln)
-		if len(f) < 3 || strings.HasPrefix(ln, "\t") || len(f[0]) != 40 {
+		if len(f) < 3 || strings.HasPrefix(ln, "\t") || (len(f[0]) != 40 && len(f[0]) != 64) {
 			continue
 		}
 		var line int
