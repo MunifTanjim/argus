@@ -32,6 +32,7 @@ const (
 	EntrySystem   EntryKind = "system"   // runtime event / meta row
 	EntryCompact  EntryKind = "compact"  // context-compression boundary
 	EntryShell    EntryKind = "shell"    // user ran `!cmd` directly in the CLI
+	EntryArgus    EntryKind = "argus"    // Argus's own event in an agent thread timeline
 )
 
 // Subagent is one referenced agent. A teammate is also modeled here with
@@ -91,8 +92,18 @@ type Entry struct {
 	Detail  string `json:"detail,omitempty"`  // system/shell: detail text (shell: raw result scaffolding)
 	IsError bool   `json:"isError,omitempty"` // system: error flag; shell: nonzero exit code
 
+	// argus: Label is the event kind and Detail its text.
+	Event *ArgusEvent `json:"event,omitempty"`
+
 	// user: the prompt's <argus-message> blocks, parsed; Text keeps the raw prompt.
 	ArgusMessages []ArgusMessage `json:"argusMessages,omitempty"`
+}
+
+// ArgusEvent is the stored event behind an argus entry.
+type ArgusEvent struct {
+	ID      int64           `json:"id"`
+	Kind    string          `json:"kind"`
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 // MarshalJSON drops ToolInput/Result from the wire form; clients fetch them on demand.

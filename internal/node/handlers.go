@@ -96,6 +96,7 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodPAgentThreadSend, d.handlePAgentThreadSend)
 	srv.Handle(api.MethodPAgentThreadList, d.handlePAgentThreadList)
 	srv.Handle(api.MethodPAgentThreadMarkRead, d.handlePAgentThreadMarkRead)
+	srv.Handle(api.MethodPAgentThreadTimeline, d.handlePAgentThreadTimeline)
 	srv.Handle(api.MethodProjectSetHidden, d.handleProjectSetHidden)
 	srv.Handle(api.MethodProjectSetPinned, d.handleProjectSetPinned)
 	srv.Handle(api.MethodProjectForget, d.handleProjectForget)

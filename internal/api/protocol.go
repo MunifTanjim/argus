@@ -1441,6 +1441,7 @@ const (
 	MethodPAgentThreadSend     = "pagent.thread.send"     // request: PAgentSendParams; result: PAgentSendResult
 	MethodPAgentThreadList     = "pagent.thread.list"     // request: PAgentRef; result: PAgentThreadsResult
 	MethodPAgentThreadMarkRead = "pagent.thread.markRead" // request: PAgentMarkReadParams; result: nil
+	MethodPAgentThreadTimeline = "pagent.thread.timeline" // request: PAgentTimelineParams; result: PAgentTimeline
 )
 
 // PAgentCreateParams creates an agent directory and registers it. NodeID is a
@@ -1552,4 +1553,23 @@ type PAgentThreadInfo struct {
 type PAgentMarkReadParams struct {
 	ThreadID string `json:"thread_id"`
 	Position int64  `json:"position,omitempty"`
+}
+
+type PAgentTimelineParams struct {
+	ThreadID string `json:"thread_id"`
+}
+
+// PAgentTimeline is a thread's session transcripts in order with Argus's
+// events spliced in. Sessions lists the thread's sessions; StartIndex is where
+// each one's entries begin in Entries.
+type PAgentTimeline struct {
+	ThreadID string                  `json:"thread_id"`
+	Entries  []transcript.Entry      `json:"entries"`
+	Sessions []PAgentTimelineSession `json:"sessions"`
+}
+
+type PAgentTimelineSession struct {
+	SessionID  string `json:"session_id"`
+	StartIndex int    `json:"start_index"`
+	Live       bool   `json:"live,omitempty"`
 }
