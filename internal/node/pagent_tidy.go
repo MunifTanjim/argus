@@ -61,25 +61,29 @@ func (d *Node) pagentTidyDue(ctx context.Context) {
 			return
 		}
 		set := d.pagentSettings(a)
-		if set.MemoryMode != "" && set.MemoryMode != "auto" {
-			continue
-		}
 		at, now, ok := d.tidyTime(set)
 		if !ok || now.Before(at) {
 			continue
 		}
 		d.tidyMu.Lock()
-		last := d.tidyAt[a.ID]
-		if !last.Before(at) {
+		if !d.tidyAt[a.ID].Before(at) || now.Sub(d.tidyTry[a.ID]) < captureErrEvery {
 			d.tidyMu.Unlock()
 			continue
 		}
-		if d.tidyAt == nil {
-			d.tidyAt = map[string]time.Time{}
+		if d.tidyTry == nil {
+			d.tidyTry = map[string]time.Time{}
 		}
-		d.tidyAt[a.ID] = now
+		d.tidyTry[a.ID] = now
 		d.tidyMu.Unlock()
-		if err := d.pagentTidy(ctx, a, false); err != nil {
+		err := d.pagentTidy(ctx, a, false)
+		if err == nil {
+			d.tidyMu.Lock()
+			if d.tidyAt == nil {
+				d.tidyAt = map[string]time.Time{}
+			}
+			d.tidyAt[a.ID] = now
+			d.tidyMu.Unlock()
+		} else {
 			d.log.Warn("pagent: tidy memory", "agent", a.ID, "err", err)
 			d.agentMemoryEvent(ctx, a, "", evMemoryError, map[string]string{"message": "tidy failed: " + err.Error()})
 		}
@@ -115,7 +119,7 @@ func newEntriesSince(ctx context.Context, repo *agentgit.Repo) (bool, error) {
 // commit. A guard violation changes nothing and records a memory.error event.
 func (d *Node) pagentTidy(ctx context.Context, a pagent.Agent, force bool) error {
 	set := d.pagentSettings(a)
-	if set.MemoryMode == memoryModeOff {
+	if set.MemoryMode != "" && set.MemoryMode != "auto" {
 		return nil
 	}
 	defer lockMemory(a.ID)()

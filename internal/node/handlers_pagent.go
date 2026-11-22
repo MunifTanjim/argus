@@ -487,6 +487,9 @@ func (d *Node) handlePAgentForget(ctx context.Context, params json.RawMessage) (
 			return nil, pagentErr("agent %q has a live session; end it first", a.Name)
 		}
 		err = s.PurgeAgent(ctx, a.ID)
+		if err == nil {
+			_ = os.Remove(d.tidyIdleFile(a.ID))
+		}
 	} else {
 		err = s.ArchiveAgent(ctx, a.ID)
 	}

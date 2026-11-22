@@ -84,7 +84,8 @@ type TidyPlan struct {
 	Errs    []error
 }
 
-// PlanTidy drops expired entries from content, applies the model's ops and
+// PlanTidy drops expired entries from content (user-written ones too: the
+// user wrote the until date, so expiry is their instruction), applies the model's ops and
 // checks the guards against the whole file. Expired entries are exempt from
 // the change limit. Ops name MEMORY.md (or ""), or add to a topic file.
 // userLines holds the 1-based lines of content written by the user.

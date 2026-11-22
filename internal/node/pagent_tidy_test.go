@@ -182,3 +182,36 @@ func TestTidyDueAtTime(t *testing.T) {
 		t.Fatal("tidied twice in one day")
 	}
 }
+
+func TestTidyRemovesExpiredUserLine(t *testing.T) {
+	r := newCaptureRig(t)
+	r.seedMemory(t, "capture", memory.Op{Text: "likes tea"}, memory.Op{Text: "uses vim"})
+	path := filepath.Join(r.agent.Dir, "memory", "MEMORY.md")
+	cur := r.memoryFile(t, "memory/MEMORY.md")
+	hand := cur + "- freeze until friday (2026-01-01) · until 2000-01-01\n- prefers dark mode (2026-01-01) · until 2999-01-01\n"
+	if err := os.WriteFile(path, []byte(hand), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r.ex.reply = `{"ops":[]}`
+	if err := r.d.pagentTidyNow(context.Background(), r.pa(t)); err != nil {
+		t.Fatal(err)
+	}
+	got := r.memoryFile(t, "memory/MEMORY.md")
+	if strings.Contains(got, "freeze") || !strings.Contains(got, "dark mode") {
+		t.Fatalf("memory:\n%s", got)
+	}
+}
+
+func TestTidyOnlyInAutoMode(t *testing.T) {
+	r := newCaptureRig(t)
+	r.seedMemory(t, "capture", memory.Op{Text: "likes tea"}, memory.Op{Text: "sprint", Until: "2000-01-01"})
+	for _, mode := range []string{"review", "off"} {
+		r.d.pagentCfg.Defaults.Memory.Mode = mode
+		if err := r.d.pagentTidyNow(context.Background(), r.pa(t)); err != nil {
+			t.Fatal(err)
+		}
+		if len(r.ex.prompts) != 0 || !strings.Contains(r.memoryFile(t, "memory/MEMORY.md"), "sprint") {
+			t.Fatalf("tidy ran in %s mode", mode)
+		}
+	}
+}
