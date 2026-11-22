@@ -98,6 +98,8 @@ func interactionKindLabel(k session.InteractionKind) string {
 		return "Question"
 	case session.InteractionPlan:
 		return "Plan"
+	case session.InteractionSecret:
+		return "Secret"
 	}
 	return "Input"
 }

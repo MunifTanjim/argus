@@ -139,13 +139,21 @@ var terminalKeys = struct {
 }
 
 var agentKeys = struct {
-	Filter, NewChat, Memory, MakePrimary, UnsetPrimary binding
+	Filter, NewChat, Memory, MakePrimary, UnsetPrimary, CycleSetting binding
 }{
+	CycleSetting: nm("cycle agent-setting", "zs", "setting"),
 	Filter:       nb("filter-agents", "/", "filter"),
 	NewChat:      nm("agent new-chat", "n", "new chat"),
 	Memory:       nm("agent memory", "m", "memory"),
 	MakePrimary:  nm("agent make-primary", "", "make primary"),
 	UnsetPrimary: nm("agent unset-primary", "", "unset primary"),
+}
+
+var offerKeys = struct {
+	Start, Dismiss binding
+}{
+	Start:   nm("offer start", "a", "start"),
+	Dismiss: nm("offer dismiss", "x", "dismiss"),
 }
 
 var threadKeys = struct {
@@ -464,9 +472,13 @@ var settingsKeys = struct {
 }
 
 func keySets() []any {
-	return []any{listKeys, projectsKeys, fileViewKeys, transcriptKeys, redactListKeys,
-		detailKeys, visualKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, agentKeys, threadKeys, memoryKeys, routineKeys, upgradeKeys, spawnKeys,
+	sets := []any{listKeys, projectsKeys, fileViewKeys, transcriptKeys, redactListKeys,
+		detailKeys, visualKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, agentKeys, threadKeys, memoryKeys, routineKeys, offerKeys, upgradeKeys, spawnKeys,
 		settingsKeys}
+	for _, b := range settingKeys() {
+		sets = append(sets, b)
+	}
+	return sets
 }
 
 func allBindingSets() []any { return append(keySets(), textInputSets()...) }

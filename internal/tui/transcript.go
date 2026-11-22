@@ -552,6 +552,9 @@ func (m tview) argusRow(e transcript.Entry, iw int) (string, []cardSpan) {
 	if e.Event != nil && e.Event.Kind == "handoff.answered" {
 		return m.handoffAnswerRow(e, iw)
 	}
+	if e.Event != nil && e.Event.Kind == "brief" {
+		return m.briefRow(e, iw)
+	}
 	head := Icon.System.Render() + " " + StyleSecondary.Render("Argus") + "  " + StyleDim.Render(clockTime(e.Timestamp))
 	if text := cmp.Or(e.Detail, e.Label); text != "" {
 		head += "  " + StyleDim.Render(text)
@@ -559,7 +562,51 @@ func (m tview) argusRow(e transcript.Entry, iw int) (string, []cardSpan) {
 	if undoCommit(e) != "" && screenHas("thread", memoryKeys.Undo.name) {
 		head += "  " + StyleDim.Render(m.c.m.keyTextOn("thread", memoryKeys.Undo)+" undo")
 	}
+	if id := offerID(e); id != "" && offerOpen(m.transcript.entries, id) {
+		head += "  " + StyleDim.Render(m.c.m.keyTextOn("thread", offerKeys.Start)+" start · "+
+			m.c.m.keyTextOn("thread", offerKeys.Dismiss)+" dismiss")
+	}
+	head += m.draftHint(e)
 	return truncateLine(head, iw), chromeSpans(1)
+}
+
+// briefRow is an agent's brief, shown whole.
+func (m tview) briefRow(e transcript.Entry, iw int) (string, []cardSpan) {
+	head := Icon.Output.Render() + " " + StylePrimaryBold.Render("Brief") + "  " + StyleDim.Render(clockTime(e.Timestamp))
+	spans := chromeSpans(1)
+	if strings.TrimSpace(e.Detail) == "" || e.Detail == e.Label {
+		return truncateLine(head, iw), spans
+	}
+	body := indentBlock(m.c.m.renderMD(e.Detail, max(iw-2, 10)), "  ")
+	return truncateLine(head, iw) + "\n" + body, append(spans, textSpan(body, e.Detail))
+}
+
+// offerID is the id of the offer an argus entry makes, or "".
+func offerID(e transcript.Entry) string {
+	if e.Event == nil || e.Event.Kind != "offer" {
+		return ""
+	}
+	var p struct {
+		OfferID string `json:"offer_id"`
+	}
+	_ = json.Unmarshal(e.Event.Payload, &p)
+	return p.OfferID
+}
+
+// offerOpen reports whether no entry started or dismissed offer id.
+func offerOpen(es []transcript.Entry, id string) bool {
+	for _, e := range es {
+		if e.Event == nil || (e.Event.Kind != "offer.started" && e.Event.Kind != "offer.dismissed") {
+			continue
+		}
+		var p struct {
+			OfferID string `json:"offer_id"`
+		}
+		if json.Unmarshal(e.Event.Payload, &p) == nil && p.OfferID == id {
+			return false
+		}
+	}
+	return true
 }
 
 // handoffAnswerRow is another agent's answer: its name, then the answer word

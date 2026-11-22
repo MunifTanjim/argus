@@ -248,6 +248,19 @@ To run Lua code on a key, see [Lua](/getting-started/configuration#lua).
 | `agent make-primary` |  | agent |  |  |
 | `agent memory` |  | agent |  | `m` |
 | `agent new-chat` |  | agent |  | `n` |
+| `agent set memory auto` |  | agent |  |  |
+| `agent set memory off` |  | agent |  |  |
+| `agent set memory review` |  | agent |  |  |
+| `agent set notify all` |  | agent |  |  |
+| `agent set notify needs-you` |  | agent |  |  |
+| `agent set notify off` |  | agent |  |  |
+| `agent set proactivity default` |  | agent |  |  |
+| `agent set proactivity high` |  | agent |  |  |
+| `agent set proactivity low` |  | agent |  |  |
+| `agent set proactivity off` |  | agent |  |  |
+| `agent unset memory` |  | agent |  |  |
+| `agent unset notify` |  | agent |  |  |
+| `agent unset proactivity` |  | agent |  |  |
 | `agent unset-primary` |  | agent |  |  |
 | `answer note` |  | session-dock | `n` |  |
 | `answer submit` |  | session-dock | `<CR>` |  |
@@ -263,6 +276,7 @@ To run Lua code on a key, see [Lua](/getting-started/configuration#lua).
 | `cursor word-end` |  | visual | `e` |  |
 | `cursor word-next` |  | visual | `w` |  |
 | `cursor word-prev` |  | visual | `b` |  |
+| `cycle agent-setting` |  | agent |  | `zs` |
 | `cycle group-by` |  | home |  | `zg` |
 | `filter-agents` |  | sidebar-agents | `/` |  |
 | `filter-directories` |  | spawn | `/` |  |
@@ -289,6 +303,8 @@ To run Lua code on a key, see [Lua](/getting-started/configuration#lua).
 | `next diff-file` |  | file |  | `]f` |
 | `next prompt` |  | thread, transcript | `}` |  |
 | `node wakelock` |  | node, project-tree |  | `w` |
+| `offer dismiss` |  | thread |  | `x` |
+| `offer start` |  | thread |  | `a` |
 | `open` |  | agent, changes, file-tree, history, home, project-tree, sidebar-agents, sidebar-sessions, spawn, terminals, thread, transcript, workspace | `<CR>` |  |
 | `open live-screen` |  | session-dock, transcript |  | `<C-t>` |
 | `open palette` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace |  | `<C-k>` |

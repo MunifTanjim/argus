@@ -34,6 +34,17 @@ func newTextInput() textinput.Model {
 	return ti
 }
 
+// newSecretInput is the masked field of a secret request: it never shows the
+// value.
+func newSecretInput() textinput.Model {
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.EchoMode = textinput.EchoPassword
+	ti.EchoCharacter = '•'
+	ti.Focus()
+	return ti
+}
+
 func newQuestionAnswerInput() textinput.Model {
 	ti := textinput.New()
 	ti.Prompt = ""
@@ -159,6 +170,7 @@ func (d *dockComp) resetPromptState() {
 	d.confirming = false
 	d.reason = newTextInput()
 	d.reason.Focus()
+	d.secret = newSecretInput()
 	d.scroll = 0
 	d.sel, d.chosen, d.toggles, d.text, d.notes = nil, nil, nil, nil, nil
 }
@@ -406,6 +418,13 @@ func (d dockComp) denyReasonActive(c *ctx) bool {
 	return d.decisionRejecting(ix)
 }
 
+// secretEntryActive reports whether the dock is taking a secret's value: a
+// secret request with its save choice highlighted.
+func (d dockComp) secretEntryActive(c *ctx) bool {
+	ix := c.m.interaction()
+	return ix != nil && ix.Kind == session.InteractionSecret && !d.decisionRejecting(ix)
+}
+
 // focusedOptionPreview returns the preview markdown for the active question's
 // highlighted option, or "" when there is none.
 func (d dockComp) focusedOptionPreview(c *ctx) string {
@@ -651,8 +670,12 @@ func (d dockComp) decisionLines(c *ctx, ix *session.Interaction, width int) ([]s
 	block, a := c.m.renderOptions(opts, d.decisionSel, optionMarks{chosen: -1}, -1, "", false, nil, width)
 	b.WriteString(block)
 	anchor := base + a
-	// The reason field appears only on the reject choice.
-	if d.decisionRejecting(ix) {
+	// The secret field shows on the save choice, the reason field on the
+	// reject choice.
+	if ix.Kind == session.InteractionSecret && !d.decisionRejecting(ix) {
+		anchor = strings.Count(b.String(), "\n") + 1
+		b.WriteString("\n" + d.secretInput(width))
+	} else if d.decisionRejecting(ix) {
 		anchor = strings.Count(b.String(), "\n") + 1
 		b.WriteString("\n" + d.rejectInput(ix, width))
 	}
@@ -669,6 +692,14 @@ func (d dockComp) rejectInput(ix *session.Interaction, width int) string {
 	}
 	ti := d.reason
 	ti.Placeholder = ph
+	ti.SetWidth(width)
+	return userStyle.Render(promptMarker) + ti.View()
+}
+
+// secretInput renders the masked value field of a secret request.
+func (d dockComp) secretInput(width int) string {
+	ti := d.secret
+	ti.Placeholder = "value (hidden)"
 	ti.SetWidth(width)
 	return userStyle.Render(promptMarker) + ti.View()
 }
@@ -880,6 +911,8 @@ func promptHeading(agent string, ix *session.Interaction) string {
 		return StyleAccentBold.Render(Icon.SystemErr.Glyph + " " + s)
 	case session.InteractionHandoff:
 		return StyleAccentBold.Render(Icon.Output.Glyph + " Your turn")
+	case session.InteractionSecret:
+		return StyleAccentBold.Render(Icon.Output.Glyph + " Secret requested · " + ix.SecretName)
 	default: // plan
 		return StyleAccentBold.Render(Icon.Output.Glyph + " Plan approval")
 	}
@@ -901,8 +934,21 @@ func interactionBody(m model, agent string, ix *session.Interaction, width int) 
 			parts = append(parts, m.renderMD(ix.Steps, width-2))
 		}
 		return strings.Join(parts, "\n")
+	case session.InteractionSecret:
+		var parts []string
+		if ix.Message != "" {
+			parts = append(parts, hardWrap(StyleSecondary.Render(ix.Message), width-2))
+		}
+		parts = append(parts, hardWrap(StyleDim.Render("Kept on this node; the agent sees only $"+ix.SecretName+"."), width-2))
+		return strings.Join(parts, "\n")
 	case session.InteractionPermission:
 		var parts []string
+		for _, w := range classWarnings(ix.Classes) {
+			parts = append(parts, StyleBlockedBold.Render("⚠ "+w))
+		}
+		if by := startedByLabel(ix.StartedBy); by != "" {
+			parts = append(parts, StyleDim.Render(by))
+		}
 		if ix.Message != "" {
 			parts = append(parts, hardWrap(StyleSecondary.Render(ix.Message), width-2))
 		}
@@ -951,4 +997,38 @@ func previewBox(content string, width, height int) string {
 		BorderForeground(ColorBorder).
 		Width(iw).
 		Render(strings.Join(lines, "\n"))
+}
+
+// classWarnings words an agent action's warning classes.
+func classWarnings(classes []string) []string {
+	var out []string
+	for _, c := range classes {
+		switch c {
+		case "irreversible":
+			out = append(out, "can't be undone")
+		case "security":
+			out = append(out, "changes security settings")
+		case "outward":
+			out = append(out, "sends data out of this machine")
+		}
+	}
+	return out
+}
+
+// startedByLabel says who started the agent work that asks, when it was not
+// the user.
+func startedByLabel(by string) string {
+	switch by {
+	case "", "you":
+		return ""
+	case "check-back":
+		return "started by a check-back"
+	case "event":
+		return "started by an event"
+	case "handoff":
+		return "started by a hand-off"
+	case "routine":
+		return "started by a routine"
+	}
+	return "started by " + by
 }

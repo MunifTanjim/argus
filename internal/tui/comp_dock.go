@@ -27,6 +27,7 @@ type dockComp struct {
 	submitSel   int               // 0=Submit, 1=Cancel on the Submit tab; 0=Proceed, 1=Go back while confirming
 	decisionSel int               // permission/plan option index (Allow/Deny)
 	reason      textinput.Model   // permission/plan deny reason (single-line)
+	secret      textinput.Model   // masked value of a secret request; cleared on send
 	reply       textarea.Model    // idle reply composer (multi-line via shift+enter)
 	scroll      int               // dock body scroll offset (lines above the pinned controls)
 	key         string            // identity of the interaction the draft belongs to
@@ -37,7 +38,7 @@ type dockComp struct {
 }
 
 func newDock() dockComp {
-	return dockComp{reason: newTextInput(), reply: newIdleReplyArea(), drafts: map[string]string{}}
+	return dockComp{reason: newTextInput(), secret: newSecretInput(), reply: newIdleReplyArea(), drafts: map[string]string{}}
 }
 
 func (d dockComp) section() string { return "session-dock" }
@@ -125,6 +126,8 @@ func (d dockComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 		d.notes[d.tab], cmd = d.notes[d.tab].Update(p)
 	case d.questionCustomActive(c):
 		d.text[d.tab], cmd = d.text[d.tab].Update(p)
+	case d.secretEntryActive(c):
+		d.secret, cmd = d.secret.Update(p)
 	case d.denyReasonActive(c):
 		d.reason, cmd = d.reason.Update(p)
 	}

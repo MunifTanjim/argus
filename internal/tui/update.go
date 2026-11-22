@@ -237,6 +237,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateAgentView(msg, msg.agentID)
 	case agentRoutineMsg:
 		return m.updateAgentView(msg, msg.agentID)
+	case agentSetMsg:
+		return m.updateAgentView(msg, msg.agentID)
 	case terminalsMsg:
 		m.terminalsDone = true
 		m.terminalsErr = msg.err

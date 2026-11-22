@@ -145,10 +145,10 @@ void main() {
 
   testWidgets('an unreachable agent disables its actions', (tester) async {
     final (_, client) = await _pump(tester, status: 'unreachable');
-    expect(find.text(agentOffline), findsNWidgets(3));
+    expect(find.text(agentOffline), findsNWidgets(4));
     await tester.tap(find.byTooltip('New chat'));
     await tester.pump();
-    expect(find.text(agentOffline), findsNWidgets(4)); // three notes and the snackbar
+    expect(find.text(agentOffline), findsNWidgets(5)); // four notes and the snackbar
     expect(find.byType(AlertDialog), findsNothing);
     await tester.tap(find.byType(PopupMenuButton<String>));
     await tester.pumpAndSettle();

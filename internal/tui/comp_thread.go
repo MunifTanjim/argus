@@ -83,6 +83,20 @@ func (m model) undoMemoryCmd(agentID, threadID, commit string) tea.Cmd {
 	}
 }
 
+// offerCmd starts or dismisses an offer in thread.
+func (m model) offerCmd(threadID, offerID string, start bool) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		p := api.PAgentOfferParams{ThreadID: threadID, OfferID: offerID}
+		if start {
+			err := client.Call(api.MethodPAgentOfferStart, p, &api.PAgentSendResult{})
+			return threadActionMsg{threadID: threadID, verb: "start offer", err: err}
+		}
+		err := client.Call(api.MethodPAgentOfferDismiss, p, nil)
+		return threadActionMsg{threadID: threadID, verb: "dismiss offer", err: err}
+	}
+}
+
 // reloadThreadViewsCmd reloads every open thread's timeline.
 func (m model) reloadThreadViewsCmd() tea.Cmd {
 	var cmds []tea.Cmd
@@ -285,6 +299,19 @@ func (t threadComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, 
 			return t, nil, true
 		}
 		return t, m.undoMemoryCmd(t.agentID, t.threadID, commit), true
+	case m.matches(msg, offerKeys.Start, offerKeys.Dismiss) && t.draftAt(v) != 0:
+		return t, m.draftCmd(t.threadID, t.draftAt(v), m.matches(msg, offerKeys.Start)), true
+	case m.matches(msg, offerKeys.Start, offerKeys.Dismiss):
+		r, ok := v.cursorRow()
+		id := ""
+		if ok && r.kind == entryRow {
+			id = offerID(t.tr.transcript.entries[r.entry])
+		}
+		if id == "" || !offerOpen(t.tr.transcript.entries, id) {
+			c.setFlash("not an open offer")
+			return t, nil, true
+		}
+		return t, m.offerCmd(t.threadID, id, m.matches(msg, offerKeys.Start)), true
 	case m.matches(msg, listKeys.Refresh):
 		return t, m.loadTimelineCmd(t.threadID), true
 	default:

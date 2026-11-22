@@ -65,6 +65,11 @@ func (d dockComp) handleDecisionKey(c *ctx, msg tea.KeyPressMsg, ix *session.Int
 	case c.m.matches(msg, promptKeys.Submit):
 		return d.submitDecision(c, ix)
 	}
+	if d.secretEntryActive(c) {
+		var cmd tea.Cmd
+		d.secret, cmd = d.secret.Update(msg)
+		return d, cmd
+	}
 	if denying {
 		var cmd tea.Cmd
 		d.reason, cmd = d.reason.Update(msg)
@@ -231,6 +236,12 @@ func (d dockComp) submitDecision(c *ctx, ix *session.Interaction) (dockComp, tea
 	p := api.RespondParams{Kind: string(ix.Kind), RequestID: ix.RequestID, OptionValue: o.Value}
 	if o.Reject {
 		p.Reason = strings.TrimSpace(d.reason.Value())
+	} else if ix.Kind == session.InteractionSecret {
+		if d.secret.Value() == "" {
+			c.setFlash("type the secret's value first")
+			return d, nil
+		}
+		p.SecretValue = d.secret.Value()
 	}
 	id := c.m.liveSessionID()
 	c.focusOn(mainPane)

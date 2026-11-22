@@ -127,9 +127,10 @@ var sectionLists = map[string]sectionList{
 		focus:     focusFor("sidebar-agents"),
 	},
 	"agent": {
-		own: bindingsOf(listKeys.Up, listKeys.Down, listKeys.Top, listKeys.Bottom, listKeys.HalfUp, listKeys.HalfDown,
+		own: append(bindingsOf(listKeys.Up, listKeys.Down, listKeys.Top, listKeys.Bottom, listKeys.HalfUp, listKeys.HalfDown,
 			listKeys.Open, listKeys.Back, listKeys.Refresh, agentKeys.NewChat, agentKeys.Memory, agentKeys.MakePrimary,
-			agentKeys.UnsetPrimary, routineKeys.Run, routineKeys.Pause, routineKeys.Resume, routineKeys.TogglePause),
+			agentKeys.UnsetPrimary, routineKeys.Run, routineKeys.Pause, routineKeys.Resume, routineKeys.TogglePause,
+			agentKeys.CycleSetting), settingKeys()...),
 		focus: focusFor("agent"),
 	},
 	"workspace": {
@@ -151,7 +152,7 @@ var sectionLists = map[string]sectionList{
 	},
 	"thread": {
 		own: bindingsOf(slices.Concat(transcriptViewKeys, []any{detailKeys, sessionKeys.FocusPrompt, threadKeys.OpenSession,
-			memoryKeys.Undo, listKeys.Refresh})...),
+			memoryKeys.Undo, listKeys.Refresh, offerKeys.Start, offerKeys.Dismiss})...),
 		focus: focusFor("thread"),
 	},
 	"file": {

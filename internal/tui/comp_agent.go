@@ -27,6 +27,7 @@ type agentComp struct {
 	// routines are the agent's routines; the cursor runs over the threads,
 	// then these.
 	routines []api.PAgentRoutineInfo
+	usage    *api.PAgentUsageRow // the last 7 days; nil when the node has no usage
 }
 
 // agentMemoryUsage is the size of the agent's core memory, its budget, and
@@ -45,7 +46,15 @@ type agentViewMsg struct {
 	memory  *agentMemoryUsage
 	// routines is nil when the node has no routines to list.
 	routines []api.PAgentRoutineInfo
+	usage    *api.PAgentUsageRow
 	err      error
+}
+
+// agentSetMsg is the reply to a setting change.
+type agentSetMsg struct {
+	agentID     string
+	name, value string
+	err         error
 }
 
 // agentRoutineMsg is the reply to a routine action.
@@ -103,6 +112,10 @@ func (m model) loadAgentViewCmd(id string) tea.Cmd {
 		} else if !api.IsMethodNotFound(err) && msg.err == nil {
 			msg.err = err
 		}
+		var us api.PAgentUsageResult
+		if client.Call(api.MethodPAgentUsage, api.PAgentUsageParams{AgentID: id, Since: time.Now().Add(-usageWindow)}, &us) == nil {
+			msg.usage = &us.Total
+		}
 		return msg
 	}
 }
@@ -115,6 +128,15 @@ func (m model) routineCmd(agentID, slug, verb string) tea.Cmd {
 	return func() tea.Msg {
 		err := client.Call(method, api.PAgentRoutineRef{AgentID: agentID, Slug: slug}, nil)
 		return agentRoutineMsg{agentID: agentID, verb: verb, slug: slug, err: err}
+	}
+}
+
+// setAgentSettingCmd sets one setting of the agent; an empty value removes it.
+func (m model) setAgentSettingCmd(agentID string, spec agentSettingSpec, value string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		err := client.Call(api.MethodPAgentSet, api.PAgentSetParams{AgentID: agentID, Key: spec.key, Value: value}, &api.PAgentSetResult{})
+		return agentSetMsg{agentID: agentID, name: spec.cmd, value: value, err: err}
 	}
 }
 
@@ -192,6 +214,16 @@ func agentReply(c *ctx, msg tea.Msg) tea.Cmd {
 			c.setFlash("primary: " + msg.err.Error())
 		}
 		return c.m.loadPAgentsCmd()
+	case agentSetMsg:
+		switch {
+		case msg.err != nil:
+			c.setFlash(msg.name + ": " + msg.err.Error())
+		case msg.value == "":
+			c.setFlash(msg.name + ": default")
+		default:
+			c.setFlash(msg.name + ": " + msg.value)
+		}
+		return c.m.loadPAgentsCmd()
 	case agentRoutineMsg:
 		if msg.err != nil {
 			c.setFlash("routine " + msg.verb + ": " + msg.err.Error())
@@ -248,7 +280,28 @@ func (a agentComp) footer(c *ctx) []binding {
 }
 
 // items is how many rows the cursor runs over: the threads, then the routines.
-func (a agentComp) items(c *ctx) int { return len(a.threads(c)) + len(a.routines) }
+// items is how many rows the cursor runs over: the threads, the routines,
+// then the settings.
+func (a agentComp) items(c *ctx) int {
+	return len(a.threads(c)) + len(a.routines) + len(a.settingRows(c))
+}
+
+// settingRows are the settings shown; none when the node does not say them.
+func (a agentComp) settingRows(c *ctx) []agentSettingSpec {
+	if a.info(c).Settings == nil {
+		return nil
+	}
+	return agentSettingSpecs
+}
+
+func (a agentComp) selectedSetting(c *ctx) (agentSettingSpec, bool) {
+	i := min(a.cursor, cursorBottom(a.items(c))) - len(a.threads(c)) - len(a.routines)
+	rows := a.settingRows(c)
+	if i < 0 || i >= len(rows) {
+		return agentSettingSpec{}, false
+	}
+	return rows[i], true
+}
 
 func (a agentComp) selectedRoutine(c *ctx) (api.PAgentRoutineInfo, bool) {
 	i := min(a.cursor, cursorBottom(a.items(c))) - len(a.threads(c))
@@ -268,8 +321,8 @@ func (a agentComp) footerPrompt(*ctx) string {
 func (a agentComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 	switch msg := msg.(type) {
 	case agentViewMsg:
-		a.loaded, a.err, a.memory, a.routines = true, msg.err, msg.memory, msg.routines
-	case agentSentMsg, agentPrimaryMsg, agentRoutineMsg:
+		a.loaded, a.err, a.memory, a.routines, a.usage = true, msg.err, msg.memory, msg.routines, msg.usage
+	case agentSentMsg, agentPrimaryMsg, agentRoutineMsg, agentSetMsg:
 		cmd := agentReply(c, msg)
 		return a, tea.Batch(cmd, c.m.loadAgentViewCmd(a.agentID))
 	}
@@ -312,6 +365,23 @@ func (a agentComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, b
 	case m.matches(msg, agentKeys.NewChat, agentKeys.Memory, agentKeys.MakePrimary, agentKeys.UnsetPrimary,
 		routineKeys.Run, routineKeys.Pause, routineKeys.Resume, routineKeys.TogglePause) && offline:
 		c.setFlash(agentOffline)
+	case m.matches(msg, settingKeys()...) && offline:
+		c.setFlash(agentOffline)
+	case m.matches(msg, agentKeys.CycleSetting):
+		spec, ok := a.selectedSetting(c)
+		if !ok {
+			c.setFlash("pick a setting")
+			return a, nil, true
+		}
+		return a, m.setAgentSettingCmd(a.agentID, spec, spec.next(a.info(c).Settings[spec.field])), true
+	case m.matches(msg, settingKeys()...):
+		for _, s := range agentSettingSpecs {
+			for i, b := range s.bindings {
+				if m.matches(msg, b) {
+					return a, m.setAgentSettingCmd(a.agentID, s, s.value(i)), true
+				}
+			}
+		}
 	case m.matches(msg, routineKeys.Run, routineKeys.Pause, routineKeys.Resume, routineKeys.TogglePause) && !onRoutine:
 		c.setFlash("pick a routine")
 	case m.matches(msg, routineKeys.Run):
@@ -414,6 +484,19 @@ func (a agentComp) view(c *ctx, w, h int) string {
 	for i, r := range a.routines {
 		at := len(threads) + i
 		l.add(at, routineRow(r, at == cursor && focused, cardW))
+	}
+	if u := a.usage; u != nil {
+		l.text("")
+		l.text(StyleSecondaryBold.Render("Usage"))
+		l.text(dimStyle.Render("Last 7 days · " + usageText(*u)))
+	}
+	if rows := a.settingRows(c); len(rows) > 0 {
+		l.text("")
+		l.text(StyleSecondaryBold.Render("Settings"))
+		for i, s := range rows {
+			at := len(threads) + len(a.routines) + i
+			l.add(at, settingRow(s, ag.Settings[s.field], at == cursor && focused, cardW))
+		}
 	}
 	if u := a.memory; u != nil {
 		line := "Memory · " + kbSize(u.usage)
@@ -581,4 +664,91 @@ func (p chatPrompt) handleKey(msg tea.KeyPressMsg) (chatPrompt, tea.Cmd, string)
 
 func (p chatPrompt) view(label string) string {
 	return asstStyle.Render(label + ": " + p.input.View() + "  enter send · esc cancel")
+}
+
+// usageWindow is how far back the agent view counts usage.
+const usageWindow = 7 * 24 * time.Hour
+
+// usageText is usage in words: sessions, then cost and tokens when reported.
+func usageText(r api.PAgentUsageRow) string {
+	parts := []string{plural(int(r.Sessions), "session")}
+	if r.Cost > 0 {
+		parts = append(parts, fmt.Sprintf("$%.2f", r.Cost))
+	}
+	if r.Tokens > 0 {
+		t := fmt.Sprint(r.Tokens)
+		if r.Tokens >= 1000 {
+			t = fmt.Sprintf("%.1fk", float64(r.Tokens)/1000)
+		}
+		parts = append(parts, t+" tokens")
+	}
+	return strings.Join(parts, " · ")
+}
+
+// agentSettingSpec is a setting the agent view shows and sets: key is the
+// set RPC's key, field the key in PAgentInfo.settings, cmd its command word.
+type agentSettingSpec struct {
+	key, field, cmd, title string
+	options                []string
+	// bindings are "agent set <cmd> <option>" for each option, then
+	// "agent unset <cmd>".
+	bindings []binding
+}
+
+// value is what binding i sets; "" removes the setting.
+func (s agentSettingSpec) value(i int) string {
+	if i < len(s.options) {
+		return s.options[i]
+	}
+	return ""
+}
+
+// next is the value after cur in the cycle: the options in order, then the
+// default.
+func (s agentSettingSpec) next(cur api.PAgentSetting) string {
+	if !cur.Explicit {
+		return s.options[0]
+	}
+	i := slices.Index(s.options, cur.Value)
+	if i < 0 || i+1 >= len(s.options) {
+		return ""
+	}
+	return s.options[i+1]
+}
+
+func newSettingSpec(key, field, cmd, title string, options ...string) agentSettingSpec {
+	s := agentSettingSpec{key: key, field: field, cmd: cmd, title: title, options: options}
+	for _, o := range options {
+		s.bindings = append(s.bindings, nm("agent set "+cmd+" "+o, "", ""))
+	}
+	s.bindings = append(s.bindings, nm("agent unset "+cmd, "", ""))
+	return s
+}
+
+var agentSettingSpecs = []agentSettingSpec{
+	newSettingSpec("notify", "notify", "notify", "Notifications", "all", "needs-you", "off"),
+	newSettingSpec("proactivity", "proactivity", "proactivity", "Proactivity", "off", "low", "default", "high"),
+	newSettingSpec("memory.mode", "memory_mode", "memory", "Memory", "auto", "review", "off"),
+}
+
+// settingKeys are the set and unset commands of every setting.
+func settingKeys() []binding {
+	var out []binding
+	for _, s := range agentSettingSpecs {
+		out = append(out, s.bindings...)
+	}
+	return out
+}
+
+func settingRow(s agentSettingSpec, st api.PAgentSetting, sel bool, w int) string {
+	marker := "  "
+	if sel {
+		marker = asstStyle.Render("❯ ")
+	}
+	val := cmp.Or(st.Value, "?")
+	line := marker + headlineStyle(sel).Render(fmt.Sprintf("%-14s", s.title)) + " " + val
+	if !st.Explicit {
+		line += dimStyle.Render(" (default)")
+	}
+	return truncateLine(line, w)
 }

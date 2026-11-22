@@ -79,6 +79,8 @@ func dockSummary(agent string, ix *session.Interaction) string {
 			return "Your turn: " + ix.Message
 		}
 		return "Your turn"
+	case session.InteractionSecret:
+		return "Secret: " + ix.SecretName
 	default: // idle
 		if ix.Message != "" {
 			return ix.Message
