@@ -116,8 +116,7 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
       if (mounted) _say('set: ${actionError(e)}');
       return;
     }
-    final n = ref.read(agentSettingChoicesProvider.notifier);
-    n.state = {...n.state, '${a.id}|${spec.key}': value};
+    await _refresh();
   }
 
   void _openMemory(PAgent a) {
@@ -234,11 +233,7 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
             for (final spec in _settings)
               _SettingRow(
                 spec: spec,
-                choice: ref.watch(
-                  agentSettingChoicesProvider.select(
-                    (m) => m['${agent.id}|${spec.key}'],
-                  ),
-                ),
+                setting: agent.settings[spec.field],
                 onChanged: (v) => _setSetting(agent, spec, v),
               ),
             if (usage != null) ...[
@@ -264,67 +259,82 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
 }
 
 class _SettingSpec {
-  const _SettingSpec(this.key, this.title, this.options);
-  final String key;
+  const _SettingSpec(this.key, this.field, this.title, this.options);
+  final String key; // the set RPC's key
+  final String field; // the key in PAgentInfo.settings
   final String title;
   final List<(String, String)> options; // value, label
 }
 
 const _settings = [
-  _SettingSpec('notify', 'Notifications', [
+  _SettingSpec('notify', 'notify', 'Notifications', [
     ('all', 'All'),
     ('needs-you', 'Needs you'),
     ('off', 'Off'),
   ]),
-  _SettingSpec('proactivity', 'Proactivity', [
+  _SettingSpec('proactivity', 'proactivity', 'Proactivity', [
     ('off', 'Off'),
     ('low', 'Low'),
     ('default', 'Default'),
     ('high', 'High'),
   ]),
-  _SettingSpec('memory.mode', 'Memory', [
+  _SettingSpec('memory.mode', 'memory_mode', 'Memory', [
     ('auto', 'Auto'),
     ('review', 'Review'),
     ('off', 'Off'),
   ]),
 ];
 
-/// One agent setting. The node does not report what an agent has set, so
-/// nothing is selected until the user picks here; picking the selected value
-/// again removes the setting, so the default applies.
+/// One agent setting. The selected segment is what the agent's own file sets;
+/// a setting left to the default selects nothing and shows the value that
+/// applies. Picking the selected value again removes the setting, so the
+/// default applies.
 class _SettingRow extends StatelessWidget {
   const _SettingRow({
     required this.spec,
-    required this.choice,
+    required this.setting,
     required this.onChanged,
   });
 
   final _SettingSpec spec;
-  final String? choice;
+  final PAgentSetting? setting;
   final void Function(String value) onChanged;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 4),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(spec.title, style: const TextStyle(color: AppColors.dim)),
-        const SizedBox(height: 4),
-        SegmentedButton<String>(
-          key: ValueKey('setting-${spec.key}'),
-          emptySelectionAllowed: true,
-          showSelectedIcon: false,
-          segments: [
-            for (final (v, label) in spec.options)
-              ButtonSegment(value: v, label: Text(label)),
-          ],
-          selected: choice == null || choice!.isEmpty ? {} : {choice!},
-          onSelectionChanged: (s) => onChanged(s.isEmpty ? '' : s.first),
-        ),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) {
+    final st = setting;
+    final explicit = st != null && st.explicit && st.value.isNotEmpty;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(spec.title, style: const TextStyle(color: AppColors.dim)),
+              if (st != null && !explicit && st.value.isNotEmpty)
+                Text(
+                  '  default (${st.value})',
+                  style: const TextStyle(color: AppColors.dim, fontSize: 12),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          SegmentedButton<String>(
+            key: ValueKey('setting-${spec.key}'),
+            emptySelectionAllowed: true,
+            showSelectedIcon: false,
+            segments: [
+              for (final (v, label) in spec.options)
+                ButtonSegment(value: v, label: Text(label)),
+            ],
+            selected: explicit ? {st.value} : {},
+            onSelectionChanged: (s) => onChanged(s.isEmpty ? '' : s.first),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _UsageLine extends ConsumerWidget {

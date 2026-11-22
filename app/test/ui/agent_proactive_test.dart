@@ -44,7 +44,16 @@ Future<FakeGatewayClient> _pumpAgent(
       case 'pagent.list':
         return {
           'agents': [
-            {'id': 'A:a1', 'name': 'scout', 'status': status},
+            {
+              'id': 'A:a1',
+              'name': 'scout',
+              'status': status,
+              'settings': {
+                'notify': {'value': 'needs-you', 'explicit': true},
+                'proactivity': {'value': 'default'},
+                'memory_mode': {'value': 'auto'},
+              },
+            },
           ],
         };
       case 'pagent.usage':
@@ -123,7 +132,7 @@ final _offer = _argus(
   'e1',
   'offer',
   {'offer_id': 'of_1', 'title': 'Tidy the inbox', 'details': 'about 10 minutes', 'prompt': 'tidy it'},
-  detail: 'Offers: Tidy the inbox',
+  detail: 'Offer: Tidy the inbox: about 10 minutes',
 );
 
 void main() {
@@ -135,20 +144,36 @@ void main() {
     expect(age.inDays, 7);
   });
 
+  testWidgets('the selectors show the current settings', (tester) async {
+    await _pumpAgent(tester);
+    SegmentedButton<String> sel(String key) => tester.widget(
+      find.byKey(ValueKey('setting-$key')),
+    );
+    // An explicit setting is selected; a default selects nothing and says what applies.
+    expect(sel('notify').selected, {'needs-you'});
+    expect(sel('proactivity').selected, <String>{});
+    expect(sel('memory.mode').selected, <String>{});
+    expect(find.text('  default (default)'), findsOneWidget);
+    expect(find.text('  default (auto)'), findsOneWidget);
+    expect(find.textContaining('default (needs-you)'), findsNothing);
+  });
+
   testWidgets('the notification selector writes through pagent.set', (tester) async {
     final client = await _pumpAgent(tester);
     await tester.tap(
       find.descendant(
         of: find.byKey(const ValueKey('setting-notify')),
-        matching: find.text('Needs you'),
+        matching: find.text('Off'),
       ),
     );
     await tester.pumpAndSettle();
     expect(
       client.calls.firstWhere((c) => c.$1 == 'pagent.set').$2,
-      {'agent_id': 'A:a1', 'key': 'notify', 'value': 'needs-you'},
+      {'agent_id': 'A:a1', 'key': 'notify', 'value': 'off'},
     );
-    // Picking it again removes the setting.
+    // The agent list is read again afterwards.
+    expect(client.calls.where((c) => c.$1 == 'pagent.list').length, 2);
+    // Picking the selected value removes the setting.
     await tester.tap(
       find.descendant(
         of: find.byKey(const ValueKey('setting-notify')),
@@ -210,16 +235,16 @@ void main() {
 
   testWidgets('a brief shows whole and health shows its message', (tester) async {
     await _pumpThread(tester, [
-      _argus('e1', 'brief', {'text': 'Good morning. Three things today.'}, detail: 'brief', sec: 1),
-      _argus('e2', 'health', {'key': 'k', 'message': 'disk is almost full'}, sec: 2),
+      _argus('e1', 'brief', {'text': 'Good morning. Three things today.'}, detail: 'Good morning. Three things today.', sec: 1),
+      _argus('e2', 'health', {'key': 'k', 'message': 'disk is almost full'}, detail: 'Health: disk is almost full', sec: 2),
     ]);
     expect(find.textContaining('Three things today'), findsOneWidget);
-    expect(find.text('  disk is almost full'), findsOneWidget);
+    expect(find.text('  Health: disk is almost full'), findsOneWidget);
   });
 
   testWidgets('an open offer can be started', (tester) async {
     final client = await _pumpThread(tester, [_offer]);
-    expect(find.text('  Offers: Tidy the inbox'), findsOneWidget);
+    expect(find.text('  Offer: Tidy the inbox: about 10 minutes'), findsOneWidget);
     await tester.tap(find.text('Start'));
     await tester.pumpAndSettle();
     expect(
@@ -260,14 +285,11 @@ void main() {
     expect(find.text('start: offer was already started'), findsOneWidget);
   });
 
-  test('argusRowText prefers the node text and falls back to the payload', () {
+  test('argusRowText shows the node text, else the kind', () {
     Entry e(String kind, Map<String, dynamic> payload, {String detail = ''}) =>
         Entry.fromJson(_argus('x', kind, payload, detail: detail));
-    expect(argusRowText(e('offer', {'title': 'T', 'details': 'D'})), 'T: D');
-    expect(argusRowText(e('brief', {'text': 'hi'})), 'hi');
-    expect(argusRowText(e('health', {'message': 'm'})), 'm');
     expect(argusRowText(e('health', {'message': 'm'}, detail: 'Node text')), 'Node text');
-    expect(argusRowText(e('other', {})), 'other');
+    expect(argusRowText(e('health', {'message': 'm'})), 'health');
     expect(offerIdOf(e('offer', {'offer_id': 'of_1'})), 'of_1');
     expect(offerIdOf(e('brief', {'offer_id': 'of_1'})), '');
     expect(
@@ -300,7 +322,7 @@ void main() {
     expect(push.data['pagent_id'], 'A:a1');
   });
 
-  test('findThread matches a node-local or qualified thread id', () async {
+  test('findThread matches the qualified thread id', () async {
     final client = FakeGatewayClient((m, p) async {
       if (m == 'pagent.list') {
         return {
@@ -319,8 +341,9 @@ void main() {
     addTearDown(c.dispose);
     await c.read(pagentsProvider.notifier).load(client);
     final s = c.read(pagentsProvider);
-    expect(s.findThread('t1')?.$1, 'A:a1');
+    expect(s.findThread('A:t1')?.$1, 'A:a1');
     expect(s.findThread('A:t1')?.$2.id, 'A:t1');
-    expect(s.findThread('t2'), isNull);
+    expect(s.findThread('t1'), isNull);
+    expect(s.findThread('A:t2'), isNull);
   });
 }

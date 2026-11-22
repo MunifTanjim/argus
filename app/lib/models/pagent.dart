@@ -4,6 +4,14 @@ DateTime _time(Object? v) =>
     (v is String ? DateTime.tryParse(v) : null) ??
     DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
 
+/// One agent setting as it applies: [value] is the resolved value, [explicit]
+/// whether the agent's own file sets it (else it is the default).
+class PAgentSetting {
+  const PAgentSetting(this.value, {this.explicit = false});
+  final String value;
+  final bool explicit;
+}
+
 /// A registered persistent agent. Ids are composite (`node:id`). [status] is
 /// needs_you, waiting, working, idle or unreachable.
 class PAgent {
@@ -19,6 +27,7 @@ class PAgent {
     this.status = 'idle',
     this.nodeId = '',
     this.nodeLabel = '',
+    this.settings = const {},
   });
 
   final String id;
@@ -32,6 +41,10 @@ class PAgent {
   final String status;
   final String nodeId;
   final String nodeLabel;
+
+  /// notify, proactivity and memory_mode as they apply; empty when the node
+  /// does not report them.
+  final Map<String, PAgentSetting> settings;
 
   bool get unreachable => status == 'unreachable';
 
@@ -47,6 +60,15 @@ class PAgent {
     status: j['status'] as String? ?? 'idle',
     nodeId: j['node_id'] as String? ?? '',
     nodeLabel: j['node_label'] as String? ?? '',
+    settings: {
+      if (j['settings'] is Map)
+        for (final e in (j['settings'] as Map).entries)
+          if (e.value is Map)
+            '${e.key}': PAgentSetting(
+              (e.value as Map)['value'] as String? ?? '',
+              explicit: (e.value as Map)['explicit'] as bool? ?? false,
+            ),
+    },
   );
 }
 
@@ -505,19 +527,8 @@ Set<String> decidedOffers(Iterable<Entry> entries) {
   return out;
 }
 
-/// What an argus entry says: the node's text, or for a brief, offer or health
-/// event the node left bare, the payload's own words.
+/// What an argus entry says: the node's text, else the event's kind.
 String argusRowText(Entry e) {
-  final kind = e.event?.kind ?? e.label ?? '';
   final detail = e.detail ?? '';
-  if (detail.isNotEmpty && detail != kind) return detail;
-  final p = e.event?.payload is Map ? e.event!.payload as Map : const {};
-  String s(String k) => p[k] is String ? (p[k] as String).trim() : '';
-  final own = switch (kind) {
-    'brief' => s('text'),
-    'offer' => [s('title'), s('details')].where((x) => x.isNotEmpty).join(': '),
-    'health' => s('message'),
-    _ => '',
-  };
-  return own.isNotEmpty ? own : kind;
+  return detail.isNotEmpty ? detail : (e.event?.kind ?? e.label ?? '');
 }

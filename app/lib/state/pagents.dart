@@ -1,5 +1,4 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_riverpod/legacy.dart';
 
 import '../models/pagent.dart';
 import '../transport/gateway_client.dart';
@@ -282,12 +281,6 @@ final agentUsageProvider = FutureProvider.autoDispose
           .usage(agentId, since: DateTime.now().subtract(const Duration(days: 7)));
     });
 
-/// The settings the user chose in this app run, by agent id and key. The node
-/// does not report an agent's current settings, so this is only what was set
-/// here.
-final agentSettingChoicesProvider =
-    StateProvider<Map<String, String>>((ref) => const {});
-
 /// The agent's routines. Reloads when the agent list changes.
 final agentRoutinesProvider = FutureProvider.autoDispose
     .family<List<PAgentRoutine>, String>((ref, agentId) {
@@ -313,12 +306,11 @@ class PAgentsState {
 
   bool isPrimary(PAgent a) => a.primary || (a.id.isNotEmpty && a.id == primary);
 
-  /// The agent id and thread for [threadId], which may be a node-local id (a
-  /// push carries one) or the gateway-qualified id the store holds.
+  /// The agent id and thread with the gateway-qualified id [threadId].
   (String, PAgentThread)? findThread(String threadId) {
     for (final e in threads.entries) {
       for (final t in e.value) {
-        if (t.id == threadId || t.id.endsWith(':$threadId')) return (e.key, t);
+        if (t.id == threadId) return (e.key, t);
       }
     }
     return null;
