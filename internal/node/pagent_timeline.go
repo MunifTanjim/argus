@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -172,43 +173,95 @@ func lastStartedBy(links []pagent.ThreadSession, t time.Time) int {
 }
 
 func eventText(ev pagent.Event) string {
-	var raw map[string]json.RawMessage
-	_ = json.Unmarshal(ev.Payload, &raw)
-	m := map[string]string{}
-	for k, v := range raw {
-		var s string
-		if json.Unmarshal(v, &s) == nil {
-			m[k] = s
-		}
+	var m map[string]any
+	_ = json.Unmarshal(ev.Payload, &m)
+	str := func(k string) string {
+		v, _ := m[k].(string)
+		return strings.TrimSpace(v)
 	}
+	list := func(k string) []string {
+		vs, _ := m[k].([]any)
+		var out []string
+		for _, v := range vs {
+			if s, ok := v.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	// with appends more, its first line, after a colon.
+	with := func(s, more string) string {
+		more, _, _ = strings.Cut(strings.TrimSpace(more), "\n")
+		if more == "" {
+			return s
+		}
+		return s + ": " + more
+	}
+	routine := "Routine " + cmp.Or(str("routine"), "routine")
 	switch ev.Kind {
 	case evMemoryChanged:
-		return "Memory: " + cmp.Or(m["summary"], "changed")
+		return "Memory: " + cmp.Or(str("summary"), "changed")
 	case evMemoryProposed:
-		var ops []json.RawMessage
-		_ = json.Unmarshal(raw["ops"], &ops)
+		ops, _ := m["ops"].([]any)
 		if len(ops) == 1 {
 			return "Memory: 1 change to review"
 		}
 		return fmt.Sprintf("Memory: %d changes to review", len(ops))
 	case evMemoryBlocked:
-		return fmt.Sprintf("Memory: not saved, looks like a secret (%s)", m["rule"])
+		return fmt.Sprintf("Memory: not saved, looks like a secret (%s)", str("rule"))
 	case evMemoryError:
-		return "Memory: " + cmp.Or(m["message"], "error")
+		return "Memory: " + cmp.Or(str("message"), "error")
 	case "session.started":
 		return "Session started"
 	case "session.resumed":
 		return "Session resumed"
 	case "session.continued":
-		if r := m["reason"]; r != "" {
-			return "Continued in a new session: " + r
-		}
-		return "Continued in a new session"
+		return with("Continued in a new session", str("reason"))
 	case "session.idle_closed":
 		return "Session closed after being idle"
+	case evRoutineResult:
+		return with(routine+" "+cmp.Or(str("result"), "finished"), str("summary"))
+	case evRoutineNeedsYou:
+		return with(routine+" needs you", str("summary"))
+	case evRoutineCompleted:
+		return routine + " reached its goal"
+	case evRoutineFailing:
+		return with(routine+" failed", str("error"))
+	case evRoutineChanged:
+		return routine + " " + cmp.Or(str("action"), "changed")
+	case evRoutineProposed:
+		return with(routine+" change to review", str("reason"))
+	case evRoutineError:
+		return with(routine+" error", str("message"))
+	case evRoutineMissed:
+		n, _ := m["count"].(float64)
+		if n <= 1 {
+			return routine + " missed 1 run"
+		}
+		return fmt.Sprintf("%s missed %d runs", routine, int(n))
+	case evRoutineSkipped:
+		return with(routine+" skipped a run", str("reason"))
+	case evRoutineStale:
+		s := routine + " is overdue"
+		if t, err := time.Parse(time.RFC3339, str("due")); err == nil {
+			s += " since " + t.UTC().Format("2006-01-02 15:04 UTC")
+		}
+		return s
+	case evRoutinePaused:
+		names := cmp.Or(strings.Join(list("routines"), ", "), str("routine"), "routines")
+		return with(with("Paused "+names, str("reason")), str("message"))
+	case evDraft:
+		return with("Drafted "+cmp.Or(str("tool"), "an action"), cmp.Or(str("command"), str("target")))
+	case evDraftSent:
+		switch {
+		case str("error") != "":
+			return with("Approved action failed", str("error"))
+		case str("command") != "":
+			return with("Ran approved command", str("command"))
+		}
+		return "Sent the approved action to the agent"
+	case evDraftDiscarded:
+		return "Discarded a drafted action"
 	}
-	if m["message"] != "" {
-		return m["message"]
-	}
-	return ev.Kind
+	return cmp.Or(str("message"), ev.Kind)
 }

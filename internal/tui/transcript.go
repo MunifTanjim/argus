@@ -547,13 +547,13 @@ func systemRow(e transcript.Entry, expanded bool, iw int) (string, []cardSpan) {
 }
 
 // argusRow is an Argus event in an agent thread: dim, with the undo key on a
-// memory change.
+// memory or routine change.
 func (m tview) argusRow(e transcript.Entry, iw int) (string, []cardSpan) {
 	head := Icon.System.Render() + " " + StyleSecondary.Render("Argus") + "  " + StyleDim.Render(clockTime(e.Timestamp))
-	if text := cmp.Or(argusEventText(e), e.Detail, e.Label); text != "" {
+	if text := cmp.Or(e.Detail, e.Label); text != "" {
 		head += "  " + StyleDim.Render(text)
 	}
-	if memoryCommit(e) != "" && screenHas("thread", memoryKeys.Undo.name) {
+	if undoCommit(e) != "" && screenHas("thread", memoryKeys.Undo.name) {
 		head += "  " + StyleDim.Render(m.c.m.keyTextOn("thread", memoryKeys.Undo)+" undo")
 	}
 	return truncateLine(head, iw), chromeSpans(1)
@@ -1014,67 +1014,4 @@ func firstLine(s string) string {
 		s = s[:i] + " …"
 	}
 	return s
-}
-
-// argusEventText describes a routine or draft event from its payload; "" for
-// the other kinds, whose text the node sends.
-func argusEventText(e transcript.Entry) string {
-	if e.Event == nil {
-		return ""
-	}
-	var p struct {
-		Routine  string   `json:"routine"`
-		Routines []string `json:"routines"`
-		Action   string   `json:"action"`
-		Result   string   `json:"result"`
-		Summary  string   `json:"summary"`
-		Reason   string   `json:"reason"`
-		Message  string   `json:"message"`
-		Error    string   `json:"error"`
-		Count    int      `json:"count"`
-		Due      string   `json:"due"`
-		Tool     string   `json:"tool"`
-		Command  string   `json:"command"`
-		Target   string   `json:"target"`
-	}
-	_ = json.Unmarshal(e.Event.Payload, &p)
-	r := cmp.Or(p.Routine, "routine")
-	with := func(s, more string) string {
-		if more = firstLine(more); more != "" {
-			return s + ": " + more
-		}
-		return s
-	}
-	switch e.Event.Kind {
-	case "routine.result":
-		return with("Routine "+r+" "+cmp.Or(p.Result, "finished"), p.Summary)
-	case "routine.needs_you":
-		return with("Routine "+r+" needs you", p.Summary)
-	case "routine.completed":
-		return "Routine " + r + " reached its goal"
-	case "routine.failing":
-		return with("Routine "+r+" failed", p.Error)
-	case "routine.changed":
-		return "Routine " + r + " " + cmp.Or(p.Action, "changed")
-	case "routine.proposed":
-		return with("Routine "+r+" change to review", p.Reason)
-	case "routine.error":
-		return with("Routine "+r+" error", p.Message)
-	case "routine.missed":
-		return fmt.Sprintf("Routine %s missed %s", r, plural(max(p.Count, 1), "run"))
-	case "routine.skipped":
-		return with("Routine "+r+" skipped a run", p.Reason)
-	case "routine.stale":
-		s := "Routine " + r + " is overdue"
-		if p.Due != "" {
-			s += " since " + clockTime(p.Due)
-		}
-		return s
-	case "routine.paused":
-		names := cmp.Or(strings.Join(p.Routines, ", "), r)
-		return with(with("Paused "+names, p.Reason), p.Message)
-	case "draft":
-		return with("Drafted "+cmp.Or(p.Tool, "an action"), cmp.Or(p.Command, p.Target))
-	}
-	return ""
 }

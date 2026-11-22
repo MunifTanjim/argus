@@ -108,9 +108,10 @@ func (m model) updateThreadView(msg tea.Msg, threadID string) (tea.Model, tea.Cm
 	return m, tea.Batch(cmd, m.apply(c))
 }
 
-// memoryCommit is the commit an argus entry reports a memory change by, or "".
-func memoryCommit(e transcript.Entry) string {
-	if e.Kind != transcript.EntryArgus || e.Event == nil || e.Event.Kind != "memory.changed" {
+// undoCommit is the commit of a memory or routine change that an argus entry
+// reports, or "".
+func undoCommit(e transcript.Entry) string {
+	if e.Kind != transcript.EntryArgus || e.Event == nil || (e.Event.Kind != "memory.changed" && e.Event.Kind != "routine.changed") {
 		return ""
 	}
 	var p struct {
@@ -277,10 +278,10 @@ func (t threadComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, 
 		r, ok := v.cursorRow()
 		commit := ""
 		if ok && r.kind == entryRow {
-			commit = memoryCommit(t.tr.transcript.entries[r.entry])
+			commit = undoCommit(t.tr.transcript.entries[r.entry])
 		}
 		if commit == "" {
-			c.setFlash("not a memory change")
+			c.setFlash("not a change to undo")
 			return t, nil, true
 		}
 		return t, m.undoMemoryCmd(t.agentID, t.threadID, commit), true

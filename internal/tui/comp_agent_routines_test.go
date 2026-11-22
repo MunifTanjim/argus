@@ -95,33 +95,30 @@ func TestAgentMemoryReviewShowsRoutineProposals(t *testing.T) {
 	}
 }
 
-func TestThreadRoutineEventText(t *testing.T) {
-	ev := func(kind, payload string) transcript.Entry {
-		return transcript.Entry{Kind: transcript.EntryArgus, Label: kind, Event: &transcript.ArgusEvent{Kind: kind, Payload: json.RawMessage(payload)}}
+func TestThreadRoutineEventsUseNodeTextAndUndo(t *testing.T) {
+	cl := threadClient()
+	cl.timeline.Entries = append(cl.timeline.Entries,
+		transcript.Entry{ID: "ev:8", Kind: transcript.EntryArgus, Label: "routine.missed", Detail: "Routine brief missed 3 runs",
+			Timestamp: threadT0.Add(4 * time.Minute).Format(time.RFC3339Nano),
+			Event:     &transcript.ArgusEvent{ID: 8, Kind: "routine.missed", Payload: json.RawMessage(`{"routine":"brief","count":3}`)}},
+		transcript.Entry{ID: "ev:9", Kind: transcript.EntryArgus, Label: "routine.changed", Detail: "Routine brief created",
+			Timestamp: threadT0.Add(5 * time.Minute).Format(time.RFC3339Nano),
+			Event:     &transcript.ArgusEvent{ID: 9, Kind: "routine.changed", Payload: json.RawMessage(`{"routine":"brief","action":"created","commit":"r123"}`)}},
+	)
+	m := openedThread(t, cl)
+	out := ansi.Strip(m.View().Content)
+	if !strings.Contains(out, "Routine brief missed 3 runs") || !strings.Contains(out, "Routine brief created  u undo") {
+		t.Fatalf("thread view lacks the node's routine text:\n%s", out)
 	}
-	for _, c := range []struct {
-		e    transcript.Entry
-		want string
-	}{
-		{ev("routine.result", `{"routine":"brief","result":"done","summary":"sent the brief"}`), "Routine brief done: sent the brief"},
-		{ev("routine.changed", `{"routine":"brief","action":"created"}`), "Routine brief created"},
-		{ev("routine.proposed", `{"routine":"brief","reason":"run earlier"}`), "Routine brief change to review: run earlier"},
-		{ev("routine.error", `{"routine":"brief","message":"bad cron"}`), "Routine brief error: bad cron"},
-		{ev("routine.missed", `{"routine":"brief","count":3}`), "Routine brief missed 3 runs"},
-		{ev("routine.skipped", `{"routine":"brief","reason":"overlap"}`), "Routine brief skipped a run: overlap"},
-		{ev("routine.paused", `{"reason":"away","routines":["a","b"]}`), "Paused a, b: away"},
-		{ev("draft", `{"tool":"Bash","command":"git push"}`), "Drafted Bash: git push"},
-		{ev("memory.changed", `{"commit":"x"}`), ""},
-	} {
-		if got := argusEventText(c.e); got != c.want {
-			t.Errorf("%s: %q, want %q", c.e.Event.Kind, got, c.want)
-		}
+	if strings.Contains(out, "Routine brief missed 3 runs  u undo") {
+		t.Error("a missed run offers undo")
 	}
-	m := openedThread(t, threadClient())
-	th := m.main.top().(threadComp)
-	th.tr.transcript.entries = append(th.tr.transcript.entries, ev("routine.stale", `{"routine":"brief","due":"2026-11-22T10:00:00Z"}`))
-	m.main = m.main.replaceTop(th)
-	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "Routine brief is overdue") {
-		t.Errorf("thread view lacks the routine event:\n%s", out)
+	m, cmd := upd(m, keyMsg("u")) // the cursor is on the last entry: routine.changed
+	if cmd == nil {
+		t.Fatal("u on a routine change undoes it")
+	}
+	cmd()
+	if p, _ := pagentParams[api.PAgentMemoryUndoParams](cl, api.MethodPAgentMemoryUndo); p != (api.PAgentMemoryUndoParams{AgentID: "n1:u", Commit: "r123"}) {
+		t.Fatalf("undo params = %+v", p)
 	}
 }

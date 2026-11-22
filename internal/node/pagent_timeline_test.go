@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -153,5 +154,36 @@ func TestTimelineMissingTranscriptAddsErrorEntry(t *testing.T) {
 	eqIDs(t, res.Entries, "s0:err", "s1:1")
 	if e := res.Entries[0]; e.Kind != transcript.EntryArgus || !e.IsError {
 		t.Fatalf("entry = %+v", e)
+	}
+}
+
+func TestEventTextReadsPayloads(t *testing.T) {
+	for _, c := range []struct {
+		kind, payload, want string
+	}{
+		{evMemoryChanged, `{"summary":"added flat search","ops":[{}]}`, "Memory: added flat search"},
+		{evMemoryProposed, `{"ops":[{},{}]}`, "Memory: 2 changes to review"},
+		{"session.continued", `{"reason":"context full"}`, "Continued in a new session: context full"},
+		{evRoutineResult, `{"routine":"brief","result":"done","summary":"sent the brief","actions_done":["x"]}`, "Routine brief done: sent the brief"},
+		{evRoutineNeedsYou, `{"routine":"brief","summary":"login expired"}`, "Routine brief needs you: login expired"},
+		{evRoutineCompleted, `{"routine":"billing"}`, "Routine billing reached its goal"},
+		{evRoutineFailing, `{"routine":"brief","error":"exit 1"}`, "Routine brief failed: exit 1"},
+		{evRoutineChanged, `{"routine":"brief","action":"created","commit":"abc"}`, "Routine brief created"},
+		{evRoutineProposed, `{"routine":"brief","reason":"run earlier"}`, "Routine brief change to review: run earlier"},
+		{evRoutineError, `{"routine":"brief","message":"bad schedule"}`, "Routine brief error: bad schedule"},
+		{evRoutineMissed, `{"routine":"brief","count":3}`, "Routine brief missed 3 runs"},
+		{evRoutineSkipped, `{"routine":"brief","reason":"overlap"}`, "Routine brief skipped a run: overlap"},
+		{evRoutineStale, `{"routine":"brief","due":"2026-11-22T10:00:00Z"}`, "Routine brief is overdue since 2026-11-22 10:00 UTC"},
+		{evRoutinePaused, `{"reason":"away","routines":["a","b"]}`, "Paused a, b: away"},
+		{evRoutinePaused, `{"reason":"failures","routines":["a"],"message":"3 runs in a row failed"}`, "Paused a: failures: 3 runs in a row failed"},
+		{evDraft, `{"tool":"Bash","command":"git push","classes":["publish"]}`, "Drafted Bash: git push"},
+		{evDraftSent, `{"event_id":4,"command":"git push","exit_code":0}`, "Ran approved command: git push"},
+		{evDraftDiscarded, `{"event_id":4}`, "Discarded a drafted action"},
+		{evSkillsMissing, `{"skills":["x"],"message":"Skills not found: x"}`, "Skills not found: x"},
+		{"other.kind", `{}`, "other.kind"},
+	} {
+		if got := eventText(pagent.Event{Kind: c.kind, Payload: json.RawMessage(c.payload)}); got != c.want {
+			t.Errorf("%s: %q, want %q", c.kind, got, c.want)
+		}
 	}
 }

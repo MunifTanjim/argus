@@ -116,7 +116,7 @@ func TestThreadViewUndoMemoryEvent(t *testing.T) {
 	cl := threadClient()
 	m := openedThread(t, cl)
 	m, cmd := upd(m, keyMsg("u"))
-	if cmd != nil || m.flash != "not a memory change" {
+	if cmd != nil || m.flash != "not a change to undo" {
 		t.Fatalf("u off a memory event: flash %q", m.flash)
 	}
 	m = typeKeys(m, "k")
