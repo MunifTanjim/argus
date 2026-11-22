@@ -299,7 +299,7 @@ func (d *Node) pagentEnsureSession(ctx context.Context, a pagent.Agent, th pagen
 	if !ok {
 		return "", false, pagentErr("unknown agent CLI %q", cli)
 	}
-	if err := d.pagentInstructions(ctx, a, th, def, set, ""); err != nil {
+	if err := d.pagentInstructions(ctx, a, th, def, set); err != nil {
 		return "", false, err
 	}
 	if err := d.pagentMakeRoom(ctx, a, set.MaxConcurrentSessions); err != nil {
@@ -368,14 +368,14 @@ func (d *Node) pagentEnsureSession(ctx context.Context, a pagent.Agent, th pagen
 }
 
 // pagentInstructions prepares the agent's shared repositories and skills and
-// writes its instruction file, with runSection appended for a run.
-func (d *Node) pagentInstructions(ctx context.Context, a pagent.Agent, th pagent.Thread, def *pagent.Definition, set pagent.Settings, runSection string) error {
+// writes its instruction file. The file is the same for every session of the
+// agent: run-specific context goes in a run's first prompt.
+func (d *Node) pagentInstructions(ctx context.Context, a pagent.Agent, th pagent.Thread, def *pagent.Definition, set pagent.Settings) error {
 	d.pagentPrepareShared(ctx, a, th, def, set.Agent)
 	in, err := pagent.GatherInput(a.Dir, def, set, d.pagentCfg.ProfileDir, set.LogEntries, set.CoreBudget, d.pagentNow())
 	if err != nil {
 		return pagentErr("read memory: %v", err)
 	}
-	in.RunSection = runSection
 	if err := pagent.WriteInstructions(ctx, a.Dir, set.Agent, in); err != nil {
 		return pagentErr("write instructions: %v", err)
 	}

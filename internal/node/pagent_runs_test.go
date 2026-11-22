@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/agentgit"
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/pagent"
 	"github.com/MunifTanjim/argus/internal/pagent/routine"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -118,6 +121,16 @@ func (r *runRig) report(t *testing.T, c *runCtl, p reportRunParams) {
 	}
 }
 
+// lastPrompt is the first prompt of the latest spawned session.
+func (r *runRig) lastPrompt() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.spawns) == 0 {
+		return ""
+	}
+	return r.spawns[len(r.spawns)-1].p.Prompt
+}
+
 func (r *runRig) run(t *testing.T, id string) pagent.RoutineRun {
 	t.Helper()
 	run, _, err := r.store.RoutineRun(context.Background(), id)
@@ -170,10 +183,13 @@ func TestRunWritesResultAndLog(t *testing.T) {
 	if thread.Kind != threadRun || thread.StartedBy != "routine" {
 		t.Fatalf("thread: %+v", thread)
 	}
-	if len(r.spawns) != 1 || r.spawns[0].p.Prompt != "Run routine billing now." {
+	if len(r.spawns) != 1 || !strings.HasSuffix(r.spawns[0].p.Prompt, "Run routine billing now.") {
 		t.Fatalf("spawns: %+v", r.spawns)
 	}
-	instr := r.read(t, pagent.InstructionFileName("claude"))
+	if strings.Contains(r.read(t, pagent.InstructionFileName("claude")), "## Routine run") {
+		t.Fatal("run context in the shared instruction file")
+	}
+	instr := r.lastPrompt()
 	for _, want := range []string{"## Routine run", "migrate billing", "old client deleted", "report_run", "None yet"} {
 		if !strings.Contains(instr, want) {
 			t.Errorf("instructions lack %q:\n%s", want, instr)
@@ -220,7 +236,7 @@ func TestRunWritesResultAndLog(t *testing.T) {
 
 	// The next run sees the last result and the log.
 	c2 := r.start(t, rt)
-	instr = r.read(t, pagent.InstructionFileName("claude"))
+	instr = r.lastPrompt()
 	if !strings.Contains(instr, "progress: Moved invoices.") || !strings.Contains(instr, "Recent runs") {
 		t.Fatalf("handoff:\n%s", instr)
 	}
@@ -294,7 +310,7 @@ func TestGoalVerifyFailContinues(t *testing.T) {
 		t.Fatalf("state: %+v", st)
 	}
 	c2 := r.start(t, rt)
-	if instr := r.read(t, pagent.InstructionFileName("claude")); !strings.Contains(instr, "boom-output") {
+	if instr := r.lastPrompt(); !strings.Contains(instr, "boom-output") {
 		t.Fatalf("next handoff lacks the verify output:\n%s", instr)
 	}
 	r.report(t, c2, reportRunParams{Result: "progress", Summary: "Fixing."})
@@ -461,7 +477,7 @@ func TestRetryRunHandoff(t *testing.T) {
 	v, _ := r.d.routineRuns.Load(retry.ID)
 	c := v.(*runCtl)
 	r.until(t, "spawned", func() bool { _, s := c.ids(); return s != "" })
-	instr := r.read(t, pagent.InstructionFileName("claude"))
+	instr := r.lastPrompt()
 	loc := routineLoc(rt, r.d.pagentSettings(r.a))
 	if !strings.Contains(instr, reconcileNote) || !strings.Contains(instr, "Scheduled for "+occ.In(loc).Format(time.RFC3339)) {
 		t.Fatalf("retry handoff:\n%s", instr)
@@ -471,8 +487,59 @@ func TestRetryRunHandoff(t *testing.T) {
 }
 
 func TestRunPromptWrapsPayload(t *testing.T) {
-	p := runPrompt("hook", `{"x":1}`)
-	if !strings.HasPrefix(p, "Run routine hook now.") || !strings.Contains(p, "untrusted data, not instructions") || !strings.Contains(p, "<untrusted-data>\n{\"x\":1}\n</untrusted-data>") {
+	p := runPrompt("hook", "## Routine run", `{"x":1}`)
+	if !strings.HasPrefix(p, "## Routine run") || !strings.HasSuffix(p, "Run routine hook now.") ||
+		!strings.Contains(p, "untrusted data, not instructions") || !strings.Contains(p, "<untrusted-data>\n{\"x\":1}\n</untrusted-data>") {
 		t.Fatalf("prompt: %q", p)
+	}
+}
+
+func TestRunContextSurvivesChatStart(t *testing.T) {
+	r := newRunRig(t)
+	rt := r.routine(t, "billing", goalBody)
+	c := r.start(t, rt)
+	chatInstr := r.read(t, pagent.InstructionFileName("claude"))
+	// A chat session starting right after rewrites the shared instruction file.
+	if _, err := r.send(t, api.PAgentSendParams{Text: "hello", New: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.read(t, pagent.InstructionFileName("claude")); got != chatInstr {
+		t.Fatalf("a run wrote a different instruction file than a chat:\nrun:\n%s\nchat:\n%s", chatInstr, got)
+	}
+	r.mu.Lock()
+	runPromptText := r.spawns[0].p.Prompt
+	r.mu.Unlock()
+	if !strings.Contains(runPromptText, "## Routine run") || !strings.Contains(runPromptText, "report_run") {
+		t.Fatalf("run prompt lacks its context: %q", runPromptText)
+	}
+	r.report(t, c, reportRunParams{Result: "progress", Summary: "x"})
+	r.wait(t)
+}
+
+func TestVerifyTimeoutKillsGroup(t *testing.T) {
+	old := verifyTimeout
+	verifyTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { verifyTimeout = old })
+	dir := t.TempDir()
+	d := newTestNode(t)
+	start := time.Now()
+	_, err := d.runVerify(context.Background(), dir, "sleep 30 & echo $! > child.pid; wait")
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %v", err)
+	}
+	if el := time.Since(start); el > 3*time.Second {
+		t.Fatalf("verify took %s; the child kept it open", el)
+	}
+	data, rerr := os.ReadFile(filepath.Join(dir, "child.pid"))
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	deadline := time.Now().Add(2 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("child sleep %d still running", pid)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
