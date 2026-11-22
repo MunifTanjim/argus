@@ -113,8 +113,16 @@ func TestTidyOnlyWhenNewEntries(t *testing.T) {
 	if err := r.d.pagentTidy(ctx, r.pa(t), false); err != nil || len(r.ex.prompts) != 1 {
 		t.Fatalf("first tidy: %v %d", err, len(r.ex.prompts))
 	}
-	// No change, so no tidy commit; still due until one is made.
-	r.ex.reply = `{"ops":[{"action":"remove","match":"uses vim"}]}`
+	// No change: skipped until memory changes, even after a restart.
+	if err := r.d.pagentTidy(ctx, r.pa(t), false); err != nil || len(r.ex.prompts) != 1 {
+		t.Fatalf("unchanged tidy: %v %d", err, len(r.ex.prompts))
+	}
+	r.d.tidyIdle = nil
+	if err := r.d.pagentTidy(ctx, r.pa(t), false); err != nil || len(r.ex.prompts) != 1 {
+		t.Fatalf("unchanged tidy after restart: %v %d", err, len(r.ex.prompts))
+	}
+	r.seedMemory(t, "capture", memory.Op{Text: "owns a dog"})
+	r.ex.reply = `{"ops":[{"action":"remove","match":"owns a dog"}]}`
 	if err := r.d.pagentTidy(ctx, r.pa(t), false); err != nil {
 		t.Fatal(err)
 	}

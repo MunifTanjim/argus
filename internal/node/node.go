@@ -134,6 +134,7 @@ type Node struct {
 	captureErrAt map[string]time.Time // thread id -> last memory.error and capture retry gate
 	tidyMu       sync.Mutex
 	tidyAt       map[string]time.Time // agent id -> when tidy last ran
+	tidyIdle     map[string]string    // agent id -> memory commit at the last tidy that changed nothing
 
 	// resumeFn relaunches a past agent session; defaults to (*Node).resumeAdopt.
 	// errResumeStarting comes with the launching session's id.

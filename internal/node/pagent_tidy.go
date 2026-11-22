@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/agentgit"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/atomicfile"
 	"github.com/MunifTanjim/argus/internal/pagent"
 	"github.com/MunifTanjim/argus/internal/pagent/memory"
 )
@@ -123,7 +126,16 @@ func (d *Node) pagentTidy(ctx context.Context, a pagent.Agent, force bool) error
 	if err := d.commitHandEdits(ctx, repo, a, "", []string{memoryDir, pagent.DefinitionFile}); err != nil {
 		return err
 	}
+	head := ""
+	if cs, err := repo.Log(ctx, []string{memoryDir}, 1); err != nil {
+		return err
+	} else if len(cs) > 0 {
+		head = cs[0].Hash
+	}
 	if !force {
+		if head != "" && d.tidyIdleHead(a.ID) == head {
+			return nil
+		}
 		due, err := newEntriesSince(ctx, repo)
 		if err != nil || !due {
 			return err
@@ -135,6 +147,7 @@ func (d *Node) pagentTidy(ctx context.Context, a pagent.Agent, force bool) error
 		return err
 	}
 	if len(memory.Parse(content)) == 0 {
+		d.setTidyIdleHead(a.ID, head)
 		return nil
 	}
 	now := d.memoryNow(set)
@@ -178,9 +191,11 @@ func (d *Node) pagentTidy(ctx context.Context, a pagent.Agent, force bool) error
 	plan, err := memory.PlanTidy(content, norm, today, userLines)
 	if err != nil {
 		d.agentMemoryEvent(ctx, a, "", evMemoryError, map[string]string{"message": "tidy rejected: " + err.Error()})
+		d.setTidyIdleHead(a.ID, head)
 		return nil
 	}
 	if plan.Expired == 0 && len(plan.Applied) == 0 && len(plan.Topics) == 0 {
+		d.setTidyIdleHead(a.ID, head)
 		return nil
 	}
 	if err := writeFileMkdir(filepath.Join(memDir, memoryFile), plan.Memory); err != nil {
@@ -238,4 +253,42 @@ func (d *Node) tidyOps(ctx context.Context, set pagent.Settings, memDir, content
 	}
 	ops, _, err := memory.ParseCaptureResult(reply)
 	return ops, err
+}
+
+func (d *Node) tidyIdleFile(agentID string) string {
+	return filepath.Join(filepath.Dir(d.pagentPrimaryFile), "pagent-tidy-"+agentID)
+}
+
+// tidyIdleHead returns the last memory commit at which a tidy attempt changed
+// nothing, or "".
+func (d *Node) tidyIdleHead(agentID string) string {
+	d.tidyMu.Lock()
+	defer d.tidyMu.Unlock()
+	if h, ok := d.tidyIdle[agentID]; ok {
+		return h
+	}
+	data, _ := os.ReadFile(d.tidyIdleFile(agentID))
+	h := strings.TrimSpace(string(data))
+	if d.tidyIdle == nil {
+		d.tidyIdle = map[string]string{}
+	}
+	d.tidyIdle[agentID] = h
+	return h
+}
+
+func (d *Node) setTidyIdleHead(agentID, head string) {
+	if head == "" {
+		return
+	}
+	d.tidyMu.Lock()
+	if d.tidyIdle == nil {
+		d.tidyIdle = map[string]string{}
+	}
+	d.tidyIdle[agentID] = head
+	d.tidyMu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(d.tidyIdleFile(agentID)), 0o755); err == nil {
+		if err := atomicfile.Write(d.tidyIdleFile(agentID), []byte(head)); err != nil {
+			d.log.Warn("pagent: save tidy state", "agent", agentID, "err", err)
+		}
+	}
 }
