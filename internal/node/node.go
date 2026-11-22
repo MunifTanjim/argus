@@ -132,6 +132,8 @@ type Node struct {
 	extractorFor func(set pagent.Settings) memory.Extractor
 	captureMu    sync.Mutex
 	captureErrAt map[string]time.Time // thread id -> last memory.error and capture retry gate
+	tidyMu       sync.Mutex
+	tidyAt       map[string]time.Time // agent id -> when tidy last ran
 
 	// resumeFn relaunches a past agent session; defaults to (*Node).resumeAdopt.
 	// errResumeStarting comes with the launching session's id.
@@ -720,6 +722,7 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 		go d.pagentWatch(ctx, pagentEvents)
 		go d.pagentIdleLoop(ctx)
 		go d.pagentCaptureLoop(ctx)
+		go d.pagentTidyLoop(ctx)
 	}
 
 	return d.server.ServeContext(ctx, l)
