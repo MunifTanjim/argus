@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -23,6 +24,9 @@ type agentComp struct {
 	err     error
 	memory  *agentMemoryUsage // nil: the node has no memory to show
 	chat    chatPrompt
+	// routines are the agent's routines; the cursor runs over the threads,
+	// then these.
+	routines []api.PAgentRoutineInfo
 }
 
 // agentMemoryUsage is the size of the agent's core memory, its budget, and
@@ -39,6 +43,16 @@ type agentViewMsg struct {
 	agentID string
 	threads []api.PAgentThreadInfo
 	memory  *agentMemoryUsage
+	// routines is nil when the node has no routines to list.
+	routines []api.PAgentRoutineInfo
+	err      error
+}
+
+// agentRoutineMsg is the reply to a routine action.
+type agentRoutineMsg struct {
+	agentID string
+	verb    string
+	slug    string
 	err     error
 }
 
@@ -83,8 +97,36 @@ func (m model) loadAgentViewCmd(id string) tea.Cmd {
 				msg.memory.last = log.Commits[0].When
 			}
 		}
+		var rl api.PAgentRoutineListResult
+		if err := client.Call(api.MethodPAgentRoutineList, api.PAgentRef{AgentID: id}, &rl); err == nil {
+			msg.routines = rl.Routines
+		} else if !api.IsMethodNotFound(err) && msg.err == nil {
+			msg.err = err
+		}
 		return msg
 	}
+}
+
+// routineCmd runs, pauses or resumes a routine: verb is run, pause or resume.
+func (m model) routineCmd(agentID, slug, verb string) tea.Cmd {
+	method := map[string]string{"run": api.MethodPAgentRoutineRun, "pause": api.MethodPAgentRoutinePause,
+		"resume": api.MethodPAgentRoutineResume}[verb]
+	client := m.client
+	return func() tea.Msg {
+		err := client.Call(method, api.PAgentRoutineRef{AgentID: agentID, Slug: slug}, nil)
+		return agentRoutineMsg{agentID: agentID, verb: verb, slug: slug, err: err}
+	}
+}
+
+// reloadAgentViewsCmd reloads every open agent view.
+func (m model) reloadAgentViewsCmd() tea.Cmd {
+	var cmds []tea.Cmd
+	for _, comp := range m.main {
+		if a, ok := comp.(agentComp); ok {
+			cmds = append(cmds, m.loadAgentViewCmd(a.agentID))
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m model) sendAgentChatCmd(id, text string) tea.Cmd {
@@ -150,6 +192,12 @@ func agentReply(c *ctx, msg tea.Msg) tea.Cmd {
 			c.setFlash("primary: " + msg.err.Error())
 		}
 		return c.m.loadPAgentsCmd()
+	case agentRoutineMsg:
+		if msg.err != nil {
+			c.setFlash("routine " + msg.verb + ": " + msg.err.Error())
+		} else {
+			c.setFlash(map[string]string{"run": "started ", "pause": "paused ", "resume": "resumed "}[msg.verb] + msg.slug)
+		}
 	}
 	return nil
 }
@@ -175,17 +223,39 @@ func (a agentComp) info(c *ctx) api.PAgentInfo {
 	return ag
 }
 
-// commands leaves out the primary change that would not change anything.
+// commands leaves out the primary change that would not change anything, and
+// the routine actions off a routine.
 func (a agentComp) commands(c *ctx) []binding {
-	drop := agentKeys.MakePrimary
+	drop := []string{agentKeys.MakePrimary.name}
 	if !c.m.pagentPrimaryOf(a.info(c)) {
-		drop = agentKeys.UnsetPrimary
+		drop = []string{agentKeys.UnsetPrimary.name}
 	}
-	return slices.DeleteFunc(slices.Clone(sectionLists[a.section()].own), func(b binding) bool { return b.name == drop.name })
+	if r, ok := a.selectedRoutine(c); !ok {
+		drop = append(drop, routineKeys.Run.name, routineKeys.Pause.name, routineKeys.Resume.name, routineKeys.TogglePause.name)
+	} else if r.State == "paused" {
+		drop = append(drop, routineKeys.Pause.name)
+	} else {
+		drop = append(drop, routineKeys.Resume.name)
+	}
+	return slices.DeleteFunc(slices.Clone(sectionLists[a.section()].own), func(b binding) bool { return slices.Contains(drop, b.name) })
 }
 
 func (a agentComp) footer(c *ctx) []binding {
+	if _, ok := a.selectedRoutine(c); ok {
+		return []binding{routineKeys.Run, routineKeys.TogglePause, agentKeys.NewChat, agentKeys.Memory, listKeys.Back, listKeys.Refresh}
+	}
 	return []binding{listKeys.Open, agentKeys.NewChat, agentKeys.Memory, listKeys.Back, listKeys.Refresh}
+}
+
+// items is how many rows the cursor runs over: the threads, then the routines.
+func (a agentComp) items(c *ctx) int { return len(a.threads(c)) + len(a.routines) }
+
+func (a agentComp) selectedRoutine(c *ctx) (api.PAgentRoutineInfo, bool) {
+	i := min(a.cursor, cursorBottom(a.items(c))) - len(a.threads(c))
+	if i < 0 || i >= len(a.routines) {
+		return api.PAgentRoutineInfo{}, false
+	}
+	return a.routines[i], true
 }
 
 func (a agentComp) footerPrompt(*ctx) string {
@@ -198,8 +268,8 @@ func (a agentComp) footerPrompt(*ctx) string {
 func (a agentComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 	switch msg := msg.(type) {
 	case agentViewMsg:
-		a.loaded, a.err, a.memory = true, msg.err, msg.memory
-	case agentSentMsg, agentPrimaryMsg:
+		a.loaded, a.err, a.memory, a.routines = true, msg.err, msg.memory, msg.routines
+	case agentSentMsg, agentPrimaryMsg, agentRoutineMsg:
 		cmd := agentReply(c, msg)
 		return a, tea.Batch(cmd, c.m.loadAgentViewCmd(a.agentID))
 	}
@@ -218,9 +288,10 @@ func (a agentComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, b
 		return a, cmd, true
 	}
 	threads := a.threads(c)
-	n := len(threads)
+	n := a.items(c)
 	a.cursor = min(a.cursor, cursorBottom(n))
 	offline := a.info(c).Status == pagentUnreachable
+	routine, onRoutine := a.selectedRoutine(c)
 	switch {
 	case m.matches(msg, k.Up):
 		a.cursor = cursorUp(a.cursor)
@@ -235,11 +306,26 @@ func (a agentComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, b
 	case m.matches(msg, k.HalfDown):
 		a.cursor = cursorBy(a.cursor, a.pageStep(c), n)
 	case m.matches(msg, k.Open):
-		if a.cursor < n {
+		if a.cursor < len(threads) {
 			return a, openThread(c, threads[a.cursor]), true
 		}
-	case m.matches(msg, agentKeys.NewChat, agentKeys.Memory, agentKeys.MakePrimary, agentKeys.UnsetPrimary) && offline:
+	case m.matches(msg, agentKeys.NewChat, agentKeys.Memory, agentKeys.MakePrimary, agentKeys.UnsetPrimary,
+		routineKeys.Run, routineKeys.Pause, routineKeys.Resume, routineKeys.TogglePause) && offline:
 		c.setFlash(agentOffline)
+	case m.matches(msg, routineKeys.Run, routineKeys.Pause, routineKeys.Resume, routineKeys.TogglePause) && !onRoutine:
+		c.setFlash("pick a routine")
+	case m.matches(msg, routineKeys.Run):
+		return a, m.routineCmd(a.agentID, routine.Slug, "run"), true
+	case m.matches(msg, routineKeys.Pause):
+		return a, m.routineCmd(a.agentID, routine.Slug, "pause"), true
+	case m.matches(msg, routineKeys.Resume):
+		return a, m.routineCmd(a.agentID, routine.Slug, "resume"), true
+	case m.matches(msg, routineKeys.TogglePause):
+		verb := "pause"
+		if routine.State == "paused" {
+			verb = "resume"
+		}
+		return a, m.routineCmd(a.agentID, routine.Slug, verb), true
 	case m.matches(msg, agentKeys.NewChat):
 		var cmd tea.Cmd
 		a.chat, cmd = a.chat.start(a.agentID)
@@ -267,8 +353,8 @@ func (a agentComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, b
 func (a agentComp) click(c *ctx, t hitTarget, focused bool) (component, tea.Cmd) {
 	threads := a.threads(c)
 	switch {
-	case t.index >= len(threads):
-	case focused && t.index == a.cursor:
+	case t.index >= a.items(c):
+	case focused && t.index == a.cursor && t.index < len(threads):
 		return a, openThread(c, threads[t.index])
 	default:
 		a.cursor = t.index
@@ -277,7 +363,7 @@ func (a agentComp) click(c *ctx, t hitTarget, focused bool) (component, tea.Cmd)
 }
 
 func (a agentComp) wheel(c *ctx, d int) (component, tea.Cmd) {
-	a.cursor = cursorBy(a.cursor, d, len(a.threads(c)))
+	a.cursor = cursorBy(a.cursor, d, a.items(c))
 	return a, nil
 }
 
@@ -303,19 +389,32 @@ func (a agentComp) view(c *ctx, w, h int) string {
 	cardW := min(w, maxCardWidth)
 	ag := a.info(c)
 	threads := a.threads(c)
-	head := StyleSecondaryBold.Render("Threads")
-	var body []string
+	cursor := min(a.cursor, cursorBottom(a.items(c)))
+	focused := m.focused == mainPane && len(m.popups) == 0
+	l := itemLines{key: "agent-view"}
+	l.text(StyleSecondaryBold.Render("Threads"))
 	switch {
 	case ag.Status == pagentUnreachable:
-		body = append(body, dimStyle.Render(agentOffline))
+		l.text(dimStyle.Render(agentOffline))
 	case !a.loaded:
-		body = append(body, dimStyle.Render("loading threads…"))
+		l.text(dimStyle.Render("loading threads…"))
 	case a.err != nil && len(threads) == 0:
-		body = append(body, dimStyle.Render("error: "+a.err.Error()))
+		l.text(dimStyle.Render("error: " + a.err.Error()))
 	case len(threads) == 0:
-		body = append(body, dimStyle.Render("no threads · "+m.keyTextOn(a.section(), agentKeys.NewChat)+" starts a chat"))
+		l.text(dimStyle.Render("no threads · " + m.keyTextOn(a.section(), agentKeys.NewChat) + " starts a chat"))
 	}
-	tail := []string{"", StyleSecondaryBold.Render("Routines"), dimStyle.Render("no routines")}
+	for i, t := range threads {
+		l.add(i, m.threadRow(t, i == cursor && focused, cardW))
+	}
+	l.text("")
+	l.text(StyleSecondaryBold.Render("Routines"))
+	if len(a.routines) == 0 {
+		l.text(dimStyle.Render("no routines"))
+	}
+	for i, r := range a.routines {
+		at := len(threads) + i
+		l.add(at, routineRow(r, at == cursor && focused, cardW))
+	}
 	if u := a.memory; u != nil {
 		line := "Memory · " + kbSize(u.usage)
 		if u.budget > 0 {
@@ -324,27 +423,80 @@ func (a agentComp) view(c *ctx, w, h int) string {
 		if !u.last.IsZero() {
 			line += " · last change " + agoText(u.last)
 		}
-		tail = append(tail, "", StyleSecondaryBold.Render(line))
+		l.text("")
+		l.text(StyleSecondaryBold.Render(line))
 	}
-	top := head + "\n"
-	if len(body) > 0 {
-		return centerBlock(top+strings.Join(append(body, tail...), "\n"), cardW, w)
+	if a.items(c) == 0 {
+		return centerBlock(strings.Join(l.lines, "\n"), cardW, w)
 	}
-	// The thread rows take what the other lines leave.
-	avail := max(1, h-1-len(tail))
-	rows := a.threadRows(c.below(1), threads, cardW, avail)
-	return centerBlock(top+rows+"\n"+strings.Join(tail, "\n"), cardW, w)
+	return centerBlock(strings.Join(l.window(c, cursor, max(1, h)), "\n"), cardW, w)
 }
 
-func (a agentComp) threadRows(c *ctx, threads []api.PAgentThreadInfo, w, avail int) string {
-	m := c.m
-	cursor := min(a.cursor, len(threads)-1)
-	focused := m.focused == mainPane && len(m.popups) == 0
-	l := itemLines{key: "agent-threads"}
-	for i, t := range threads {
-		l.add(i, m.threadRow(t, i == cursor && focused, w))
+// routineRow is a routine: slug, when it starts, the next run, its progress
+// against its budget, and its state when not active.
+func routineRow(r api.PAgentRoutineInfo, sel bool, w int) string {
+	marker := "  "
+	if sel {
+		marker = asstStyle.Render("❯ ")
 	}
-	return strings.Join(l.window(c, cursor, avail), "\n")
+	var parts []string
+	if d := cmp.Or(strings.Join(r.Starts, ", "), r.What); d != "" {
+		parts = append(parts, d)
+	}
+	if r.NextDue != nil && r.State == "active" {
+		parts = append(parts, "next "+untilText(*r.NextDue))
+	}
+	if p := routineProgress(r); p != "" {
+		parts = append(parts, p)
+	}
+	switch {
+	case r.State == "paused" && r.PausedReason != "":
+		parts = append(parts, "paused: "+r.PausedReason)
+	case r.State == "invalid" && r.Error != "":
+		parts = append(parts, "invalid: "+r.Error)
+	case r.State != "active" && r.State != "":
+		parts = append(parts, r.State)
+	}
+	return truncateLine(marker+headlineStyle(sel).Render(r.Slug)+"  "+dimStyle.Render(strings.Join(parts, " · ")), w)
+}
+
+// routineProgress is the sessions and cost used, against the budget where it
+// has one.
+func routineProgress(r api.PAgentRoutineInfo) string {
+	var parts []string
+	if r.Budget.Sessions > 0 {
+		parts = append(parts, fmt.Sprintf("%d/%d sessions", r.Used.Sessions, r.Budget.Sessions))
+	} else if r.Used.Sessions > 0 {
+		parts = append(parts, plural(int(r.Used.Sessions), "session"))
+	}
+	switch {
+	case r.Budget.Cost > 0:
+		parts = append(parts, fmt.Sprintf("%s/%s", dollars(r.Used.Cost), dollars(r.Budget.Cost)))
+	case r.Used.Cost > 0:
+		parts = append(parts, dollars(r.Used.Cost))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func dollars(v float64) string {
+	if v == float64(int64(v)) {
+		return fmt.Sprintf("$%d", int64(v))
+	}
+	return fmt.Sprintf("$%.2f", v)
+}
+
+// untilText is how long until t: "now" or "in 5m".
+func untilText(t time.Time) string {
+	d := time.Until(t)
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("in %dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("in %dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("in %dd", int(d.Hours())/24)
 }
 
 func (m model) threadRow(t api.PAgentThreadInfo, sel bool, w int) string {

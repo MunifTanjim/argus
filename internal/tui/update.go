@@ -235,6 +235,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateAgentView(msg, msg.agentID)
 	case agentPrimaryMsg:
 		return m.updateAgentView(msg, msg.agentID)
+	case agentRoutineMsg:
+		return m.updateAgentView(msg, msg.agentID)
 	case terminalsMsg:
 		m.terminalsDone = true
 		m.terminalsErr = msg.err
@@ -472,7 +474,7 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 		return m.loadProjects()
 	}
 	if n.Method == api.MethodPAgentChanged {
-		return tea.Batch(m.loadPAgentsCmd(), m.reloadThreadViewsCmd())
+		return tea.Batch(m.loadPAgentsCmd(), m.reloadThreadViewsCmd(), m.reloadAgentViewsCmd())
 	}
 	if n.Method == api.MethodTerminalChanged {
 		return m.loadTerminalsCmd()

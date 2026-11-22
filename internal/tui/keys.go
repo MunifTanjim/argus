@@ -154,6 +154,15 @@ var threadKeys = struct {
 	OpenSession: nm("thread open-session", "o", "session"),
 }
 
+var routineKeys = struct {
+	Run, Pause, Resume, TogglePause binding
+}{
+	Run:         nm("routine run", "R", "run now"),
+	Pause:       nm("routine pause", "", "pause"),
+	Resume:      nm("routine resume", "", "resume"),
+	TogglePause: nm("toggle routine-pause", "zp", "pause"),
+}
+
 var memoryKeys = struct {
 	Undo, Accept, Reject binding
 }{
@@ -456,7 +465,7 @@ var settingsKeys = struct {
 
 func keySets() []any {
 	return []any{listKeys, projectsKeys, fileViewKeys, transcriptKeys, redactListKeys,
-		detailKeys, visualKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, agentKeys, threadKeys, memoryKeys, upgradeKeys, spawnKeys,
+		detailKeys, visualKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, agentKeys, threadKeys, memoryKeys, routineKeys, upgradeKeys, spawnKeys,
 		settingsKeys}
 }
 

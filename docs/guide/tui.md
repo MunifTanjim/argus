@@ -307,6 +307,9 @@ To run Lua code on a key, see [Lua](/getting-started/configuration#lua).
 | `redaction remove` |  | transcript |  | `u` |
 | `redaction save` |  | transcript |  | `W` |
 | `refresh` |  | agent, agent-memory, changes, file, file-tree, history, home, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, thread, workspace |  | `gr` |
+| `routine pause` |  | agent |  |  |
+| `routine resume` |  | agent |  |  |
+| `routine run` |  | agent |  | `R` |
 | `scroll down` |  | file, logs, settings, thread, transcript | `<Down>` `j` |  |
 | `scroll half-page-down` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, spawn, terminals, thread, transcript, visual, workspace | `<C-d>` |  |
 | `scroll half-page-up` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, spawn, terminals, thread, transcript, visual, workspace | `<C-u>` |  |
@@ -343,6 +346,7 @@ To run Lua code on a key, see [Lua](/getting-started/configuration#lua).
 | `toggle mouse` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace |  |  |
 | `toggle pin` |  | project-tree |  | `P` |
 | `toggle right-sidebar` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace |  | `<Leader>e` |
+| `toggle routine-pause` |  | agent |  | `zp` |
 | `toggle selection` |  | session-dock | `<Space>` |  |
 | `toggle show-gone` |  | node, project, project-tree, workspace |  | `zx` |
 | `toggle show-hidden` |  | node, project, project-tree, workspace |  | `z.` |

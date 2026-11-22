@@ -131,6 +131,7 @@ type pagentClient struct {
 	timeline api.PAgentTimeline
 	undoErr  error
 	props    []api.PAgentMemoryProposal
+	routines []api.PAgentRoutineInfo
 	decided  api.PAgentMemoryDecideResult
 	notFound bool // every pagent RPC is missing
 }
@@ -162,6 +163,8 @@ func (c *pagentClient) Call(method string, params, out any) error {
 		*out.(*api.PAgentMemoryProposalsResult) = api.PAgentMemoryProposalsResult{Proposals: c.props}
 	case api.MethodSessionToolDetail, api.MethodSessionHistoryToolDetail:
 		*out.(*api.ToolDetail) = api.ToolDetail{ToolInput: `{"command":"ls"}`, Result: "detail from " + method}
+	case api.MethodPAgentRoutineList:
+		*out.(*api.PAgentRoutineListResult) = api.PAgentRoutineListResult{Routines: c.routines}
 	case api.MethodPAgentMemoryDecide:
 		*out.(*api.PAgentMemoryDecideResult) = c.decided
 	}
