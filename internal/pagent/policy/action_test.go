@@ -182,6 +182,10 @@ func TestClassifyOtherTools(t *testing.T) {
 		{"mcp hint", "mcp__x__do_thing", `{"destructiveHint":true}`, irr},
 		{"mcp both", "mcp__x__send_and_delete", `{}`, []string{ClassOutward, ClassIrreversible}},
 		{"server name not matched", "mcp__sender__list", `{}`, nil},
+		{"keyword inside a word", "mcp__db__postgres_query", `{}`, nil},
+		{"keyword inside a camel word", "mcp__x__getPostgresRows", `{}`, nil},
+		{"keyword prefix of a word", "mcp__x__sendgrid-status", `{}`, nil},
+		{"dash segment", "mcp__x__send-mail", `{}`, out},
 		{"unknown tool", "Frobnicate", `{"command":"git push"}`, nil},
 	}
 	for _, tt := range tests {

@@ -3,7 +3,9 @@ package policy
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"unicode"
 )
 
 // mcpOutward and mcpIrreversible are the name keywords that mark MCP tools.
@@ -35,9 +37,9 @@ func Classify(a Action) []string {
 		m := strings.ToUpper(inputString(a.Input, "method"))
 		outward = m != "" && m != "GET" && m != "HEAD" || inputString(a.Input, "body") != ""
 	case kindMCP:
-		name := strings.ToLower(mcpTool(a.Tool))
-		outward = containsAny(name, mcpOutward)
-		irreversible = containsAny(name, mcpIrreversible) || destructiveHint(a.Input)
+		words := nameWords(mcpTool(a.Tool))
+		outward = containsAny(words, mcpOutward)
+		irreversible = containsAny(words, mcpIrreversible) || destructiveHint(a.Input)
 	}
 	var out []string
 	if outward {
@@ -58,9 +60,39 @@ func destructiveHint(in []byte) bool {
 	return ok && string(raw) == "true"
 }
 
-func containsAny(s string, words []string) bool {
+// nameWords splits a tool name into lowercase words at _, -, . and camelCase
+// boundaries, so "postgres_query" does not count as "post".
+func nameWords(name string) []string {
+	var (
+		out []string
+		cur []rune
+	)
+	flush := func() {
+		if len(cur) > 0 {
+			out = append(out, strings.ToLower(string(cur)))
+			cur = nil
+		}
+	}
+	rs := []rune(name)
+	for i, r := range rs {
+		switch {
+		case r == '_' || r == '-' || r == '.':
+			flush()
+		case unicode.IsUpper(r) && i > 0 && (unicode.IsLower(rs[i-1]) ||
+			i+1 < len(rs) && unicode.IsLower(rs[i+1]) && unicode.IsUpper(rs[i-1])):
+			flush()
+			cur = append(cur, r)
+		default:
+			cur = append(cur, r)
+		}
+	}
+	flush()
+	return out
+}
+
+func containsAny(words, keywords []string) bool {
 	for _, w := range words {
-		if strings.Contains(s, w) {
+		if slices.Contains(keywords, w) {
 			return true
 		}
 	}
