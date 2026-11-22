@@ -31,6 +31,7 @@ const Set<String> nodeAddressed = {
   'sessions.exportBundle',
   'sessions.historySessions', 'sessions.historyTranscript', 'sessions.historyToolDetail',
   'terminal.create', 'host.info', 'host.setWakelock', 'host.completeDir',
+  'pagent.create', 'pagent.add',
 };
 
 /// Methods routed to the node named by node_id, or to the gateway without one
@@ -67,6 +68,23 @@ const Set<String> projectAddressed = {
   'project.setPinned', 'project.forget', 'project.branches', 'project.prs',
   'project.issues',
 };
+
+/// Methods carrying a composite agent_id the client splits and routes to the
+/// agent's node.
+const Set<String> pagentAddressed = {
+  'pagent.show', 'pagent.rename', 'pagent.forget', 'pagent.setPrimary',
+  'pagent.thread.send', 'pagent.thread.list',
+  'pagent.memory.show', 'pagent.memory.log', 'pagent.memory.undo',
+  'pagent.memory.import', 'pagent.memory.proposals',
+};
+
+/// Methods carrying a composite thread_id.
+const Set<String> pagentThreadAddressed = {
+  'pagent.thread.timeline', 'pagent.thread.markRead',
+};
+
+/// Status given to an agent whose node is offline, served from the cache.
+const String pagentUnreachable = 'unreachable';
 
 /// Methods whose result carries a node-local session_id that must be composited.
 const Set<String> compositeResultMethods = {'sessions.spawn', 'sessions.resume'};

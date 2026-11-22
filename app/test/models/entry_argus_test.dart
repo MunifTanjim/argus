@@ -41,4 +41,23 @@ void main() {
     final e = Entry.fromJson({'id': 'u', 'kind': 'user', 'text': 'hi'});
     expect(e.argusMessages, isEmpty);
   });
+
+  test('an argus entry parses its event', () {
+    final e = Entry.fromJson({
+      'id': 'a',
+      'kind': 'argus',
+      'label': 'check-back',
+      'detail': 'later',
+      'event': {
+        'id': 7,
+        'kind': 'check-back',
+        'payload': {'at': 'x'},
+      },
+    });
+    expect(e.kind, EntryKind.argus);
+    expect(e.event?.id, 7);
+    expect(e.event?.kind, 'check-back');
+    expect(e.event?.payload, {'at': 'x'});
+    expect(Entry.fromJson({'id': 'u', 'kind': 'user'}).event, isNull);
+  });
 }

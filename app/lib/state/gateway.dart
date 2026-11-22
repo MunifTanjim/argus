@@ -21,6 +21,7 @@ import '../transport/ssh_ws_link.dart';
 import '../transport/ws_link.dart';
 import 'control.dart';
 import 'device_identity.dart';
+import 'pagents.dart';
 import 'profiles.dart';
 import 'projects.dart';
 import 'push.dart';
@@ -223,6 +224,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   final store = ref.read(sessionsProvider.notifier);
   final projects = ref.read(projectsProvider.notifier);
   final terminals = ref.read(terminalsProvider.notifier);
+  final pagents = ref.read(pagentsProvider.notifier);
   final rosterRevision = ref.read(rosterRevisionProvider.notifier);
   final keyStore = ref.read(sshKeyStoreProvider);
   final hostKeys = ref.read(hostKeyStoreProvider);
@@ -276,6 +278,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
       );
       unawaited(projects.load(client));
       unawaited(terminals.load(client));
+      unawaited(pagents.load(client));
       client.notifications.listen((m) {
         dispatchEvent(m, store);
         if (m.method == 'node.event') rosterRevision.state++;
@@ -284,6 +287,9 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
         }
         if (m.method == 'terminal.changed' || m.method == 'node.event') {
           unawaited(terminals.load(client));
+        }
+        if (m.method == 'pagent.changed' || m.method == 'node.event') {
+          unawaited(pagents.load(client));
         }
       });
       // Register this device's push target now the connection is up (re-runs on
@@ -326,6 +332,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
       store.clear();
       projects.clear();
       terminals.clear();
+      pagents.clear();
     });
   });
   manager.start();

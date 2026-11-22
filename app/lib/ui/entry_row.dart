@@ -133,6 +133,7 @@ class EntryRow extends StatelessWidget {
           agent: detailRef.agent,
           onTap: drillFor(context, e, detailRef),
         );
+      case EntryKind.argus:
       case EntryKind.unknown:
         return const SizedBox.shrink();
     }

@@ -36,6 +36,7 @@ enum EntryKind {
   system,
   compact,
   shell,
+  argus,
   unknown,
 }
 
@@ -61,6 +62,8 @@ EntryKind entryKindFromWire(String? s) {
       return EntryKind.compact;
     case 'shell':
       return EntryKind.shell;
+    case 'argus':
+      return EntryKind.argus;
     default:
       return EntryKind.unknown;
   }
@@ -97,6 +100,21 @@ class ArgusMessage {
     child: j['child'] as String?,
     childSession: j['childSession'] as String?,
     body: j['body'] as String? ?? '',
+  );
+}
+
+/// Argus's own event behind an [EntryKind.argus] entry.
+class ArgusEvent {
+  final int id;
+  final String kind;
+  final Object? payload;
+
+  const ArgusEvent({this.id = 0, this.kind = '', this.payload});
+
+  factory ArgusEvent.fromJson(Map<String, dynamic> j) => ArgusEvent(
+    id: (j['id'] as num?)?.toInt() ?? 0,
+    kind: j['kind'] as String? ?? '',
+    payload: j['payload'],
   );
 }
 
@@ -178,6 +196,8 @@ class Entry {
   final bool isError;
   // user: the prompt's argus messages; [text] keeps the raw prompt
   final List<ArgusMessage> argusMessages;
+  // argus: Argus's own event; [label] is its kind and [detail] its text
+  final ArgusEvent? event;
 
   const Entry({
     required this.id,
@@ -209,6 +229,7 @@ class Entry {
     this.detail,
     this.isError = false,
     this.argusMessages = const [],
+    this.event,
   });
 
   Subagent? get soleSubagent => subagents.length == 1 ? subagents.first : null;
@@ -258,6 +279,9 @@ class Entry {
             ?.map((e) => ArgusMessage.fromJson(e as Map<String, dynamic>))
             .toList() ??
         const [],
+    event: j['event'] is Map<String, dynamic>
+        ? ArgusEvent.fromJson(j['event'] as Map<String, dynamic>)
+        : null,
   );
 
   /// Entries ship without [toolInput]/[result] (see the server's
