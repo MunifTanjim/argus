@@ -272,7 +272,7 @@ func TestRevertConflictAborts(t *testing.T) {
 	if _, err := r.CommitPaths(ctx, "two", nil, []string{"memory.md"}, true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Revert(ctx, first); !errors.Is(err, ErrConflict) {
+	if _, err := r.Revert(ctx, first, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v, want ErrConflict", err)
 	}
 	if st := run(t, dir, "status", "--porcelain"); st != "" {
@@ -292,9 +292,14 @@ func TestRevertSuccess(t *testing.T) {
 	r.CommitPaths(ctx, "a", nil, []string{"a.md"}, true)
 	write(t, filepath.Join(dir, "b.md"), "b\n")
 	b, _ := r.CommitPaths(ctx, "b", nil, []string{"b.md"}, true)
-	hash, err := r.Revert(ctx, b)
+	hash, err := r.Revert(ctx, b, []Trailer{{"Argus-Source", "you"}, {"Argus-Agent-Id", "ag1"}, {"Argus-Thread", ""}})
 	if err != nil || hash == "" {
 		t.Fatalf("Revert = %q, %v", hash, err)
+	}
+	log, _ := r.Log(ctx, nil, 1)
+	if log[0].Hash != hash || !strings.HasPrefix(log[0].Subject, "Revert ") ||
+		log[0].Trailers["Argus-Source"] != "you" || log[0].Trailers["Argus-Agent-Id"] != "ag1" || len(log[0].Trailers) != 2 {
+		t.Fatalf("revert commit = %+v", log[0])
 	}
 	if _, err := os.Stat(filepath.Join(dir, "b.md")); err == nil {
 		t.Fatal("b.md still present")
@@ -383,7 +388,7 @@ func TestRevertBusyLeavesUserRevertAlone(t *testing.T) {
 	a, _ := r.CommitPaths(ctx, "a", nil, []string{"a.md"}, true)
 	marker := filepath.Join(r.GitDir, "REVERT_HEAD")
 	write(t, marker, a+"\n")
-	if _, err := r.Revert(ctx, a); !errors.Is(err, ErrBusy) {
+	if _, err := r.Revert(ctx, a, nil); !errors.Is(err, ErrBusy) {
 		t.Fatalf("err = %v, want ErrBusy", err)
 	}
 	if _, err := os.Stat(marker); err != nil {

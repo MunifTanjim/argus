@@ -662,7 +662,11 @@ func (d *Node) handlePAgentMemoryUndo(ctx context.Context, params json.RawMessag
 	if err := d.commitHandEdits(ctx, repo, a, "", userPaths); err != nil {
 		return nil, pagentErr("%v", err)
 	}
-	hash, err := repo.Revert(ctx, target)
+	hash, err := repo.Revert(ctx, target, []agentgit.Trailer{
+		{Key: "Argus-Agent", Value: a.Name},
+		{Key: "Argus-Agent-Id", Value: a.ID},
+		{Key: "Argus-Source", Value: "you"},
+	})
 	switch {
 	case errors.Is(err, agentgit.ErrConflict):
 		return nil, pagentErr("can't undo: later changes touched the same lines")

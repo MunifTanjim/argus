@@ -354,6 +354,33 @@ func TestUndoConflict(t *testing.T) {
 	}
 }
 
+func TestUndoKeepsUserProvenance(t *testing.T) {
+	r := newMemRig(t, 0)
+	ctx := context.Background()
+	r.write(t, "memory/MEMORY.md", "- hand written (2026-11-01)\n")
+	r.apply(t, memory.Op{Action: "remove", Match: "hand written"})
+	removal := r.log(t, 1)[0].Hash
+	if got := r.read(t, "memory/MEMORY.md"); strings.Contains(got, "hand written") {
+		t.Fatalf("not removed: %q", got)
+	}
+	res, err := callPAgent[api.PAgentMemoryUndoResult](t, r.d.handlePAgentMemoryUndo, api.PAgentMemoryUndoParams{AgentID: r.a.ID, Commit: removal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := r.log(t, 1)[0]
+	if c.Hash != res.Commit || c.Trailers["Argus-Source"] != "you" || c.Trailers["Argus-Agent"] != "scout" || c.Trailers["Argus-Agent-Id"] != r.a.ID {
+		t.Fatalf("undo commit = %+v", c)
+	}
+	if got := r.read(t, "memory/MEMORY.md"); got != "- hand written (2026-11-01)\n" {
+		t.Fatalf("MEMORY.md after undo = %q", got)
+	}
+	repo, _ := agentgit.Open(ctx, r.a.Dir, agentgit.ModeNested)
+	sources, err := repo.BlameSources(ctx, "memory/MEMORY.md")
+	if err != nil || sources[1] != "you" {
+		t.Fatalf("blame sources = %v, %v", sources, err)
+	}
+}
+
 func TestUserEditsCommittedFirst(t *testing.T) {
 	r := newMemRig(t, 0)
 	r.apply(t, memory.Op{Action: "add", Text: "a"})

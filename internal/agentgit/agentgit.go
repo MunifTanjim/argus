@@ -184,14 +184,18 @@ func (r *Repo) CommitUserEdits(ctx context.Context, paths []string, agentName, a
 	}, paths, name == "" || email == "")
 }
 
-// Revert reverts hash and returns the new commit. A conflicting revert is
-// aborted and reported as ErrConflict.
-func (r *Repo) Revert(ctx context.Context, hash string) (string, error) {
+// Revert reverts hash and returns the new commit, which carries trailers.
+// A conflicting revert is aborted and reported as ErrConflict.
+func (r *Repo) Revert(ctx context.Context, hash string, trailers []Trailer) (string, error) {
 	defer lock(r.GitDir)()
 	if r.busy() {
 		return "", ErrBusy
 	}
-	args := append(append([]string{}, argusIdentity...), "revert", "--no-edit", "--end-of-options", hash)
+	args := append(append([]string{}, argusIdentity...), "revert", "--no-edit")
+	if !r.Outer {
+		args = append(args, "--no-gpg-sign")
+	}
+	args = append(args, "--end-of-options", hash)
 	if _, err := mustGit(ctx, r.Dir, args...); err != nil {
 		if _, statErr := os.Lstat(filepath.Join(r.GitDir, "REVERT_HEAD")); statErr == nil {
 			if _, abortErr := mustGit(ctx, r.Dir, "revert", "--abort"); abortErr != nil {
@@ -200,6 +204,24 @@ func (r *Repo) Revert(ctx context.Context, hash string) (string, error) {
 			return "", ErrConflict
 		}
 		return "", err
+	}
+	if len(trailers) > 0 {
+		amend := append(append([]string{}, argusIdentity...), "commit", "--quiet", "--amend", "--no-edit")
+		if !r.Outer {
+			amend = append(amend, "--no-gpg-sign")
+		}
+		for _, t := range trailers {
+			if t.Value != "" {
+				amend = append(amend, "--trailer", t.Key+": "+strings.Join(strings.Fields(t.Value), " "))
+			}
+		}
+		if _, err := mustGit(ctx, r.Dir, amend...); err != nil {
+			// Drop the untagged revert; --keep refuses to touch local changes.
+			if _, resetErr := mustGit(ctx, r.Dir, "reset", "--quiet", "--keep", "HEAD~1"); resetErr != nil {
+				return "", fmt.Errorf("%w (undoing the revert also failed: %v)", err, resetErr)
+			}
+			return "", err
+		}
 	}
 	return mustGit(ctx, r.Dir, "rev-parse", "HEAD")
 }
