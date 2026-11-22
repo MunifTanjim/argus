@@ -61,9 +61,6 @@ func openAgent(c *ctx, id string) tea.Cmd {
 	return c.m.loadAgentViewCmd(id)
 }
 
-// openAgentMemory opens the agent's memory view.
-func openAgentMemory(c *ctx, _ string) { c.setFlash("memory view comes next") }
-
 // loadAgentViewCmd reads the agent's threads and memory usage. An unreachable
 // agent's node is not asked.
 func (m model) loadAgentViewCmd(id string) tea.Cmd {
@@ -248,7 +245,7 @@ func (a agentComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, b
 		a.chat, cmd = a.chat.start(a.agentID)
 		return a, cmd, true
 	case m.matches(msg, agentKeys.Memory):
-		openAgentMemory(c, a.agentID)
+		return a, openAgentMemory(c, a.agentID), true
 	case m.matches(msg, agentKeys.MakePrimary):
 		return a, m.setAgentPrimaryCmd(a.agentID, a.agentID), true
 	case m.matches(msg, agentKeys.UnsetPrimary):

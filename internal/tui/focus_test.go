@@ -155,6 +155,7 @@ func sectionStates() []sectionState {
 		{"Agents tab", "sidebar-agents", calmAgentsModel},
 		{"agent view", "agent", agentViewModel},
 		{"thread view", "thread", threadViewModel},
+		{"agent memory", "agent-memory", agentMemoryModel},
 	}
 }
 

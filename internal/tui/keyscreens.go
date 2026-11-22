@@ -30,6 +30,7 @@ var sectionOffers = func() map[string]offer {
 		"sidebar-sessions": {keys: helpQuit},
 		"sidebar-agents":   {keys: helpQuit},
 		"agent":            {keys: helpQuit},
+		"agent-memory":     {keys: helpQuit},
 		"workspace":        {keys: helpQuit},
 		"project":          {keys: helpQuit},
 		"node":             {keys: helpQuit},
@@ -142,6 +143,11 @@ var sectionLists = map[string]sectionList{
 	"node": {
 		own:   append(slices.Clone(summaryKeys), listKeys.TabPrev, listKeys.TabNext, nodeKeys.Wakelock),
 		focus: focusFor("node"),
+	},
+	"agent-memory": {
+		own: bindingsOf(listKeys.Up, listKeys.Down, listKeys.Top, listKeys.Bottom, listKeys.HalfUp, listKeys.HalfDown,
+			listKeys.TabPrev, listKeys.TabNext, listKeys.Back, listKeys.Refresh, memoryKeys.Undo, memoryKeys.Accept, memoryKeys.Reject),
+		focus: focusFor("agent-memory"),
 	},
 	"thread": {
 		own: bindingsOf(slices.Concat(transcriptViewKeys, []any{detailKeys, sessionKeys.FocusPrompt, threadKeys.OpenSession,

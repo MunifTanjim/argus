@@ -78,6 +78,7 @@ func contractComponents(m model) []component {
 		agentsSidebarComp{},
 		agentComp{agentID: "n1:a"},
 		newThreadComp(api.PAgentThreadInfo{ID: "n1:t", AgentID: "n1:a"}),
+		agentMemoryComp{agentID: "n1:a"},
 		m.right.fileTree,
 		m.right.changes,
 		homeComp{},

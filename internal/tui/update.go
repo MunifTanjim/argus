@@ -218,6 +218,10 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reorder()
 		}
 		return m, nil
+	case agentMemoryMsg:
+		return m.updateAgentMemory(msg, msg.agentID)
+	case agentMemoryActionMsg:
+		return m.updateAgentMemory(msg, msg.agentID)
 	case threadTimelineMsg:
 		return m.updateThreadView(msg, msg.threadID)
 	case threadActionMsg:

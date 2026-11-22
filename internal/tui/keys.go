@@ -155,9 +155,11 @@ var threadKeys = struct {
 }
 
 var memoryKeys = struct {
-	Undo binding
+	Undo, Accept, Reject binding
 }{
-	Undo: nm("memory undo", "u", "undo"),
+	Undo:   nm("memory undo", "u", "undo"),
+	Accept: nm("memory accept", "a", "accept"),
+	Reject: nm("memory reject", "x", "reject"),
 }
 
 var nodeKeys = struct {
