@@ -62,7 +62,8 @@ func (d *Node) buildTimeline(threadID string, links []pagent.ThreadSession, even
 				path = sess.TranscriptPath
 			}
 		}
-		res.Sessions[i] = api.PAgentTimelineSession{SessionID: l.SessionID, StartIndex: len(res.Entries), Live: live}
+		res.Sessions[i] = api.PAgentTimelineSession{SessionID: l.SessionID, StartIndex: len(res.Entries), Live: live,
+			CLI: cli, AgentSessionID: l.AgentSessionID, TranscriptPath: path}
 		if path == "" {
 			segs[i] = timelineSegment{start: len(res.Entries)}
 			continue

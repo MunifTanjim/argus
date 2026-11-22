@@ -92,6 +92,9 @@ func TestTimelineMergesSessionsInOrder(t *testing.T) {
 	if len(res.Sessions) != 3 || res.Sessions[0].StartIndex != 0 || res.Sessions[1].StartIndex != 2 || res.Sessions[2].StartIndex != 5 {
 		t.Fatalf("sessions = %+v", res.Sessions)
 	}
+	if s := res.Sessions[1]; s.TranscriptPath != "/b" || s.CLI != "claude" {
+		t.Fatalf("session 1 lacks its transcript address: %+v", s)
+	}
 }
 
 func TestTimelineSplicesEventsAtAnchor(t *testing.T) {

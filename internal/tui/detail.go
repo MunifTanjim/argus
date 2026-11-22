@@ -157,7 +157,9 @@ func (m tview) enterDetail() tea.Cmd {
 	if !ok || r.isControl() {
 		return nil
 	}
-	return m.drillEntry(m.transcript.entries[r.entry], "")
+	e := m.transcript.entries[r.entry]
+	m.drillSrc = m.sourceFor(e)
+	return m.drillEntry(e, "")
 }
 
 func (m tview) drillEntry(e transcript.Entry, agentID string) tea.Cmd {
@@ -191,7 +193,7 @@ func (m tview) drillTrace(e transcript.Entry, s transcript.Subagent) tea.Cmd {
 	}
 	if !m.live {
 		m.transcript.detailStack = append(m.transcript.detailStack, f)
-		return m.c.m.fetchHistSubagent(m.history.addr(), s.ID)
+		return m.c.m.fetchHistSubagent(m.sourceFor(e).addr, s.ID)
 	}
 	// Stash the session subRef so pop can restore it without a leak.
 	m.sessionSub = m.activeSub

@@ -1575,10 +1575,16 @@ type PAgentTimeline struct {
 	Sessions []PAgentTimelineSession `json:"sessions"`
 }
 
+// PAgentTimelineSession is one session of a thread. Entries read from its
+// transcript have ids prefixed "s<index>:", index into Sessions; CLI and
+// TranscriptPath address that transcript for tool details.
 type PAgentTimelineSession struct {
-	SessionID  string `json:"session_id"`
-	StartIndex int    `json:"start_index"`
-	Live       bool   `json:"live,omitempty"`
+	SessionID      string `json:"session_id"`
+	StartIndex     int    `json:"start_index"`
+	Live           bool   `json:"live,omitempty"`
+	CLI            string `json:"cli,omitempty"`
+	AgentSessionID string `json:"agent_session_id,omitempty"`
+	TranscriptPath string `json:"transcript_path,omitempty"`
 }
 
 // PAgentMemoryOp is one memory edit. Action is add, update or remove; File is

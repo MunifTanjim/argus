@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // historyKind is a transcript's inner view: the entry stream, or the entry detail.
@@ -32,6 +33,30 @@ type transcriptComp struct {
 	history       historyState // history only
 	pendingExport bool
 	redact        redactState
+
+	// sourceAt, when set, names the session an entry was read from: an agent
+	// thread spans several. drillSrc is the source of the entry the detail
+	// opened on, which the entries inside the detail share.
+	sourceAt func(entryID string) (entrySource, bool)
+	drillSrc entrySource
+}
+
+// entrySource is where an entry's details are read: its live session, or its
+// transcript file.
+type entrySource struct {
+	live      bool
+	sessionID string
+	addr      histAddr
+}
+
+func (m tview) sourceFor(it transcript.Entry) entrySource {
+	if m.sourceAt == nil {
+		return entrySource{live: m.live, sessionID: m.sessionID, addr: m.history.addr()}
+	}
+	if s, ok := m.sourceAt(it.ID); ok {
+		return s
+	}
+	return m.drillSrc
 }
 
 func newTranscript() transcriptComp {

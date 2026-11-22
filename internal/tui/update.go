@@ -189,6 +189,9 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case histTranscriptMsg:
 		return m.updateTranscript(msg, reads(msg.addr))
 	case histSubagentMsg:
+		if t, ok := m.main.top().(threadComp); ok && m.transcriptAt(reads(msg.addr)) < 0 {
+			return m.updateThreadView(msg, t.threadID)
+		}
 		return m.updateTranscript(msg, reads(msg.addr))
 	case toolDetailMsg:
 		match := func(t transcriptComp) bool { return t.owner() == msg.owner && t.toolBodies[msg.toolID].loading }

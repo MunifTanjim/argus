@@ -2,6 +2,8 @@ package tui
 
 import (
 	"encoding/json"
+	"strconv"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -181,6 +183,8 @@ func (t threadComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 		v.transcript.err = nil
 		v.restoreEntryCursor(prevID, atBottom, wasLast || !t.loaded)
 		t.sessions, t.loaded = msg.res.Sessions, true
+		a, _ := c.m.pagent(t.agentID)
+		t.tr.sourceAt = timelineSource(a.NodeID, msg.res.Sessions)
 		if pos := lastEntryTime(msg.res.Entries); pos > t.readPos {
 			t.readPos = pos
 			return t, c.m.markThreadReadCmd(t.threadID, pos)
@@ -194,6 +198,28 @@ func (t threadComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 		return t, t.bind(c).updateMsg(msg)
 	}
 	return t, nil
+}
+
+// timelineSource maps a timeline entry to the session it was read from: its
+// id is prefixed "s<index>:". The live session that writes that transcript, if
+// any, serves its tool details; else the file does.
+func timelineSource(nodeID string, ss []api.PAgentTimelineSession) func(string) (entrySource, bool) {
+	return func(id string) (entrySource, bool) {
+		n, _, ok := strings.Cut(strings.TrimPrefix(id, "s"), ":")
+		i, err := strconv.Atoi(n)
+		if !ok || !strings.HasPrefix(id, "s") || err != nil || i < 0 || i >= len(ss) || ss[i].TranscriptPath == "" {
+			return entrySource{}, false
+		}
+		s := ss[i]
+		src := entrySource{addr: histAddr{nodeID: nodeID, path: s.TranscriptPath, agent: s.CLI}}
+		for j := len(ss) - 1; j >= 0; j-- {
+			if ss[j].Live && ss[j].TranscriptPath == s.TranscriptPath {
+				src.live, src.sessionID = true, ss[j].SessionID
+				break
+			}
+		}
+		return src, true
+	}
 }
 
 func lastEntryTime(es []transcript.Entry) int64 {

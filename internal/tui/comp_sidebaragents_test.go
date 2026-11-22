@@ -160,6 +160,8 @@ func (c *pagentClient) Call(method string, params, out any) error {
 		return c.undoErr
 	case api.MethodPAgentMemoryProposals:
 		*out.(*api.PAgentMemoryProposalsResult) = api.PAgentMemoryProposalsResult{Proposals: c.props}
+	case api.MethodSessionToolDetail, api.MethodSessionHistoryToolDetail:
+		*out.(*api.ToolDetail) = api.ToolDetail{ToolInput: `{"command":"ls"}`, Result: "detail from " + method}
 	case api.MethodPAgentMemoryDecide:
 		*out.(*api.PAgentMemoryDecideResult) = c.decided
 	}

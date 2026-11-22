@@ -23,9 +23,9 @@ func (m tview) fetchToolBodyCmd(it transcript.Entry, agentID string) tea.Cmd {
 	}
 	m.toolBodies[it.ToolID] = toolBodyEntry{loading: true}
 	client := m.c.m.client
-	toolID, owner := it.ToolID, m.owner()
-	if !m.live {
-		nodeID, path, agent := m.history.openNodeID, m.history.openPath, m.history.openAgent
+	toolID, owner, src := it.ToolID, m.owner(), m.sourceFor(it)
+	if !src.live {
+		nodeID, path, agent := src.addr.nodeID, src.addr.path, src.addr.agent
 		return func() tea.Msg {
 			var td api.ToolDetail
 			err := client.Call(api.MethodSessionHistoryToolDetail, api.HistoryToolDetailParams{
@@ -34,7 +34,7 @@ func (m tview) fetchToolBodyCmd(it transcript.Entry, agentID string) tea.Cmd {
 			return toolDetailMsg{owner: owner, toolID: toolID, detail: td, err: err}
 		}
 	}
-	sessionID := m.sessionID
+	sessionID := src.sessionID
 	return func() tea.Msg {
 		var td api.ToolDetail
 		err := client.Call(api.MethodSessionToolDetail, api.ToolDetailParams{

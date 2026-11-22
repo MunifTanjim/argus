@@ -194,3 +194,92 @@ func TestThreadViewDetail(t *testing.T) {
 		t.Fatal("esc leaves the detail, not the thread")
 	}
 }
+
+// toolThread is a thread of two sessions, each with one tool call: the first
+// ended, the second live.
+func toolThread() *pagentClient {
+	cl := threadClient()
+	ts := func(m int) string { return threadT0.Add(time.Duration(m) * time.Minute).Format(time.RFC3339Nano) }
+	cl.timeline = api.PAgentTimeline{ThreadID: "n1:t1",
+		Entries: []transcript.Entry{
+			{ID: "s0:u", Kind: transcript.EntryUser, Text: "list", Timestamp: ts(0)},
+			{ID: "s0:t", Kind: transcript.EntryTool, ToolName: "Bash", ToolID: "tool-old", InputPreview: "ls old", Timestamp: ts(1)},
+			{ID: "s0:a", Kind: transcript.EntryText, Text: "listed", Timestamp: ts(2)},
+			{ID: "s1:u", Kind: transcript.EntryUser, Text: "again", Timestamp: ts(3)},
+			{ID: "s1:t", Kind: transcript.EntryTool, ToolName: "Bash", ToolID: "tool-new", InputPreview: "ls new", Timestamp: ts(4)},
+			{ID: "s1:a", Kind: transcript.EntryText, Text: "listed again", Timestamp: ts(5)},
+		},
+		Sessions: []api.PAgentTimelineSession{
+			{SessionID: "n1:old", StartIndex: 0, CLI: "claude", TranscriptPath: "/t/old.jsonl"},
+			{SessionID: "n1:new", StartIndex: 3, CLI: "claude", TranscriptPath: "/t/new.jsonl", Live: true},
+		}}
+	return cl
+}
+
+// drillTool opens the detail of the tool entry id and feeds it its body.
+func drillTool(t *testing.T, m model, id string) model {
+	t.Helper()
+	th := m.main.top().(threadComp)
+	v := th.bind(&ctx{m: &m})
+	for _, r := range v.displayRows() {
+		if r.run.key != "" {
+			th.tr.transcript.runs[r.run.key] = true
+		}
+	}
+	rows := v.displayRows()
+	at := -1
+	for i, r := range rows {
+		if r.kind == entryRow && th.tr.transcript.entries[r.entry].ID == id {
+			at = i
+		}
+	}
+	if at < 0 {
+		t.Fatalf("no row for %s", id)
+	}
+	th.tr.transcript.cursor = at
+	m.main = m.main.replaceTop(th)
+	m, cmd := upd(m, keyMsg("enter"))
+	if m.main.top().(threadComp).tr.historyView != histDetail || cmd == nil {
+		t.Fatalf("enter on %s opens its detail and fetches the body", id)
+	}
+	m, _ = upd(m, cmd())
+	return m
+}
+
+func TestThreadToolDetailEndedSession(t *testing.T) {
+	cl := toolThread()
+	m := openedThread(t, cl)
+	m = drillTool(t, m, "s0:t")
+	p, n := pagentParams[api.HistoryToolDetailParams](cl, api.MethodSessionHistoryToolDetail)
+	if n != 1 || p.TranscriptPath != "/t/old.jsonl" || p.Agent != "claude" || p.ToolID != "tool-old" {
+		t.Fatalf("history tool detail = %+v (%d calls)", p, n)
+	}
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "detail from "+api.MethodSessionHistoryToolDetail) {
+		t.Errorf("the detail lacks the body:\n%s", out)
+	}
+}
+
+func TestThreadToolDetailLiveSession(t *testing.T) {
+	cl := toolThread()
+	m := openedThread(t, cl)
+	m = drillTool(t, m, "s1:t")
+	p, n := pagentParams[api.ToolDetailParams](cl, api.MethodSessionToolDetail)
+	if n != 1 || p.SessionID != "n1:new" || p.ToolID != "tool-new" {
+		t.Fatalf("session tool detail = %+v (%d calls)", p, n)
+	}
+	if out := ansi.Strip(m.View().Content); !strings.Contains(out, "detail from "+api.MethodSessionToolDetail) {
+		t.Errorf("the detail lacks the body:\n%s", out)
+	}
+}
+
+func TestThreadSubagentDrillReadsItsSession(t *testing.T) {
+	cl := toolThread()
+	cl.timeline.Entries[1] = transcript.Entry{ID: "s0:t", Kind: transcript.EntrySubagent, ToolName: "Task", ToolID: "tool-old",
+		Subagents: []transcript.Subagent{{ID: "agent-7", Type: "explore", HasTrace: true}}, Timestamp: cl.timeline.Entries[1].Timestamp}
+	m := openedThread(t, cl)
+	m = drillTool(t, m, "s0:t")
+	p, n := pagentParams[api.HistoryTranscriptParams](cl, api.MethodSessionsHistoryTranscript)
+	if n != 1 || p.TranscriptPath != "/t/old.jsonl" || p.Agent != "claude" || p.AgentID != "agent-7" {
+		t.Fatalf("subagent read = %+v (%d calls)", p, n)
+	}
+}
