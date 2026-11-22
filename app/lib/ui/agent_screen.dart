@@ -11,19 +11,35 @@ import 'theme.dart';
 import 'thread_screen.dart';
 
 /// Opens an agent's screen: its threads and memory.
-Route<void> agentRoute(String agentId) =>
-    MaterialPageRoute(builder: (_) => AgentScreen(agentId: agentId));
+Route<void> agentRoute(String agentId, {String chatText = ''}) =>
+    MaterialPageRoute(
+      builder: (_) => AgentScreen(agentId: agentId, chatText: chatText),
+    );
 
 class AgentScreen extends ConsumerStatefulWidget {
-  const AgentScreen({super.key, required this.agentId});
+  const AgentScreen({super.key, required this.agentId, this.chatText = ''});
 
   final String agentId;
+
+  /// A message to prefill in a new chat opened with the screen.
+  final String chatText;
 
   @override
   ConsumerState<AgentScreen> createState() => _AgentScreenState();
 }
 
 class _AgentScreenState extends ConsumerState<AgentScreen> {
+  @override
+  void initState() {
+    super.initState();
+    if (widget.chatText.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final a = _agent(ref.read(pagentsProvider));
+        if (mounted && a != null) _newChat(a, widget.chatText);
+      });
+    }
+  }
+
   PAgent? _agent(PAgentsState s) {
     for (final a in s.agents) {
       if (a.id == widget.agentId) return a;
@@ -49,11 +65,11 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
     return false;
   }
 
-  Future<void> _newChat(PAgent a) async {
+  Future<void> _newChat(PAgent a, [String initial = '']) async {
     if (!_reachable(a)) return;
     final text = await showDialog<String>(
       context: context,
-      builder: (_) => const _NewChatDialog(),
+      builder: (_) => _NewChatDialog(initial: initial),
     );
     if (text == null || text.isEmpty || !mounted) return;
     try {
@@ -256,14 +272,16 @@ class _ThreadRow extends StatelessWidget {
 }
 
 class _NewChatDialog extends StatefulWidget {
-  const _NewChatDialog();
+  const _NewChatDialog({this.initial = ''});
+
+  final String initial;
 
   @override
   State<_NewChatDialog> createState() => _NewChatDialogState();
 }
 
 class _NewChatDialogState extends State<_NewChatDialog> {
-  final _text = TextEditingController();
+  late final _text = TextEditingController(text: widget.initial);
 
   @override
   void dispose() {

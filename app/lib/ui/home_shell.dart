@@ -7,7 +7,9 @@ import '../models/project.dart';
 import '../models/session.dart';
 import '../state/control.dart';
 import '../state/gateway.dart';
+import '../state/agent_link.dart';
 import '../state/navigation.dart';
+import '../state/pagents.dart';
 import '../state/projects.dart';
 import '../state/push.dart';
 import '../state/sessions.dart';
@@ -17,9 +19,11 @@ import 'history_screen.dart';
 import 'project_drawer.dart';
 import 'route_observer.dart';
 import 'session_detail_screen.dart';
+import 'agent_link.dart';
 import 'session_list_screen.dart';
 import 'shell_drawer.dart';
 import 'terminal_list_screen.dart';
+import 'thread_screen.dart';
 import 'workspace_screen.dart';
 
 const double kSidePanelMinWidth = 900;
@@ -49,7 +53,39 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ref.read(terminalPrefsProvider);
     // A tap can set the pending session before this mounts (cold launch from a
     // notification); ref.listen only sees later changes, so open it once here.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _openPending());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _openPending();
+      _openPendingThread();
+      _openPendingLink();
+    });
+  }
+
+  // Open a link to an agent once its agents are loaded.
+  void _openPendingLink() {
+    if (!mounted) return;
+    final link = ref.read(pendingAgentLinkProvider);
+    final state = ref.read(pagentsProvider);
+    if (link == null || !state.loaded) return;
+    ref.read(pendingAgentLinkProvider.notifier).state = null;
+    openAgentLink(context, state, link);
+  }
+
+  // Open a tapped notification's agent thread once the thread's agent is
+  // known, like a session tap waits for its session.
+  void _openPendingThread() {
+    if (!mounted) return;
+    final id = ref.read(pendingOpenThreadProvider);
+    if (id == null) return;
+    final state = ref.read(pagentsProvider);
+    for (final e in state.threads.entries) {
+      final thread = e.value.where((t) => t.id == id).firstOrNull;
+      if (thread == null) continue;
+      ref.read(pendingOpenThreadProvider.notifier).state = null;
+      Navigator.of(context, rootNavigator: true).push(
+        threadRoute(agentId: e.key, threadId: id, title: thread.title),
+      );
+      return;
+    }
   }
 
   // Deep-link a tapped notification's session. Keep the request until its
@@ -252,6 +288,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // Open on a new tap, and re-check when the session list arrives for a tap
     // that pointed at a not-yet-known session.
     ref.listen<PendingOpen?>(pendingOpenSessionProvider, (_, _) => _openPending());
+    ref.listen<String?>(pendingOpenThreadProvider, (_, _) => _openPendingThread());
+    ref.listen<PAgentsState>(pagentsProvider, (_, _) {
+      _openPendingThread();
+      _openPendingLink();
+    });
+    ref.listen<AgentLink?>(pendingAgentLinkProvider, (_, _) => _openPendingLink());
     ref.listen<Map<String, Session>>(sessionsProvider, _onSessions);
     ref.listen<ProjectsState>(projectsProvider, _onProjects);
     ref.listen<String?>(scopeProvider, _onScope);

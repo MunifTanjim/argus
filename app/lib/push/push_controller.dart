@@ -11,6 +11,7 @@ import 'device_id.dart';
 import 'fcm_source.dart';
 import 'pause_preference_store.dart';
 import 'notifications.dart';
+import 'push_message.dart';
 import 'push_provider.dart';
 import 'push_target_store.dart';
 import 'pushport_client.dart';
@@ -38,6 +39,7 @@ class PushController {
     PausePreferenceStore? pauseStore,
     SecureKv? providerKv,
     void Function(String sessionId)? onSessionTap,
+    void Function(String threadId)? onThreadTap,
     @visibleForTesting
     String? testDeviceId,
   })  : _unifiedPush = unifiedPush ?? UnifiedPushProvider(),
@@ -46,7 +48,8 @@ class PushController {
         _pauseStore = pauseStore ?? PausePreferenceStore(const FlutterSecureKv()),
         _providerKv = providerKv ?? const FlutterSecureKv(),
         // ignore: prefer_initializing_formals — private field, public named param.
-        _onSessionTap = onSessionTap {
+        _onSessionTap = onSessionTap,
+        _onThreadTap = onThreadTap {
     _deviceId = testDeviceId;
     _buildProviders(extraProviders);
   }
@@ -58,6 +61,7 @@ class PushController {
   final SecureKv _providerKv;
   static const _kProviderKey = 'push_provider';
   final void Function(String sessionId)? _onSessionTap;
+  final void Function(String threadId)? _onThreadTap;
   final _registrations = StreamController<bool>.broadcast();
   late final Map<String, PushProvider> _providers;
   bool? _lastRegistration;
@@ -403,10 +407,8 @@ class PushController {
     await provider.start(
       onTarget: _setTarget,
       onMessage: PushNotifications.instance.show,
-      onOpen: (m) {
-        final id = m.sessionId;
-        if (id != null) _emitTap(id);
-      },
+      onOpen: (m) =>
+          routePushOpen(m, onSession: _emitTap, onThread: _onThreadTap),
     );
   }
 
@@ -474,4 +476,20 @@ class PushController {
       await _serializePushOp(() => setPauseOnGateway(client, deviceId, _pausedUntil));
     }
   }
+}
+
+/// Routes a tapped push: to its agent thread when it names one and [onThread]
+/// is set, else to its session.
+void routePushOpen(
+  PushMessage m, {
+  required void Function(String sessionId) onSession,
+  void Function(String threadId)? onThread,
+}) {
+  final thread = m.pagentThreadId;
+  if (thread != null && thread.isNotEmpty && onThread != null) {
+    onThread(thread);
+    return;
+  }
+  final id = m.sessionId;
+  if (id != null) onSession(id);
 }

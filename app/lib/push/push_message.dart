@@ -12,4 +12,7 @@ class PushMessage {
   final Map<String, String> data;
 
   String? get sessionId => data['session_id'];
+
+  /// The agent thread the push is about, when it is about one.
+  String? get pagentThreadId => data['pagent_thread_id'];
 }

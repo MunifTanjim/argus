@@ -29,6 +29,7 @@ String interactionLabel(Interaction ix) => switch (ix.kind) {
       InteractionKind.plan => 'Plan review',
       InteractionKind.question => 'Question',
       InteractionKind.idle => 'Reply',
+      InteractionKind.handoff => 'Handoff',
       InteractionKind.unknown => 'Respond',
     };
 

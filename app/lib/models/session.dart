@@ -127,6 +127,9 @@ class Interaction {
   final String? toolInput;
   final List<QuestionSpec> questions;
   final String? plan;
+
+  /// A handoff's instructions for the user.
+  final String? steps;
   final List<DecisionOption> options;
 
   /// Questions the agent cannot decline: cancelling interrupts the turn, and
@@ -146,6 +149,7 @@ class Interaction {
     this.toolInput,
     this.questions = const [],
     this.plan,
+    this.steps,
     this.options = const [],
     this.cancelInterrupts = false,
     this.allowUnanswered = false,
@@ -162,6 +166,7 @@ class Interaction {
                 .toList() ??
             const [],
         plan: j['plan'] as String?,
+        steps: j['steps'] as String?,
         options: (j['options'] as List?)
                 ?.map((e) => DecisionOption.fromJson(e as Map<String, dynamic>))
                 .toList() ??

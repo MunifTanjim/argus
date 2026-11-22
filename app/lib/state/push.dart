@@ -16,12 +16,18 @@ class PendingOpen {
 /// clears it.
 final pendingOpenSessionProvider = StateProvider<PendingOpen?>((ref) => null);
 
+/// An agent thread a tapped notification wants to open. HomeShell opens it once
+/// the thread's agent is known, then clears it.
+final pendingOpenThreadProvider = StateProvider<String?>((ref) => null);
+
 /// The single PushController for the app. Materialized at startup; it sets the
 /// pending session on a notification tap so the UI can deep-link.
 final pushControllerProvider = Provider<PushController>((ref) {
   final controller = PushController(
     onSessionTap: (id) =>
         ref.read(pendingOpenSessionProvider.notifier).state = PendingOpen(id),
+    onThreadTap: (id) =>
+        ref.read(pendingOpenThreadProvider.notifier).state = id,
   );
   controller.init();
   ref.onDispose(controller.dispose);

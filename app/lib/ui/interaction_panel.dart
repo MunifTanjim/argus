@@ -9,7 +9,9 @@ import '../models/entry.dart';
 import '../models/enums.dart';
 import '../models/session.dart';
 import '../state/respond_params.dart';
+import '../state/projects_api.dart' show actionError;
 import '../state/respond_view_model.dart';
+import 'live_screen_screen.dart';
 import 'code_block.dart';
 import 'theme.dart';
 import 'tool_detail.dart';
@@ -74,7 +76,7 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
       case Error(:final error):
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed: $error')));
+        ).showSnackBar(SnackBar(content: Text('Failed: ${actionError(error)}')));
       case null:
         break;
     }
@@ -102,6 +104,8 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
         return _serverDecision(ix, 'plan');
       case InteractionKind.idle:
         return const [];
+      case InteractionKind.handoff:
+        return _handoff(ix);
       case InteractionKind.question:
         return _questions(ix);
       case InteractionKind.unknown:
@@ -226,6 +230,87 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
           child: LinearProgressIndicator(),
         ),
     ];
+  }
+
+  /// A persistent agent asks the user to do a step it cannot: take over the
+  /// session's terminal, then mark it done.
+  List<Widget> _handoff(Interaction ix) {
+    const takeover = 'takeover';
+    final options = ix.options.isNotEmpty
+        ? ix.options
+        : const [
+            DecisionOption(label: 'Take over', value: takeover),
+            DecisionOption(label: 'Done', value: 'done'),
+          ];
+    void takeOver() {
+      if (!widget.session.canOpenTerminal) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No terminal to take over')),
+        );
+        return;
+      }
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => LiveScreenScreen(session: widget.session),
+        ),
+      );
+    }
+
+    return [
+      _scrollBody([
+        const Text(
+          'Handoff',
+          style: TextStyle(
+            color: AppColors.secondary,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        if ((ix.message ?? '').isNotEmpty) ...[
+          const SizedBox(height: 8),
+          appMarkdown(ix.message!),
+        ],
+        if ((ix.steps ?? '').isNotEmpty) ...[
+          const SizedBox(height: 8),
+          appMarkdown(ix.steps!),
+        ],
+      ]),
+      const SizedBox(height: 16),
+      for (var i = 0; i < options.length; i++)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: _handoffButton(
+            options[i],
+            primary: i == 0,
+            onTap: options[i].value == takeover
+                ? takeOver
+                : () => _respond(
+                    optionRespond(
+                      sessionId: _sid,
+                      kind: 'handoff',
+                      value: options[i].value,
+                      requestId: ix.requestId,
+                    ),
+                  ),
+          ),
+        ),
+      if (_busy)
+        const Padding(
+          padding: EdgeInsets.only(top: 12),
+          child: LinearProgressIndicator(),
+        ),
+    ];
+  }
+
+  Widget _handoffButton(
+    DecisionOption o, {
+    required bool primary,
+    required VoidCallback onTap,
+  }) {
+    final label = Text(o.label);
+    final tap = _busy ? null : onTap;
+    return primary
+        ? FilledButton(onPressed: tap, child: label)
+        : OutlinedButton(onPressed: tap, child: label);
   }
 
   /// Asks whether to submit with unanswered questions, as Codex does.
