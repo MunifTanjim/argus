@@ -84,6 +84,8 @@ var pagentAddressed = map[string]bool{
 var pagentThreadAddressed = map[string]bool{
 	api.MethodPAgentThreadTimeline: true,
 	api.MethodPAgentThreadMarkRead: true,
+	api.MethodPAgentDraftSend:      true,
+	api.MethodPAgentDraftDiscard:   true,
 }
 
 // nodeAddressed methods route by an explicit node_id (or the sole node).

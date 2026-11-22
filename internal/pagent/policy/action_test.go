@@ -202,3 +202,21 @@ func TestClassifyUsesInput(t *testing.T) {
 		t.Errorf("got %v", got)
 	}
 }
+
+func TestShellLine(t *testing.T) {
+	for _, c := range []struct {
+		tool, in, want string
+		ok             bool
+	}{
+		{"Bash", `{"command":"git push origin main"}`, "git push origin main", true},
+		{"exec_command", `{"cmd":"ls -la","workdir":"/tmp"}`, "ls -la", true},
+		{"shell", `{"command":["bash","-lc","echo 'hi there'"]}`, `bash -lc 'echo '\''hi there'\'''`, true},
+		{"Bash", `{"description":"x"}`, "", false},
+		{"Edit", `{"file_path":"a"}`, "", false},
+	} {
+		got, ok := Action{Tool: c.tool, Input: json.RawMessage(c.in)}.ShellLine()
+		if got != c.want || ok != c.ok {
+			t.Errorf("%s %s: got %q %v, want %q %v", c.tool, c.in, got, ok, c.want, c.ok)
+		}
+	}
+}

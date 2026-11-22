@@ -443,3 +443,34 @@ func TestPAgentRoutineRoutesToNode(t *testing.T) {
 		t.Fatal("an agent id without a node routed")
 	}
 }
+
+func TestPAgentDraftRoutesByThread(t *testing.T) {
+	f, clientConn := newFakeGatewayNode(t, "n1")
+	defer f.peer.Close()
+	var got []string
+	f.handle = func(method string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		if method != api.MethodPAgentDraftSend && method != api.MethodPAgentDraftDiscard {
+			return nil, nil, nil
+		}
+		var p api.PAgentDraftParams
+		_ = json.Unmarshal(params, &p)
+		got = append(got, method+" "+p.ThreadID)
+		return json.RawMessage(`{}`), nil, nil
+	}
+	c, err := NewE2EClient(clientConn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []string{api.MethodPAgentDraftSend, api.MethodPAgentDraftDiscard} {
+		if err := c.Call(m, api.PAgentDraftParams{ThreadID: "n1:t1", EventID: 3}, nil); err != nil {
+			t.Fatalf("%s: %v", m, err)
+		}
+	}
+	if len(got) != 2 || got[0] != api.MethodPAgentDraftSend+" t1" || got[1] != api.MethodPAgentDraftDiscard+" t1" {
+		t.Errorf("node got %v", got)
+	}
+}

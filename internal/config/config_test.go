@@ -481,8 +481,28 @@ func TestAgentsDefaults(t *testing.T) {
 		l.MaxRunsPerHour != 12 || l.MaxConsecutiveFailures != 10 || l.CheckBackMin != 15*time.Minute || l.CheckBackMax != 7*24*time.Hour || l.CatchUpWindow != 12*time.Hour || l.PauseAfterAway != 7*24*time.Hour {
 		t.Errorf("limits = %+v", l)
 	}
+	if a.Execution != "ask" || a.Approvals.UnattendedExpiry != 30*time.Minute {
+		t.Errorf("approvals = %q %v", a.Execution, a.Approvals.UnattendedExpiry)
+	}
 	if err := load(t, "").Validate(); err != nil {
 		t.Errorf("Validate: %v", err)
+	}
+}
+
+func TestAgentsApprovalsFromFile(t *testing.T) {
+	isolateConfigDir(t)
+	a := load(t, writeConfig(t, "agents:\n  execution: never-unattended\n  approvals:\n    unattended-expiry: 5m\n")).Agents
+	if a.Execution != "never-unattended" || a.Approvals.UnattendedExpiry != 5*time.Minute {
+		t.Errorf("approvals = %q %v", a.Execution, a.Approvals.UnattendedExpiry)
+	}
+	for key, body := range map[string]string{
+		"agents.execution":                   "execution: sometimes",
+		"agents.approvals.unattended-expiry": "approvals:\n    unattended-expiry: soon",
+	} {
+		err := load(t, writeConfig(t, "agents:\n  "+body+"\n")).Validate()
+		if err == nil || !strings.Contains(err.Error(), key) {
+			t.Errorf("%s: Validate = %v", key, err)
+		}
 	}
 }
 

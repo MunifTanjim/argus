@@ -187,3 +187,51 @@ func filePaths(tool string, in json.RawMessage) []string {
 	}
 	return nil
 }
+
+// IsShell reports whether the action runs a shell command.
+func (a Action) IsShell() bool { return kindOf(a.Tool) == kindShell }
+
+// ShellLine returns the command line of a shell action, for running it again;
+// ok is false for other tools or when the input has no command.
+func (a Action) ShellLine() (line string, ok bool) {
+	if !a.IsShell() {
+		return "", false
+	}
+	var raw json.RawMessage = a.Input
+	if m := inputObject(a.Input); m != nil {
+		raw = nil
+		for _, k := range []string{"command", "cmd", "script"} {
+			if v, ok := m[k]; ok {
+				raw = v
+				break
+			}
+		}
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s, strings.TrimSpace(s) != ""
+	}
+	var argv []string
+	if json.Unmarshal(raw, &argv) == nil && len(argv) > 0 {
+		q := make([]string, len(argv))
+		for i, w := range argv {
+			q[i] = shellQuote(w)
+		}
+		return strings.Join(q, " "), true
+	}
+	if inputObject(a.Input) == nil && len(raw) > 0 && raw[0] != '{' && raw[0] != '[' && raw[0] != '"' {
+		s := strings.TrimSpace(string(raw))
+		return s, s != ""
+	}
+	return "", false
+}
+
+func shellQuote(w string) string {
+	if w != "" && strings.IndexFunc(w, func(r rune) bool {
+		return !(r == '-' || r == '_' || r == '.' || r == '/' || r == '=' || r == ':' || r == ',' || r == '+' || r == '@' ||
+			r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9')
+	}) < 0 {
+		return w
+	}
+	return "'" + strings.ReplaceAll(w, "'", `'\''`) + "'"
+}

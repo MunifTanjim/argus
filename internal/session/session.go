@@ -161,6 +161,11 @@ type Interaction struct {
 	// RequestID identifies the pending request this interaction shows, for agents
 	// that queue several (Codex). Clients echo it in RespondParams.RequestID.
 	RequestID string `json:"request_id,omitempty"`
+	// Classes are the warning classes of an agent action: outward,
+	// irreversible, security.
+	Classes []string `json:"classes,omitempty"`
+	// StartedBy is how the agent work that asks was started (you, routine, ...).
+	StartedBy string `json:"started_by,omitempty"`
 }
 
 // Summary is a cached transcript digest for list views, computed node-side on hook

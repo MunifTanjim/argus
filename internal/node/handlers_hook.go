@@ -83,8 +83,14 @@ func (d *Node) handleSessionRespond(ctx context.Context, params json.RawMessage)
 		d.log.Info("respond delivered to parked decision", "session", p.SessionID, "request", rid, "kind", p.Kind)
 		return nil, nil
 	}
+	if ok && d.cardExpired(s.ID, cardRequest(s, rid)) {
+		return nil, errRequestExpired
+	}
 	if ok {
 		if r, ok := d.adapterFor(s.Agent).(adapter.Responder); ok {
+			if np, card := d.headlessAnswer(ctx, s, rid, p); card {
+				p = np
+			}
 			if err := r.Respond(ctx, s, p); err != nil {
 				d.log.Warn("responder failed", "session", p.SessionID, "err", err)
 				return nil, err

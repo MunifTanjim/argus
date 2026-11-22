@@ -52,6 +52,9 @@ func (d *Node) withCaps(s session.Session) session.Session {
 	s.CanPrompt = s.TakesPrompt(ok && q.QueuesPrompts(s))
 	s.Parent = d.parentRef(s)
 	s.PAgentID, s.PAgentThreadID = d.pagentTag(s)
+	if s.PAgentThreadID != "" {
+		s = d.approvalOverlay(s)
+	}
 	return s
 }
 

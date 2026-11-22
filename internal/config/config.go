@@ -166,7 +166,15 @@ type AgentsConfig struct {
 	Primary    string
 	// WebhookListen is the address of the node's routine webhook listener; empty disables it.
 	WebhookListen string
-	Defaults      AgentDefaults
+	// Execution is the node's execution policy for agent actions: ask, allow
+	// or never-unattended.
+	Execution string
+	Approvals struct {
+		// UnattendedExpiry is how long a card from unattended work waits for an
+		// answer; negative when the configured value does not parse.
+		UnattendedExpiry time.Duration
+	}
+	Defaults AgentDefaults
 }
 
 // AgentDefaults are the settings an agent inherits when its own definition
@@ -293,6 +301,8 @@ var defaults = map[string]any{
 	"agents.skills-dir":                               "",
 	"agents.primary":                                  "",
 	"agents.webhook.listen-addr":                      "",
+	"agents.execution":                                "ask",
+	"agents.approvals.unattended-expiry":              "30m",
 	"agents.defaults.agent":                           "claude",
 	"agents.defaults.model":                           "",
 	"agents.defaults.timezone":                        "auto",
@@ -397,6 +407,7 @@ func (c Config) Validate() error {
 		key, val string
 		allowed  []string
 	}{
+		{"agents.execution", c.Agents.Execution, []string{"ask", "allow", "never-unattended"}},
 		{"agents.defaults.git.mode", d.Git.Mode, []string{"nested", "outer"}},
 		{"agents.defaults.memory.mode", d.Memory.Mode, []string{"auto", "review", "off"}},
 		{"agents.defaults.notify", d.Notify, []string{"all", "needs-you", "off"}},
@@ -405,6 +416,9 @@ func (c Config) Validate() error {
 		if e.val != "" && !slices.Contains(e.allowed, e.val) {
 			return fmt.Errorf("%s %q must be one of %s", e.key, e.val, strings.Join(e.allowed, ", "))
 		}
+	}
+	if c.Agents.Approvals.UnattendedExpiry < 0 {
+		return errors.New("agents.approvals.unattended-expiry must be a duration such as 30m")
 	}
 	if d.NotifyDelay < 0 {
 		return errors.New("agents.defaults.notify-delay must be a duration such as 3m")
@@ -523,7 +537,9 @@ func agentsFromViper(v *viper.Viper) AgentsConfig {
 		Primary:    v.GetString("agents.primary"),
 
 		WebhookListen: strings.TrimSpace(v.GetString("agents.webhook.listen-addr")),
+		Execution:     strings.TrimSpace(v.GetString("agents.execution")),
 	}
+	a.Approvals.UnattendedExpiry = days(v, "agents.approvals.unattended-expiry")
 	d := &a.Defaults
 	d.Agent = v.GetString(p + "agent")
 	d.Model = v.GetString(p + "model")

@@ -190,6 +190,7 @@ func (d *Node) handlePAgentThreadSend(ctx context.Context, params json.RawMessag
 	if err != nil {
 		return nil, err
 	}
+	d.approvalUserMessage(th.ID)
 	sid, sent, err := d.pagentEnsureSession(ctx, a, th, p.Text)
 	if err != nil {
 		return nil, err
@@ -670,6 +671,7 @@ func (d *Node) pagentWatch(ctx context.Context, events <-chan registry.Event) {
 			if !ok {
 				return
 			}
+			d.approvalTrack(ctx, ev)
 			d.pagentTrack(ctx, ev, prev)
 		}
 	}
