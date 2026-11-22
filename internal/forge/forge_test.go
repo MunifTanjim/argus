@@ -24,7 +24,7 @@ func fakeGH(t *testing.T, script string) {
 func TestGitHubParsesGHOutput(t *testing.T) {
 	fakeGH(t, `case "$1 $2" in
 "pr list") echo '[{"number":7,"title":"Fix","author":{"login":"al"},"headRefName":"fix","baseRefName":"main","url":"u7"}]';;
-"pr view") echo '{"number":7,"title":"Fix","author":{"login":"al"},"headRefName":"fix","baseRefName":"dev","url":"u7"}';;
+"pr view") echo '{"number":7,"title":"Fix","author":{"login":"al"},"headRefName":"fix","headRepositoryOwner":{"login":"fo"},"isCrossRepository":true,"baseRefName":"dev","url":"u7"}';;
 "issue list") echo '[{"number":3,"title":"Bug","author":{"login":"bo"},"url":"u3"}]';;
 "issue view") echo '{"number":3,"title":"Bug","body":"steps","author":{"login":"bo"},"url":"u3"}';;
 esac`)
@@ -35,7 +35,7 @@ esac`)
 		t.Fatalf("ListPRs = %+v, %v", prs, err)
 	}
 	pr, err := g.GetPR(ctx, t.TempDir(), 7)
-	if err != nil || pr.BaseBranch != "dev" {
+	if err != nil || pr.BaseBranch != "dev" || pr.ForkOwner != "fo" {
 		t.Fatalf("GetPR = %+v, %v", pr, err)
 	}
 	is, err := g.ListIssues(ctx, t.TempDir())

@@ -172,29 +172,46 @@ func TestCreateFromPRStoresBaseAsTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if !strings.HasSuffix(res.Dir, "pr-9") {
-		t.Errorf("dir = %q, want it named after the PR number", res.Dir)
+	if loc, _ := gittree.Resolve(context.Background(), res.Dir); loc.Branch != "pr-head" || filepath.Base(res.Dir) != "pr-head" {
+		t.Errorf("branch = %q, dir = %q; want both named after the PR head", loc.Branch, res.Dir)
 	}
 	if got := storedTarget(t, d, res.WorkspaceID); got != "release" {
 		t.Errorf("target = %q, want the PR base", got)
 	}
 }
 
-func TestCreateFromPRsWithSameHeadName(t *testing.T) {
+func TestCreateFromForkPRsWithSameHeadName(t *testing.T) {
 	d, projID, main := createFixture(t)
 	runGit(t, main, "branch", "patch-1")
-	for _, n := range []int{3, 4} {
+	for n, owner := range map[int]string{3: "alice", 4: "bob"} {
 		d.forgeFor = func(context.Context, string) (forge.Provider, error) {
-			return fakeForge{pr: forge.PullRequest{Number: n, HeadBranch: "patch-1", BaseBranch: "main"}, checkout: checkoutBranch}, nil
+			pr := forge.PullRequest{Number: n, HeadBranch: "patch-1", ForkOwner: owner, BaseBranch: "main"}
+			return fakeForge{pr: pr, checkout: checkoutBranch}, nil
 		}
 		res, err := create(t, d, api.WorkspaceCreateParams{ProjectID: projID, Source: api.SourcePR, Number: n})
 		if err != nil {
 			t.Fatalf("PR %d: %v", n, err)
 		}
-		want := "pr-" + strconv.Itoa(n)
-		if loc, _ := gittree.Resolve(context.Background(), res.Dir); loc.Branch != want || filepath.Base(res.Dir) != want {
+		want := owner + "/patch-1"
+		if loc, _ := gittree.Resolve(context.Background(), res.Dir); loc.Branch != want || !strings.HasSuffix(res.Dir, want) {
 			t.Errorf("PR %d: branch = %q, dir = %q; want both %q", n, loc.Branch, res.Dir, want)
 		}
+	}
+}
+
+func TestCreateFromPRRefusesBranchCheckedOutElsewhere(t *testing.T) {
+	d, projID, main := createFixture(t)
+	other := filepath.Join(t.TempDir(), "other")
+	runGit(t, main, "worktree", "add", "-b", "feat", other)
+	d.forgeFor = func(context.Context, string) (forge.Provider, error) {
+		return fakeForge{pr: forge.PullRequest{Number: 6, HeadBranch: "feat", BaseBranch: "main"}, checkout: checkoutBranch}, nil
+	}
+	_, err := create(t, d, api.WorkspaceCreateParams{ProjectID: projID, Source: api.SourcePR, Number: 6})
+	if err == nil || !strings.Contains(err.Error(), other) {
+		t.Fatalf("err = %v, want it to name the worktree that has the branch", err)
+	}
+	if _, err := os.Stat(filepath.Join(main, ".worktrees", "feat")); !os.IsNotExist(err) {
+		t.Error("refused create left a worktree")
 	}
 }
 
@@ -209,7 +226,7 @@ func TestCreateFromPRRollsBackOnCheckoutFailure(t *testing.T) {
 	if _, err := create(t, d, api.WorkspaceCreateParams{ProjectID: projID, Source: api.SourcePR, Number: 9}); err == nil {
 		t.Fatal("expected the checkout failure")
 	}
-	if _, err := os.Stat(filepath.Join(main, ".worktrees", "pr-9")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(main, ".worktrees", "bad")); !os.IsNotExist(err) {
 		t.Error("rollback left the worktree")
 	}
 }
@@ -220,7 +237,7 @@ func TestCreateRollbackDeletesOnlyBranchesItCreated(t *testing.T) {
 	for n, kept := range map[int]bool{7: false, 8: true} {
 		d.forgeFor = func(context.Context, string) (forge.Provider, error) {
 			return fakeForge{
-				pr: forge.PullRequest{Number: n, BaseBranch: "main"},
+				pr: forge.PullRequest{Number: n, HeadBranch: "pr-" + strconv.Itoa(n), BaseBranch: "main"},
 				checkout: func(dir, branch string) error {
 					_ = exec.Command("git", "-C", dir, "checkout", "-B", branch).Run()
 					return errors.New("checkout failed")
@@ -482,7 +499,7 @@ func TestCreateRollbackSurvivesCancelledRequest(t *testing.T) {
 	if _, err := d.handleWorkspaceCreate(ctx, raw); err == nil {
 		t.Fatal("expected the checkout failure")
 	}
-	if _, err := os.Stat(filepath.Join(main, ".worktrees", "pr-9")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(main, ".worktrees", "gone")); !os.IsNotExist(err) {
 		t.Error("rollback after a cancelled request left the worktree")
 	}
 }

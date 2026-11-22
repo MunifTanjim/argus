@@ -27,6 +27,7 @@ type PullRequest struct {
 	HeadBranch string
 	BaseBranch string
 	URL        string
+	ForkOwner  string // empty unless the head is in a fork
 }
 
 type Issue struct {
