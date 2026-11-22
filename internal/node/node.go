@@ -149,6 +149,7 @@ type Node struct {
 	routineCtx      context.Context                   // the run context of runs started by RPC and webhooks; set by Run
 	routineWG       sync.WaitGroup                    // run goroutines
 	routinePayloads sync.Map                          // run id -> webhook body of a run not started yet
+	notify          notifyState                       // held and delayed agent pushes
 
 	clientMu        sync.Mutex
 	lastClientAt    time.Time // when a client was last attached

@@ -560,3 +560,23 @@ func TestAgentsInvalidGitMode(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentNotifySettings(t *testing.T) {
+	v := viper.New()
+	if err := config.Load(v, "", true); err != nil {
+		t.Fatal(err)
+	}
+	c := config.FromViper(v)
+	if c.Agents.Defaults.NotifyDelay != 3*time.Minute {
+		t.Errorf("notify-delay = %s", c.Agents.Defaults.NotifyDelay)
+	}
+	for spec, ok := range map[string]bool{"22:00-07:00": true, "09:00-17:30": true, "22:00": false, "25:00-07:00": false, "08:00-08:00": false} {
+		if _, _, err := config.ParseQuietHours(spec); (err == nil) != ok {
+			t.Errorf("ParseQuietHours(%q) err = %v", spec, err)
+		}
+	}
+	c.Agents.Defaults.QuietHours = "late"
+	if err := c.Validate(); err == nil {
+		t.Error("bad quiet-hours accepted")
+	}
+}

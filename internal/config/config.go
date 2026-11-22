@@ -194,6 +194,9 @@ type AgentDefaults struct {
 	Proactivity string
 	QuietHours  string
 	Notify      string
+	// NotifyDelay is how long a push waits while a client is attached; it is
+	// dropped if the thread is read meanwhile. Negative when it does not parse.
+	NotifyDelay time.Duration
 	Brief       struct {
 		Enabled bool
 		At      string
@@ -307,6 +310,7 @@ var defaults = map[string]any{
 	"agents.defaults.quiet-hours":                     "",
 	"agents.defaults.brief.enabled":                   false,
 	"agents.defaults.brief.at":                        "08:00",
+	"agents.defaults.notify-delay":                    "3m",
 	"agents.defaults.notify":                          "needs-you",
 	"agents.defaults.limits.min-interval":             "15m",
 	"agents.defaults.limits.max-enabled-routines":     20,
@@ -400,6 +404,14 @@ func (c Config) Validate() error {
 	} {
 		if e.val != "" && !slices.Contains(e.allowed, e.val) {
 			return fmt.Errorf("%s %q must be one of %s", e.key, e.val, strings.Join(e.allowed, ", "))
+		}
+	}
+	if d.NotifyDelay < 0 {
+		return errors.New("agents.defaults.notify-delay must be a duration such as 3m")
+	}
+	if d.QuietHours != "" {
+		if _, _, err := ParseQuietHours(d.QuietHours); err != nil {
+			return fmt.Errorf("agents.defaults.quiet-hours: %w", err)
 		}
 	}
 	if d.Memory.CoreBudget < 0 {
@@ -533,6 +545,7 @@ func agentsFromViper(v *viper.Viper) AgentsConfig {
 	d.Proactivity = v.GetString(p + "proactivity")
 	d.QuietHours = v.GetString(p + "quiet-hours")
 	d.Notify = v.GetString(p + "notify")
+	d.NotifyDelay = days(v, p+"notify-delay")
 	d.Brief.Enabled = v.GetBool(p + "brief.enabled")
 	d.Brief.At = v.GetString(p + "brief.at")
 	d.Limits.MinInterval = v.GetDuration(p + "limits.min-interval")
@@ -546,4 +559,30 @@ func agentsFromViper(v *viper.Viper) AgentsConfig {
 	d.Limits.CatchUpWindow = days(v, p+"limits.catch-up-window")
 	d.Limits.PauseAfterAway = days(v, p+"limits.pause-after-away")
 	return a
+}
+
+// ParseQuietHours parses "HH:MM-HH:MM" into minutes after midnight; the range
+// may cross midnight.
+func ParseQuietHours(s string) (start, end int, err error) {
+	a, b, ok := strings.Cut(strings.TrimSpace(s), "-")
+	if !ok {
+		return 0, 0, fmt.Errorf("%q must look like 22:00-07:00", s)
+	}
+	clock := func(v string) (int, error) {
+		t, err := time.Parse("15:04", strings.TrimSpace(v))
+		if err != nil {
+			return 0, fmt.Errorf("%q must look like 22:00-07:00", s)
+		}
+		return t.Hour()*60 + t.Minute(), nil
+	}
+	if start, err = clock(a); err != nil {
+		return 0, 0, err
+	}
+	if end, err = clock(b); err != nil {
+		return 0, 0, err
+	}
+	if start == end {
+		return 0, 0, fmt.Errorf("%q is an empty range", s)
+	}
+	return start, end, nil
 }

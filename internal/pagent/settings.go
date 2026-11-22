@@ -19,6 +19,9 @@ type Settings struct {
 	MaxConcurrentSessions int
 
 	QuietHours   string
+	BriefEnabled bool
+	BriefAt      string
+	NotifyDelay  time.Duration
 	CoreBudget   int64
 	CaptureAfter time.Duration
 	TidyAt       string
@@ -39,6 +42,9 @@ func Resolve(def *Definition, d config.AgentDefaults) Settings {
 		IdleClose:             d.IdleClose,
 		MaxConcurrentSessions: d.MaxConcurrentSessions,
 		QuietHours:            d.QuietHours,
+		BriefEnabled:          d.Brief.Enabled,
+		BriefAt:               d.Brief.At,
+		NotifyDelay:           d.NotifyDelay,
 		CoreBudget:            d.Memory.CoreBudget,
 		CaptureAfter:          d.Memory.CaptureAfter,
 		TidyAt:                d.Memory.TidyAt,
@@ -60,6 +66,13 @@ func Resolve(def *Definition, d config.AgentDefaults) Settings {
 	set(&s.MemoryMode, def.Memory.Mode)
 	set(&s.Notify, def.Notify)
 	set(&s.Proactivity, def.Proactivity)
+	set(&s.QuietHours, def.QuietHours)
+	if def.Brief != nil {
+		if def.Brief.Enabled != nil {
+			s.BriefEnabled = *def.Brief.Enabled
+		}
+		set(&s.BriefAt, def.Brief.At)
+	}
 	set(&s.Extractor, def.Memory.Extractor)
 	if def.Memory.CaptureAfter != 0 {
 		s.CaptureAfter = def.Memory.CaptureAfter

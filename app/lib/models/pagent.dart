@@ -255,6 +255,8 @@ class PAgentMemoryProposal {
     this.threadId = '',
     this.source = '',
     this.kind = '',
+    this.slug = '',
+    this.summary = '',
     this.text = '',
     this.reason = '',
     this.ops = const [],
@@ -266,6 +268,8 @@ class PAgentMemoryProposal {
   final String threadId;
   final String source;
   final String kind;
+  final String slug;
+  final String summary;
   final String text;
   final String reason;
   final List<PAgentMemoryOp> ops;
@@ -273,6 +277,7 @@ class PAgentMemoryProposal {
   final DateTime createdAt;
 
   bool get isInstructions => kind == 'instructions';
+  bool get isRoutine => kind == 'routine';
 
   factory PAgentMemoryProposal.fromJson(Map<String, dynamic> j) =>
       PAgentMemoryProposal(
@@ -281,6 +286,8 @@ class PAgentMemoryProposal {
         threadId: j['thread_id'] as String? ?? '',
         source: j['source'] as String? ?? '',
         kind: j['kind'] as String? ?? '',
+        slug: j['slug'] as String? ?? '',
+        summary: j['summary'] as String? ?? '',
         text: j['text'] as String? ?? '',
         reason: j['reason'] as String? ?? '',
         ops: [
@@ -364,4 +371,128 @@ String liveSessionOf(PAgentTimeline t) {
     if (t.sessions[i].live) return t.sessions[i].sessionId;
   }
   return '';
+}
+
+/// A routine's budget, or its use; 0 in a budget is unlimited.
+class PAgentRoutineBudget {
+  const PAgentRoutineBudget({this.sessions = 0, this.cost = 0, this.tokens = 0});
+  final int sessions;
+  final double cost;
+  final int tokens;
+
+  factory PAgentRoutineBudget.fromJson(Object? j) {
+    final m = j is Map ? j : const {};
+    return PAgentRoutineBudget(
+      sessions: (m['sessions'] as num?)?.toInt() ?? 0,
+      cost: (m['cost'] as num?)?.toDouble() ?? 0,
+      tokens: (m['tokens'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+/// A routine with its runtime state. [state] is active, paused, disabled,
+/// completed or invalid.
+class PAgentRoutine {
+  const PAgentRoutine({
+    required this.slug,
+    this.agentId = '',
+    this.what = '',
+    this.starts = const [],
+    this.state = 'active',
+    this.pausedReason = '',
+    this.nextDue,
+    this.lastRunAt,
+    this.lastResult = '',
+    this.consecutiveFailures = 0,
+    this.budget = const PAgentRoutineBudget(),
+    this.used = const PAgentRoutineBudget(),
+    this.error = '',
+  });
+
+  final String slug;
+  final String agentId;
+  final String what;
+  final List<String> starts;
+  final String state;
+  final String pausedReason;
+  final DateTime? nextDue;
+  final DateTime? lastRunAt;
+  final String lastResult;
+  final int consecutiveFailures;
+  final PAgentRoutineBudget budget;
+  final PAgentRoutineBudget used;
+  final String error;
+
+  factory PAgentRoutine.fromJson(Map<String, dynamic> j) => PAgentRoutine(
+    slug: j['slug'] as String? ?? '',
+    agentId: j['agent_id'] as String? ?? '',
+    what: j['what'] as String? ?? '',
+    starts: [for (final s in (j['starts'] as List?) ?? const []) '$s'],
+    state: j['state'] as String? ?? 'active',
+    pausedReason: j['paused_reason'] as String? ?? '',
+    nextDue: DateTime.tryParse(j['next_due'] as String? ?? ''),
+    lastRunAt: DateTime.tryParse(j['last_run_at'] as String? ?? ''),
+    lastResult: j['last_result'] as String? ?? '',
+    consecutiveFailures: (j['consecutive_failures'] as num?)?.toInt() ?? 0,
+    budget: PAgentRoutineBudget.fromJson(j['budget']),
+    used: PAgentRoutineBudget.fromJson(j['used']),
+    error: j['error'] as String? ?? '',
+  );
+}
+
+/// What an argus event says, in words. Routine and draft events are built from
+/// their payload; any other event keeps the node's text.
+String argusEventText(Entry e) {
+  final fallback = (e.detail ?? '').isNotEmpty ? e.detail! : (e.label ?? '');
+  final ev = e.event;
+  final p = ev?.payload is Map ? (ev!.payload as Map) : const {};
+  String s(String k) => p[k] is String ? p[k] as String : '';
+  final slug = s('routine');
+  String join(String head, [String tail = '']) =>
+      tail.isEmpty ? head : '$head: $tail';
+  switch (ev?.kind) {
+    case 'routine.result':
+      final r = s('result');
+      return join(
+        'Routine $slug${r.isEmpty ? '' : ' ($r)'}',
+        s('summary'),
+      );
+    case 'routine.needs_you':
+      return join('Routine $slug needs you', s('summary'));
+    case 'routine.completed':
+      return 'Routine $slug completed';
+    case 'routine.failing':
+      return join('Routine $slug is failing', s('error'));
+    case 'routine.error':
+      return join('Routine $slug', s('message'));
+    case 'routine.changed':
+      final a = s('action');
+      return 'Routine $slug ${a.isEmpty ? 'changed' : a}';
+    case 'routine.proposed':
+      return join('Routine $slug: change to review', s('reason'));
+    case 'routine.missed':
+      final n = (p['count'] as num?)?.toInt() ?? 1;
+      return n == 1
+          ? 'Routine $slug missed a run (${s('first')})'
+          : 'Routine $slug missed $n runs';
+    case 'routine.skipped':
+      return join('Routine $slug skipped a run', s('reason'));
+    case 'routine.stale':
+      return 'Routine $slug is overdue (due ${s('due')})';
+    case 'routine.paused':
+      final rs = [for (final r in (p['routines'] as List?) ?? const []) '$r'];
+      final reason = s('reason');
+      return [
+        rs.length == 1 ? 'Routine ${rs.first} paused' : 'Routines paused',
+        if (reason.isNotEmpty) '($reason)',
+        if (rs.length > 1) ': ${rs.join(', ')}',
+        if (s('message').isNotEmpty) '- ${s('message')}',
+      ].join(' ').replaceAll(' :', ':');
+    case 'draft':
+      final what = s('command').isNotEmpty
+          ? s('command')
+          : [s('tool'), s('target')].where((x) => x.isNotEmpty).join(' ');
+      return what.isEmpty ? 'Draft held for approval' : 'Draft held: $what';
+  }
+  return fallback;
 }

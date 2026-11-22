@@ -74,6 +74,7 @@ func (d *Node) agentNotice(ctx context.Context, a pagent.Agent, kind string, pay
 // routineTick runs one scheduler pass over every active agent.
 func (d *Node) routineTick(ctx context.Context) {
 	now := d.pagentNow()
+	d.flushQuietHolds(ctx, now)
 	away := d.clientAway(now)
 	expired, err := d.pagents.ExpiredLeases(ctx, now)
 	if err != nil {

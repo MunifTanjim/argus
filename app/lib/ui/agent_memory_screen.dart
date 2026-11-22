@@ -319,7 +319,11 @@ class _ReviewTabState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              p.isInstructions ? 'Instruction rewrite' : 'Memory change',
+              p.isRoutine
+                  ? 'Routine change'
+                  : p.isInstructions
+                  ? 'Instruction rewrite'
+                  : 'Memory change',
               style: const TextStyle(
                 color: AppColors.secondary,
                 fontWeight: FontWeight.w700,
@@ -330,6 +334,10 @@ class _ReviewTabState
                 p.source,
                 style: const TextStyle(color: AppColors.dim, fontSize: 12),
               ),
+            if (p.isRoutine && (p.slug.isNotEmpty || p.summary.isNotEmpty)) ...[
+              const SizedBox(height: 6),
+              Text([p.slug, p.summary].where((x) => x.isNotEmpty).join(' · ')),
+            ],
             if (p.reason.isNotEmpty) ...[
               const SizedBox(height: 6),
               Text(p.reason),

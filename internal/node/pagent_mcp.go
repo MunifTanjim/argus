@@ -166,7 +166,8 @@ func (d *Node) applyInstructionsProposal(ctx context.Context, a pagent.Agent, pr
 }
 
 func (d *Node) mcpRequestHandoff(ctx context.Context, caller callerRef, p requestHandoffParams) (any, error) {
-	if _, _, err := d.pagentCaller(ctx, caller); err != nil {
+	a, th, err := d.pagentCaller(ctx, caller)
+	if err != nil {
 		return nil, err
 	}
 	if _, ok := d.reg.Get(caller.Local.ID); !ok {
@@ -182,6 +183,7 @@ func (d *Node) mcpRequestHandoff(ctx context.Context, caller callerRef, p reques
 			{Label: "Done", Value: handoffDone},
 		},
 	})
+	d.pagentNotify(ctx, a, th.ID, NotifyNeedsYou, th.StartedBy, a.Name+" needs you", strings.TrimSpace(p.Reason))
 	return map[string]string{"status": "waiting for the user; you'll get a message when they're done"}, nil
 }
 

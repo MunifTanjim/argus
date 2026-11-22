@@ -191,3 +191,23 @@ func TestDefinitionApprovalsRoundTrip(t *testing.T) {
 		t.Fatalf("reload: %v %+v", err, d2)
 	}
 }
+
+func TestResolveNotificationSettings(t *testing.T) {
+	var d config.AgentDefaults
+	d.Notify, d.QuietHours, d.NotifyDelay = "needs-you", "", 3*time.Minute
+	d.Brief.Enabled, d.Brief.At = false, "08:00"
+	on := true
+	def := &Definition{QuietHours: "22:00-07:00", Brief: &BriefDef{Enabled: &on, At: "07:30"}}
+	s := Resolve(def, d)
+	if s.QuietHours != "22:00-07:00" || !s.BriefEnabled || s.BriefAt != "07:30" || s.NotifyDelay != 3*time.Minute || s.Notify != "needs-you" {
+		t.Fatalf("settings: %+v", s)
+	}
+	dir := t.TempDir()
+	if err := def.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	back, err := LoadDefinition(dir)
+	if err != nil || back.QuietHours != "22:00-07:00" || back.Brief == nil || back.Brief.At != "07:30" || !*back.Brief.Enabled {
+		t.Fatalf("round trip: %+v %v", back, err)
+	}
+}

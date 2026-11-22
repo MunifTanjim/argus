@@ -88,6 +88,26 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
     if (mounted) await _refresh();
   }
 
+  Future<void> _routineAction(PAgent a, PAgentRoutine r, String action) async {
+    if (!_reachable(a)) return;
+    final api = ref.read(pagentsApiProvider);
+    try {
+      switch (action) {
+        case 'run':
+          await api.runRoutine(a.id, r.slug);
+          if (mounted) _say('${r.slug}: test run started');
+        case 'pause':
+          await api.pauseRoutine(a.id, r.slug);
+        case 'resume':
+          await api.resumeRoutine(a.id, r.slug);
+      }
+    } catch (e) {
+      if (mounted) _say('$action: ${actionError(e)}');
+    }
+    ref.invalidate(agentRoutinesProvider(a.id));
+    await _refresh();
+  }
+
   void _openMemory(PAgent a) {
     if (!_reachable(a)) return;
     Navigator.of(context).push(agentMemoryRoute(a.id));
@@ -185,6 +205,15 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
                     ),
                   ),
                 ),
+            const SizedBox(height: 16),
+            const _Heading('Routines'),
+            if (agent.unreachable)
+              const _Note(agentOffline)
+            else
+              _RoutinesList(
+                agentId: agent.id,
+                onAction: (r, v) => _routineAction(agent, r, v),
+              ),
             if (usage != null) ...[
               const SizedBox(height: 16),
               InkWell(
@@ -202,6 +231,82 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _RoutinesList extends ConsumerWidget {
+  const _RoutinesList({required this.agentId, required this.onAction});
+
+  final String agentId;
+  final void Function(PAgentRoutine, String) onAction;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final routines = ref.watch(agentRoutinesProvider(agentId));
+    final list = routines.value;
+    if (list == null) {
+      return routines.hasError
+          ? const _Note('no routines')
+          : const _Note('loading routines…');
+    }
+    if (list.isEmpty) return const _Note('no routines');
+    return Column(
+      children: [
+        for (final r in list) _RoutineRow(routine: r, onAction: onAction),
+      ],
+    );
+  }
+}
+
+class _RoutineRow extends StatelessWidget {
+  const _RoutineRow({required this.routine, required this.onAction});
+
+  final PAgentRoutine routine;
+  final void Function(PAgentRoutine, String) onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = routine;
+    final lines = [
+      if (r.what.isNotEmpty) r.what,
+      if (r.starts.isNotEmpty) r.starts.join('; '),
+      if (r.state == 'active' && r.nextDue != null)
+        'next ${untilText(r.nextDue!)}',
+      routineProgress(r),
+    ].where((x) => x.isNotEmpty);
+    final runnable = r.state == 'active' || r.state == 'paused';
+    return ListTile(
+      dense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(r.slug, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            routineStateText(r),
+            style: TextStyle(
+              fontSize: 12,
+              color: r.state == 'active' ? AppColors.accent : AppColors.dim,
+            ),
+          ),
+        ],
+      ),
+      subtitle: lines.isEmpty ? null : Text(lines.join(' · ')),
+      trailing: PopupMenuButton<String>(
+        tooltip: 'Routine actions',
+        onSelected: (v) => onAction(r, v),
+        itemBuilder: (_) => [
+          if (runnable)
+            const PopupMenuItem(value: 'run', child: Text('Run now')),
+          if (r.state == 'active')
+            const PopupMenuItem(value: 'pause', child: Text('Pause')),
+          if (r.state == 'paused')
+            const PopupMenuItem(value: 'resume', child: Text('Resume')),
+        ],
       ),
     );
   }

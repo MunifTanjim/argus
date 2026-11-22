@@ -83,8 +83,9 @@ overrides the `agents.defaults` values.
 | `agents.defaults.memory.log-entries` | `20` | Recent log entries loaded into a session. |
 | `agents.defaults.memory.extractor` | none | The model that captures memory. |
 | `agents.defaults.proactivity` | `default` | `off`, `low`, `default` or `high`. |
-| `agents.defaults.quiet-hours` | none | Hours when the agent does not notify you. |
+| `agents.defaults.quiet-hours` | none | Hours, such as `22:00-07:00`, when background work does not notify you; you get one summary when they end. |
 | `agents.defaults.notify` | `needs-you` | `all`, `needs-you` or `off`. |
+| `agents.defaults.notify-delay` | `3m` | While you are connected, how long a notification waits; it is dropped if you read the thread meanwhile. |
 | `agents.defaults.brief.enabled` | `false` | Whether the agent writes a daily brief. |
 | `agents.defaults.brief.at` | `08:00` | Time of the daily brief. |
 | `agents.defaults.limits.min-interval` | `15m` | Shortest interval between runs of a routine. |

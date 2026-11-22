@@ -1054,6 +1054,38 @@ class E2EClient implements GatewayClient {
                 t,
           ],
         };
+      case 'pagent.routine.list' when res is Map<String, dynamic>:
+        return {
+          ...res,
+          'routines': [
+            for (final r in (res['routines'] as List?) ?? const [])
+              if (r is Map<String, dynamic>)
+                {...r, 'agent_id': compositeId(nodeId, '${r['agent_id'] ?? ''}')}
+              else
+                r,
+          ],
+        };
+      case 'pagent.routine.pause' ||
+          'pagent.routine.resume' when res is Map<String, dynamic>:
+        return {
+          ...res,
+          'agent_id': compositeId(nodeId, '${res['agent_id'] ?? ''}'),
+        };
+      case 'pagent.routine.runs' when res is Map<String, dynamic>:
+        return {
+          ...res,
+          'runs': [
+            for (final r in (res['runs'] as List?) ?? const [])
+              if (r is Map<String, dynamic>)
+                {
+                  ...r,
+                  if (_compositeIf(nodeId, r['thread_id']).isNotEmpty)
+                    'thread_id': _compositeIf(nodeId, r['thread_id']),
+                }
+              else
+                r,
+          ],
+        };
       case 'pagent.memory.log' when res is Map<String, dynamic>:
         return {
           ...res,

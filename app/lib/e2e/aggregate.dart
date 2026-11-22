@@ -76,6 +76,8 @@ const Set<String> pagentAddressed = {
   'pagent.thread.send', 'pagent.thread.list',
   'pagent.memory.show', 'pagent.memory.log', 'pagent.memory.undo',
   'pagent.memory.import', 'pagent.memory.proposals',
+  'pagent.routine.list', 'pagent.routine.run', 'pagent.routine.pause',
+  'pagent.routine.resume', 'pagent.routine.runs', 'pagent.routine.hookSecret',
 };
 
 /// Methods carrying a composite thread_id.

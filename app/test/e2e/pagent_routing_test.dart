@@ -306,4 +306,65 @@ void main() {
     expect(added['found_instructions'], true);
     await f.client.close();
   });
+
+  test('routine calls route by agent and composite their results', () async {
+    final f = await _connect(
+      (m, p) => _json(null),
+      (m, p) => switch (m) {
+        'pagent.routine.list' => _json({
+          'routines': [
+            {'agent_id': 'a1', 'slug': 'billing', 'state': 'active'},
+          ],
+        }),
+        'pagent.routine.pause' || 'pagent.routine.resume' => _json({
+          'agent_id': 'a1',
+          'slug': 'billing',
+          'state': 'paused',
+        }),
+        'pagent.routine.run' => _json({'run_id': 'r1'}),
+        'pagent.routine.runs' => _json({
+          'runs': [
+            {'id': 'r1', 'thread_id': 't1'},
+            {'id': 'r2'},
+          ],
+        }),
+        _ => _json(null),
+      },
+    );
+    final list = await f.client.call('pagent.routine.list', {
+      'agent_id': 'B:a1',
+    }) as Map;
+    expect(((list['routines'] as List).single as Map)['agent_id'], 'B:a1');
+
+    final paused = await f.client.call('pagent.routine.pause', {
+      'agent_id': 'B:a1',
+      'slug': 'billing',
+    }) as Map;
+    expect(paused['agent_id'], 'B:a1');
+    expect(
+      _params(f.b.requests.last.params),
+      {'agent_id': 'a1', 'slug': 'billing'},
+    );
+    final resumed = await f.client.call('pagent.routine.resume', {
+      'agent_id': 'B:a1',
+      'slug': 'billing',
+    }) as Map;
+    expect(resumed['agent_id'], 'B:a1');
+
+    final run = await f.client.call('pagent.routine.run', {
+      'agent_id': 'B:a1',
+      'slug': 'billing',
+    }) as Map;
+    expect(run['run_id'], 'r1');
+
+    final runs = await f.client.call('pagent.routine.runs', {
+      'agent_id': 'B:a1',
+      'slug': 'billing',
+    }) as Map;
+    final rs = (runs['runs'] as List).cast<Map>();
+    expect(rs[0]['thread_id'], 'B:t1');
+    expect(rs[1].containsKey('thread_id'), false);
+    expect(f.a.requests.where((r) => r.method.startsWith('pagent.')), isEmpty);
+    await f.client.close();
+  });
 }

@@ -162,6 +162,33 @@ class PAgentsApi {
         }),
       );
 
+  Future<List<PAgentRoutine>> routines(String agentId) async {
+    final res = await _map('pagent.routine.list', {'agent_id': agentId});
+    return [
+      for (final r in (res['routines'] as List?) ?? const [])
+        if (r is Map<String, dynamic>) PAgentRoutine.fromJson(r),
+    ];
+  }
+
+  /// Starts a test run now and returns its run id.
+  Future<String> runRoutine(String agentId, String slug) async {
+    final res = await _map('pagent.routine.run', {
+      'agent_id': agentId,
+      'slug': slug,
+    });
+    return res['run_id'] as String? ?? '';
+  }
+
+  Future<PAgentRoutine> pauseRoutine(String agentId, String slug) async =>
+      PAgentRoutine.fromJson(
+        await _map('pagent.routine.pause', {'agent_id': agentId, 'slug': slug}),
+      );
+
+  Future<PAgentRoutine> resumeRoutine(String agentId, String slug) async =>
+      PAgentRoutine.fromJson(
+        await _map('pagent.routine.resume', {'agent_id': agentId, 'slug': slug}),
+      );
+
   /// Returns how many changes were staged for review.
   Future<int> importMemory(String agentId, String content) async {
     final res = await _map('pagent.memory.import', {
@@ -208,6 +235,13 @@ final agentMemoryUsageProvider = FutureProvider.autoDispose
         if (log.isNotEmpty) last = log.first.when;
       } catch (_) {}
       return AgentMemoryUsage(usage: mem.usage, budget: mem.budget, last: last);
+    });
+
+/// The agent's routines. Reloads when the agent list changes.
+final agentRoutinesProvider = FutureProvider.autoDispose
+    .family<List<PAgentRoutine>, String>((ref, agentId) {
+      ref.watch(pagentsProvider.select((s) => s.agents));
+      return ref.read(pagentsApiProvider).routines(agentId);
     });
 
 class PAgentsState {

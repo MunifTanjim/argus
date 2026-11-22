@@ -36,11 +36,19 @@ type Definition struct {
 	MaxConcurrentSessions int           `yaml:"max-concurrent-sessions,omitempty"`
 	Notify                string        `yaml:"notify,omitempty"`
 	Proactivity           string        `yaml:"proactivity,omitempty"`
+	QuietHours            string        `yaml:"quiet-hours,omitempty"`
+	Brief                 *BriefDef     `yaml:"brief,omitempty"`
 	CanMessage            []string      `yaml:"can-message,omitempty"`
 	Approvals             []policy.Rule `yaml:"approvals,omitempty"`
 
 	// doc is the parsed file this definition was loaded from.
 	doc *yaml.Node
+}
+
+// BriefDef is the agent's daily brief; nil fields keep the defaults.
+type BriefDef struct {
+	Enabled *bool  `yaml:"enabled,omitempty"`
+	At      string `yaml:"at,omitempty"`
 }
 
 type MemoryDef struct {
@@ -53,7 +61,7 @@ type MemoryDef struct {
 var knownKeys = []string{
 	"id", "name", "description", "instructions", "agent", "model", "workdirs",
 	"skills", "timezone", "memory", "idle-close", "max-concurrent-sessions",
-	"notify", "proactivity", "can-message", "approvals",
+	"notify", "proactivity", "quiet-hours", "brief", "can-message", "approvals",
 }
 
 // LoadDefinition reads agent.yaml from dir.

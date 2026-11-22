@@ -483,6 +483,11 @@ func (d *Node) finishRun(ctx context.Context, c *runCtl, res pagent.RunResult) {
 	case r.ReportTo != reportQuiet && res.Result != resultNoChange:
 		d.agentNotice(ctx, a, evRoutineResult, payload)
 	}
+	kind := resultNotifyKind(res.Result)
+	if r.ReportTo == reportQuiet && kind == NotifyResult {
+		kind = NotifyQuiet
+	}
+	d.pagentNotify(ctx, a, th, kind, run.StartedBy, fmt.Sprintf("%s: %s %s", a.Name, r.Slug, strings.ReplaceAll(res.Result, "_", " ")), res.Summary)
 }
 
 // failRun ends the run failed and applies fatigue: the first failure of a
