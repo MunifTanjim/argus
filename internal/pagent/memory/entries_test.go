@@ -88,9 +88,9 @@ func TestCheckTidyFraction(t *testing.T) {
 	if err := CheckTidy(small, entries("c"), nil); err == nil {
 		t.Fatal("2 of 3 should fail")
 	}
-	// additions do not count
-	if err := CheckTidy(before, append(entries("a1", "b2", "c3", "d4", "e5", "f6", "g7", "h8", "i9", "j10"), Entry{Text: "new detail"}), nil); err != nil {
-		t.Fatalf("additions: %v", err)
+	// tidy must not add facts
+	if err := CheckTidy(before, append(entries("a1", "b2", "c3", "d4", "e5", "f6", "g7", "h8", "i9", "j10"), Entry{Text: "new detail"}), nil); err == nil {
+		t.Fatal("addition without removal should fail")
 	}
 }
 
@@ -114,5 +114,34 @@ func TestCheckTidyNoNewWords(t *testing.T) {
 	bad := append(entries("x", "y", "z", "p", "q", "r", "s", "t"), Entry{Text: "uses neovim daily", Date: "2026-01-01"})
 	if err := CheckTidy(before, bad, nil); err == nil {
 		t.Fatal("new word should fail")
+	}
+}
+
+func TestApplyPreservesStructure(t *testing.T) {
+	content := "# Memory\n\nintro prose\n\n## Work\n- a one (2026-01-01) · until 2026-05-05\n- b two (2026-01-01)\n\n## Notes\nplain line\n"
+	out, _, errs := Apply(content, []Op{
+		{Action: "add", Text: "c three"},
+		{Action: "remove", Match: "b two"},
+		{Action: "update", Match: "a one", Text: "a uno"},
+	}, "2026-02-01")
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	want := "# Memory\n\nintro prose\n\n## Work\n- a uno (2026-02-01) · until 2026-05-05\n- c three (2026-02-01)\n\n## Notes\nplain line\n"
+	if out != want {
+		t.Fatalf("got %q want %q", out, want)
+	}
+	out, _, _ = Apply("# Memory\nprose\n", []Op{{Action: "add", Text: "x"}}, "2026-02-01")
+	if out != "# Memory\nprose\n- x (2026-02-01)\n" {
+		t.Fatalf("append at end: %q", out)
+	}
+}
+
+func TestHeaderOverBudget(t *testing.T) {
+	if Header("# Memory\n- a\n") != "# Memory" || Header("- a\n") != "" {
+		t.Fatal("header")
+	}
+	if OverBudget("abc", 3) || !OverBudget("abcd", 3) {
+		t.Fatal("budget")
 	}
 }

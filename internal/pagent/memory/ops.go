@@ -47,45 +47,99 @@ func findUnique(entries []Entry, match string) (int, error) {
 	return idx, nil
 }
 
+type row struct {
+	raw string
+	e   *Entry
+}
+
+func entriesOf(rows []row) []Entry {
+	var es []Entry
+	for _, r := range rows {
+		if r.e != nil {
+			es = append(es, *r.e)
+		}
+	}
+	return es
+}
+
 // Apply applies ops in order to content. Failed ops are skipped and reported
-// in the returned errors; the rest are returned as applied.
+// in the returned errors; the rest are returned as applied. Non-bullet lines
+// are preserved in place; added entries go after the last bullet.
 func Apply(content string, ops []Op, today string) (string, []Op, []error) {
-	entries := Parse(content)
+	var rows []row
+	if content != "" {
+		for _, line := range strings.Split(strings.TrimSuffix(content, "\n"), "\n") {
+			r := row{raw: line}
+			if m := entryRe.FindStringSubmatch(line); m != nil {
+				r.e = &Entry{Text: m[1], Date: m[2], Until: m[3]}
+			}
+			rows = append(rows, r)
+		}
+	}
 	var applied []Op
 	var errs []error
 	for _, op := range ops {
 		var err error
+		es := entriesOf(rows)
 		switch op.Action {
 		case "add":
 			var text string
 			if text, err = cleanText(op.Text); err != nil {
 				break
 			}
-			for _, e := range entries {
+			for _, e := range es {
 				if strings.EqualFold(e.Text, text) {
 					err = fmt.Errorf("duplicate entry %q", text)
 					break
 				}
 			}
 			if err == nil {
-				entries = append(entries, Entry{Text: text, Date: today, Until: op.Until})
+				at := len(rows)
+				for i, r := range rows {
+					if r.e != nil {
+						at = i + 1
+					}
+				}
+				nr := row{e: &Entry{Text: text, Date: today, Until: op.Until}}
+				rows = append(rows[:at], append([]row{nr}, rows[at:]...)...)
 			}
-		case "update":
+		case "update", "remove":
+			var i int
+			if i, err = findUnique(es, op.Match); err != nil {
+				break
+			}
+			// map entry index to row index
+			n, ri := 0, -1
+			for j, r := range rows {
+				if r.e == nil {
+					continue
+				}
+				if n == i {
+					ri = j
+					break
+				}
+				n++
+			}
+			if op.Action == "remove" {
+				rows = append(rows[:ri], rows[ri+1:]...)
+				break
+			}
 			var text string
 			if text, err = cleanText(op.Text); err != nil {
 				break
 			}
-			var i int
-			if i, err = findUnique(entries, op.Match); err != nil {
-				break
+			for j, e := range es {
+				if j != i && strings.EqualFold(e.Text, text) {
+					err = fmt.Errorf("duplicate entry %q", text)
+				}
 			}
-			entries[i] = Entry{Text: text, Date: today, Until: op.Until}
-		case "remove":
-			var i int
-			if i, err = findUnique(entries, op.Match); err != nil {
-				break
+			if err == nil {
+				until := op.Until
+				if until == "" {
+					until = rows[ri].e.Until
+				}
+				rows[ri] = row{e: &Entry{Text: text, Date: today, Until: until}}
 			}
-			entries = append(entries[:i], entries[i+1:]...)
 		default:
 			err = fmt.Errorf("unknown action %q", op.Action)
 		}
@@ -98,5 +152,14 @@ func Apply(content string, ops []Op, today string) (string, []Op, []error) {
 	if len(applied) == 0 {
 		return content, nil, errs
 	}
-	return Render(entries, Header(content)), applied, errs
+	var b strings.Builder
+	for _, r := range rows {
+		if r.e != nil {
+			b.WriteString(r.e.render())
+		} else {
+			b.WriteString(r.raw)
+		}
+		b.WriteString("\n")
+	}
+	return b.String(), applied, errs
 }

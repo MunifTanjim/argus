@@ -53,9 +53,6 @@ func CheckTidy(before, after []Entry, userLines map[int]bool) error {
 			known[w] = true
 		}
 	}
-	if len(removed) == 0 {
-		return nil
-	}
 	beforeTexts := map[string]int{}
 	for _, e := range before {
 		beforeTexts[e.Text]++

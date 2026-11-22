@@ -32,6 +32,9 @@ func TestLooksSecret(t *testing.T) {
 		"order 4111 1111 1111 1112",
 		"phone 1234567890",
 		"-----BEGIN CERTIFICATE-----",
+		"task-tracking-dashboard-v2",
+		"risk-assessment-framework",
+		"MAKIAABCDEFGHIJKLMNOP",
 	}
 	for _, s := range neg {
 		if rule, ok := LooksSecret(s); ok {

@@ -12,12 +12,12 @@ type secretRule struct {
 }
 
 var secretRules = []secretRule{
-	{"aws-access-key", regexp.MustCompile(`AKIA[0-9A-Z]{16}`)},
-	{"github-token", regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{36,}`)},
-	{"github-pat", regexp.MustCompile(`github_pat_[A-Za-z0-9_]{22,}`)},
-	{"slack-token", regexp.MustCompile(`xox[baprs]-[A-Za-z0-9-]{10,}`)},
-	{"api-key", regexp.MustCompile(`sk-(ant-)?[A-Za-z0-9_-]{20,}`)},
-	{"google-api-key", regexp.MustCompile(`AIza[0-9A-Za-z_-]{35}`)},
+	{"aws-access-key", regexp.MustCompile(`(?:^|[^A-Za-z0-9])AKIA[0-9A-Z]{16}`)},
+	{"github-token", regexp.MustCompile(`(?:^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{36,}`)},
+	{"github-pat", regexp.MustCompile(`(?:^|[^A-Za-z0-9])github_pat_[A-Za-z0-9_]{22,}`)},
+	{"slack-token", regexp.MustCompile(`(?:^|[^A-Za-z0-9])xox[baprs]-[A-Za-z0-9-]{10,}`)},
+	{"api-key", regexp.MustCompile(`(?:^|[^A-Za-z0-9])sk-(ant-)?[A-Za-z0-9_-]{20,}`)},
+	{"google-api-key", regexp.MustCompile(`(?:^|[^A-Za-z0-9])AIza[0-9A-Za-z_-]{35}`)},
 	{"private-key", regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)},
 	{"jwt", regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)},
 	{"generic-secret", regexp.MustCompile(`(?i)(password|passwd|secret|token|api[_-]?key)\s*[:=]\s*\S{8,}`)},
