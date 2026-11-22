@@ -67,3 +67,14 @@ func (m model) draftCmd(threadID string, eventID int64, send bool) tea.Cmd {
 		return threadActionMsg{threadID: threadID, verb: "discard draft", err: client.Call(api.MethodPAgentDraftDiscard, p, nil)}
 	}
 }
+
+// closedEntryFlash says why the start and dismiss keys did nothing on the
+// row under the cursor: a draft or an offer that is no longer open.
+func (t threadComp) closedEntryFlash(v tview) string {
+	if r, ok := v.cursorRow(); ok && r.kind == entryRow {
+		if e := t.tr.transcript.entries[r.entry]; e.Event != nil && e.Event.Kind == "draft" {
+			return "not an open draft"
+		}
+	}
+	return "not an open offer"
+}

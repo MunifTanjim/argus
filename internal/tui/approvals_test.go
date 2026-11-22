@@ -142,8 +142,11 @@ func TestThreadDraftSendAndDiscard(t *testing.T) {
 		t.Error("a discarded draft still offers send")
 	}
 	m = typeKeys(m, "k") // the discarded draft
-	if mm, cmd := upd(m, keyMsg("a")); cmd != nil || mm.flash != "not an open offer" {
+	if mm, cmd := upd(m, keyMsg("a")); cmd != nil || mm.flash != "not an open draft" {
 		t.Fatalf("a on a discarded draft: flash %q", mm.flash)
+	}
+	if !strings.Contains(offerKeys.Start.Help().Desc, "send") || !strings.Contains(offerKeys.Dismiss.Help().Desc, "discard") {
+		t.Errorf("key help = %q / %q", offerKeys.Start.Help().Desc, offerKeys.Dismiss.Help().Desc)
 	}
 	m = typeKeys(m, "k") // the open draft
 	m, cmd := upd(m, keyMsg("a"))

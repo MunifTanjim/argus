@@ -152,8 +152,8 @@ var agentKeys = struct {
 var offerKeys = struct {
 	Start, Dismiss binding
 }{
-	Start:   nm("offer start", "a", "start"),
-	Dismiss: nm("offer dismiss", "x", "dismiss"),
+	Start:   nm("offer start", "a", "start / send"),
+	Dismiss: nm("offer dismiss", "x", "dismiss / discard"),
 }
 
 var threadKeys = struct {

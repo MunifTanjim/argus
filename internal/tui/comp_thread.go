@@ -308,7 +308,7 @@ func (t threadComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, 
 			id = offerID(t.tr.transcript.entries[r.entry])
 		}
 		if id == "" || !offerOpen(t.tr.transcript.entries, id) {
-			c.setFlash("not an open offer")
+			c.setFlash(t.closedEntryFlash(v))
 			return t, nil, true
 		}
 		return t, m.offerCmd(t.threadID, id, m.matches(msg, offerKeys.Start)), true
