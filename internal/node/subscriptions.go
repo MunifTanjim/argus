@@ -27,6 +27,7 @@ type connSubs struct {
 	mu     sync.Mutex
 	cancel map[string]context.CancelFunc // sub_id -> poller cancel
 	opened time.Time                     // when the connection was registered
+	client bool                          // the connection listed sessions: a TUI or app, not a hook
 }
 
 func newConnSubs() *connSubs { return &connSubs{cancel: map[string]context.CancelFunc{}} }
@@ -76,7 +77,7 @@ func (d *Node) dropConn(n api.Notifier) {
 	d.subsMu.Unlock()
 	if cs != nil {
 		cs.closeAll()
-		d.connClosed(cs.opened)
+		d.connClosed(cs)
 	}
 }
 

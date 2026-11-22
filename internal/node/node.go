@@ -145,6 +145,7 @@ type Node struct {
 	routineErrSent map[string]string                 // agent id/slug -> key of the last routine.error
 	routineSkip    map[string]string                 // agent id/slug -> reason of the current skip streak
 	routineStale   map[string]time.Time              // agent id/slug -> due time of the last stale notice
+	routineRuns    sync.Map                          // run id -> runs this process executes
 
 	clientMu        sync.Mutex
 	lastClientAt    time.Time // when a client was last attached

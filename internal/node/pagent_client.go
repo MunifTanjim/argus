@@ -1,23 +1,40 @@
 package node
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/atomicfile"
 )
 
 const (
-	// clientAttachMin is how long a connection must stay open to count as an
-	// attached client; hook calls and one-shot commands close sooner.
+	// clientAttachMin is how long a client connection must stay open to count
+	// as attached; one-shot commands close sooner.
 	clientAttachMin = 10 * time.Second
 	// clientSaveEvery bounds how often the last-attached time is written while
 	// a client stays attached.
 	clientSaveEvery = 10 * time.Minute
 )
+
+// markClient records that the connection serving ctx is a client (a TUI or
+// app listing sessions). Hook calls and the mod bridge never list sessions, so
+// a long-held hook connection does not count as a user being present.
+func (d *Node) markClient(ctx context.Context) {
+	n, ok := api.NotifierFrom(ctx)
+	if !ok {
+		return
+	}
+	d.subsMu.Lock()
+	if cs := d.conns[n]; cs != nil {
+		cs.client = true
+	}
+	d.subsMu.Unlock()
+}
 
 // clientAttached reports whether a client connection has been open for at
 // least clientAttachMin.
@@ -25,7 +42,7 @@ func (d *Node) clientAttached(now time.Time) bool {
 	d.subsMu.Lock()
 	defer d.subsMu.Unlock()
 	for _, cs := range d.conns {
-		if cs != nil && !cs.opened.IsZero() && now.Sub(cs.opened) >= clientAttachMin {
+		if cs != nil && cs.client && !cs.opened.IsZero() && now.Sub(cs.opened) >= clientAttachMin {
 			return true
 		}
 	}
@@ -33,9 +50,12 @@ func (d *Node) clientAttached(now time.Time) bool {
 }
 
 // connClosed records a client that stayed attached until now.
-func (d *Node) connClosed(opened time.Time) {
+func (d *Node) connClosed(cs *connSubs) {
 	now := d.pagentNow()
-	if !opened.IsZero() && now.Sub(opened) >= clientAttachMin {
+	d.subsMu.Lock()
+	client, opened := cs.client, cs.opened
+	d.subsMu.Unlock()
+	if client && !opened.IsZero() && now.Sub(opened) >= clientAttachMin {
 		d.clientSeen(now, true)
 	}
 }

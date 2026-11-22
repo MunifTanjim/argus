@@ -297,3 +297,37 @@ func (s *Store) WebhookSecretHash(ctx context.Context, agentID, slug string) (st
 	h, err := s.q.GetPAgentWebhookSecretHash(ctx, gen.GetPAgentWebhookSecretHashParams{AgentID: agentID, Slug: slug})
 	return one(h, err, func(h string) string { return h })
 }
+
+// InterruptRun marks an active run interrupted when its lease is still
+// expired at now and it has no result. ok is false when the run was renewed,
+// ended or reported meanwhile.
+func (s *Store) InterruptRun(ctx context.Context, id string, now time.Time, errMsg string) (bool, error) {
+	n, err := s.q.InterruptPAgentRoutineRun(ctx, gen.InterruptPAgentRoutineRunParams{
+		Error: errMsg, EndedAt: s.now().UnixNano(), ID: id, Now: now.UnixNano(),
+	})
+	return n > 0, err
+}
+
+// RunOutcome is what one finished run adds to its routine's state.
+type RunOutcome struct {
+	Result   string
+	Failed   bool
+	Sessions int64
+	Cost     float64
+	Tokens   int64
+}
+
+// RecordRunOutcome records a finished run on the routine's state: the last
+// result, the failure streak (reset by a non-failure) and the budget used. It
+// returns the updated state.
+func (s *Store) RecordRunOutcome(ctx context.Context, agentID, slug string, o RunOutcome) (RoutineState, error) {
+	now := s.now().UnixNano()
+	r, err := s.q.RecordPAgentRoutineOutcome(ctx, gen.RecordPAgentRoutineOutcomeParams{
+		LastRunAt: now, LastResult: o.Result, Failed: b2i(o.Failed), Sessions: o.Sessions,
+		Cost: o.Cost, Tokens: o.Tokens, UpdatedAt: now, AgentID: agentID, Slug: slug,
+	})
+	if err != nil {
+		return RoutineState{}, err
+	}
+	return stateFrom(r), nil
+}

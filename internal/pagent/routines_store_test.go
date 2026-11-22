@@ -268,3 +268,49 @@ func TestSetRunStateGuarded(t *testing.T) {
 		t.Fatal(got.State)
 	}
 }
+
+func TestInterruptRunConditional(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newStore(t)
+	t0 := time.Unix(1_700_000_000, 0)
+	run, _, _ := s.ClaimOccurrence(ctx, "ag1", "r", t0, "routine", false)
+	if ok, err := s.InterruptRun(ctx, run.ID, run.LeaseUntil.Add(-time.Second), "lease expired"); err != nil || ok {
+		t.Fatalf("lease still held: ok=%v err=%v", ok, err)
+	}
+	if err := s.RenewLease(ctx, run.ID, run.LeaseUntil.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := s.InterruptRun(ctx, run.ID, run.LeaseUntil.Add(time.Minute), "lease expired"); ok {
+		t.Fatal("renewed lease interrupted")
+	}
+	if ok, err := s.InterruptRun(ctx, run.ID, run.LeaseUntil.Add(2*time.Hour), "lease expired"); err != nil || !ok {
+		t.Fatalf("expired lease: ok=%v err=%v", ok, err)
+	}
+	if got, _, _ := s.RoutineRun(ctx, run.ID); got.State != RunInterrupted || got.Error != "lease expired" {
+		t.Fatalf("run: %+v", got)
+	}
+	reported, _, _ := s.ClaimOccurrence(ctx, "ag1", "r", t0.Add(time.Hour), "routine", false)
+	_ = s.RecordResult(ctx, reported.ID, RunResult{Result: "progress"})
+	if ok, _ := s.InterruptRun(ctx, reported.ID, reported.LeaseUntil.Add(time.Hour), "x"); ok {
+		t.Fatal("reported run interrupted")
+	}
+}
+
+func TestRecordRunOutcome(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newStore(t)
+	t0 := time.Unix(1_700_000_000, 0)
+	_ = s.UpsertRoutineState(ctx, RoutineState{AgentID: "ag1", Slug: "r", Enabled: true, NextDueAt: t0, AnchorAt: t0})
+	st, err := s.RecordRunOutcome(ctx, "ag1", "r", RunOutcome{Result: "failed", Failed: true, Sessions: 1, Cost: 0.5, Tokens: 10})
+	if err != nil || st.ConsecutiveFailures != 1 || st.SessionsUsed != 1 || st.CostUsed != 0.5 || st.TokensUsed != 10 || st.LastResult != "failed" {
+		t.Fatalf("state: %+v %v", st, err)
+	}
+	st, _ = s.RecordRunOutcome(ctx, "ag1", "r", RunOutcome{Result: "failed", Failed: true, Sessions: 1})
+	if st.ConsecutiveFailures != 2 || st.SessionsUsed != 2 || !st.NextDueAt.Equal(t0) {
+		t.Fatalf("state: %+v", st)
+	}
+	st, _ = s.RecordRunOutcome(ctx, "ag1", "r", RunOutcome{Result: "progress", Sessions: 1, Cost: 0.25})
+	if st.ConsecutiveFailures != 0 || st.SessionsUsed != 3 || st.CostUsed != 0.75 || st.LastRunAt.IsZero() {
+		t.Fatalf("state: %+v", st)
+	}
+}

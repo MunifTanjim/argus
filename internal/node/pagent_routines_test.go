@@ -428,7 +428,11 @@ func TestSchedulerAttachedClientKeepsRunning(t *testing.T) {
 	r.write(t, "inbox", hourly)
 	r.tick()
 	r.at(8*24*time.Hour - time.Minute)
-	r.d.registerConn(&fakeNotifier{ch: make(chan api.Notification, 1)})
+	n := &fakeNotifier{ch: make(chan api.Notification, 1)}
+	r.d.registerConn(n)
+	if _, err := r.d.handleSessionsList(api.WithNotifier(context.Background(), n), nil); err != nil {
+		t.Fatal(err)
+	}
 	r.at(8 * 24 * time.Hour)
 	r.tick()
 	if st, _ := r.state(t, "inbox"); !st.Enabled {
@@ -436,5 +440,47 @@ func TestSchedulerAttachedClientKeepsRunning(t *testing.T) {
 	}
 	if r.startCount() != 1 {
 		t.Fatalf("starts = %d", r.startCount())
+	}
+}
+
+func TestSchedulerHookConnectionIsNotAClient(t *testing.T) {
+	r := newSchedRig(t)
+	r.write(t, "inbox", hourly)
+	r.tick()
+	r.at(8*24*time.Hour - time.Minute)
+	// A blocking permission hook holds its connection open but never lists sessions.
+	r.d.registerConn(&fakeNotifier{ch: make(chan api.Notification, 1)})
+	r.at(8 * 24 * time.Hour)
+	r.tick()
+	if st, _ := r.state(t, "inbox"); st.Enabled || st.PausedReason != pausedAway {
+		t.Fatalf("a hook connection kept routines running: %+v", st)
+	}
+}
+
+func TestExpiredLeaseOfOwnedRunNotInterrupted(t *testing.T) {
+	r := newSchedRig(t)
+	ctx := context.Background()
+	r.write(t, "digest", "what: x\nstarts:\n  - every: 1d\n")
+	r.tick()
+	run, _, err := r.store.ClaimOccurrence(ctx, r.agent.ID, "digest", schedT0.Add(-time.Hour), "routine", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.d.routineRuns.Store(run.ID, struct{}{})
+	r.at(10 * time.Minute)
+	r.tick()
+	if got, _, _ := r.store.RoutineRun(ctx, run.ID); got.State != pagent.RunClaimed {
+		t.Fatalf("owned run: %+v", got)
+	}
+	if r.startCount() != 0 {
+		t.Fatalf("owned run retried: %+v", r.starts)
+	}
+	// Renewed after the tick listed it: still not interrupted.
+	r.d.routineRuns.Delete(run.ID)
+	if err := r.store.RenewLease(ctx, run.ID, r.now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if r.d.interruptRun(ctx, run) {
+		t.Fatal("renewed run interrupted")
 	}
 }

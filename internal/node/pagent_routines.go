@@ -94,6 +94,9 @@ func (d *Node) routineTick(ctx context.Context) {
 	}
 	byAgent := map[string][]pagent.RoutineRun{}
 	for _, run := range expired {
+		if d.ownsRun(run.ID) {
+			continue
+		}
 		if active[run.AgentID] {
 			byAgent[run.AgentID] = append(byAgent[run.AgentID], run)
 		} else {
@@ -108,10 +111,24 @@ func (d *Node) routineTick(ctx context.Context) {
 	}
 }
 
-func (d *Node) interruptRun(ctx context.Context, run pagent.RoutineRun) {
-	if err := d.pagents.SetRunState(ctx, run.ID, pagent.RunInterrupted, "lease expired"); err != nil {
+// ownsRun reports whether this process is executing the run.
+func (d *Node) ownsRun(id string) bool {
+	_, ok := d.routineRuns.Load(id)
+	return ok
+}
+
+// interruptRun marks a run whose lease expired interrupted, unless this
+// process executes it or its lease was renewed since it was listed. It
+// reports whether the run was interrupted.
+func (d *Node) interruptRun(ctx context.Context, run pagent.RoutineRun) bool {
+	if d.ownsRun(run.ID) {
+		return false
+	}
+	ok, err := d.pagents.InterruptRun(ctx, run.ID, d.pagentNow(), "lease expired")
+	if err != nil {
 		d.log.Warn("pagent: interrupt run", "run", run.ID, "err", err)
 	}
+	return ok
 }
 
 func defHash(data []byte) string {
@@ -252,7 +269,9 @@ func (d *Node) scheduleAgent(ctx context.Context, a pagent.Agent, now time.Time,
 		byslug[f.r.Slug] = f
 	}
 	for _, run := range expired {
-		d.interruptRun(ctx, run)
+		if !d.interruptRun(ctx, run) {
+			continue
+		}
 		f, ok := byslug[run.Slug]
 		st := states[run.Slug]
 		if run.RetryOf != "" || run.Test || !ok || st == nil || !st.Enabled || away {

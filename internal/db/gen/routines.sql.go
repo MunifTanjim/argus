@@ -280,6 +280,31 @@ func (q *Queries) InsertPAgentRoutineRun(ctx context.Context, arg InsertPAgentRo
 	return result.RowsAffected()
 }
 
+const interruptPAgentRoutineRun = `-- name: InterruptPAgentRoutineRun :execrows
+UPDATE pagent_routine_run SET state = 'interrupted', error = ?1, ended_at = ?2
+WHERE id = ?3 AND state IN ('claimed', 'running') AND result = '' AND lease_until < ?4
+`
+
+type InterruptPAgentRoutineRunParams struct {
+	Error   string
+	EndedAt int64
+	ID      string
+	Now     int64
+}
+
+func (q *Queries) InterruptPAgentRoutineRun(ctx context.Context, arg InterruptPAgentRoutineRunParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, interruptPAgentRoutineRun,
+		arg.Error,
+		arg.EndedAt,
+		arg.ID,
+		arg.Now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const lastStartedPAgentRoutineRun = `-- name: LastStartedPAgentRoutineRun :one
 SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM pagent_routine_run
 WHERE agent_id = ? AND slug = ? AND test = 0 AND state NOT IN ('skipped', 'missed', 'queued')
@@ -419,6 +444,63 @@ func (q *Queries) PAgentRoutineRunsSince(ctx context.Context, arg PAgentRoutineR
 		return nil, err
 	}
 	return items, nil
+}
+
+const recordPAgentRoutineOutcome = `-- name: RecordPAgentRoutineOutcome :one
+UPDATE pagent_routine_state
+SET last_run_at = ?1, last_result = ?2,
+    consecutive_failures = (consecutive_failures + 1) * ?3,
+    sessions_used = sessions_used + ?4,
+    cost_used = cost_used + ?5,
+    tokens_used = tokens_used + ?6,
+    updated_at = ?7
+WHERE agent_id = ?8 AND slug = ?9
+RETURNING agent_id, slug, def_hash, enabled, next_due_at, last_run_at, last_result, consecutive_failures, paused_reason, sessions_used, cost_used, tokens_used, check_back_at, anchor_at, updated_at
+`
+
+type RecordPAgentRoutineOutcomeParams struct {
+	LastRunAt  int64
+	LastResult string
+	Failed     int64
+	Sessions   int64
+	Cost       float64
+	Tokens     int64
+	UpdatedAt  int64
+	AgentID    string
+	Slug       string
+}
+
+func (q *Queries) RecordPAgentRoutineOutcome(ctx context.Context, arg RecordPAgentRoutineOutcomeParams) (PagentRoutineState, error) {
+	row := q.db.QueryRowContext(ctx, recordPAgentRoutineOutcome,
+		arg.LastRunAt,
+		arg.LastResult,
+		arg.Failed,
+		arg.Sessions,
+		arg.Cost,
+		arg.Tokens,
+		arg.UpdatedAt,
+		arg.AgentID,
+		arg.Slug,
+	)
+	var i PagentRoutineState
+	err := row.Scan(
+		&i.AgentID,
+		&i.Slug,
+		&i.DefHash,
+		&i.Enabled,
+		&i.NextDueAt,
+		&i.LastRunAt,
+		&i.LastResult,
+		&i.ConsecutiveFailures,
+		&i.PausedReason,
+		&i.SessionsUsed,
+		&i.CostUsed,
+		&i.TokensUsed,
+		&i.CheckBackAt,
+		&i.AnchorAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const recordPAgentRoutineRunResult = `-- name: RecordPAgentRoutineRunResult :execrows

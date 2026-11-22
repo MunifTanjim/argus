@@ -95,3 +95,18 @@ SELECT secret_hash FROM pagent_webhook_secret WHERE agent_id = ? AND slug = ?;
 
 -- name: DeletePAgentWebhookSecrets :exec
 DELETE FROM pagent_webhook_secret WHERE agent_id = ?;
+
+-- name: InterruptPAgentRoutineRun :execrows
+UPDATE pagent_routine_run SET state = 'interrupted', error = sqlc.arg(error), ended_at = sqlc.arg(ended_at)
+WHERE id = sqlc.arg(id) AND state IN ('claimed', 'running') AND result = '' AND lease_until < sqlc.arg(now);
+
+-- name: RecordPAgentRoutineOutcome :one
+UPDATE pagent_routine_state
+SET last_run_at = sqlc.arg(last_run_at), last_result = sqlc.arg(last_result),
+    consecutive_failures = (consecutive_failures + 1) * sqlc.arg(failed),
+    sessions_used = sessions_used + sqlc.arg(sessions),
+    cost_used = cost_used + sqlc.arg(cost),
+    tokens_used = tokens_used + sqlc.arg(tokens),
+    updated_at = sqlc.arg(updated_at)
+WHERE agent_id = sqlc.arg(agent_id) AND slug = sqlc.arg(slug)
+RETURNING *;

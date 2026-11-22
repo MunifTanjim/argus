@@ -31,7 +31,8 @@ import (
 // See TestSessionInputDelaysEnterAfterText.
 var submitDelay = 75 * time.Millisecond
 
-func (d *Node) handleSessionsList(context.Context, json.RawMessage) (any, error) {
+func (d *Node) handleSessionsList(ctx context.Context, _ json.RawMessage) (any, error) {
+	d.markClient(ctx)
 	return d.snapshotWithCaps(), nil
 }
 
@@ -171,6 +172,7 @@ func (d *Node) handleServerInfo(context.Context, json.RawMessage) (any, error) {
 
 // handleSessionsRefresh rescans on demand, then returns the current snapshot.
 func (d *Node) handleSessionsRefresh(ctx context.Context, _ json.RawMessage) (any, error) {
+	d.markClient(ctx)
 	d.scan(ctx)
 	return d.snapshotWithCaps(), nil
 }
