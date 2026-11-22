@@ -20,11 +20,13 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/forge"
 	"github.com/MunifTanjim/argus/internal/host"
 	"github.com/MunifTanjim/argus/internal/mcphttp"
 	"github.com/MunifTanjim/argus/internal/orch"
+	"github.com/MunifTanjim/argus/internal/pagent"
 	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/push"
@@ -116,6 +118,10 @@ type Node struct {
 
 	instanceID string                                                                                 // tells mods this node process from a restarted one
 	spawnFn    func(ctx context.Context, p api.SpawnParams, presetID string) (api.SpawnResult, error) // seam for tests; defaults to (*Node).spawn
+
+	pagents           *pagent.Store // nil = pagent.* disabled
+	pagentCfg         config.AgentsConfig
+	pagentPrimaryFile string // node state file holding the primary agent id
 
 	orch            *orch.Store // nil = orch.* and message.* disabled
 	orchPrev        map[string]session.Status

@@ -1425,3 +1425,85 @@ type LockStatusResult struct {
 	PinSource      string   `json:"pin_source,omitempty"`   // "config" or "file"
 	Quarantined    bool     `json:"quarantined,omitempty"`
 }
+
+// Persistent-agent registry.
+const (
+	MethodPAgentCreate     = "pagent.create"     // request: PAgentCreateParams; result: PAgentInfo
+	MethodPAgentAdd        = "pagent.add"        // request: PAgentAddParams; result: PAgentAddResult
+	MethodPAgentList       = "pagent.list"       // request: PAgentListParams; result: PAgentListResult
+	MethodPAgentShow       = "pagent.show"       // request: PAgentRef; result: PAgentInfo
+	MethodPAgentRename     = "pagent.rename"     // request: PAgentRenameParams; result: PAgentInfo
+	MethodPAgentForget     = "pagent.forget"     // request: PAgentForgetParams; result: nil
+	MethodPAgentSetPrimary = "pagent.setPrimary" // request: PAgentPrimaryParams; result: nil (empty AgentID unsets)
+	MethodPAgentChanged    = "pagent.changed"    // notification, no params
+)
+
+// PAgentCreateParams creates an agent directory and registers it. NodeID is a
+// gateway routing key the node ignores.
+type PAgentCreateParams struct {
+	Name   string `json:"name,omitempty"`
+	Dir    string `json:"dir,omitempty"`
+	Agent  string `json:"agent,omitempty"`
+	Model  string `json:"model,omitempty"`
+	From   string `json:"from,omitempty"`
+	NodeID string `json:"node_id,omitempty"`
+}
+
+// PAgentAddParams registers an existing agent directory.
+type PAgentAddParams struct {
+	Dir                string `json:"dir"`
+	Name               string `json:"name,omitempty"`
+	ImportInstructions bool   `json:"import_instructions,omitempty"`
+	NodeID             string `json:"node_id,omitempty"`
+}
+
+// PAgentAddResult holds the registered agent. When FoundInstructions is set
+// and ImportInstructions was not, nothing was registered.
+type PAgentAddResult struct {
+	Agent             PAgentInfo `json:"agent"`
+	FoundInstructions bool       `json:"found_instructions,omitempty"`
+}
+
+type PAgentListParams struct {
+	IncludeArchived bool `json:"include_archived,omitempty"`
+}
+
+// PAgentListResult's Primary is the primary agent's id, or empty.
+type PAgentListResult struct {
+	Agents  []PAgentInfo `json:"agents"`
+	Primary string       `json:"primary,omitempty"`
+}
+
+type PAgentRef struct {
+	AgentID string `json:"agent_id"`
+}
+
+type PAgentRenameParams struct {
+	AgentID string `json:"agent_id"`
+	Name    string `json:"name"`
+}
+
+type PAgentForgetParams struct {
+	AgentID string `json:"agent_id"`
+	Purge   bool   `json:"purge,omitempty"`
+}
+
+type PAgentPrimaryParams struct {
+	AgentID string `json:"agent_id,omitempty"`
+}
+
+// PAgentInfo describes a registered agent. Status is needs_you, waiting,
+// working or idle.
+type PAgentInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Dir         string `json:"dir"`
+	Description string `json:"description,omitempty"`
+	Agent       string `json:"agent,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Archived    bool   `json:"archived,omitempty"`
+	Primary     bool   `json:"primary,omitempty"`
+	Status      string `json:"status"`
+	NodeID      string `json:"node_id,omitempty"`
+	NodeLabel   string `json:"node_label,omitempty"`
+}
