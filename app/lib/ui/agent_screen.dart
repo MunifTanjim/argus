@@ -7,6 +7,7 @@ import '../state/projects_api.dart' show actionError;
 import 'agent_badge.dart';
 import 'pagent_style.dart';
 import 'theme.dart';
+import 'thread_screen.dart';
 
 /// Opens an agent's screen: its threads and memory.
 Route<void> agentRoute(String agentId) =>
@@ -55,12 +56,19 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
     );
     if (text == null || text.isEmpty || !mounted) return;
     try {
-      await ref.read(pagentsApiProvider).send(a.id, text, newThread: true);
+      final res = await ref
+          .read(pagentsApiProvider)
+          .send(a.id, text, newThread: true);
+      if (!mounted) return;
+      _refresh();
+      await Navigator.of(context).push(
+        threadRoute(agentId: a.id, threadId: res.threadId),
+      );
     } catch (e) {
       if (mounted) _say('send failed: ${actionError(e)}');
       return;
     }
-    await _refresh();
+    if (mounted) await _refresh();
   }
 
   Future<void> _setPrimary(PAgent a, bool primary) async {
@@ -145,7 +153,13 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
               for (final t in threads)
                 _ThreadRow(
                   thread: t,
-                  onTap: () => _say('thread view comes next'),
+                  onTap: () => Navigator.of(context).push(
+                    threadRoute(
+                      agentId: agent.id,
+                      threadId: t.id,
+                      title: t.title,
+                    ),
+                  ),
                 ),
             if (usage != null) ...[
               const SizedBox(height: 16),

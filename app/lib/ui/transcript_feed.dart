@@ -131,6 +131,7 @@ class TranscriptFeed extends ConsumerStatefulWidget {
     required this.entries,
     this.emptyText = 'No transcript yet.',
     this.stickToBottom = true,
+    this.onUndoMemory,
   });
 
   /// Addresses the transcript so tool rows can fetch their bodies on demand.
@@ -138,6 +139,9 @@ class TranscriptFeed extends ConsumerStatefulWidget {
   final List<Entry> entries;
   final String emptyText;
   final bool stickToBottom;
+
+  /// Offers an undo on memory-change events (agent threads only).
+  final void Function(String commit)? onUndoMemory;
 
   @override
   ConsumerState<TranscriptFeed> createState() => TranscriptFeedState();
@@ -332,6 +336,7 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
               key: ValueKey(entry.id),
               detailRef: widget.detailRef,
               entry: entry,
+              onUndoMemory: widget.onUndoMemory,
               expanded: _expanded.contains(entry.id),
               onToggle: () => setState(() {
                 if (!_expanded.remove(entry.id)) _expanded.add(entry.id);

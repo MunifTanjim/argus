@@ -319,3 +319,40 @@ class PAgentAddResult {
     foundInstructions: j['found_instructions'] as bool? ?? false,
   );
 }
+
+/// The commit an argus entry reports a memory change by, or '' when it is not
+/// one.
+String memoryCommit(Entry e) {
+  if (e.kind != EntryKind.argus || e.event?.kind != 'memory.changed') return '';
+  final p = e.event?.payload;
+  return p is Map ? (p['commit'] as String? ?? '') : '';
+}
+
+/// A timestamp as Unix nanoseconds, the unit of a thread's read position; 0
+/// when it does not parse.
+int timestampNanos(String? ts) {
+  if (ts == null) return 0;
+  final m = RegExp(r'^(.*?)(?:\.(\d+))?(Z|[+-]\d\d:\d\d)$').firstMatch(ts);
+  if (m == null) return 0;
+  final base = DateTime.tryParse('${m[1]}${m[3]}');
+  if (base == null) return 0;
+  final frac = (m[2] ?? '').padRight(9, '0').substring(0, 9);
+  return base.millisecondsSinceEpoch ~/ 1000 * 1000000000 + int.parse(frac);
+}
+
+/// The last entry timestamp of a timeline in Unix nanoseconds, or 0.
+int lastEntryNanos(List<Entry> entries) {
+  for (var i = entries.length - 1; i >= 0; i--) {
+    final n = timestampNanos(entries[i].timestamp);
+    if (n > 0) return n;
+  }
+  return 0;
+}
+
+/// The id of the timeline's last live session, or ''.
+String liveSessionOf(PAgentTimeline t) {
+  for (var i = t.sessions.length - 1; i >= 0; i--) {
+    if (t.sessions[i].live) return t.sessions[i].sessionId;
+  }
+  return '';
+}

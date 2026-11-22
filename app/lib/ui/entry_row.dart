@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../models/entry.dart';
+import '../models/pagent.dart' show memoryCommit;
 import '../state/tool_detail.dart';
 import 'code_block.dart';
 import 'item_detail_screen.dart';
@@ -75,12 +76,17 @@ class EntryRow extends StatelessWidget {
     required this.entry,
     this.expanded = false,
     this.onToggle,
+    this.onUndoMemory,
   });
 
   final ToolDetailRef detailRef;
   final Entry entry;
   final bool expanded;
   final VoidCallback? onToggle;
+
+  /// Offers an undo on an argus entry that reports a memory change; null
+  /// leaves the entry without one.
+  final void Function(String commit)? onUndoMemory;
 
   @override
   Widget build(BuildContext context) {
@@ -134,6 +140,7 @@ class EntryRow extends StatelessWidget {
           onTap: drillFor(context, e, detailRef),
         );
       case EntryKind.argus:
+        return _ArgusEventRow(entry: e, onUndo: onUndoMemory);
       case EntryKind.unknown:
         return const SizedBox.shrink();
     }
@@ -630,6 +637,50 @@ class _CompactDivider extends StatelessWidget {
             child: Text(text, style: _monoDim),
           ),
           const Expanded(child: Divider(color: AppColors.border, height: 1)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Argus's own event in an agent thread: dim, with an undo on a memory change.
+class _ArgusEventRow extends StatelessWidget {
+  const _ArgusEventRow({required this.entry, this.onUndo});
+  final Entry entry;
+  final void Function(String commit)? onUndo;
+
+  @override
+  Widget build(BuildContext context) {
+    final e = entry;
+    final text = (e.detail ?? '').isNotEmpty ? e.detail! : (e.label ?? '');
+    final commit = memoryCommit(e);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        key: const ValueKey('argus-event'),
+        children: [
+          const Icon(Icons.terminal, size: 13, color: AppColors.dim),
+          const SizedBox(width: 6),
+          Text('Argus', style: _mono.copyWith(color: AppColors.secondary)),
+          Text('  ·  ${_clockTime(e.timestamp)}', style: _monoDim),
+          if (text.isNotEmpty)
+            Flexible(
+              child: Text(
+                '  $text',
+                style: _monoDim,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          if (commit.isNotEmpty && onUndo != null)
+            TextButton(
+              onPressed: () => onUndo!(commit),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                minimumSize: const Size(0, 28),
+              ),
+              child: const Text('Undo'),
+            ),
         ],
       ),
     );
