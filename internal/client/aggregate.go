@@ -57,6 +57,22 @@ var projectAddressed = map[string]bool{
 	api.MethodProjectIssues:    true,
 }
 
+// pagentAddressed methods route by a composite agent_id.
+var pagentAddressed = map[string]bool{
+	api.MethodPAgentShow:       true,
+	api.MethodPAgentRename:     true,
+	api.MethodPAgentForget:     true,
+	api.MethodPAgentSetPrimary: true,
+	api.MethodPAgentThreadSend: true,
+	api.MethodPAgentThreadList: true,
+}
+
+// pagentThreadAddressed methods route by a composite thread_id.
+var pagentThreadAddressed = map[string]bool{
+	api.MethodPAgentThreadTimeline: true,
+	api.MethodPAgentThreadMarkRead: true,
+}
+
 // nodeAddressed methods route by an explicit node_id (or the sole node).
 var nodeAddressed = map[string]bool{
 	api.MethodSessionSpawn:              true,
@@ -71,6 +87,8 @@ var nodeAddressed = map[string]bool{
 	api.MethodHostInfo:                  true,
 	api.MethodHostSetWakelock:           true,
 	api.MethodHostCompleteDir:           true,
+	api.MethodPAgentCreate:              true,
+	api.MethodPAgentAdd:                 true,
 }
 
 // serverAddressed methods go to the node named by node_id, or to the gateway

@@ -102,7 +102,9 @@ type E2EClient struct {
 	nodeSessions  map[string]map[string]session.Session
 	offlineTimers map[string]*time.Timer
 	offlineGrace  time.Duration
-	opening       map[string]chan struct{} // node id -> closed when its in-flight open finishes
+	pagentCache   map[string][]api.PAgentInfo // nodeID -> last stamped pagent.list agents
+	pagentLostAt  map[string]time.Time        // nodeID -> when its channel was lost
+	opening       map[string]chan struct{}    // node id -> closed when its in-flight open finishes
 
 	events chan api.Notification
 	kick   chan struct{} // buffered(1); nudges trustSyncLoop from the Peer read loop without blocking it
@@ -157,6 +159,8 @@ func newE2EClientWithGate(conn net.Conn, static e2e.KeyPair, genesisHash []byte,
 		offlineTimers: map[string]*time.Timer{},
 		opening:       map[string]chan struct{}{},
 		offlineGrace:  defaultOfflineGrace,
+		pagentCache:   map[string][]api.PAgentInfo{},
+		pagentLostAt:  map[string]time.Time{},
 		events:        make(chan api.Notification, 256),
 		kick:          make(chan struct{}, 1),
 		tipMiss:       map[string]*tipMissState{},
@@ -529,6 +533,8 @@ func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
 			params = stampTasksChanged(params, nc.nodeID)
 		} else if f.Method == api.MethodTerminalChanged {
 			params, _ = json.Marshal(api.TerminalChanged{NodeID: nc.nodeID})
+		} else if f.Method == api.MethodPAgentChanged {
+			params, _ = json.Marshal(map[string]string{"node_id": nc.nodeID})
 		}
 		select {
 		case m.events <- api.Notification{Method: f.Method, Params: params}:
@@ -566,6 +572,14 @@ func (m *E2EClient) Call(method string, params, out any) error {
 		return m.fanoutHistoryProjects(raw, out)
 	case method == api.MethodProjectList:
 		return m.fanoutProjects(raw, out)
+	case method == api.MethodPAgentList:
+		return m.fanoutPAgents(raw, out)
+	case method == api.MethodPAgentSetPrimary && pagentIDEmpty(raw):
+		return m.clearPAgentPrimary(raw)
+	case pagentAddressed[method]:
+		return m.routeByPAgent(method, raw, out)
+	case pagentThreadAddressed[method]:
+		return m.routeByPAgentThread(method, raw, out)
 	case method == api.MethodTerminalList:
 		return m.fanoutTerminals(raw, out)
 	case terminalAddressed[method], method == api.MethodTerminalOpen && hasTerminalID(raw):
@@ -1034,6 +1048,21 @@ func (m *E2EClient) routeByNode(method string, raw json.RawMessage, out any) err
 			return assignRaw(out, rewritten)
 		}
 		return assignRaw(out, res)
+	}
+	if method == api.MethodPAgentCreate {
+		var info api.PAgentInfo
+		if err := m.callNode(nodeID, method, raw, &info); err != nil {
+			return err
+		}
+		return assign(out, m.pagentOrigin(info, nodeID))
+	}
+	if method == api.MethodPAgentAdd {
+		var res api.PAgentAddResult
+		if err := m.callNode(nodeID, method, raw, &res); err != nil {
+			return err
+		}
+		res.Agent = m.pagentOrigin(res.Agent, nodeID)
+		return assign(out, res)
 	}
 	if method == api.MethodSessionsHistorySessions {
 		var page session.HistorySessionPage
@@ -1514,6 +1543,12 @@ func (m *E2EClient) loseNode(nodeID string, gone bool) {
 	var events []registry.Event
 	sessions := m.nodeSessions[nodeID]
 	if gone {
+		delete(m.pagentCache, nodeID)
+		delete(m.pagentLostAt, nodeID)
+	} else if len(m.pagentCache[nodeID]) > 0 {
+		m.pagentLostAt[nodeID] = time.Now()
+	}
+	if gone {
 		delete(m.nodeSessions, nodeID)
 		for _, s := range sessions {
 			events = append(events, registry.Event{Type: registry.EventRemoved, Session: s})
@@ -1530,6 +1565,10 @@ func (m *E2EClient) loseNode(nodeID string, gone bool) {
 	}
 	m.mu.Unlock()
 	m.emitSessionEvents(events)
+	select {
+	case m.events <- api.Notification{Method: api.MethodPAgentChanged, Params: []byte(`{"node_id":` + strconv.Quote(nodeID) + `}`)}:
+	default:
+	}
 }
 
 // sweepOfflineNode drops the sessions still marked offline when the grace window
