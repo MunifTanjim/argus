@@ -188,7 +188,7 @@ func (d *Node) ensureRoutineState(ctx context.Context, a pagent.Agent, f routine
 	next, _ := routine.NextDue(f.r, now, now, routineLoc(f.r, d.pagentSettings(a)))
 	st := pagent.RoutineState{AgentID: a.ID, Slug: f.r.Slug, DefHash: f.hash, Enabled: true, NextDueAt: next, AnchorAt: now}
 	if selfPaced(f.r) {
-		st.CheckBackAt = now.Add(checkBackDefault)
+		st.CheckBackAt = now.Add(clampCheckBack(d.pagentSettings(a), 0))
 	}
 	return st, d.pagents.UpsertRoutineState(ctx, st)
 }

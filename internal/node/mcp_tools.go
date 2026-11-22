@@ -366,6 +366,17 @@ func mcpTools() []mcpTool {
 				return d.mcpRoutineDelete(ctx, caller, p)
 			}),
 		},
+		{
+			Tool: mcphttp.Tool{
+				Name: "offer",
+				Description: "Offer the user something you could do: title is a short name, details says why, prompt is the message that starts the work if the user accepts. " +
+					"It only proposes: nothing runs unless the user starts it. A few offers a day at most. Works in chats and check-back runs.",
+			},
+			props: []mcpProp{required("title", "string"), optional("details", "string"), required("prompt", "string")}, needsCaller: true,
+			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p offerParams) (any, error) {
+				return d.mcpOffer(ctx, caller, p)
+			}),
+		},
 	}
 	return tools
 }

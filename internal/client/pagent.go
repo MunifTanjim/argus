@@ -285,6 +285,17 @@ func (m *E2EClient) routeByPAgentThread(method string, raw json.RawMessage, out 
 	if err != nil {
 		return err
 	}
+	if method == api.MethodPAgentOfferStart {
+		var r api.PAgentSendResult
+		if err := m.callNode(nodeID, method, params, &r); err != nil {
+			return err
+		}
+		r.ThreadID = session.CompositeID(nodeID, r.ThreadID)
+		if r.SessionID != "" {
+			r.SessionID = session.CompositeID(nodeID, r.SessionID)
+		}
+		return assign(out, r)
+	}
 	if method != api.MethodPAgentThreadTimeline {
 		return m.callNode(nodeID, method, params, out)
 	}

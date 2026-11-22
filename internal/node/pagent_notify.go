@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +41,7 @@ type notifyState struct {
 	mu     sync.Mutex
 	held   map[string][]pagentPush // agent id -> pushes held for quiet hours
 	health map[string]time.Time    // agent id + key -> last push
+	notes  map[string]string       // agent id + key -> open health notice
 }
 
 // pagentPush is one agent notification.
@@ -152,6 +154,10 @@ func (d *Node) pagentHealth(ctx context.Context, a pagent.Agent, threadID, key, 
 	if d.notify.health == nil {
 		d.notify.health = map[string]time.Time{}
 	}
+	if d.notify.notes == nil {
+		d.notify.notes = map[string]string{}
+	}
+	d.notify.notes[k] = strings.TrimSpace(strings.TrimSpace(title + ": " + body))
 	last, seen := d.notify.health[k]
 	if seen && now.Sub(last) < healthRepush {
 		d.notify.mu.Unlock()
@@ -166,7 +172,26 @@ func (d *Node) pagentHealth(ctx context.Context, a pagent.Agent, threadID, key, 
 func (d *Node) pagentHealthResolved(a pagent.Agent, key string) {
 	d.notify.mu.Lock()
 	delete(d.notify.health, a.ID+"/"+key)
+	delete(d.notify.notes, a.ID+"/"+key)
 	d.notify.mu.Unlock()
+}
+
+// healthNotes lists the agent's open health notices, oldest key first.
+func (d *Node) healthNotes(a pagent.Agent) []string {
+	d.notify.mu.Lock()
+	defer d.notify.mu.Unlock()
+	var keys []string
+	for k := range d.notify.notes {
+		if strings.HasPrefix(k, a.ID+"/") {
+			keys = append(keys, k)
+		}
+	}
+	slices.Sort(keys)
+	out := make([]string, len(keys))
+	for i, k := range keys {
+		out[i] = strings.TrimSuffix(d.notify.notes[k], ":")
+	}
+	return out
 }
 
 // threadReadSince reports whether the thread was read at or after t.

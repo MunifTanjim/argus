@@ -292,6 +292,13 @@ func (d *Node) scheduleAgent(ctx context.Context, a pagent.Agent, now time.Time,
 			paused = append(paused, f.r.Slug)
 		}
 	}
+	if d.briefWanted(ctx, a, set) {
+		if f, err := briefRoutine(set); err != nil {
+			d.routineErrorOnce(ctx, a, briefSlug, set.BriefAt, err.Error())
+		} else if ctx.Err() == nil {
+			d.scheduleRoutine(ctx, a, set, f, states[briefSlug], now, away)
+		}
+	}
 	if len(paused) > 0 {
 		d.agentNotice(ctx, a, evRoutinePaused, map[string]any{"reason": pausedAway, "routines": paused})
 	}
@@ -306,7 +313,7 @@ func (d *Node) scheduleRoutine(ctx context.Context, a pagent.Agent, set pagent.S
 		next, _ := routine.NextDue(r, now, now, loc)
 		ns := pagent.RoutineState{AgentID: a.ID, Slug: r.Slug, DefHash: f.hash, Enabled: !away, NextDueAt: next, AnchorAt: now}
 		if selfPaced(r) {
-			ns.CheckBackAt = now.Add(checkBackDefault)
+			ns.CheckBackAt = now.Add(clampCheckBack(set, 0))
 		}
 		if away {
 			ns.PausedReason = pausedAway
@@ -348,7 +355,7 @@ func (d *Node) scheduleRoutine(ctx context.Context, a pagent.Agent, set pagent.S
 	if selfPaced(r) {
 		switch {
 		case st.CheckBackAt.IsZero():
-			if err := d.pagents.SetCheckBackAt(ctx, a.ID, r.Slug, now.Add(checkBackDefault)); err != nil {
+			if err := d.pagents.SetCheckBackAt(ctx, a.ID, r.Slug, now.Add(clampCheckBack(set, 0))); err != nil {
 				d.log.Warn("pagent: check-back", "agent", a.ID, "routine", r.Slug, "err", err)
 			}
 		case !st.CheckBackAt.After(now):
@@ -357,7 +364,7 @@ func (d *Node) scheduleRoutine(ctx context.Context, a pagent.Agent, set pagent.S
 				run, ok, err := d.pagents.ClaimOccurrence(ctx, a.ID, r.Slug, occ, startedByCheckBack, false)
 				if err == nil {
 					// Fallback until the run reports its own next_check_in.
-					err = d.pagents.SetCheckBackAt(ctx, a.ID, r.Slug, now.Add(checkBackDefault))
+					err = d.pagents.SetCheckBackAt(ctx, a.ID, r.Slug, now.Add(clampCheckBack(set, 0)))
 				}
 				return run, ok, err
 			})

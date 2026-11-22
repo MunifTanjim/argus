@@ -52,23 +52,37 @@ func oneShotCheckBack(r routine.Routine) bool {
 	return strings.HasPrefix(r.Slug, checkBackPrefix) && len(r.Starts) == 1 && r.Starts[0].At != ""
 }
 
-// checkBackMultiplier scales a requested check-back wait by the agent's
-// proactivity. Piece 4 sets it; for now it is 1.
-func checkBackMultiplier(pagent.Settings) float64 { return 1 }
-
-// clampCheckBack applies the proactivity multiplier and the check-back
-// limits to d; zero d is the default wait.
-func clampCheckBack(set pagent.Settings, d time.Duration) time.Duration {
-	if d <= 0 {
-		d = checkBackDefault
+// checkBackMultiplier scales the default self-paced wait by the agent's
+// proactivity dial: low waits twice as long, high half as long.
+func checkBackMultiplier(set pagent.Settings) float64 {
+	switch set.Proactivity {
+	case proactivityLow:
+		return 2
+	case proactivityHigh:
+		return 0.5
 	}
-	d = time.Duration(float64(d) * checkBackMultiplier(set))
-	lo, hi := set.Limits.Limits.CheckBackMin, set.Limits.Limits.CheckBackMax
+	return 1
+}
+
+// clampCheckBack returns the wait before a self-paced routine runs again: d
+// as asked, or with d zero the default scaled by the dial (the longest wait
+// with the dial off, which schedules only what runs ask for), kept within
+// the check-back limits and never below min-interval.
+func clampCheckBack(set pagent.Settings, d time.Duration) time.Duration {
+	lim := set.Limits.Limits
+	lo, hi := lim.CheckBackMin, lim.CheckBackMax
 	if lo <= 0 {
 		lo = checkBackMinDef
 	}
 	if hi <= 0 {
 		hi = checkBackMaxDef
+	}
+	lo = max(lo, lim.MinInterval)
+	if d <= 0 {
+		if set.Proactivity == proactivityOff {
+			return hi
+		}
+		d = time.Duration(float64(checkBackDefault) * checkBackMultiplier(set))
 	}
 	return min(max(d, lo), hi)
 }

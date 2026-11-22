@@ -474,3 +474,39 @@ func TestPAgentDraftRoutesByThread(t *testing.T) {
 		t.Errorf("node got %v", got)
 	}
 }
+
+func TestPAgentOfferRoutesByThread(t *testing.T) {
+	f, clientConn := newFakeGatewayNode(t, "n1")
+	defer f.peer.Close()
+	var got api.PAgentOfferParams
+	f.handle = func(method string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		switch method {
+		case api.MethodPAgentOfferStart:
+			_ = json.Unmarshal(params, &got)
+			b, _ := json.Marshal(api.PAgentSendResult{ThreadID: "t1", SessionID: "s1"})
+			return b, nil, nil
+		case api.MethodPAgentOfferDismiss:
+			_ = json.Unmarshal(params, &got)
+			return []byte(`{}`), nil, nil
+		}
+		return nil, nil, nil
+	}
+	c, err := NewE2EClient(clientConn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	var r api.PAgentSendResult
+	if err := c.Call(api.MethodPAgentOfferStart, api.PAgentOfferParams{ThreadID: session.CompositeID("n1", "t1"), OfferID: "of_1"}, &r); err != nil {
+		t.Fatal(err)
+	}
+	if got.ThreadID != "t1" || got.OfferID != "of_1" || r.ThreadID != session.CompositeID("n1", "t1") || r.SessionID != session.CompositeID("n1", "s1") {
+		t.Fatalf("start: params %+v result %+v", got, r)
+	}
+	if err := c.Call(api.MethodPAgentOfferDismiss, api.PAgentOfferParams{ThreadID: session.CompositeID("n1", "t1"), OfferID: "of_2"}, nil); err != nil || got.OfferID != "of_2" {
+		t.Fatalf("dismiss: %+v %v", got, err)
+	}
+}

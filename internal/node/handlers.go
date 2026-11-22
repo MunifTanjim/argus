@@ -111,6 +111,8 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodPAgentRoutineResume, d.handlePAgentRoutineResume)
 	srv.Handle(api.MethodPAgentRoutineRuns, d.handlePAgentRoutineRuns)
 	srv.Handle(api.MethodPAgentRoutineHookSecret, d.handlePAgentRoutineHookSecret)
+	srv.Handle(api.MethodPAgentOfferStart, d.handlePAgentOfferStart)
+	srv.Handle(api.MethodPAgentOfferDismiss, d.handlePAgentOfferDismiss)
 	srv.Handle(api.MethodProjectSetHidden, d.handleProjectSetHidden)
 	srv.Handle(api.MethodProjectSetPinned, d.handleProjectSetPinned)
 	srv.Handle(api.MethodProjectForget, d.handleProjectForget)

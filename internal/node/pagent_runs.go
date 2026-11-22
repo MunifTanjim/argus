@@ -252,7 +252,7 @@ func (d *Node) spawnRun(ctx context.Context, c *runCtl) (bool, error) {
 	}
 	th := pagent.Thread{
 		ID: newThreadID(), AgentID: a.ID, Kind: threadRun, StartedBy: startedBy,
-		Title: threadTitle(r.Slug + ": " + r.What), Status: pagent.ThreadActive,
+		Title: runTitle(r), Status: pagent.ThreadActive,
 	}
 	if err := d.pagents.InsertThread(ctx, th); err != nil {
 		return false, err
@@ -271,7 +271,11 @@ func (d *Node) spawnRun(ctx context.Context, c *runCtl) (bool, error) {
 	if err := d.pagentInstructions(ctx, a, th, def, set); err != nil {
 		return false, err
 	}
-	prompt := runPrompt(r.Slug, d.runSection(ctx, c, set), c.payload)
+	section := d.runSection(ctx, c, set)
+	if r.Slug == briefSlug {
+		section = d.briefSection(ctx, c, set)
+	}
+	prompt := runPrompt(r.Slug, section, c.payload)
 	sid, err := d.pagentSpawn(ctx, a, th, set, ad, prompt, startedBy)
 	if err != nil {
 		return false, err
@@ -283,6 +287,13 @@ func (d *Node) spawnRun(ctx context.Context, c *runCtl) (bool, error) {
 		d.log.Warn("pagent: record event failed", "thread", th.ID, "err", err)
 	}
 	return true, nil
+}
+
+func runTitle(r routine.Routine) string {
+	if r.Slug == briefSlug {
+		return "Brief"
+	}
+	return threadTitle(r.Slug + ": " + r.What)
 }
 
 // runPrompt is the first prompt of a run session: the run context, then the
@@ -476,6 +487,13 @@ func (d *Node) finishRun(ctx context.Context, c *runCtl, res pagent.RunResult) {
 	}
 	if verifyErr != "" {
 		payload["verify_failed"] = true
+	}
+	if r.Slug == briefSlug {
+		if res.Result != resultNoChange && strings.TrimSpace(res.Summary) != "" {
+			d.agentNotice(ctx, a, evBrief, map[string]any{"run_id": run.ID, "thread_id": th, "text": res.Summary})
+			d.pagentNotify(ctx, a, th, NotifyBrief, run.StartedBy, a.Name+": brief", res.Summary)
+		}
+		return
 	}
 	switch {
 	case res.Result == resultBlocked || res.Result == resultNeedsYou:
