@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -79,19 +80,28 @@ func (d *Node) captureBlocked(threadID string) bool {
 // captureFailed records a capture error as a memory.error event, at most once
 // per thread per captureErrEvery, and pauses capture of the thread.
 func (d *Node) captureFailed(ctx context.Context, threadID string, err error) {
-	d.log.Warn("pagent: capture memory", "thread", threadID, "err", err)
+	d.captureReport(ctx, threadID, "capture failed: "+err.Error())
+}
+
+func (d *Node) captureReport(ctx context.Context, threadID, message string) {
+	d.log.Warn("pagent: capture memory", "thread", threadID, "message", message)
 	d.captureMu.Lock()
 	if d.captureErrAt == nil {
 		d.captureErrAt = map[string]time.Time{}
 	}
 	now := d.pagentNow()
-	last, seen := d.captureErrAt[threadID]
+	for id, at := range d.captureErrAt {
+		if now.Sub(at) >= captureErrEvery {
+			delete(d.captureErrAt, id)
+		}
+	}
+	_, seen := d.captureErrAt[threadID]
 	d.captureErrAt[threadID] = now
 	d.captureMu.Unlock()
-	if seen && now.Sub(last) < captureErrEvery {
+	if seen {
 		return
 	}
-	d.memoryEvent(ctx, threadID, evMemoryError, map[string]string{"message": "capture failed: " + err.Error()})
+	d.memoryEvent(ctx, threadID, evMemoryError, map[string]string{"message": message})
 }
 
 // pagentCapture extracts memory from chat sessions that have been quiet for
@@ -231,6 +241,9 @@ func captureChunk(entries []transcript.Entry, start int) ([]transcript.Entry, in
 func (d *Node) captureExtract(ctx context.Context, a pagent.Agent, set pagent.Settings, th pagent.Thread, chunk []transcript.Entry) error {
 	ex := d.extractorFor(set)
 	if ex == nil {
+		if _, err := memory.NewExtractor(set.Extractor); set.Extractor != "" && err != nil {
+			return fmt.Errorf("invalid memory.extractor: %s", set.Extractor)
+		}
 		return errors.New("no extractor available")
 	}
 	memDir := filepath.Join(a.Dir, memoryDir)
@@ -271,7 +284,7 @@ func (d *Node) captureExtract(ctx context.Context, a pagent.Agent, set pagent.Se
 		var rpc *api.RPCError
 		if errors.As(err, &rpc) {
 			// Retrying the same transcript cannot succeed; report and move on.
-			d.memoryEvent(ctx, th.ID, evMemoryError, map[string]string{"message": "capture: " + rpc.Message})
+			d.captureReport(ctx, th.ID, "capture: "+rpc.Message)
 			return nil
 		}
 		return err

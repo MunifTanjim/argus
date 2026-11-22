@@ -318,3 +318,33 @@ func TestCaptureModeOffAndBusy(t *testing.T) {
 		t.Fatal("captured with memory off")
 	}
 }
+
+func TestCaptureInvalidExtractorMessage(t *testing.T) {
+	r := newCaptureRig(t)
+	r.d.extractorFor = func(pagent.Settings) memory.Extractor { return nil }
+	r.d.pagentCfg.Defaults.Memory.Extractor = "gemini"
+	r.ad.set(uEntry("u1", "hello"))
+	r.capture()
+	var msg string
+	for _, e := range r.events(t, r.thread) {
+		if e.Kind == evMemoryError {
+			msg = string(e.Payload)
+		}
+	}
+	if !strings.Contains(msg, "invalid memory.extractor: gemini") {
+		t.Fatalf("message = %s", msg)
+	}
+}
+
+func TestCaptureRejectedOpsReportedOncePerHour(t *testing.T) {
+	r := newCaptureRig(t)
+	r.ex.reply = `{"ops":[{"action":"add","file":"MEMORY.md","text":"key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"}],"log":""}`
+	r.ad.set(uEntry("u1", "hello"))
+	r.capture()
+	r.ad.set(uEntry("u1", "hello"), uEntry("u2", "again"))
+	r.newIdlePeriod(t)
+	r.capture()
+	if n := r.errorEvents(t); n > 1 {
+		t.Fatalf("memory.error events = %d", n)
+	}
+}

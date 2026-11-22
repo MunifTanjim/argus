@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"github.com/MunifTanjim/argus/internal/config"
 	"testing"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/db"
 )
 
