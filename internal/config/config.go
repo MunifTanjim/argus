@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -173,8 +175,27 @@ type AgentsConfig struct {
 		// UnattendedExpiry is how long a card from unattended work waits for an
 		// answer; negative when the configured value does not parse.
 		UnattendedExpiry time.Duration
+		// Hook is the node's policy hook; no Command and no URL means none.
+		Hook ApprovalHook
 	}
 	Defaults AgentDefaults
+}
+
+// Policy hook modes.
+const (
+	HookShadow     = "shadow"
+	HookFailOpen   = "fail-open"
+	HookFailClosed = "fail-closed"
+)
+
+// ApprovalHook is a program or HTTPS endpoint asked about every agent action.
+type ApprovalHook struct {
+	Command string
+	URL     string
+	// Mode is shadow, fail-open or fail-closed.
+	Mode string
+	// Timeout is negative when the configured value does not parse.
+	Timeout time.Duration
 }
 
 // AgentDefaults are the settings an agent inherits when its own definition
@@ -303,6 +324,10 @@ var defaults = map[string]any{
 	"agents.webhook.listen-addr":                      "",
 	"agents.execution":                                "ask",
 	"agents.approvals.unattended-expiry":              "30m",
+	"agents.approvals.hook.command":                   "",
+	"agents.approvals.hook.url":                       "",
+	"agents.approvals.hook.mode":                      "shadow",
+	"agents.approvals.hook.timeout":                   "5s",
 	"agents.defaults.agent":                           "claude",
 	"agents.defaults.model":                           "",
 	"agents.defaults.timezone":                        "auto",
@@ -408,6 +433,7 @@ func (c Config) Validate() error {
 		allowed  []string
 	}{
 		{"agents.execution", c.Agents.Execution, []string{"ask", "allow", "never-unattended"}},
+		{"agents.approvals.hook.mode", c.Agents.Approvals.Hook.Mode, []string{HookShadow, HookFailOpen, HookFailClosed}},
 		{"agents.defaults.git.mode", d.Git.Mode, []string{"nested", "outer"}},
 		{"agents.defaults.memory.mode", d.Memory.Mode, []string{"auto", "review", "off"}},
 		{"agents.defaults.notify", d.Notify, []string{"all", "needs-you", "off"}},
@@ -419,6 +445,9 @@ func (c Config) Validate() error {
 	}
 	if c.Agents.Approvals.UnattendedExpiry < 0 {
 		return errors.New("agents.approvals.unattended-expiry must be a duration such as 30m")
+	}
+	if err := c.Agents.Approvals.Hook.validate(); err != nil {
+		return err
 	}
 	if d.NotifyDelay < 0 {
 		return errors.New("agents.defaults.notify-delay must be a duration such as 3m")
@@ -540,6 +569,12 @@ func agentsFromViper(v *viper.Viper) AgentsConfig {
 		Execution:     strings.TrimSpace(v.GetString("agents.execution")),
 	}
 	a.Approvals.UnattendedExpiry = days(v, "agents.approvals.unattended-expiry")
+	a.Approvals.Hook = ApprovalHook{
+		Command: strings.TrimSpace(v.GetString("agents.approvals.hook.command")),
+		URL:     strings.TrimSpace(v.GetString("agents.approvals.hook.url")),
+		Mode:    strings.TrimSpace(v.GetString("agents.approvals.hook.mode")),
+		Timeout: days(v, "agents.approvals.hook.timeout"),
+	}
 	d := &a.Defaults
 	d.Agent = v.GetString(p + "agent")
 	d.Model = v.GetString(p + "model")
@@ -601,4 +636,28 @@ func ParseQuietHours(s string) (start, end int, err error) {
 		return 0, 0, fmt.Errorf("%q is an empty range", s)
 	}
 	return start, end, nil
+}
+
+func (h ApprovalHook) validate() error {
+	if h.Command != "" && h.URL != "" {
+		return errors.New("agents.approvals.hook: set command or url, not both")
+	}
+	if h.Timeout < 0 {
+		return errors.New("agents.approvals.hook.timeout must be a duration such as 5s")
+	}
+	if h.URL == "" {
+		return nil
+	}
+	u, err := url.Parse(h.URL)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("agents.approvals.hook.url %q is not a URL", h.URL)
+	}
+	loopback := u.Hostname() == "localhost"
+	if ip := net.ParseIP(u.Hostname()); ip != nil && ip.IsLoopback() {
+		loopback = true
+	}
+	if u.Scheme != "https" && !(u.Scheme == "http" && loopback) {
+		return fmt.Errorf("agents.approvals.hook.url %q must use https (http only on this machine)", h.URL)
+	}
+	return nil
 }

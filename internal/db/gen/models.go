@@ -62,6 +62,23 @@ type Pagent struct {
 	CreatedAt  int64
 }
 
+type PagentActivity struct {
+	ID        int64
+	AgentID   string
+	ThreadID  string
+	SessionID string
+	StartedBy string
+	Tool      string
+	Target    string
+	Class     string
+	Decision  string
+	DecidedBy string
+	Rule      string
+	Reason    string
+	Hook      string
+	CreatedAt int64
+}
+
 type PagentCaptureCursor struct {
 	ThreadID    string
 	SessionID   string
@@ -120,6 +137,14 @@ type PagentRoutineState struct {
 	CheckBackAt         int64
 	AnchorAt            int64
 	UpdatedAt           int64
+}
+
+type PagentSecret struct {
+	AgentID     string
+	Name        string
+	Description string
+	ValueEnc    []byte
+	UpdatedAt   int64
 }
 
 type PagentThread struct {

@@ -506,6 +506,31 @@ func TestAgentsApprovalsFromFile(t *testing.T) {
 	}
 }
 
+func TestAgentsApprovalHook(t *testing.T) {
+	isolateConfigDir(t)
+	h := load(t, "").Agents.Approvals.Hook
+	if h.Command != "" || h.URL != "" || h.Mode != "shadow" || h.Timeout != 5*time.Second {
+		t.Errorf("defaults = %+v", h)
+	}
+	h = load(t, writeConfig(t, "agents:\n  approvals:\n    hook:\n      url: https://policy.example/check\n      mode: fail-closed\n      timeout: 2s\n")).Agents.Approvals.Hook
+	if h.URL != "https://policy.example/check" || h.Mode != "fail-closed" || h.Timeout != 2*time.Second {
+		t.Errorf("file = %+v", h)
+	}
+	for name, body := range map[string]string{
+		"mode":    "mode: loud",
+		"both":    "command: x\n      url: https://a",
+		"http":    "url: http://policy.example/check",
+		"timeout": "timeout: soon",
+	} {
+		if err := load(t, writeConfig(t, "agents:\n  approvals:\n    hook:\n      "+body+"\n")).Validate(); err == nil || !strings.Contains(err.Error(), "agents.approvals.hook") {
+			t.Errorf("%s: Validate = %v", name, err)
+		}
+	}
+	if err := load(t, writeConfig(t, "agents:\n  approvals:\n    hook:\n      url: http://127.0.0.1:9/check\n")).Validate(); err != nil {
+		t.Errorf("loopback http: %v", err)
+	}
+}
+
 func TestAgentsFromFile(t *testing.T) {
 	isolateConfigDir(t)
 	path := writeConfig(t, `

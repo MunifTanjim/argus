@@ -68,11 +68,11 @@ func (d *Node) awaitDecision(ctx context.Context, a adapter.Adapter, sid, id str
 	if ix != nil && ix.Kind == session.InteractionPermission {
 		if s, ok := d.reg.Get(sid); ok {
 			if sc, ok := d.approvalScopeFor(ctx, s); ok {
-				act, dec := d.approvalDecide(sc, toolName, toolInput)
-				if dec.Outcome != policy.OutcomeAsk {
-					return a.FormatDecision(toolName, toolInput, d.approvalImmediate(ctx, sc, act, dec))
+				v := d.approvalDecide(ctx, sc, toolName, toolInput)
+				if v.dec.Outcome != policy.OutcomeAsk {
+					return a.FormatDecision(toolName, toolInput, d.approvalImmediate(ctx, sc, v))
 				}
-				card = d.openCard(sc, id, act, false)
+				card = d.openCard(ctx, sc, id, v, false)
 				defer d.takeCard(card)
 				closed = card.closed
 				enrichCard(ix, card)

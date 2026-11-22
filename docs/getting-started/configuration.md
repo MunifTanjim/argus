@@ -71,6 +71,10 @@ overrides the `agents.defaults` values.
 | `agents.webhook.listen-addr` | none (off) | Address, such as `127.0.0.1:7420`, where the node accepts routine webhooks. Reachability from other machines is up to your network. |
 | `agents.execution` | `ask` | What agents may do on this node without a matching approval rule. `ask` asks you about risky actions from your own requests and denies actions from unattended work. `allow` lets unattended work and ordinary actions run, and still asks about risky actions from your requests. `never-unattended` denies every action from unattended work. |
 | `agents.approvals.unattended-expiry` | `30m` | How long a request for approval from unattended work waits for your answer before it is denied. |
+| `agents.approvals.hook.command` | none | A program asked about every agent action. See [Agents](/guide/agents#policy-hook). |
+| `agents.approvals.hook.url` | none | An HTTPS address asked about every agent action, instead of a program. |
+| `agents.approvals.hook.mode` | `shadow` | `shadow` only records the hook's answers. `fail-open` lets them decide, falling back to the rules when the hook fails. `fail-closed` lets them decide and denies when the hook fails. |
+| `agents.approvals.hook.timeout` | `5s` | How long Argus waits for the hook. |
 | `agents.defaults.agent` | `claude` | The coding agent that runs the sessions. |
 | `agents.defaults.model` | none | The model of the sessions. |
 | `agents.defaults.timezone` | `auto` | The timezone of schedules and quiet hours. |

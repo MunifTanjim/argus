@@ -99,6 +99,7 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodPAgentThreadTimeline, d.handlePAgentThreadTimeline)
 	srv.Handle(api.MethodPAgentDraftSend, d.handlePAgentDraftSend)
 	srv.Handle(api.MethodPAgentDraftDiscard, d.handlePAgentDraftDiscard)
+	srv.Handle(api.MethodPAgentActivity, d.handlePAgentActivity)
 	srv.Handle(api.MethodPAgentMemoryShow, d.handlePAgentMemoryShow)
 	srv.Handle(api.MethodPAgentMemoryLog, d.handlePAgentMemoryLog)
 	srv.Handle(api.MethodPAgentMemoryUndo, d.handlePAgentMemoryUndo)

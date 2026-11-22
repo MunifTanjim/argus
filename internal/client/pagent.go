@@ -225,6 +225,21 @@ func (m *E2EClient) routeByPAgent(method string, raw json.RawMessage, out any) e
 			}
 		}
 		return assign(out, r)
+	case api.MethodPAgentActivity:
+		var r api.PAgentActivityResult
+		if err := m.callNode(nodeID, method, params, &r); err != nil {
+			return err
+		}
+		for i := range r.Activity {
+			a := &r.Activity[i]
+			if a.ThreadID != "" {
+				a.ThreadID = session.CompositeID(nodeID, a.ThreadID)
+			}
+			if a.SessionID != "" {
+				a.SessionID = session.CompositeID(nodeID, a.SessionID)
+			}
+		}
+		return assign(out, r)
 	case api.MethodPAgentMemoryProposals:
 		var r api.PAgentMemoryProposalsResult
 		if err := m.callNode(nodeID, method, params, &r); err != nil {

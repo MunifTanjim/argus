@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,6 +76,9 @@ type approvalState struct {
 	// thread.
 	grants map[string]map[string]struct{}
 	denied map[string]map[string]struct{}
+	// once holds one-shot grants by thread: an approved draft, used by the
+	// first matching request.
+	once map[string]map[string]struct{}
 	// cards are the open cards by cardKey.
 	cards map[string]*approvalCard
 	// expired holds the cardKey of cards that expired, for late answers.
@@ -103,6 +107,8 @@ type approvalCard struct {
 	// headless cards are answered through the adapter's Responder; the
 	// others are parked hook calls.
 	headless bool
+	// hook is the shadow hook answer, for the activity record.
+	hook string
 	// closed takes a deny reason that ends a parked card.
 	closed chan string
 	timer  *time.Timer
@@ -114,6 +120,7 @@ func (st *approvalState) init() {
 	if st.cards == nil {
 		st.grants = map[string]map[string]struct{}{}
 		st.denied = map[string]map[string]struct{}{}
+		st.once = map[string]map[string]struct{}{}
 		st.cards = map[string]*approvalCard{}
 		st.expired = map[string]time.Time{}
 		st.seen = map[string]string{}
@@ -188,8 +195,17 @@ func (d *Node) globalApprovalRules() []policy.Rule {
 	return list
 }
 
+// verdict is the policy's decision on one action.
+type verdict struct {
+	action policy.Action
+	dec    policy.Decision
+	// hook is the policy hook's answer in shadow mode, for the activity
+	// record.
+	hook string
+}
+
 // approvalDecide describes and decides a tool request of an agent session.
-func (d *Node) approvalDecide(sc approvalScope, tool string, input json.RawMessage) (policy.Action, policy.Decision) {
+func (d *Node) approvalDecide(ctx context.Context, sc approvalScope, tool string, input json.RawMessage) verdict {
 	a := policy.Describe(sc.cli, tool, input)
 	a.StartedBy, a.AgentID, a.ThreadID, a.SessionID = sc.thread.StartedBy, sc.agent.ID, sc.thread.ID, sc.sessionID
 	in := policy.DecideInput{
@@ -203,29 +219,49 @@ func (d *Node) approvalDecide(sc approvalScope, tool string, input json.RawMessa
 	} else {
 		d.log.Warn("pagent: read agent approvals", "agent", sc.agent.ID, "err", err)
 	}
+	v := verdict{action: a}
+	if h := d.approvalHook(ctx, sc, a); h != nil {
+		in.Hook = h
+		if h.Mode == policy.HookShadow {
+			v.hook = strings.TrimSpace(h.Decision + " " + h.Reason)
+		}
+	}
+	key := a.GrantKey()
 	d.approvals.mu.Lock()
 	d.approvals.init()
 	in.Denied = copyKeys(d.approvals.denied[sc.thread.ID])
 	in.Grants = copyKeys(d.approvals.grants[sc.thread.ID])
+	_, once := d.approvals.once[sc.thread.ID][key]
+	if once {
+		in.Grants[key] = struct{}{}
+	}
 	d.approvals.mu.Unlock()
-	return a, policy.Decide(a, in)
+	v.dec = policy.Decide(a, in)
+	if once && v.dec.By == policy.ByGrant {
+		d.approvals.mu.Lock()
+		if _, kept := d.approvals.grants[sc.thread.ID][key]; !kept {
+			delete(d.approvals.once[sc.thread.ID], key)
+		}
+		d.approvals.mu.Unlock()
+	}
+	return v
 }
 
 // approvalImmediate answers a decision that needs no card: allow, deny or
 // draft. A draft is recorded in the thread's timeline.
-func (d *Node) approvalImmediate(ctx context.Context, sc approvalScope, a policy.Action, dec policy.Decision) api.RespondParams {
+func (d *Node) approvalImmediate(ctx context.Context, sc approvalScope, v verdict) api.RespondParams {
+	dec := v.dec
+	p := api.RespondParams{Behavior: "allow"}
 	switch dec.Outcome {
 	case policy.OutcomeAllow:
-		return api.RespondParams{Behavior: "allow"}
 	case policy.OutcomeDraft:
-		d.recordDraft(ctx, sc, a)
-		return api.RespondParams{Behavior: "deny", Reason: policy.ReasonDraft}
+		d.recordDraft(ctx, sc, v.action)
+		p = api.RespondParams{Behavior: "deny", Reason: policy.ReasonDraft}
+	default:
+		p = api.RespondParams{Behavior: "deny", Reason: cmp.Or(dec.Reason, reasonRuleDenied)}
 	}
-	reason := dec.Reason
-	if reason == "" {
-		reason = reasonRuleDenied
-	}
-	return api.RespondParams{Behavior: "deny", Reason: reason}
+	d.recordActivity(ctx, sc, v.action, dec.Outcome, dec.By, dec.Rule, cmp.Or(p.Reason, dec.Reason), v.hook)
+	return p
 }
 
 func (d *Node) recordDraft(ctx context.Context, sc approvalScope, a policy.Action) {
@@ -254,10 +290,13 @@ func (d *Node) unattendedExpiry() time.Duration {
 }
 
 // openCard records an ask card. Cards from unattended work expire.
-func (d *Node) openCard(sc approvalScope, requestID string, a policy.Action, headless bool) *approvalCard {
+func (d *Node) openCard(ctx context.Context, sc approvalScope, requestID string, v verdict, headless bool) *approvalCard {
 	c := &approvalCard{
-		key: cardKey(sc.sessionID, requestID), scope: sc, requestID: requestID, action: a,
-		headless: headless, closed: make(chan string, 1),
+		key: cardKey(sc.sessionID, requestID), scope: sc, requestID: requestID, action: v.action,
+		headless: headless, hook: v.hook, closed: make(chan string, 1),
+	}
+	if sc.thread.StartedBy != policy.StartedByYou {
+		d.notifyApproval(ctx, sc, v.action)
 	}
 	d.approvals.mu.Lock()
 	defer d.approvals.mu.Unlock()
@@ -296,6 +335,7 @@ func (d *Node) expireCard(c *approvalCard) {
 	}
 	d.approvals.expired[c.key] = now
 	d.approvals.mu.Unlock()
+	d.recordCard(c, policy.OutcomeDeny, decidedExpiry, "", reasonNoAnswer)
 	d.endCard(c, reasonNoAnswer)
 }
 
@@ -334,6 +374,7 @@ func (d *Node) approvalUserMessage(threadID string) {
 	d.approvals.mu.Unlock()
 	for _, c := range open {
 		if d.takeCard(c) {
+			d.recordCard(c, policy.OutcomeDeny, decidedUser, "", reasonNewMessage)
 			d.endCard(c, reasonNewMessage)
 		}
 	}
@@ -374,19 +415,23 @@ func (d *Node) approvalAnswer(ctx context.Context, c *approvalCard, p api.Respon
 		}
 	}
 	th := c.scope.thread.ID
+	var rule, note string
 	switch opt {
 	case optAllowOnce, "allow":
 		out.Behavior = "allow"
 	case optAllowThread:
+		note = "allowed for this thread"
 		d.approvals.mu.Lock()
 		d.approvals.init()
 		addKey(d.approvals.grants, th, c.action.GrantKey())
 		d.approvals.mu.Unlock()
 		out.Behavior = "allow"
 	case optAllowAlways:
-		if err := d.alwaysAllow(ctx, c); err != nil {
+		r, err := d.alwaysAllow(ctx, c)
+		if err != nil {
 			d.log.Warn("pagent: save approval rule", "agent", c.scope.agent.ID, "err", err)
 		}
+		rule, note = r.String(), "always allowed"
 		out.Behavior = "allow"
 	case optExplain:
 		out.Behavior, out.Reason = "deny", reasonExplain
@@ -400,14 +445,19 @@ func (d *Node) approvalAnswer(ctx context.Context, c *approvalCard, p api.Respon
 			out.Reason = reasonUserDenied
 		}
 	}
+	d.recordCard(c, out.Behavior, decidedUser, rule, cmp.Or(out.Reason, note))
 	return out
 }
 
 // alwaysAllow appends a narrow allow rule (tool and target) to the agent's
 // approvals and commits it.
-func (d *Node) alwaysAllow(ctx context.Context, c *approvalCard) error {
+func (d *Node) alwaysAllow(ctx context.Context, c *approvalCard) (policy.Rule, error) {
 	a, th := c.scope.agent, c.scope.thread.ID
 	r := policy.Rule{Tool: c.action.Tool, Target: c.action.Target, Decision: policy.OutcomeAllow}
+	return r, d.saveAllowRule(ctx, a, th, r)
+}
+
+func (d *Node) saveAllowRule(ctx context.Context, a pagent.Agent, th string, r policy.Rule) error {
 	defer lockMemory(a.ID)()
 	repo, err := agentgit.Open(ctx, a.Dir, d.pagentGitMode())
 	if err != nil {
@@ -500,8 +550,10 @@ func (d *Node) approvalTrack(ctx context.Context, ev registry.Event) {
 			delete(d.approvals.seen, s.ID)
 		}
 		d.approvals.mu.Unlock()
+		d.dropHeadlessCards(s.ID, "")
 		return
 	}
+	d.dropHeadlessCards(s.ID, headlessKey(*ix))
 	if _, ok := d.adapterFor(s.Agent).(adapter.Responder); !ok {
 		return
 	}
@@ -527,14 +579,29 @@ func (d *Node) approvalTrack(ctx context.Context, ev registry.Event) {
 	if !ok {
 		return
 	}
-	a, dec := d.approvalDecide(sc, ix.ToolName, json.RawMessage(ix.ToolInput))
-	if dec.Outcome == policy.OutcomeAsk {
-		d.openCard(sc, key, a, true)
+	v := d.approvalDecide(ctx, sc, ix.ToolName, json.RawMessage(ix.ToolInput))
+	if v.dec.Outcome == policy.OutcomeAsk {
+		d.openCard(ctx, sc, key, v, true)
 		d.reg.Republish(s.ID)
 		return
 	}
-	p := d.approvalImmediate(ctx, sc, a, dec)
+	p := d.approvalImmediate(ctx, sc, v)
 	go d.respondHeadless(context.Background(), s.ID, key, p)
+}
+
+// dropHeadlessCards forgets the headless cards of a session except keep: the
+// request was answered in the CLI itself, or withdrawn.
+func (d *Node) dropHeadlessCards(sessionID, keep string) {
+	d.approvals.mu.Lock()
+	defer d.approvals.mu.Unlock()
+	for k, c := range d.approvals.cards {
+		if c.headless && c.scope.sessionID == sessionID && c.requestID != keep {
+			delete(d.approvals.cards, k)
+			if c.timer != nil {
+				c.timer.Stop()
+			}
+		}
+	}
 }
 
 // respondHeadless answers a headless session's request with a plain allow or
@@ -664,6 +731,7 @@ type draftPayload struct {
 	Target  string          `json:"target"`
 	Input   json.RawMessage `json:"input"`
 	Command string          `json:"command"`
+	Classes []string        `json:"classes"`
 }
 
 // draftLocks keeps a draft from being sent twice at once.
@@ -708,6 +776,14 @@ func (d *Node) handlePAgentDraftSend(ctx context.Context, params json.RawMessage
 	send := api.PAgentSendParams{AgentID: a.ID, Text: "The user approved: " + draftAction(dp) + ". Do it now."}
 	if th.Kind == threadChat && th.Status == pagent.ThreadActive {
 		send.ThreadID = th.ID
+	} else if latest, ok, err := d.pagents.LatestThread(ctx, a.ID, threadChat); err == nil && ok {
+		send.ThreadID = latest.ID
+	}
+	// The approved action runs once in the chat without asking again.
+	act.Class = dp.Classes
+	grant := act.GrantKey()
+	if send.ThreadID != "" {
+		d.grantOnce(send.ThreadID, grant)
 	}
 	raw, err := json.Marshal(send)
 	if err != nil {
@@ -715,11 +791,17 @@ func (d *Node) handlePAgentDraftSend(ctx context.Context, params json.RawMessage
 	}
 	res, err := d.handlePAgentThreadSend(ctx, raw)
 	if err != nil {
+		if send.ThreadID != "" {
+			d.revokeOnce(send.ThreadID, grant)
+		}
 		return nil, err
 	}
 	payload := map[string]any{"event_id": ev.ID}
 	if r, ok := res.(api.PAgentSendResult); ok {
 		payload["thread_id"] = r.ThreadID
+		if send.ThreadID == "" {
+			d.grantOnce(r.ThreadID, grant)
+		}
 	}
 	if err := d.pagentEvent(ctx, th.ID, evDraftSent, startedByYou, payload, "", 0); err != nil {
 		return nil, pagentErr("%v", err)
@@ -774,4 +856,19 @@ func (d *Node) handlePAgentDraftDiscard(ctx context.Context, params json.RawMess
 		return nil, pagentErr("%v", err)
 	}
 	return struct{}{}, nil
+}
+
+func (d *Node) grantOnce(threadID, key string) {
+	d.approvals.mu.Lock()
+	defer d.approvals.mu.Unlock()
+	d.approvals.init()
+	addKey(d.approvals.once, threadID, key)
+}
+
+func (d *Node) revokeOnce(threadID, key string) {
+	d.approvals.mu.Lock()
+	defer d.approvals.mu.Unlock()
+	if d.approvals.once != nil {
+		delete(d.approvals.once[threadID], key)
+	}
 }
