@@ -124,3 +124,20 @@ DELETE FROM pagent_memory_proposal WHERE agent_id = ?;
 
 -- name: DeletePAgentThreads :exec
 DELETE FROM pagent_thread WHERE agent_id = ?;
+
+-- name: InsertPAgentProposal :exec
+INSERT INTO pagent_memory_proposal (id, agent_id, thread_id, ops, created_at)
+VALUES (?, ?, ?, ?, ?);
+
+-- name: GetPAgentProposal :one
+SELECT id, agent_id, thread_id, ops, created_at, decided_at, decision
+FROM pagent_memory_proposal WHERE id = ?;
+
+-- name: ListPendingPAgentProposals :many
+SELECT id, agent_id, thread_id, ops, created_at, decided_at, decision
+FROM pagent_memory_proposal WHERE agent_id = ? AND decided_at = 0
+ORDER BY created_at, id;
+
+-- name: DecidePAgentProposal :execrows
+UPDATE pagent_memory_proposal SET decided_at = ?, decision = ?
+WHERE id = ? AND decided_at = 0;

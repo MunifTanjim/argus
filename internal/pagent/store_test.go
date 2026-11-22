@@ -267,3 +267,37 @@ func TestPurgeAgentRemovesEverything(t *testing.T) {
 		t.Fatal("a1 still present")
 	}
 }
+
+func TestProposalsPendingAndDecide(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newStore(t)
+	seedAgent(t, s)
+	for _, id := range []string{"p1", "p2"} {
+		if err := s.InsertProposal(ctx, Proposal{ID: id, AgentID: "a1", ThreadID: "t1", Ops: json.RawMessage(`{"ops":[]}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.InsertProposal(ctx, Proposal{ID: "p3", AgentID: "a2", Ops: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := s.PendingProposals(ctx, "a1")
+	if err != nil || len(pending) != 2 || pending[0].ID != "p1" || pending[1].ThreadID != "t1" || string(pending[0].Ops) != `{"ops":[]}` {
+		t.Fatalf("pending = %+v, %v", pending, err)
+	}
+	if err := s.DecideProposal(ctx, "p1", "accepted"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DecideProposal(ctx, "p1", "rejected"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second decide err = %v", err)
+	}
+	p, ok, err := s.Proposal(ctx, "p1")
+	if err != nil || !ok || p.Decision != "accepted" || p.DecidedAt.IsZero() || p.CreatedAt.IsZero() {
+		t.Fatalf("proposal = %+v %v %v", p, ok, err)
+	}
+	if pending, _ := s.PendingProposals(ctx, "a1"); len(pending) != 1 || pending[0].ID != "p2" {
+		t.Fatalf("pending after decide = %+v", pending)
+	}
+	if _, ok, _ := s.Proposal(ctx, "nope"); ok {
+		t.Fatal("missing proposal found")
+	}
+}

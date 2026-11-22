@@ -9,6 +9,25 @@ import (
 	"context"
 )
 
+const decidePAgentProposal = `-- name: DecidePAgentProposal :execrows
+UPDATE pagent_memory_proposal SET decided_at = ?, decision = ?
+WHERE id = ? AND decided_at = 0
+`
+
+type DecidePAgentProposalParams struct {
+	DecidedAt int64
+	Decision  string
+	ID        string
+}
+
+func (q *Queries) DecidePAgentProposal(ctx context.Context, arg DecidePAgentProposalParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, decidePAgentProposal, arg.DecidedAt, arg.Decision, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deletePAgent = `-- name: DeletePAgent :exec
 DELETE FROM pagent WHERE id = ?
 `
@@ -132,6 +151,26 @@ func (q *Queries) GetPAgentByName(ctx context.Context, name string) (Pagent, err
 	return i, err
 }
 
+const getPAgentProposal = `-- name: GetPAgentProposal :one
+SELECT id, agent_id, thread_id, ops, created_at, decided_at, decision
+FROM pagent_memory_proposal WHERE id = ?
+`
+
+func (q *Queries) GetPAgentProposal(ctx context.Context, id string) (PagentMemoryProposal, error) {
+	row := q.db.QueryRowContext(ctx, getPAgentProposal, id)
+	var i PagentMemoryProposal
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.ThreadID,
+		&i.Ops,
+		&i.CreatedAt,
+		&i.DecidedAt,
+		&i.Decision,
+	)
+	return i, err
+}
+
 const getPAgentThread = `-- name: GetPAgentThread :one
 SELECT id, agent_id, kind, started_by, title, status, read_position, created_at, last_active_at
 FROM pagent_thread WHERE id = ?
@@ -227,6 +266,30 @@ func (q *Queries) InsertPAgent(ctx context.Context, arg InsertPAgentParams) erro
 		arg.ID,
 		arg.Name,
 		arg.Dir,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const insertPAgentProposal = `-- name: InsertPAgentProposal :exec
+INSERT INTO pagent_memory_proposal (id, agent_id, thread_id, ops, created_at)
+VALUES (?, ?, ?, ?, ?)
+`
+
+type InsertPAgentProposalParams struct {
+	ID        string
+	AgentID   string
+	ThreadID  string
+	Ops       string
+	CreatedAt int64
+}
+
+func (q *Queries) InsertPAgentProposal(ctx context.Context, arg InsertPAgentProposalParams) error {
+	_, err := q.db.ExecContext(ctx, insertPAgentProposal,
+		arg.ID,
+		arg.AgentID,
+		arg.ThreadID,
+		arg.Ops,
 		arg.CreatedAt,
 	)
 	return err
@@ -527,6 +590,43 @@ func (q *Queries) ListPAgentThreads(ctx context.Context, agentID string) ([]Page
 			&i.ReadPosition,
 			&i.CreatedAt,
 			&i.LastActiveAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingPAgentProposals = `-- name: ListPendingPAgentProposals :many
+SELECT id, agent_id, thread_id, ops, created_at, decided_at, decision
+FROM pagent_memory_proposal WHERE agent_id = ? AND decided_at = 0
+ORDER BY created_at, id
+`
+
+func (q *Queries) ListPendingPAgentProposals(ctx context.Context, agentID string) ([]PagentMemoryProposal, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingPAgentProposals, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PagentMemoryProposal{}
+	for rows.Next() {
+		var i PagentMemoryProposal
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.ThreadID,
+			&i.Ops,
+			&i.CreatedAt,
+			&i.DecidedAt,
+			&i.Decision,
 		); err != nil {
 			return nil, err
 		}

@@ -346,3 +346,52 @@ func (s *Store) Events(ctx context.Context, threadID string, afterID int64) ([]E
 	}
 	return out, nil
 }
+
+// Proposal is a staged memory change awaiting review. Ops is opaque JSON
+// owned by the caller. Decision is empty while pending.
+type Proposal struct {
+	ID, AgentID, ThreadID string
+	Ops                   json.RawMessage
+	Decision              string
+	CreatedAt, DecidedAt  time.Time
+}
+
+func proposalFrom(r gen.PagentMemoryProposal) Proposal {
+	return Proposal{
+		ID: r.ID, AgentID: r.AgentID, ThreadID: r.ThreadID, Ops: json.RawMessage(r.Ops), Decision: r.Decision,
+		CreatedAt: fromNanos(r.CreatedAt), DecidedAt: fromNanos(r.DecidedAt),
+	}
+}
+
+// InsertProposal stores p as pending, setting CreatedAt.
+func (s *Store) InsertProposal(ctx context.Context, p Proposal) error {
+	return s.q.InsertPAgentProposal(ctx, gen.InsertPAgentProposalParams{
+		ID: p.ID, AgentID: p.AgentID, ThreadID: p.ThreadID, Ops: string(p.Ops), CreatedAt: s.now().UnixNano(),
+	})
+}
+
+func (s *Store) Proposal(ctx context.Context, id string) (Proposal, bool, error) {
+	r, err := s.q.GetPAgentProposal(ctx, id)
+	return one(r, err, proposalFrom)
+}
+
+// PendingProposals returns the agent's undecided proposals, oldest first.
+func (s *Store) PendingProposals(ctx context.Context, agentID string) ([]Proposal, error) {
+	rows, err := s.q.ListPendingPAgentProposals(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Proposal, len(rows))
+	for i, r := range rows {
+		out[i] = proposalFrom(r)
+	}
+	return out, nil
+}
+
+// DecideProposal records decision on a pending proposal; ErrNotFound when it
+// does not exist or was already decided.
+func (s *Store) DecideProposal(ctx context.Context, id, decision string) error {
+	return affected(s.q.DecidePAgentProposal(ctx, gen.DecidePAgentProposalParams{
+		DecidedAt: s.now().UnixNano(), Decision: decision, ID: id,
+	}))
+}
