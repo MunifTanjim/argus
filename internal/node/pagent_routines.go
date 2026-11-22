@@ -75,6 +75,7 @@ func (d *Node) agentNotice(ctx context.Context, a pagent.Agent, kind string, pay
 func (d *Node) routineTick(ctx context.Context) {
 	now := d.pagentNow()
 	d.flushQuietHolds(ctx, now)
+	d.expireHandoffs(ctx, now)
 	away := d.clientAway(now)
 	expired, err := d.pagents.ExpiredLeases(ctx, now)
 	if err != nil {
@@ -301,6 +302,9 @@ func (d *Node) scheduleAgent(ctx context.Context, a pagent.Agent, now time.Time,
 	}
 	if len(paused) > 0 {
 		d.agentNotice(ctx, a, evRoutinePaused, map[string]any{"reason": pausedAway, "routines": paused})
+		for _, slug := range paused {
+			d.pausedHealth(ctx, a, slug, pausedAway)
+		}
 	}
 }
 

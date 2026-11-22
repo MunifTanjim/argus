@@ -338,3 +338,8 @@ func (s *Store) SetCheckBackAt(ctx context.Context, agentID, slug string, t time
 		CheckBackAt: nanos(t), UpdatedAt: s.now().UnixNano(), AgentID: agentID, Slug: slug,
 	})
 }
+
+// AgentRunsSince lists all of the agent's runs started at or after t.
+func (s *Store) AgentRunsSince(ctx context.Context, agentID string, t time.Time) ([]RoutineRun, error) {
+	return runs(s.q.PAgentRoutineRunsByAgentSince(ctx, gen.PAgentRoutineRunsByAgentSinceParams{AgentID: agentID, StartedAt: t.UnixNano()}))
+}

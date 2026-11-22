@@ -41,6 +41,7 @@ func newRunRig(t *testing.T) *runRig {
 	}
 	tr := newThreadRig(t)
 	tr.d.pagentCfg.Defaults.Limits.MaxConsecutiveFailures = 10
+	tr.d.lookPath = func(string) bool { return true }
 	a, _, err := tr.store.AgentByID(context.Background(), tr.agent.ID)
 	if err != nil {
 		t.Fatal(err)

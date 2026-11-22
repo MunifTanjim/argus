@@ -244,6 +244,7 @@ func (d *Node) handlePAgentRoutineResume(ctx context.Context, params json.RawMes
 	if err := d.pagents.SetRoutineEnabled(ctx, a.ID, f.r.Slug, true, ""); err != nil {
 		return nil, pagentErr("%v", err)
 	}
+	d.pagentHealthResolved(a, healthPausedPrefix+f.r.Slug)
 	d.notifyConns(api.MethodPAgentChanged)
 	return d.routineInfoOf(ctx, a, f), nil
 }

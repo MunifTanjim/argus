@@ -344,6 +344,7 @@ func (d *Node) pagentEnsureSession(ctx context.Context, a pagent.Agent, th pagen
 			return sid, true, d.pagentDeliver(ctx, sid, firstPrompt, pagentReadyTimeout)
 		}
 		d.log.Warn("pagent: resume failed", "thread", th.ID, "agent_session", prev.AgentSessionID, "err", err)
+		d.noteSpawn(ctx, a, err)
 		if err := s.SetEndReason(ctx, th.ID, prev.SessionID, endResumeFailed); err != nil {
 			d.log.Warn("pagent: record resume failure", "thread", th.ID, "err", err)
 		}
@@ -391,6 +392,7 @@ func (d *Node) pagentSpawn(ctx context.Context, a pagent.Agent, th pagent.Thread
 		presetID = uuid.NewString()
 	}
 	spawned, err := d.spawnFn(ctx, api.SpawnParams{Agent: cli, Cwd: a.Dir, Model: set.Model, Prompt: prompt}, presetID)
+	d.noteSpawn(ctx, a, err)
 	if err != nil {
 		return "", err
 	}

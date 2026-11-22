@@ -185,3 +185,118 @@ A routine with `event: webhook` runs when something sends `POST /hooks/<agent>/<
 The webhook listener is off by default. Set `agents.webhook.listen-addr` (for example `0.0.0.0:7420`) to turn it on. The sender must be able to reach that address, for example over your LAN or Tailscale; webhooks do not go through the gateway. A 200 response means the run was accepted, not that it finished. Requests over the hourly run limit get 429.
 
 The limits above are defaults; see [Configuration](../getting-started/configuration.md).
+
+## Notifications, briefs and offers
+
+### Notifications
+
+Each agent's `notify` setting decides what reaches your devices:
+
+| What happened | `all` | `needs-you` (default) | `off` |
+| --- | --- | --- | --- |
+| A run needs you or is blocked, the agent asks for approval or for a hand-off, a health notice | yes | yes | no |
+| A run made progress or finished, a brief, an offer | yes | no | no |
+| Nothing changed, memory changes | no | no | no |
+
+- **Quiet hours** (`quiet-hours: 22:00-07:00`): notifications from background work wait, and you get one summary when quiet hours end. Chats you started still notify you.
+- **While you are connected**, a notification waits a few minutes (`notify-delay`, default 3m) and is dropped if you read the thread meanwhile.
+- **Health notices** tell you about problems Argus detects: the agent's coding CLI is not installed, sessions failed to start three times in a row, or a routine paused because it failed too often, ran out of budget or you were away. Each notifies once, then at most once a day until it is resolved.
+
+### Briefs
+
+With `brief: { enabled: true, at: "08:00" }`, the agent writes a short daily brief at that time: what needs you, what its runs did since the last brief, what is due today and how its goals are going. Argus gathers these facts; the agent writes them up. The brief appears in the agent's latest chat. On a day with nothing to tell, there is no brief. When the node has a primary agent, only the primary writes a brief, and it covers every agent on the node.
+
+### Proactivity and offers
+
+`proactivity` sets how much an agent does on its own:
+
+| | Briefs | Offers per day | Self-paced check-backs wait |
+| --- | --- | --- | --- |
+| `off` | no | none | only as long as each run asks, up to 7 days |
+| `low` | yes | 1 | 2 days by default |
+| `default` | yes | 3 | 1 day by default |
+| `high` | yes | 6 | 12 hours by default |
+
+An offer is something the agent proposes to do, shown in its chat with a short reason. Starting an offer sends its prompt to the agent as if you wrote it; dismissing it drops it. An offer never does anything by itself.
+
+### Settings and usage
+
+```sh
+argus agent set scout notify all
+argus agent set scout proactivity low
+argus agent set scout memory.mode review
+argus agent set scout quiet-hours 22:00-07:00
+argus agent set scout brief.enabled true
+argus agent set scout brief.at 07:30
+argus agent set scout notify ""
+argus agent usage
+argus agent usage scout --since 7d
+```
+
+`set` changes one setting in the agent's `agent.yaml` and keeps the change in its history; an empty value goes back to the default. `usage` shows sessions, cost and tokens per agent, split by who started the work: you (chats and test runs), a routine, a check-back or an event. Cost and tokens appear only when the agent's coding CLI reports them.
+
+## Approvals
+
+Agent sessions run in the coding agent's normal permission mode, so it asks before actions that are not read-only. Argus answers those requests for agent sessions. It never sees what the coding agent runs without asking.
+
+### Who started the work
+
+Work you start by messaging the agent is attended. Routines, check-backs and other work you did not start are unattended.
+
+- Attended work: Argus asks you, unless a rule decides. It warns when an action sends data out of this machine, can't be undone or changes security settings.
+- Unattended work: an action is denied unless an approval rule allows it. The agent is told to add a rule if it needs one.
+- Unattended work never sends anything out on its own. Such an action becomes a draft in the thread. **Send** runs a shell command again in the agent's directory and records its output. For any other tool, Send asks the agent to do it now, and that one action is then allowed without asking. **Discard** drops the draft.
+
+### Answering
+
+A request shows the exact action, its warnings and who started the work. The answers are:
+
+- **Allow once**
+- **Allow in this thread**: the same tool and target are allowed until the thread's session ends.
+- **Always allow**: adds a rule for the tool and target to the agent's `agent.yaml` and commits it.
+- **Deny**: the agent gets your reason. The same action is denied again without asking until you next message the agent.
+- **Explain**: denies and asks the agent to explain the action in plain language, then ask again.
+
+A new message from you closes the requests still open in that thread. A request from unattended work is denied if you don't answer within 30 minutes (`agents.approvals.unattended-expiry`).
+
+### Rules
+
+Rules go in the agent's `agent.yaml` under `approvals`, and in `approvals.yaml` in the profile directory for every agent on the node:
+
+```yaml
+approvals:
+  - { tool: Bash, target: git, decision: allow }
+  - { tool: Bash, target: "gh pr *", decision: ask }
+  - { tool: "mcp__gmail__*", decision: ask, started-by: [routine, event] }
+  - { class: irreversible, decision: ask }
+```
+
+`tool` and `target` are patterns where `*` matches anything. The target of a shell command is its program, or the program and its arguments when the pattern has a space. For file tools it is the path, for fetches the host, and for MCP tools the tool name. `class` is `outward`, `irreversible` or `security`. `started-by` limits a rule to work started that way (`you`, `routine`, `check-back`, `event`, `handoff`). `decision` is `allow`, `ask` or `deny`; `expires` (an RFC 3339 time) and `note` are optional. When several rules match, deny wins over ask, and ask wins over allow. No rule turns an unattended outward action into anything but a draft.
+
+`agents.execution` sets what the node allows without a rule: `ask` (the default), `allow` or `never-unattended`. With `never-unattended`, unattended work can't run any action.
+
+### Policy hook
+
+`agents.approvals.hook` names a program (`command`) or an HTTPS address (`url`) that Argus asks about every agent action. A program reads the request on standard input and writes the reply on standard output; an address gets the request as a JSON POST. The request is:
+
+```json
+{"action": {"tool": "Bash", "target": "git", "class": ["outward"], "input": {"command": "git push"}},
+ "agent": {"id": "...", "name": "scout"}, "thread": "...", "started_by": "routine", "session": "...", "node": "..."}
+```
+
+The reply is `{"decision": "allow" | "ask" | "deny", "reason": "..."}`. `mode` sets what the reply does:
+
+- `shadow` (the default): the reply is only recorded.
+- `fail-open`: the reply decides; if the hook fails or takes longer than `timeout` (5s), the rules decide.
+- `fail-closed`: the reply decides; if the hook fails or times out, the action is denied.
+
+The hook can't overrule drafts, or the denial of an action you already denied.
+
+### Activity
+
+Every decision is recorded:
+
+```sh
+argus agent activity scout
+argus agent activity scout --unattended
+```

@@ -75,6 +75,8 @@ type runCtl struct {
 	r       routine.Routine
 	run     pagent.RoutineRun
 	payload string
+	// handoff is the hand-off a hand-off run answers; nil for routine runs.
+	handoff *pagent.Handoff
 
 	report chan pagent.RunResult
 	ended  chan struct{}
@@ -221,6 +223,10 @@ func (d *Node) executeRun(ctx context.Context, c *runCtl) {
 }
 
 func (d *Node) skipRun(ctx context.Context, c *runCtl, reason string) {
+	if c.handoff != nil {
+		d.failHandoffRun(ctx, c, pagent.RunSkipped, reason)
+		return
+	}
 	if err := d.pagents.SetRunState(ctx, c.run.ID, pagent.RunSkipped, reason); err != nil {
 		d.log.Warn("pagent: skip run", "run", c.run.ID, "err", err)
 		return
@@ -242,6 +248,12 @@ func (d *Node) spawnRun(ctx context.Context, c *runCtl) (bool, error) {
 	if !ok {
 		return false, fmt.Errorf("unknown agent CLI %q", set.Agent)
 	}
+	if name, ok := d.cliInstalled(ad); !ok {
+		msg := fmt.Sprintf("%s is not installed on this node (not found on PATH)", name)
+		d.healthNotice(ctx, a, healthCLIMissing, msg)
+		return false, errors.New(msg)
+	}
+	d.pagentHealthResolved(a, healthCLIMissing)
 	if err := d.pagentMakeRoom(ctx, a, set.MaxConcurrentSessions); err != nil {
 		return false, nil
 	}
@@ -250,9 +262,13 @@ func (d *Node) spawnRun(ctx context.Context, c *runCtl) (bool, error) {
 	if startedBy == "" {
 		startedBy = startedByRoutine
 	}
+	title := runTitle(r)
+	if c.handoff != nil {
+		title = handoffTitle(*c.handoff)
+	}
 	th := pagent.Thread{
 		ID: newThreadID(), AgentID: a.ID, Kind: threadRun, StartedBy: startedBy,
-		Title: runTitle(r), Status: pagent.ThreadActive,
+		Title: title, Status: pagent.ThreadActive,
 	}
 	if err := d.pagents.InsertThread(ctx, th); err != nil {
 		return false, err
@@ -267,15 +283,22 @@ func (d *Node) spawnRun(ctx context.Context, c *runCtl) (bool, error) {
 	c.mu.Lock()
 	c.threadID = th.ID
 	c.mu.Unlock()
+	if c.handoff != nil {
+		d.handoffRunStarted(ctx, c, th.ID)
+	}
 
 	if err := d.pagentInstructions(ctx, a, th, def, set); err != nil {
 		return false, err
 	}
-	section := d.runSection(ctx, c, set)
-	if r.Slug == briefSlug {
-		section = d.briefSection(ctx, c, set)
+	var prompt string
+	switch {
+	case c.handoff != nil:
+		prompt = handoffPrompt(handoffSection(*c.handoff))
+	case r.Slug == briefSlug:
+		prompt = runPrompt(r.Slug, d.briefSection(ctx, c, set), c.payload)
+	default:
+		prompt = runPrompt(r.Slug, d.runSection(ctx, c, set), c.payload)
 	}
-	prompt := runPrompt(r.Slug, section, c.payload)
 	sid, err := d.pagentSpawn(ctx, a, th, set, ad, prompt, startedBy)
 	if err != nil {
 		return false, err
@@ -427,6 +450,10 @@ func (d *Node) refreshUsage(c *runCtl) {
 
 // finishRun applies a reported result: verify, logs, state, notices.
 func (d *Node) finishRun(ctx context.Context, c *runCtl, res pagent.RunResult) {
+	if c.handoff != nil {
+		d.finishHandoffRun(ctx, c, res)
+		return
+	}
 	a, r, run := c.agent, c.r, c.run
 	th, _ := c.ids()
 	d.refreshUsage(c)
@@ -512,6 +539,10 @@ func (d *Node) finishRun(ctx context.Context, c *runCtl, res pagent.RunResult) {
 // streak posts a notice, max-consecutive-failures pauses the routine.
 func (d *Node) failRun(ctx context.Context, c *runCtl, msg string, spawned bool) {
 	ctx = context.WithoutCancel(ctx)
+	if c.handoff != nil {
+		d.failHandoffRun(ctx, c, pagent.RunFailed, msg)
+		return
+	}
 	a, r, run := c.agent, c.r, c.run
 	if err := d.pagents.SetRunState(ctx, run.ID, pagent.RunFailed, msg); err != nil {
 		d.log.Warn("pagent: fail run", "run", run.ID, "err", err)
@@ -543,6 +574,9 @@ func (d *Node) failRun(ctx context.Context, c *runCtl, msg string, spawned bool)
 // pauseRoutine pauses an enabled routine for reason with a notice; a goal
 // that completed gets a completed notice instead.
 func (d *Node) pauseRoutine(ctx context.Context, a pagent.Agent, slug, reason, msg string) {
+	if reason != pausedCompleted {
+		defer d.pausedHealth(ctx, a, slug, reason)
+	}
 	st, ok := d.routineState(ctx, a.ID, slug)
 	if !ok || !st.Enabled {
 		return

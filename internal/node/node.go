@@ -150,6 +150,7 @@ type Node struct {
 	routineWG       sync.WaitGroup                    // run goroutines
 	routinePayloads sync.Map                          // run id -> webhook body of a run not started yet
 	notify          notifyState                       // held and delayed agent pushes
+	lookPath        func(name string) bool            // whether a CLI is on PATH; tests replace it
 
 	clientMu        sync.Mutex
 	lastClientAt    time.Time // when a client was last attached

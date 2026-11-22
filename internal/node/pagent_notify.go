@@ -42,6 +42,8 @@ type notifyState struct {
 	held   map[string][]pagentPush // agent id -> pushes held for quiet hours
 	health map[string]time.Time    // agent id + key -> last push
 	notes  map[string]string       // agent id + key -> open health notice
+
+	spawnFails map[string]int // agent id -> spawn or resume failures in a row
 }
 
 // pagentPush is one agent notification.

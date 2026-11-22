@@ -510,3 +510,39 @@ func TestPAgentOfferRoutesByThread(t *testing.T) {
 		t.Fatalf("dismiss: %+v %v", got, err)
 	}
 }
+
+func TestPAgentUsageAndSetRouteToNode(t *testing.T) {
+	f, clientConn := newFakeGatewayNode(t, "n1")
+	defer f.peer.Close()
+	var gotUsage api.PAgentUsageParams
+	var gotSet api.PAgentSetParams
+	f.handle = func(method string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
+		switch method {
+		case api.MethodPAgentUsage:
+			_ = json.Unmarshal(params, &gotUsage)
+			b, _ := json.Marshal(api.PAgentUsageResult{AgentID: "a1", Total: api.PAgentUsageRow{Sessions: 2}})
+			return b, nil, nil
+		case api.MethodPAgentSet:
+			_ = json.Unmarshal(params, &gotSet)
+			return []byte(`{"commit":"c1"}`), nil, nil
+		}
+		return nil, nil, nil
+	}
+	c, err := NewE2EClient(clientConn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	agent := session.CompositeID("n1", "a1")
+	var u api.PAgentUsageResult
+	if err := c.Call(api.MethodPAgentUsage, api.PAgentUsageParams{AgentID: agent}, &u); err != nil || gotUsage.AgentID != "a1" || u.AgentID != agent || u.Total.Sessions != 2 {
+		t.Fatalf("usage: %+v %+v %v", gotUsage, u, err)
+	}
+	var s api.PAgentSetResult
+	if err := c.Call(api.MethodPAgentSet, api.PAgentSetParams{AgentID: agent, Key: "notify", Value: "all"}, &s); err != nil || gotSet.AgentID != "a1" || gotSet.Key != "notify" || s.Commit != "c1" {
+		t.Fatalf("set: %+v %+v %v", gotSet, s, err)
+	}
+}

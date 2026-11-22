@@ -65,6 +65,7 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"profile":             true, // `agent memory` only: per-invocation target
 		"accept":              true, // `agent memory review` only: per-invocation decision
 		"reject":              true, // `agent memory review` only: per-invocation decision
+		"since":               true, // `agent usage` only: per-invocation time window
 	}
 
 	seen := map[string]bool{}

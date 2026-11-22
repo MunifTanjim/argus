@@ -248,6 +248,13 @@ func (m *E2EClient) routeByPAgent(method string, raw json.RawMessage, out any) e
 			r.Routines[i].AgentID = session.CompositeID(nodeID, r.Routines[i].AgentID)
 		}
 		return assign(out, r)
+	case api.MethodPAgentUsage:
+		var r api.PAgentUsageResult
+		if err := m.callNode(nodeID, method, params, &r); err != nil {
+			return err
+		}
+		r.AgentID = session.CompositeID(nodeID, r.AgentID)
+		return assign(out, r)
 	case api.MethodPAgentRoutinePause, api.MethodPAgentRoutineResume:
 		var r api.PAgentRoutineInfo
 		if err := m.callNode(nodeID, method, params, &r); err != nil {

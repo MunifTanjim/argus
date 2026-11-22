@@ -389,6 +389,62 @@ func (q *Queries) ListPAgentRoutineStates(ctx context.Context, agentID string) (
 	return items, nil
 }
 
+const pAgentRoutineRunsByAgentSince = `-- name: PAgentRoutineRunsByAgentSince :many
+SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM pagent_routine_run
+WHERE agent_id = ?1 AND started_at >= ?2
+ORDER BY started_at, id
+`
+
+type PAgentRoutineRunsByAgentSinceParams struct {
+	AgentID   string
+	StartedAt int64
+}
+
+func (q *Queries) PAgentRoutineRunsByAgentSince(ctx context.Context, arg PAgentRoutineRunsByAgentSinceParams) ([]PagentRoutineRun, error) {
+	rows, err := q.db.QueryContext(ctx, pAgentRoutineRunsByAgentSince, arg.AgentID, arg.StartedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PagentRoutineRun{}
+	for rows.Next() {
+		var i PagentRoutineRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.Slug,
+			&i.Occurrence,
+			&i.StartedBy,
+			&i.Test,
+			&i.State,
+			&i.LeaseUntil,
+			&i.ThreadID,
+			&i.Result,
+			&i.Summary,
+			&i.ActionsDone,
+			&i.ActionsPending,
+			&i.Unverified,
+			&i.Sources,
+			&i.Cost,
+			&i.Tokens,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.Error,
+			&i.RetryOf,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const pAgentRoutineRunsSince = `-- name: PAgentRoutineRunsSince :many
 SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM pagent_routine_run
 WHERE agent_id = ? AND slug = ? AND started_at >= ?

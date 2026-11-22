@@ -114,3 +114,8 @@ RETURNING *;
 -- name: SetPAgentRoutineCheckBack :exec
 UPDATE pagent_routine_state SET check_back_at = sqlc.arg(check_back_at), updated_at = sqlc.arg(updated_at)
 WHERE agent_id = sqlc.arg(agent_id) AND slug = sqlc.arg(slug);
+
+-- name: PAgentRoutineRunsByAgentSince :many
+SELECT * FROM pagent_routine_run
+WHERE agent_id = sqlc.arg(agent_id) AND started_at >= sqlc.arg(started_at)
+ORDER BY started_at, id;

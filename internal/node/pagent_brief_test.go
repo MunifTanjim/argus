@@ -57,7 +57,7 @@ func TestBriefRunDelivers(t *testing.T) {
 	c := r.start(t, rt)
 	r.report(t, c, reportRunParams{Result: "needs_you", Summary: "log in to the mail site"})
 	r.wait(t)
-	r.d.pagentHealth(ctx, r.a, r.chat, "cli-missing", "claude is not installed", "")
+	r.d.pagentHealth(ctx, r.a, r.chat, "disk", "the disk is nearly full", "")
 
 	f, err := briefRoutine(r.d.pagentSettings(r.a))
 	if err != nil {
@@ -66,7 +66,7 @@ func TestBriefRunDelivers(t *testing.T) {
 	_ = r.store.UpsertRoutineState(ctx, pagent.RoutineState{AgentID: r.a.ID, Slug: briefSlug, Enabled: true, AnchorAt: time.Now()})
 	b := r.start(t, f.r)
 	p := r.lastPrompt()
-	for _, want := range []string{"## Daily brief", "### Agent scout", "inbox needs_you: log in to the mail site", "claude is not installed", "billing: old client deleted", "Run routine _brief now."} {
+	for _, want := range []string{"## Daily brief", "### Agent scout", "inbox needs_you: log in to the mail site", "the disk is nearly full", "billing: old client deleted", "Run routine _brief now."} {
 		if !strings.Contains(p, want) {
 			t.Errorf("brief prompt lacks %q:\n%s", want, p)
 		}
