@@ -18,6 +18,8 @@ const (
 	RunSkipped     = "skipped"
 	RunMissed      = "missed"
 	RunInterrupted = "interrupted"
+	// RunQueued waits for the routine's active run to end (overlap: queue).
+	RunQueued = "queued"
 )
 
 // ClaimLease is how long a freshly claimed run holds its lease before a thread starts renewing it.
@@ -42,6 +44,8 @@ type RoutineRun struct {
 	Occurrence                                    time.Time
 	Test                                          bool
 	LeaseUntil, StartedAt, EndedAt                time.Time
+	// RetryOf is the id of the interrupted run this run retries.
+	RetryOf string
 	RunResult
 	Error string
 }
@@ -106,7 +110,7 @@ func runFrom(r gen.PagentRoutineRun) RoutineRun {
 			Unverified: decodeList(r.Unverified), Sources: decodeList(r.Sources),
 			Cost: r.Cost, Tokens: r.Tokens,
 		},
-		Error: r.Error,
+		Error: r.Error, RetryOf: r.RetryOf,
 	}
 }
 
@@ -145,6 +149,27 @@ func (s *Store) RoutineStates(ctx context.Context, agentID string) ([]RoutineSta
 	return out, nil
 }
 
+// SetRoutineEnabled pauses (enabled false, with reason) or resumes the routine.
+func (s *Store) SetRoutineEnabled(ctx context.Context, agentID, slug string, enabled bool, reason string) error {
+	return s.q.SetPAgentRoutineEnabled(ctx, gen.SetPAgentRoutineEnabledParams{
+		Enabled: b2i(enabled), PausedReason: reason, UpdatedAt: s.now().UnixNano(), AgentID: agentID, Slug: slug,
+	})
+}
+
+// SetRoutineDef records a new definition hash and the next due time it gives.
+func (s *Store) SetRoutineDef(ctx context.Context, agentID, slug, defHash string, nextDue time.Time) error {
+	return s.q.SetPAgentRoutineDef(ctx, gen.SetPAgentRoutineDefParams{
+		DefHash: defHash, NextDueAt: nanos(nextDue), UpdatedAt: s.now().UnixNano(), AgentID: agentID, Slug: slug,
+	})
+}
+
+// AdvanceNextDue sets the routine's next due time.
+func (s *Store) AdvanceNextDue(ctx context.Context, agentID, slug string, nextDue time.Time) error {
+	return s.q.AdvancePAgentRoutineNextDue(ctx, gen.AdvancePAgentRoutineNextDueParams{
+		NextDueAt: nanos(nextDue), UpdatedAt: s.now().UnixNano(), AgentID: agentID, Slug: slug,
+	})
+}
+
 func (s *Store) DeleteRoutineState(ctx context.Context, agentID, slug string) error {
 	return s.q.DeletePAgentRoutineState(ctx, gen.DeletePAgentRoutineStateParams{AgentID: agentID, Slug: slug})
 }
@@ -152,7 +177,13 @@ func (s *Store) DeleteRoutineState(ctx context.Context, agentID, slug string) er
 // ClaimOccurrence inserts a claimed run for the occurrence. ok is false when
 // the occurrence was already claimed.
 func (s *Store) ClaimOccurrence(ctx context.Context, agentID, slug string, occurrence time.Time, startedBy string, test bool) (RoutineRun, bool, error) {
-	return s.claim(ctx, s.q, agentID, slug, occurrence, startedBy, test)
+	return s.claim(ctx, s.q, agentID, slug, occurrence, startedBy, test, "")
+}
+
+// ClaimRetry claims the one retry of an interrupted run. Its occurrence is
+// the original's plus 1ns, so a second retry of the same run is a duplicate.
+func (s *Store) ClaimRetry(ctx context.Context, prev RoutineRun) (RoutineRun, bool, error) {
+	return s.claim(ctx, s.q, prev.AgentID, prev.Slug, prev.Occurrence.Add(time.Nanosecond), prev.StartedBy, prev.Test, prev.ID)
 }
 
 // ClaimOccurrenceAdvance claims the occurrence and sets the routine's
@@ -164,7 +195,7 @@ func (s *Store) ClaimOccurrenceAdvance(ctx context.Context, agentID, slug string
 	}
 	defer tx.Rollback()
 	q := s.q.WithTx(tx)
-	run, ok, err := s.claim(ctx, q, agentID, slug, occurrence, startedBy, test)
+	run, ok, err := s.claim(ctx, q, agentID, slug, occurrence, startedBy, test, "")
 	if err != nil || !ok {
 		return run, ok, err
 	}
@@ -176,12 +207,12 @@ func (s *Store) ClaimOccurrenceAdvance(ctx context.Context, agentID, slug string
 	return run, true, tx.Commit()
 }
 
-func (s *Store) claim(ctx context.Context, q *gen.Queries, agentID, slug string, occurrence time.Time, startedBy string, test bool) (RoutineRun, bool, error) {
+func (s *Store) claim(ctx context.Context, q *gen.Queries, agentID, slug string, occurrence time.Time, startedBy string, test bool, retryOf string) (RoutineRun, bool, error) {
 	now := s.now()
 	id := "rr_" + NewID()[3:]
 	n, err := q.InsertPAgentRoutineRun(ctx, gen.InsertPAgentRoutineRunParams{
 		ID: id, AgentID: agentID, Slug: slug, Occurrence: occurrence.UnixNano(), StartedBy: startedBy,
-		Test: b2i(test), LeaseUntil: now.Add(ClaimLease).UnixNano(), StartedAt: now.UnixNano(),
+		Test: b2i(test), LeaseUntil: now.Add(ClaimLease).UnixNano(), StartedAt: now.UnixNano(), RetryOf: retryOf,
 	})
 	if err != nil || n == 0 {
 		return RoutineRun{}, false, err
@@ -226,6 +257,18 @@ func (s *Store) ExpiredLeases(ctx context.Context, now time.Time) ([]RoutineRun,
 // RunsSince lists the routine's runs started at or after t.
 func (s *Store) RunsSince(ctx context.Context, agentID, slug string, t time.Time) ([]RoutineRun, error) {
 	return runs(s.q.PAgentRoutineRunsSince(ctx, gen.PAgentRoutineRunsSinceParams{AgentID: agentID, Slug: slug, StartedAt: t.UnixNano()}))
+}
+
+// ActiveRuns lists the routine's claimed, running and queued runs, oldest first.
+func (s *Store) ActiveRuns(ctx context.Context, agentID, slug string) ([]RoutineRun, error) {
+	return runs(s.q.ActivePAgentRoutineRuns(ctx, gen.ActivePAgentRoutineRunsParams{AgentID: agentID, Slug: slug}))
+}
+
+// LastStartedRun returns the routine's most recent non-test run that started
+// (not skipped, missed or queued).
+func (s *Store) LastStartedRun(ctx context.Context, agentID, slug string) (RoutineRun, bool, error) {
+	r, err := s.q.LastStartedPAgentRoutineRun(ctx, gen.LastStartedPAgentRoutineRunParams{AgentID: agentID, Slug: slug})
+	return one(r, err, runFrom)
 }
 
 // RecordResult stores the structured result on the run.

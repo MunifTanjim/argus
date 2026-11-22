@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
+
+	"github.com/MunifTanjim/argus/internal/pagent/routine"
 )
 
 // Config is the resolved argus configuration. Precedence: flags > env > file > defaults.
@@ -199,6 +201,11 @@ type AgentDefaults struct {
 		MaxEnabledRoutines int
 		MaxCheckBacks      int
 		RunTimeout         time.Duration
+		MaxRunsPerHour     int
+		// CatchUpWindow and PauseAfterAway are negative when the configured
+		// value does not parse.
+		CatchUpWindow  time.Duration
+		PauseAfterAway time.Duration
 	}
 }
 
@@ -296,6 +303,9 @@ var defaults = map[string]any{
 	"agents.defaults.limits.max-enabled-routines": 20,
 	"agents.defaults.limits.max-check-backs":      10,
 	"agents.defaults.limits.run-timeout":          "1h",
+	"agents.defaults.limits.max-runs-per-hour":    12,
+	"agents.defaults.limits.catch-up-window":      "12h",
+	"agents.defaults.limits.pause-after-away":     "7d",
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
@@ -383,7 +393,22 @@ func (c Config) Validate() error {
 	if d.Memory.CoreBudget < 0 {
 		return errors.New("agents.defaults.memory.core-budget must be a size such as 24KB")
 	}
+	if d.Limits.CatchUpWindow < 0 {
+		return errors.New("agents.defaults.limits.catch-up-window must be a duration such as 12h")
+	}
+	if d.Limits.PauseAfterAway < 0 {
+		return errors.New("agents.defaults.limits.pause-after-away must be a duration such as 7d")
+	}
 	return nil
+}
+
+// days reads a duration that may use a day suffix ("7d"); -1 when it does not parse.
+func days(v *viper.Viper, key string) time.Duration {
+	d, err := routine.ParseDuration(strings.TrimSpace(v.GetString(key)))
+	if err != nil || d < 0 {
+		return -1
+	}
+	return d
 }
 
 // FromViper reads resolved values out of v into a Config. Explicit Get calls (not
@@ -494,5 +519,8 @@ func agentsFromViper(v *viper.Viper) AgentsConfig {
 	d.Limits.MaxEnabledRoutines = v.GetInt(p + "limits.max-enabled-routines")
 	d.Limits.MaxCheckBacks = v.GetInt(p + "limits.max-check-backs")
 	d.Limits.RunTimeout = v.GetDuration(p + "limits.run-timeout")
+	d.Limits.MaxRunsPerHour = v.GetInt(p + "limits.max-runs-per-hour")
+	d.Limits.CatchUpWindow = days(v, p+"limits.catch-up-window")
+	d.Limits.PauseAfterAway = days(v, p+"limits.pause-after-away")
 	return a
 }

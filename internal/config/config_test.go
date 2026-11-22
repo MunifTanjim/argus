@@ -477,7 +477,8 @@ func TestAgentsDefaults(t *testing.T) {
 		t.Errorf("brief = %+v", d.Brief)
 	}
 	l := d.Limits
-	if l.MinInterval != 15*time.Minute || l.MaxEnabledRoutines != 20 || l.MaxCheckBacks != 10 || l.RunTimeout != time.Hour {
+	if l.MinInterval != 15*time.Minute || l.MaxEnabledRoutines != 20 || l.MaxCheckBacks != 10 || l.RunTimeout != time.Hour ||
+		l.MaxRunsPerHour != 12 || l.CatchUpWindow != 12*time.Hour || l.PauseAfterAway != 7*24*time.Hour {
 		t.Errorf("limits = %+v", l)
 	}
 	if err := load(t, "").Validate(); err != nil {
@@ -515,6 +516,9 @@ agents:
       max-enabled-routines: 3
       max-check-backs: 2
       run-timeout: 10m
+      max-runs-per-hour: 4
+      catch-up-window: 1d
+      pause-after-away: 2d
 `)
 	a := load(t, path).Agents
 	home, _ := os.UserHomeDir()
@@ -534,7 +538,8 @@ agents:
 	if d.Proactivity != "high" || d.QuietHours != "22:00-07:00" || d.Notify != "all" || !d.Brief.Enabled || d.Brief.At != "09:30" {
 		t.Errorf("defaults = %+v", d)
 	}
-	if d.Limits.MinInterval != time.Minute || d.Limits.MaxEnabledRoutines != 3 || d.Limits.MaxCheckBacks != 2 || d.Limits.RunTimeout != 10*time.Minute {
+	if d.Limits.MinInterval != time.Minute || d.Limits.MaxEnabledRoutines != 3 || d.Limits.MaxCheckBacks != 2 || d.Limits.RunTimeout != 10*time.Minute ||
+		d.Limits.MaxRunsPerHour != 4 || d.Limits.CatchUpWindow != 24*time.Hour || d.Limits.PauseAfterAway != 48*time.Hour {
 		t.Errorf("limits = %+v", d.Limits)
 	}
 }

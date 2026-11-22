@@ -90,6 +90,9 @@ overrides the `agents.defaults` values.
 | `agents.defaults.limits.max-enabled-routines` | `20` | Routines an agent can have enabled. |
 | `agents.defaults.limits.max-check-backs` | `10` | Pending check-backs an agent can have. |
 | `agents.defaults.limits.run-timeout` | `1h` | Longest time a run can take. |
+| `agents.defaults.limits.max-runs-per-hour` | `12` | Routine runs an agent can start in an hour. |
+| `agents.defaults.limits.catch-up-window` | `12h` | How old a missed run can be and still run when the node comes back. |
+| `agents.defaults.limits.pause-after-away` | `7d` | Routines pause when no client has connected for this long. |
 
 ## Projects & Workspaces
 

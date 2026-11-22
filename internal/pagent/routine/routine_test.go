@@ -191,6 +191,7 @@ func TestDescribeCommon(t *testing.T) {
 		{Every: "2h"}:                 "every 2 hours",
 		{Every: "1h"}:                 "every hour",
 		{Every: "45m"}:                "every 45 minutes",
+		{Every: "2d"}:                 "every 2 days",
 		{At: "2026-12-01T09:00"}:      "once at 2026-12-01T09:00",
 		{CheckBack: "self-paced"}:     "self-paced check-back",
 		{Event: "webhook"}:            "on webhook",
@@ -199,5 +200,28 @@ func TestDescribeCommon(t *testing.T) {
 		if got := Describe(in); got != want {
 			t.Errorf("%+v: got %q want %q", in, got, want)
 		}
+	}
+}
+
+func TestParseDurationDays(t *testing.T) {
+	for in, want := range map[string]time.Duration{
+		"7d":    7 * 24 * time.Hour,
+		"1d12h": 36 * time.Hour,
+		"1.5d":  36 * time.Hour,
+		"90m":   90 * time.Minute,
+		"0d":    0,
+	} {
+		if got, err := ParseDuration(in); err != nil || got != want {
+			t.Errorf("%q: got %v, %v want %v", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "d", "xd", "1d-", "1w"} {
+		if _, err := ParseDuration(in); err == nil {
+			t.Errorf("%q: want error", in)
+		}
+	}
+	r := Routine{What: "x", Does: "act", Until: "stopped", IfUnavailable: "report", ReportTo: "thread", Overlap: "skip", Starts: []Start{{Every: "1d"}}}
+	if err := Validate(r, Limits{MinInterval: 15 * time.Minute}); err != nil {
+		t.Fatalf("every 1d: %v", err)
 	}
 }

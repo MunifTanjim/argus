@@ -2,6 +2,7 @@ package routine
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,9 +19,31 @@ func parseCron(expr string) (cron.Schedule, error) {
 	return s, nil
 }
 
-// ParseEvery parses an interval such as "2h" or "30m".
+// ParseDuration parses a Go duration that may start with a whole or decimal
+// number of days, such as "7d", "1d12h" or "90m".
+func ParseDuration(s string) (time.Duration, error) {
+	days, rest, ok := strings.Cut(s, "d")
+	if !ok {
+		return time.ParseDuration(s)
+	}
+	n, err := strconv.ParseFloat(days, 64)
+	if err != nil || n < 0 || strings.ContainsAny(days, "+-eE") {
+		return 0, fmt.Errorf("invalid duration %q", s)
+	}
+	d := time.Duration(n * float64(24*time.Hour))
+	if rest != "" {
+		r, err := time.ParseDuration(rest)
+		if err != nil || r < 0 || strings.HasPrefix(rest, "-") || strings.HasPrefix(rest, "+") {
+			return 0, fmt.Errorf("invalid duration %q", s)
+		}
+		d += r
+	}
+	return d, nil
+}
+
+// ParseEvery parses an interval such as "2h", "30m" or "1d".
 func ParseEvery(s string) (time.Duration, error) {
-	d, err := time.ParseDuration(s)
+	d, err := ParseDuration(s)
 	if err != nil {
 		return 0, fmt.Errorf("invalid every %q: %w", s, err)
 	}

@@ -101,6 +101,7 @@ type PagentRoutineRun struct {
 	StartedAt      int64
 	EndedAt        int64
 	Error          string
+	RetryOf        string
 }
 
 type PagentRoutineState struct {

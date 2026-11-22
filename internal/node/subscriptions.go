@@ -26,6 +26,7 @@ var queueStaleAfter = 2 * time.Second
 type connSubs struct {
 	mu     sync.Mutex
 	cancel map[string]context.CancelFunc // sub_id -> poller cancel
+	opened time.Time                     // when the connection was registered
 }
 
 func newConnSubs() *connSubs { return &connSubs{cancel: map[string]context.CancelFunc{}} }
@@ -61,6 +62,7 @@ func (cs *connSubs) closeAll() {
 // the connection's Notifier (the *Peer). Called from OnConnect.
 func (d *Node) registerConn(n api.Notifier) *connSubs {
 	cs := newConnSubs()
+	cs.opened = d.pagentNow()
 	d.subsMu.Lock()
 	d.conns[n] = cs
 	d.subsMu.Unlock()
@@ -74,6 +76,7 @@ func (d *Node) dropConn(n api.Notifier) {
 	d.subsMu.Unlock()
 	if cs != nil {
 		cs.closeAll()
+		d.connClosed(cs.opened)
 	}
 }
 
@@ -92,6 +95,7 @@ func (d *Node) getOrCreateConnSubs(ctx context.Context, n api.Notifier) *connSub
 	cs, ok := d.conns[n]
 	if !ok {
 		cs = newConnSubs()
+		cs.opened = d.pagentNow()
 		d.conns[n] = cs
 	}
 	d.subsMu.Unlock()

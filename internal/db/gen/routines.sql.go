@@ -9,6 +9,62 @@ import (
 	"context"
 )
 
+const activePAgentRoutineRuns = `-- name: ActivePAgentRoutineRuns :many
+SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM pagent_routine_run
+WHERE agent_id = ? AND slug = ? AND state IN ('claimed', 'running', 'queued')
+ORDER BY started_at, id
+`
+
+type ActivePAgentRoutineRunsParams struct {
+	AgentID string
+	Slug    string
+}
+
+func (q *Queries) ActivePAgentRoutineRuns(ctx context.Context, arg ActivePAgentRoutineRunsParams) ([]PagentRoutineRun, error) {
+	rows, err := q.db.QueryContext(ctx, activePAgentRoutineRuns, arg.AgentID, arg.Slug)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PagentRoutineRun{}
+	for rows.Next() {
+		var i PagentRoutineRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.Slug,
+			&i.Occurrence,
+			&i.StartedBy,
+			&i.Test,
+			&i.State,
+			&i.LeaseUntil,
+			&i.ThreadID,
+			&i.Result,
+			&i.Summary,
+			&i.ActionsDone,
+			&i.ActionsPending,
+			&i.Unverified,
+			&i.Sources,
+			&i.Cost,
+			&i.Tokens,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.Error,
+			&i.RetryOf,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const advancePAgentRoutineNextDue = `-- name: AdvancePAgentRoutineNextDue :exec
 UPDATE pagent_routine_state SET next_due_at = ?, updated_at = ? WHERE agent_id = ? AND slug = ?
 `
@@ -89,7 +145,7 @@ func (q *Queries) DeletePAgentWebhookSecrets(ctx context.Context, agentID string
 }
 
 const expiredPAgentRoutineRuns = `-- name: ExpiredPAgentRoutineRuns :many
-SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error FROM pagent_routine_run
+SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM pagent_routine_run
 WHERE state IN ('claimed', 'running') AND lease_until > 0 AND lease_until < ? AND result = ''
 ORDER BY started_at, id
 `
@@ -124,6 +180,7 @@ func (q *Queries) ExpiredPAgentRoutineRuns(ctx context.Context, leaseUntil int64
 			&i.StartedAt,
 			&i.EndedAt,
 			&i.Error,
+			&i.RetryOf,
 		); err != nil {
 			return nil, err
 		}
@@ -139,7 +196,7 @@ func (q *Queries) ExpiredPAgentRoutineRuns(ctx context.Context, leaseUntil int64
 }
 
 const getPAgentRoutineRun = `-- name: GetPAgentRoutineRun :one
-SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error FROM pagent_routine_run WHERE id = ?
+SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM pagent_routine_run WHERE id = ?
 `
 
 func (q *Queries) GetPAgentRoutineRun(ctx context.Context, id string) (PagentRoutineRun, error) {
@@ -166,6 +223,7 @@ func (q *Queries) GetPAgentRoutineRun(ctx context.Context, id string) (PagentRou
 		&i.StartedAt,
 		&i.EndedAt,
 		&i.Error,
+		&i.RetryOf,
 	)
 	return i, err
 }
@@ -187,8 +245,8 @@ func (q *Queries) GetPAgentWebhookSecretHash(ctx context.Context, arg GetPAgentW
 }
 
 const insertPAgentRoutineRun = `-- name: InsertPAgentRoutineRun :execrows
-INSERT INTO pagent_routine_run (id, agent_id, slug, occurrence, started_by, test, state, lease_until, started_at)
-VALUES (?, ?, ?, ?, ?, ?, 'claimed', ?, ?)
+INSERT INTO pagent_routine_run (id, agent_id, slug, occurrence, started_by, test, state, lease_until, started_at, retry_of)
+VALUES (?, ?, ?, ?, ?, ?, 'claimed', ?, ?, ?)
 ON CONFLICT (agent_id, slug, occurrence) DO NOTHING
 `
 
@@ -201,6 +259,7 @@ type InsertPAgentRoutineRunParams struct {
 	Test       int64
 	LeaseUntil int64
 	StartedAt  int64
+	RetryOf    string
 }
 
 func (q *Queries) InsertPAgentRoutineRun(ctx context.Context, arg InsertPAgentRoutineRunParams) (int64, error) {
@@ -213,11 +272,53 @@ func (q *Queries) InsertPAgentRoutineRun(ctx context.Context, arg InsertPAgentRo
 		arg.Test,
 		arg.LeaseUntil,
 		arg.StartedAt,
+		arg.RetryOf,
 	)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const lastStartedPAgentRoutineRun = `-- name: LastStartedPAgentRoutineRun :one
+SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM pagent_routine_run
+WHERE agent_id = ? AND slug = ? AND test = 0 AND state NOT IN ('skipped', 'missed', 'queued')
+ORDER BY started_at DESC, id DESC
+LIMIT 1
+`
+
+type LastStartedPAgentRoutineRunParams struct {
+	AgentID string
+	Slug    string
+}
+
+func (q *Queries) LastStartedPAgentRoutineRun(ctx context.Context, arg LastStartedPAgentRoutineRunParams) (PagentRoutineRun, error) {
+	row := q.db.QueryRowContext(ctx, lastStartedPAgentRoutineRun, arg.AgentID, arg.Slug)
+	var i PagentRoutineRun
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.Slug,
+		&i.Occurrence,
+		&i.StartedBy,
+		&i.Test,
+		&i.State,
+		&i.LeaseUntil,
+		&i.ThreadID,
+		&i.Result,
+		&i.Summary,
+		&i.ActionsDone,
+		&i.ActionsPending,
+		&i.Unverified,
+		&i.Sources,
+		&i.Cost,
+		&i.Tokens,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.Error,
+		&i.RetryOf,
+	)
+	return i, err
 }
 
 const listPAgentRoutineStates = `-- name: ListPAgentRoutineStates :many
@@ -264,7 +365,7 @@ func (q *Queries) ListPAgentRoutineStates(ctx context.Context, agentID string) (
 }
 
 const pAgentRoutineRunsSince = `-- name: PAgentRoutineRunsSince :many
-SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error FROM pagent_routine_run
+SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM pagent_routine_run
 WHERE agent_id = ? AND slug = ? AND started_at >= ?
 ORDER BY started_at, id
 `
@@ -305,6 +406,7 @@ func (q *Queries) PAgentRoutineRunsSince(ctx context.Context, arg PAgentRoutineR
 			&i.StartedAt,
 			&i.EndedAt,
 			&i.Error,
+			&i.RetryOf,
 		); err != nil {
 			return nil, err
 		}
@@ -370,6 +472,52 @@ func (q *Queries) RenewPAgentRoutineRunLease(ctx context.Context, arg RenewPAgen
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const setPAgentRoutineDef = `-- name: SetPAgentRoutineDef :exec
+UPDATE pagent_routine_state SET def_hash = ?, next_due_at = ?, updated_at = ? WHERE agent_id = ? AND slug = ?
+`
+
+type SetPAgentRoutineDefParams struct {
+	DefHash   string
+	NextDueAt int64
+	UpdatedAt int64
+	AgentID   string
+	Slug      string
+}
+
+func (q *Queries) SetPAgentRoutineDef(ctx context.Context, arg SetPAgentRoutineDefParams) error {
+	_, err := q.db.ExecContext(ctx, setPAgentRoutineDef,
+		arg.DefHash,
+		arg.NextDueAt,
+		arg.UpdatedAt,
+		arg.AgentID,
+		arg.Slug,
+	)
+	return err
+}
+
+const setPAgentRoutineEnabled = `-- name: SetPAgentRoutineEnabled :exec
+UPDATE pagent_routine_state SET enabled = ?, paused_reason = ?, updated_at = ? WHERE agent_id = ? AND slug = ?
+`
+
+type SetPAgentRoutineEnabledParams struct {
+	Enabled      int64
+	PausedReason string
+	UpdatedAt    int64
+	AgentID      string
+	Slug         string
+}
+
+func (q *Queries) SetPAgentRoutineEnabled(ctx context.Context, arg SetPAgentRoutineEnabledParams) error {
+	_, err := q.db.ExecContext(ctx, setPAgentRoutineEnabled,
+		arg.Enabled,
+		arg.PausedReason,
+		arg.UpdatedAt,
+		arg.AgentID,
+		arg.Slug,
+	)
+	return err
 }
 
 const setPAgentRoutineRunState = `-- name: SetPAgentRoutineRunState :execrows

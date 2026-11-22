@@ -28,6 +28,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/orch"
 	"github.com/MunifTanjim/argus/internal/pagent"
 	"github.com/MunifTanjim/argus/internal/pagent/memory"
+	"github.com/MunifTanjim/argus/internal/pagent/routine"
 	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/push"
@@ -136,6 +137,19 @@ type Node struct {
 	tidyAt       map[string]time.Time // agent id -> when tidy last ran
 	tidyTry      map[string]time.Time // agent id -> last tidy attempt
 	tidyIdle     map[string]string    // agent id -> memory commit at the last tidy that changed nothing
+
+	// routineStartFn starts a claimed routine run; tests replace it.
+	routineStartFn func(ctx context.Context, a pagent.Agent, r routine.Routine, run pagent.RoutineRun) error
+	routineMu      sync.Mutex
+	routineCache   map[string]map[string]routineFile // agent id -> slug -> parsed file
+	routineErrSent map[string]string                 // agent id/slug -> key of the last routine.error
+	routineSkip    map[string]string                 // agent id/slug -> reason of the current skip streak
+	routineStale   map[string]time.Time              // agent id/slug -> due time of the last stale notice
+
+	clientMu        sync.Mutex
+	lastClientAt    time.Time // when a client was last attached
+	lastClientSaved time.Time
+	lastClientFile  string // node state file holding lastClientAt
 
 	// resumeFn relaunches a past agent session; defaults to (*Node).resumeAdopt.
 	// errResumeStarting comes with the launching session's id.
@@ -725,6 +739,7 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 		go d.pagentIdleLoop(ctx)
 		go d.pagentCaptureLoop(ctx)
 		go d.pagentTidyLoop(ctx)
+		go d.pagentRoutineLoop(ctx)
 	}
 
 	return d.server.ServeContext(ctx, l)

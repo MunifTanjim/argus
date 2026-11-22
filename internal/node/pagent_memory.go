@@ -128,12 +128,8 @@ func (d *Node) memoryEvent(ctx context.Context, threadID, kind string, payload a
 // only logs.
 func (d *Node) agentMemoryEvent(ctx context.Context, a pagent.Agent, threadID, kind string, payload any) {
 	if threadID == "" {
-		th, ok, err := d.pagents.LatestThread(ctx, a.ID, threadChat)
-		if err != nil || !ok {
-			d.log.Info("pagent: memory event without a thread", "agent", a.ID, "kind", kind, "payload", payload)
-			return
-		}
-		threadID = th.ID
+		d.agentNotice(ctx, a, kind, payload)
+		return
 	}
 	d.memoryEvent(ctx, threadID, kind, payload)
 }

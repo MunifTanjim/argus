@@ -24,6 +24,12 @@ SELECT * FROM pagent_routine_state WHERE agent_id = ? ORDER BY slug;
 -- name: AdvancePAgentRoutineNextDue :exec
 UPDATE pagent_routine_state SET next_due_at = ?, updated_at = ? WHERE agent_id = ? AND slug = ?;
 
+-- name: SetPAgentRoutineEnabled :exec
+UPDATE pagent_routine_state SET enabled = ?, paused_reason = ?, updated_at = ? WHERE agent_id = ? AND slug = ?;
+
+-- name: SetPAgentRoutineDef :exec
+UPDATE pagent_routine_state SET def_hash = ?, next_due_at = ?, updated_at = ? WHERE agent_id = ? AND slug = ?;
+
 -- name: DeletePAgentRoutineState :exec
 DELETE FROM pagent_routine_state WHERE agent_id = ? AND slug = ?;
 
@@ -31,8 +37,8 @@ DELETE FROM pagent_routine_state WHERE agent_id = ? AND slug = ?;
 DELETE FROM pagent_routine_state WHERE agent_id = ?;
 
 -- name: InsertPAgentRoutineRun :execrows
-INSERT INTO pagent_routine_run (id, agent_id, slug, occurrence, started_by, test, state, lease_until, started_at)
-VALUES (?, ?, ?, ?, ?, ?, 'claimed', ?, ?)
+INSERT INTO pagent_routine_run (id, agent_id, slug, occurrence, started_by, test, state, lease_until, started_at, retry_of)
+VALUES (?, ?, ?, ?, ?, ?, 'claimed', ?, ?, ?)
 ON CONFLICT (agent_id, slug, occurrence) DO NOTHING;
 
 -- name: GetPAgentRoutineRun :one
@@ -56,6 +62,17 @@ ORDER BY started_at, id;
 SELECT * FROM pagent_routine_run
 WHERE agent_id = ? AND slug = ? AND started_at >= ?
 ORDER BY started_at, id;
+
+-- name: ActivePAgentRoutineRuns :many
+SELECT * FROM pagent_routine_run
+WHERE agent_id = ? AND slug = ? AND state IN ('claimed', 'running', 'queued')
+ORDER BY started_at, id;
+
+-- name: LastStartedPAgentRoutineRun :one
+SELECT * FROM pagent_routine_run
+WHERE agent_id = ? AND slug = ? AND test = 0 AND state NOT IN ('skipped', 'missed', 'queued')
+ORDER BY started_at DESC, id DESC
+LIMIT 1;
 
 -- name: RecordPAgentRoutineRunResult :execrows
 UPDATE pagent_routine_run

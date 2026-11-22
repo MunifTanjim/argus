@@ -201,3 +201,51 @@ func TestPurgeAgentRemovesRoutineData(t *testing.T) {
 		}
 	}
 }
+
+func TestClaimRetryOnceAndActiveRuns(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newStore(t)
+	occ := time.Unix(1_700_000_000, 0)
+	run, _, _ := s.ClaimOccurrence(ctx, "ag1", "r", occ, "routine", false)
+	if err := s.SetRunState(ctx, run.ID, RunInterrupted, "lease expired"); err != nil {
+		t.Fatal(err)
+	}
+	retry, ok, err := s.ClaimRetry(ctx, run)
+	if err != nil || !ok || retry.RetryOf != run.ID || retry.StartedBy != "routine" {
+		t.Fatalf("retry: %+v %v %v", retry, ok, err)
+	}
+	if _, ok, _ := s.ClaimRetry(ctx, run); ok {
+		t.Fatal("second retry claimed")
+	}
+	q, _, _ := s.ClaimOccurrence(ctx, "ag1", "r", occ.Add(time.Hour), "routine", false)
+	_ = s.SetRunState(ctx, q.ID, RunQueued, "")
+	active, err := s.ActiveRuns(ctx, "ag1", "r")
+	if err != nil || len(active) != 2 || active[0].ID != retry.ID || active[1].State != RunQueued {
+		t.Fatalf("active: %+v %v", active, err)
+	}
+	last, ok, err := s.LastStartedRun(ctx, "ag1", "r")
+	if err != nil || !ok || last.ID != retry.ID {
+		t.Fatalf("last started: %+v %v %v", last, ok, err)
+	}
+}
+
+func TestRoutineStatePartialUpdates(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newStore(t)
+	anchor := time.Unix(1_700_000_000, 0)
+	_ = s.UpsertRoutineState(ctx, RoutineState{AgentID: "ag1", Slug: "r", DefHash: "h", Enabled: true, AnchorAt: anchor, ConsecutiveFailures: 3})
+	if err := s.SetRoutineEnabled(ctx, "ag1", "r", false, "away"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRoutineDef(ctx, "ag1", "r", "h2", anchor.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AdvanceNextDue(ctx, "ag1", "r", anchor.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := s.RoutineStates(ctx, "ag1")
+	if st[0].Enabled || st[0].PausedReason != "away" || st[0].DefHash != "h2" || !st[0].NextDueAt.Equal(anchor.Add(2*time.Hour)) ||
+		!st[0].AnchorAt.Equal(anchor) || st[0].ConsecutiveFailures != 3 {
+		t.Fatalf("state: %+v", st[0])
+	}
+}
