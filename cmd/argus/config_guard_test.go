@@ -15,44 +15,52 @@ import (
 func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 	// Flags that are intentionally NOT config-backed.
 	exempt := map[string]bool{
-		"config":           true, // selects the config file itself; resolved before viper loads
-		"no-config":        true, // skips the config file entirely; resolved before viper loads
-		"help":             true,
-		"version":          true,
-		"bin":              true, // `hooks install` only; not a node/client setting
-		"count":            true, // `ping` only
-		"interval":         true, // `ping` only
-		"url":              true, // `pair` only: QR base-URL override
-		"timeout":          true, // `pair` only: device-connect wait
-		"agent":            true, // `hook` only: selects the adapter, not a config key
-		"detach":           true, // `spawn` only: per-invocation background spawn, not a config key
-		"argus-managed":    true, // `hook` only: install marker, parsed and ignored
-		"argus-log-file":   true, // `start` only: detached child's log path, set by the TUI
-		"redact":           true, // `view` only: offline viewer flag, not a node/client setting
-		"json":             true, // `project list` only: output format, not a node/client setting
-		"source":           true, // `workspace create` only: what the name argument is
-		"target":           true, // `workspace create` only: per-workspace target branch
-		"force":            true, // `workspace remove` only: must never be config-backed — a stored true would discard changes silently
-		"wait":             true, // `workspace create/setup` only: per-invocation wait
-		"gen-disablements": true, // `lock init` only: one-shot count, not a persistent config key
-		"confirm":          true, // `lock init` only: must never be config-backed — a stored true would silently re-arm the destructive path
-		"cosign":           true, // `lock revoke-signer` only: ceremony blob, not a config key
-		"finish":           true, // `lock revoke-signer` only: ceremony blob, not a config key
-		"replacement":      true, // `lock revoke-signer` only: ceremony argument, not a config key
-		"fork-from":        true, // `lock revoke-signer` only: ceremony argument, not a config key
-		"no-restart":       true, // `upgrade` only: per-invocation step selection
-		"no-download":      true, // `upgrade` only: per-invocation step selection
-		"beta":             true, // `upgrade` only: per-invocation channel selection
-		"cwd":              true, // `session spawn` and `pi-host`: per-invocation working directory
-		"node":             true, // `session spawn` only: per-invocation target node
-		"name":             true, // `session spawn` only: per-invocation session name
-		"model":            true, // `session spawn` only: per-invocation model
-		"prompt":           true, // `session spawn` only: per-invocation first prompt
-		"request-id":       true, // `session spawn` and `session send`: per-invocation retry key
-		"reason":           true, // `session respond` only: per-invocation answer detail
-		"option":           true, // `session respond` only: per-invocation answer
-		"answer":           true, // `session respond` only: per-invocation answer
-		"last":             true, // `session transcript` only: per-invocation entry count
+		"config":              true, // selects the config file itself; resolved before viper loads
+		"no-config":           true, // skips the config file entirely; resolved before viper loads
+		"help":                true,
+		"version":             true,
+		"bin":                 true, // `hooks install` only; not a node/client setting
+		"count":               true, // `ping` only
+		"interval":            true, // `ping` only
+		"url":                 true, // `pair` only: QR base-URL override
+		"timeout":             true, // `pair` only: device-connect wait
+		"agent":               true, // `hook` only: selects the adapter, not a config key
+		"detach":              true, // `spawn` only: per-invocation background spawn, not a config key
+		"argus-managed":       true, // `hook` only: install marker, parsed and ignored
+		"argus-log-file":      true, // `start` only: detached child's log path, set by the TUI
+		"redact":              true, // `view` only: offline viewer flag, not a node/client setting
+		"json":                true, // `project list` only: output format, not a node/client setting
+		"source":              true, // `workspace create` only: what the name argument is
+		"target":              true, // `workspace create` only: per-workspace target branch
+		"force":               true, // `workspace remove` only: must never be config-backed — a stored true would discard changes silently
+		"wait":                true, // `workspace create/setup` only: per-invocation wait
+		"gen-disablements":    true, // `lock init` only: one-shot count, not a persistent config key
+		"confirm":             true, // `lock init` only: must never be config-backed — a stored true would silently re-arm the destructive path
+		"cosign":              true, // `lock revoke-signer` only: ceremony blob, not a config key
+		"finish":              true, // `lock revoke-signer` only: ceremony blob, not a config key
+		"replacement":         true, // `lock revoke-signer` only: ceremony argument, not a config key
+		"fork-from":           true, // `lock revoke-signer` only: ceremony argument, not a config key
+		"no-restart":          true, // `upgrade` only: per-invocation step selection
+		"no-download":         true, // `upgrade` only: per-invocation step selection
+		"beta":                true, // `upgrade` only: per-invocation channel selection
+		"cwd":                 true, // `session spawn` and `pi-host`: per-invocation working directory
+		"node":                true, // `session spawn` only: per-invocation target node
+		"name":                true, // `session spawn` only: per-invocation session name
+		"model":               true, // `session spawn` only: per-invocation model
+		"prompt":              true, // `session spawn` only: per-invocation first prompt
+		"request-id":          true, // `session spawn` and `session send`: per-invocation retry key
+		"reason":              true, // `session respond` only: per-invocation answer detail
+		"option":              true, // `session respond` only: per-invocation answer
+		"answer":              true, // `session respond` only: per-invocation answer
+		"last":                true, // `session transcript` only: per-invocation entry count
+		"import-instructions": true, // `agent add` only: per-invocation import choice
+		"message":             true, // `agent chat` only: per-invocation message
+		"new":                 true, // `agent chat` only: per-invocation new thread
+		"dir":                 true, // `agent create` only: per-invocation directory
+		"from":                true, // `agent create` only: per-invocation source agent
+		"purge":               true, // `agent forget` only: must never be config-backed, a stored true would delete data
+		"all":                 true, // `agent list` only: per-invocation listing scope
+		"unset":               true, // `agent primary` only: per-invocation action
 	}
 
 	seen := map[string]bool{}
