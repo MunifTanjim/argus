@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/entry.dart';
 import 'package:argus/state/tool_detail.dart';
+import 'package:argus/ui/prompt_scrollbar.dart';
 import 'package:argus/ui/transcript_feed.dart';
 import 'package:super_sliver_list/super_sliver_list.dart';
 
@@ -24,6 +26,16 @@ ScrollController _controller(WidgetTester tester) =>
     tester.widget<SuperListView>(find.byType(SuperListView)).controller!;
 
 void main() {
+  testWidgets('desktop transcript has no framework scrollbar over PromptScrollbar',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    await tester.pumpWidget(_feed(_chunks(50)));
+    await tester.pumpAndSettle();
+    expect(find.byType(PromptScrollbar), findsOneWidget);
+    expect(find.byType(Scrollbar), findsNothing);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   testWidgets('renders chunks', (tester) async {
     await tester.pumpWidget(const ProviderScope(
         child: MaterialApp(

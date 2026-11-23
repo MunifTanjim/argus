@@ -34,6 +34,7 @@ class KeyLibraryScreen extends ConsumerWidget {
                 ),
                 trailing: IconButton(
                   key: Key('key-delete-${k.id}'),
+                  tooltip: 'Delete key',
                   icon: const Icon(Icons.delete_outline),
                   onPressed: () => _confirmDelete(context, ref, k),
                 ),

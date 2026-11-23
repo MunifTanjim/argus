@@ -186,16 +186,19 @@ class _CollapsibleMarkdownState extends State<_CollapsibleMarkdown> {
             ),
           ),
         ),
-      GestureDetector(
-        key: const Key('plan-toggle'),
-        onTap: () => setState(() => _expanded = !_expanded),
-        child: Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: Text(_expanded ? 'Show less' : 'Show more',
-              style: const TextStyle(
-                  color: AppColors.accent,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13)),
+      MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          key: const Key('plan-toggle'),
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(_expanded ? 'Show less' : 'Show more',
+                style: const TextStyle(
+                    color: AppColors.accent,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13)),
+          ),
         ),
       ),
     ]);

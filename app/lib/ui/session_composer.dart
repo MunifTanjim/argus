@@ -469,12 +469,17 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (showPanel)
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _collapsed ? _toggle : null,
-              onVerticalDragStart: _dragStart,
-              onVerticalDragUpdate: _dragUpdate,
-              child: status,
+            MouseRegion(
+              cursor: _collapsed
+                  ? SystemMouseCursors.click
+                  : MouseCursor.defer,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _collapsed ? _toggle : null,
+                onVerticalDragStart: _dragStart,
+                onVerticalDragUpdate: _dragUpdate,
+                child: status,
+              ),
             )
           else
             status,

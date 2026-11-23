@@ -323,7 +323,11 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
         rows: rows,
         listController: _lc,
         scrollController: _sc,
-        child: appSelectionArea(
+        // PromptScrollbar is the scrollbar here; the desktop default would
+        // draw a second one under its touch strip.
+        child: ScrollConfiguration(
+          behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+          child: appSelectionArea(
           child: SuperListView.builder(
           controller: _sc,
           listController: _lc,
@@ -363,6 +367,7 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
                 tools,
               ),
           },
+        ),
         ),
         ),
       ),

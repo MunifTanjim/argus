@@ -341,13 +341,16 @@ class _Foldable extends StatelessWidget {
           ),
         if (long)
           SelectionContainer.disabled(
-            child: GestureDetector(
-              onTap: onToggle,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  expanded ? 'Show less' : 'Show more',
-                  style: _mono.copyWith(color: AppColors.accent),
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: onToggle,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    expanded ? 'Show less' : 'Show more',
+                    style: _mono.copyWith(color: AppColors.accent),
+                  ),
                 ),
               ),
             ),
