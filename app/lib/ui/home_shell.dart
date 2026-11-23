@@ -24,6 +24,7 @@ import 'session_detail_screen.dart';
 import 'session_list_screen.dart';
 import 'settings_screen.dart';
 import 'shell_drawer.dart';
+import 'shortcut_sheet.dart';
 import 'spawn_dialog.dart';
 import 'terminal_list_screen.dart';
 import 'workspace_screen.dart';
@@ -283,7 +284,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           onSettings: () => Navigator.of(context, rootNavigator: true).push(
               MaterialPageRoute(builder: (_) => const SettingsScreen())),
           onQuickSwitcher: () => showQuickSwitcher(context),
-          onShortcutSheet: () {},
+          onShortcutSheet: () => showShortcutSheet(context),
           child: Scaffold(
             body: wide
                 ? Row(
