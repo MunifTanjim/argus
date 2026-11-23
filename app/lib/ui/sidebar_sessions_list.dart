@@ -11,6 +11,7 @@ import '../state/projects.dart';
 import '../state/push.dart';
 import '../state/sessions.dart';
 import '../state/sidebar_sessions.dart';
+import 'adaptive_sheet.dart';
 import 'agent_badge.dart';
 import 'project_actions.dart';
 import 'relative_time.dart';
@@ -124,9 +125,8 @@ class SidebarSessionsList extends ConsumerWidget {
       ('Tmux', tmux),
       ('ID', s.id),
     ].where((f) => f.$2.isNotEmpty);
-    return showModalBottomSheet<void>(
-      context: context,
-      useRootNavigator: true,
+    return showSidePanel<void>(
+      context,
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),

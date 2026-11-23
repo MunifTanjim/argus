@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/session.dart';
 import '../state/sessions.dart';
+import 'adaptive_sheet.dart';
 import 'session_composer.dart';
 import 'theme.dart';
 
@@ -35,9 +36,8 @@ Future<void> showRunningSheet(
   required List<RunningRow> Function(Session) rows,
 }) {
   final shell = Navigator.of(context);
-  return showModalBottomSheet<void>(
-    context: context,
-    useRootNavigator: true,
+  return showSidePanel<void>(
+    context,
     builder: (_) =>
         _RunningSheet(sessionId: sessionId, rows: rows, shell: shell),
   );

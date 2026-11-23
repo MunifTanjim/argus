@@ -43,6 +43,49 @@ Future<T?> showActionMenu<T>(
     ? _showPopup(context, title, items, position)
     : _showSheet(context, title, sheetHeader, items);
 
+/// Shows [builder]'s content. Below the wide desktop threshold this is a
+/// bottom sheet on the root navigator; at it, a panel sliding in from the
+/// right edge that a click on the scrim dismisses.
+Future<T?> showSidePanel<T>(
+  BuildContext context, {
+  required WidgetBuilder builder,
+}) {
+  if (!useDesktopLayout(context)) {
+    return showModalBottomSheet<T>(
+      context: context,
+      useRootNavigator: true,
+      builder: builder,
+    );
+  }
+  return showGeneralDialog<T>(
+    context: context,
+    useRootNavigator: true,
+    barrierDismissible: true,
+    barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+    barrierColor: Colors.black54,
+    transitionDuration: const Duration(milliseconds: 200),
+    pageBuilder: (ctx, _, _) => Align(
+      alignment: Alignment.centerRight,
+      child: Material(
+        child: SizedBox(
+          width: _sidePanelWidth,
+          height: double.infinity,
+          child: SafeArea(child: builder(ctx)),
+        ),
+      ),
+    ),
+    transitionBuilder: (_, animation, _, child) => SlideTransition(
+      position: Tween(
+        begin: const Offset(1, 0),
+        end: Offset.zero,
+      ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
+      child: child,
+    ),
+  );
+}
+
+const _sidePanelWidth = 400.0;
+
 const _titleStyle = TextStyle(fontWeight: FontWeight.w600);
 
 Widget? _icon(ActionItem<Object?> item) => item.icon == null

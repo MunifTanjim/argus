@@ -160,4 +160,105 @@ void main() {
     expect(find.text('HEADER'), findsOneWidget);
     expect(find.text('T'), findsNothing);
   });
+
+  group('showSidePanel', () {
+    Future<void> openPanel(WidgetTester tester, TargetPlatform platform) async {
+      debugDefaultTargetPlatformOverride = platform;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showSidePanel<void>(
+                context,
+                builder: (_) => const Text('PANEL'),
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('showSidePanel opens a bottom sheet on iOS at 1200 px', (
+      tester,
+    ) async {
+      await openPanel(tester, TargetPlatform.iOS);
+      expect(find.byType(BottomSheet), findsOneWidget);
+      expect(find.text('PANEL'), findsOneWidget);
+    });
+
+    testWidgets(
+      'showSidePanel opens a 400 px panel at the right edge on macOS at 1200 px',
+      (tester) async {
+        await openPanel(tester, TargetPlatform.macOS);
+        expect(find.byType(BottomSheet), findsNothing);
+        final panel = tester.getRect(
+          find
+              .ancestor(of: find.text('PANEL'), matching: find.byType(SizedBox))
+              .first,
+        );
+        expect(panel.right, 1200);
+        expect(panel.width, 400);
+        expect(panel.height, 800);
+      },
+    );
+
+    testWidgets('a click on the scrim closes the panel', (tester) async {
+      await openPanel(tester, TargetPlatform.macOS);
+      await tester.tapAt(const Offset(100, 400));
+      await tester.pumpAndSettle();
+      expect(find.text('PANEL'), findsNothing);
+    });
+
+    for (final (platform, width) in [
+      (TargetPlatform.android, 1200.0),
+      (TargetPlatform.macOS, 800.0),
+    ]) {
+      testWidgets(
+        'the narrow path is a root-navigator bottom sheet on $platform at '
+        '${width.toInt()} px',
+        (tester) async {
+          debugDefaultTargetPlatformOverride = platform;
+          addTearDown(() => debugDefaultTargetPlatformOverride = null);
+          tester.view.physicalSize = Size(width, 800);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.reset);
+          final nested = GlobalKey<NavigatorState>();
+          await tester.pumpWidget(
+            MaterialApp(
+              home: Navigator(
+                key: nested,
+                onGenerateRoute: (_) => MaterialPageRoute<void>(
+                  builder: (_) => Builder(
+                    builder: (context) => TextButton(
+                      onPressed: () => showSidePanel<void>(
+                        context,
+                        builder: (_) => const Text('PANEL'),
+                      ),
+                      child: const Text('open'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+          await tester.tap(find.text('open'));
+          await tester.pumpAndSettle();
+          expect(find.byType(BottomSheet), findsOneWidget);
+          final sheetRoute = ModalRoute.of(tester.element(find.text('PANEL')))!;
+          expect(sheetRoute.navigator, isNot(nested.currentState));
+          expect(
+            sheetRoute.navigator,
+            Navigator.of(nested.currentContext!, rootNavigator: true),
+          );
+        },
+      );
+    }
+  });
 }
