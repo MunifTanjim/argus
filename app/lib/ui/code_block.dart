@@ -10,6 +10,7 @@ import 'package:re_highlight/re_highlight.dart';
 import 'package:re_highlight/styles/all.dart';
 
 import 'adaptive_sheet.dart';
+import '../util/platform.dart';
 import 'external_url.dart';
 import 'markdown_table.dart';
 import 'theme.dart';
@@ -32,10 +33,66 @@ String safeFence(String body) {
   return '`' * n;
 }
 
+/// Whether an ancestor [SelectionArea] already covers [context]. A nested area
+/// would split the selection, so inner blocks skip their own.
+bool insideSelectionArea(BuildContext context) =>
+    SelectionContainer.maybeOf(context) != null;
+
+/// The link button under [global] in the subtree of [root], if any.
+LinkButton? _linkAt(BuildContext root, Offset global) {
+  LinkButton? found;
+  void visit(Element el) {
+    if (found != null) return;
+    final w = el.widget;
+    if (w is LinkButton) {
+      final box = el.renderObject;
+      if (box is RenderBox && box.attached) {
+        final local = box.globalToLocal(global);
+        if ((Offset.zero & box.size).contains(local)) found = w;
+      }
+      return;
+    }
+    el.visitChildren(visit);
+  }
+
+  (root as Element).visitChildren(visit);
+  return found;
+}
+
+/// Context menu for the app's selection areas. On desktop a right-click on a
+/// markdown link opens the link actions, so no selection toolbar is shown over
+/// it. [areaContext] must be an ancestor of the area's content (the toolbar's
+/// own context is not). [extra] items follow the standard ones.
+Widget selectionContextMenu(
+  BuildContext areaContext,
+  SelectableRegionState state, {
+  List<ContextMenuButtonItem> extra = const [],
+}) {
+  final anchors = state.contextMenuAnchors;
+  if (isDesktop && _linkAt(areaContext, anchors.primaryAnchor) != null) {
+    return const SizedBox.shrink();
+  }
+  return AdaptiveTextSelectionToolbar.buttonItems(
+    anchors: anchors,
+    buttonItems: [...state.contextMenuButtonItems, ...extra],
+  );
+}
+
+/// Makes [child]'s text selectable across its blocks (the scrollable body of a
+/// screen, not its app bar or composer).
+Widget appSelectionArea({required Widget child}) => Builder(
+      builder: (areaContext) => SelectionArea(
+        contextMenuBuilder: (_, state) =>
+            selectionContextMenu(areaContext, state),
+        child: child,
+      ),
+    );
+
 /// Renders markdown with syntax-highlighted code blocks. Fenced code renders
-/// with `selectable: false` to avoid a forbidden nested SelectionArea. The
-/// toolbar's "Copy Markdown" action copies raw source since native Copy yields
-/// rendered text with the markup stripped.
+/// with `selectable: false` to avoid a forbidden nested SelectionArea. Inside an
+/// ancestor [SelectionArea] the markdown joins it instead of adding its own.
+/// The toolbar's "Copy Markdown" action copies raw source since native Copy
+/// yields rendered text with the markup stripped.
 Widget appMarkdown(String data) => _SelectableMarkdown(data);
 
 class _SelectableMarkdown extends StatefulWidget {
@@ -56,65 +113,54 @@ class _SelectableMarkdownState extends State<_SelectableMarkdown> {
   // gpt_markdown's default link widget handles only the primary button, so a
   // right-click presses the link under the pointer; the menu then anchors at
   // _lastDown, the right-click position.
-  void _pressLinkAt(BuildContext context, Offset global) {
-    void visit(Element el) {
-      final w = el.widget;
-      if (w is LinkButton) {
-        final box = el.renderObject;
-        if (box is RenderBox && box.attached) {
-          final local = box.globalToLocal(global);
-          if ((Offset.zero & box.size).contains(local)) w.onPressed?.call();
-        }
-        return;
-      }
-      el.visitChildren(visit);
-    }
-
-    (context as Element).visitChildren(visit);
-  }
+  void _pressLinkAt(BuildContext context, Offset global) =>
+      _linkAt(context, global)?.onPressed?.call();
 
   @override
-  Widget build(BuildContext context) => SelectionArea(
-        onSelectionChanged: (c) => _selected = c?.plainText,
-        contextMenuBuilder: (_, state) =>
-            AdaptiveTextSelectionToolbar.buttonItems(
-          anchors: state.contextMenuAnchors,
-          buttonItems: [
-            ...state.contextMenuButtonItems,
-            ContextMenuButtonItem(
-              label: 'Copy Markdown',
-              onPressed: () {
-                final md = extractMarkdown(widget.data, _selected);
-                if (md == null) {
-                  _showSnack(context, "Couldn't copy markdown source");
-                } else {
-                  copyToClipboard(context, md);
-                }
-                state.hideToolbar();
-                state.clearSelection();
-              },
-            ),
-          ],
+  Widget build(BuildContext context) {
+    final body = Builder(
+      builder: (context) => Listener(
+        onPointerDown: (e) {
+          _lastDown = e.position;
+          if (e.buttons == kSecondaryMouseButton) {
+            _pressLinkAt(context, e.position);
+          }
+        },
+        child: GptMarkdown(
+          widget.data,
+          onLinkTap: (url, title) =>
+              showLinkActions(context, url, position: _lastDown),
+          tableBuilder: markdownTable,
+          codeBuilder: (context, name, code, closed) =>
+              codeView(code, lang: name, selectable: false),
         ),
-        child: Builder(
-          builder: (context) => Listener(
-            onPointerDown: (e) {
-              _lastDown = e.position;
-              if (e.buttons == kSecondaryMouseButton) {
-                _pressLinkAt(context, e.position);
+      ),
+    );
+    if (insideSelectionArea(context)) return body;
+    return SelectionArea(
+      onSelectionChanged: (c) => _selected = c?.plainText,
+      contextMenuBuilder: (_, state) => selectionContextMenu(
+        context,
+        state,
+        extra: [
+          ContextMenuButtonItem(
+            label: 'Copy Markdown',
+            onPressed: () {
+              final md = extractMarkdown(widget.data, _selected);
+              if (md == null) {
+                _showSnack(context, "Couldn't copy markdown source");
+              } else {
+                copyToClipboard(context, md);
               }
+              state.hideToolbar();
+              state.clearSelection();
             },
-            child: GptMarkdown(
-              widget.data,
-              onLinkTap: (url, title) =>
-                  showLinkActions(context, url, position: _lastDown),
-              tableBuilder: markdownTable,
-              codeBuilder: (context, name, code, closed) =>
-                  codeView(code, lang: name, selectable: false),
-            ),
           ),
-        ),
-      );
+        ],
+      ),
+      child: body,
+    );
+  }
 }
 
 /// Maps a rendered [selected] range back to the source lines it spans, returned
@@ -293,9 +339,10 @@ Widget codeView(String body,
   // Show the box with a dim marker so an empty block still reads as "a block that
   // was empty" rather than a missing render.
   if (body.trim().isEmpty) {
-    return _container(
-        Text('(empty)', style: _codeMono.copyWith(color: AppColors.dim)),
-        selectable: selectable);
+    return Builder(
+        builder: (context) => _container(
+            Text('(empty)', style: _codeMono.copyWith(color: AppColors.dim)),
+            selectable: selectable && !insideSelectionArea(context)));
   }
   return _CodeBlock(
       body: body,
@@ -378,7 +425,7 @@ class _CodeBlockState extends State<_CodeBlock> {
           _header(label),
           Padding(
             padding: const EdgeInsets.all(10),
-            child: widget.selectable
+            child: widget.selectable && !insideSelectionArea(context)
                 ? SelectionArea(child: _scrollable(content))
                 : _scrollable(content),
           ),

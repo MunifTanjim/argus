@@ -123,8 +123,13 @@ Widget _exitPlanMode(Entry it) {
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     if (planFilePath.isNotEmpty) ...[
       _label('Plan file'),
-      SelectableText(planFilePath,
-          style: _mono.copyWith(color: AppColors.secondary)),
+      Builder(builder: (context) {
+        final style = _mono.copyWith(color: AppColors.secondary);
+        // Inside a SelectionArea a SelectableText would be a nested selectable.
+        return insideSelectionArea(context)
+            ? Text(planFilePath, style: style)
+            : SelectableText(planFilePath, style: style);
+      }),
     ],
     if (plan.isNotEmpty) ...[
       _label('Plan'),

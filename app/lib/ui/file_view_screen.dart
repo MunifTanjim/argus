@@ -54,13 +54,15 @@ class FileViewScreen extends ConsumerWidget {
                     style: TextStyle(color: AppColors.dim),
                   ),
                 )
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(12),
-                  child: codeView(
-                    f.content,
-                    lang: langFromPath(path),
-                    lineNumbers: true,
-                    prettyJson: false,
+              : appSelectionArea(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(12),
+                    child: codeView(
+                      f.content,
+                      lang: langFromPath(path),
+                      lineNumbers: true,
+                      prettyJson: false,
+                    ),
                   ),
                 ),
         ),

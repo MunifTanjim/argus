@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/result.dart';
 import '../models/entry.dart';
 import '../state/tool_detail.dart';
+import 'code_block.dart' show appSelectionArea;
 import 'responsive.dart';
 import 'theme.dart';
 import 'tool_detail.dart';
@@ -88,6 +89,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
           : SafeArea(
               top: false,
               child: CenteredBody(
+              child: appSelectionArea(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(12),
                 child: Column(
@@ -104,6 +106,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                     toolDetailBody(_item, agent: widget.detailRef.agent),
                   ],
                 ),
+              ),
               ),
             ),
           ),

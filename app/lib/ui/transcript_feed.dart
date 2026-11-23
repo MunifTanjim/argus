@@ -7,6 +7,7 @@ import 'package:super_sliver_list/super_sliver_list.dart';
 import '../models/entry.dart';
 import '../state/appearance.dart';
 import '../state/tool_detail.dart';
+import 'code_block.dart' show appSelectionArea;
 import 'entry_row.dart';
 import 'prompt_scrollbar.dart';
 import 'responsive.dart';
@@ -322,7 +323,8 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
         rows: rows,
         listController: _lc,
         scrollController: _sc,
-        child: SuperListView.builder(
+        child: appSelectionArea(
+          child: SuperListView.builder(
           controller: _sc,
           listController: _lc,
           padding: const EdgeInsets.all(12),
@@ -361,6 +363,7 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
                 tools,
               ),
           },
+        ),
         ),
       ),
     );
