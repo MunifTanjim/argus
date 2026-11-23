@@ -333,6 +333,11 @@ func (d *Node) scheduleAgent(ctx context.Context, a pagent.Agent, now time.Time,
 		} else if ctx.Err() == nil {
 			d.scheduleRoutine(ctx, a, set, f, states[briefSlug], now, away)
 		}
+	} else if states[briefSlug] != nil {
+		// Turning briefs off and on again starts them fresh, without a pause.
+		if err := d.pagents.DeleteRoutineState(ctx, a.ID, briefSlug); err != nil {
+			d.log.Warn("pagent: brief state", "agent", a.ID, "err", err)
+		}
 	}
 	if ctx.Err() == nil {
 		d.sweepCheckBacks(ctx, a, set, files, now)

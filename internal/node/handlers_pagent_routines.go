@@ -125,6 +125,16 @@ func (d *Node) routineTarget(ctx context.Context, params json.RawMessage) (pagen
 		return a, routineFile{}, err
 	}
 	f, ok := d.routineFiles(a)[p.Slug]
+	if !ok && p.Slug == briefSlug {
+		// The built-in brief has no file; it is paused and resumed by slug.
+		if set := d.pagentSettings(a); d.briefWanted(ctx, a, set) {
+			f, err = briefRoutine(set)
+			if err != nil {
+				return a, f, pagentErr("%v", err)
+			}
+			ok = true
+		}
+	}
 	if !ok {
 		return a, f, pagentErr("routine %q not found", p.Slug)
 	}

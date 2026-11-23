@@ -193,3 +193,34 @@ func TestOfferStartAndDismiss(t *testing.T) {
 		t.Fatalf("offer events: %v", kinds)
 	}
 }
+
+func TestPausedBriefResumes(t *testing.T) {
+	r := newSchedRig(t)
+	ctx := context.Background()
+	r.d.pagentCfg.Defaults.Brief.Enabled = true
+	r.tick()
+	if err := r.store.SetRoutineEnabled(ctx, r.agent.ID, briefSlug, false, pausedFailures); err != nil {
+		t.Fatal(err)
+	}
+	info, err := callPAgent[api.PAgentRoutineInfo](t, r.d.handlePAgentRoutineResume, api.PAgentRoutineRef{AgentID: r.agent.ID, Slug: briefSlug})
+	if err != nil || info.State != "active" {
+		t.Fatalf("resume: %+v %v", info, err)
+	}
+	// Turning briefs off and on again drops a pause.
+	if err := r.store.SetRoutineEnabled(ctx, r.agent.ID, briefSlug, false, pausedAway); err != nil {
+		t.Fatal(err)
+	}
+	r.d.pagentCfg.Defaults.Brief.Enabled = false
+	r.tick()
+	if _, ok := r.state(t, briefSlug); ok {
+		t.Fatal("brief state kept while briefs are off")
+	}
+	if _, err := callPAgent[api.PAgentRoutineInfo](t, r.d.handlePAgentRoutineResume, api.PAgentRoutineRef{AgentID: r.agent.ID, Slug: briefSlug}); err == nil {
+		t.Fatal("resumed a brief that is off")
+	}
+	r.d.pagentCfg.Defaults.Brief.Enabled = true
+	r.tick()
+	if st, ok := r.state(t, briefSlug); !ok || !st.Enabled {
+		t.Fatalf("brief after turning on: %+v %v", st, ok)
+	}
+}
