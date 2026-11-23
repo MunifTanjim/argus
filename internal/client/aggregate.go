@@ -57,44 +57,44 @@ var projectAddressed = map[string]bool{
 	api.MethodProjectIssues:    true,
 }
 
-// pagentAddressed methods route by a composite agent_id.
-var pagentAddressed = map[string]bool{
-	api.MethodPAgentShow:       true,
-	api.MethodPAgentRename:     true,
-	api.MethodPAgentForget:     true,
-	api.MethodPAgentSetPrimary: true,
-	api.MethodPAgentThreadSend: true,
-	api.MethodPAgentThreadList: true,
+// botAddressed methods route by a composite bot_id.
+var botAddressed = map[string]bool{
+	api.MethodBotShow:       true,
+	api.MethodBotRename:     true,
+	api.MethodBotForget:     true,
+	api.MethodBotSetPrimary: true,
+	api.MethodBotThreadSend: true,
+	api.MethodBotThreadList: true,
 
-	api.MethodPAgentMemoryShow:      true,
-	api.MethodPAgentMemoryLog:       true,
-	api.MethodPAgentMemoryUndo:      true,
-	api.MethodPAgentMemoryImport:    true,
-	api.MethodPAgentMemoryProposals: true,
-	api.MethodPAgentActivity:        true,
-	api.MethodPAgentSecretSet:       true,
-	api.MethodPAgentSecretList:      true,
-	api.MethodPAgentSecretRm:        true,
+	api.MethodBotMemoryShow:      true,
+	api.MethodBotMemoryLog:       true,
+	api.MethodBotMemoryUndo:      true,
+	api.MethodBotMemoryImport:    true,
+	api.MethodBotMemoryProposals: true,
+	api.MethodBotActivity:        true,
+	api.MethodBotSecretSet:       true,
+	api.MethodBotSecretList:      true,
+	api.MethodBotSecretRm:        true,
 
-	api.MethodPAgentRoutineList:       true,
-	api.MethodPAgentRoutineRun:        true,
-	api.MethodPAgentRoutinePause:      true,
-	api.MethodPAgentRoutineResume:     true,
-	api.MethodPAgentRoutineRuns:       true,
-	api.MethodPAgentRoutineHookSecret: true,
+	api.MethodBotRoutineList:       true,
+	api.MethodBotRoutineRun:        true,
+	api.MethodBotRoutinePause:      true,
+	api.MethodBotRoutineResume:     true,
+	api.MethodBotRoutineRuns:       true,
+	api.MethodBotRoutineHookSecret: true,
 
-	api.MethodPAgentUsage: true,
-	api.MethodPAgentSet:   true,
+	api.MethodBotUsage: true,
+	api.MethodBotSet:   true,
 }
 
-// pagentThreadAddressed methods route by a composite thread_id.
-var pagentThreadAddressed = map[string]bool{
-	api.MethodPAgentThreadTimeline: true,
-	api.MethodPAgentThreadMarkRead: true,
-	api.MethodPAgentDraftSend:      true,
-	api.MethodPAgentDraftDiscard:   true,
-	api.MethodPAgentOfferStart:     true,
-	api.MethodPAgentOfferDismiss:   true,
+// botThreadAddressed methods route by a composite thread_id.
+var botThreadAddressed = map[string]bool{
+	api.MethodBotThreadTimeline: true,
+	api.MethodBotThreadMarkRead: true,
+	api.MethodBotDraftSend:      true,
+	api.MethodBotDraftDiscard:   true,
+	api.MethodBotOfferStart:     true,
+	api.MethodBotOfferDismiss:   true,
 }
 
 // nodeAddressed methods route by an explicit node_id (or the sole node).
@@ -111,8 +111,8 @@ var nodeAddressed = map[string]bool{
 	api.MethodHostInfo:                  true,
 	api.MethodHostSetWakelock:           true,
 	api.MethodHostCompleteDir:           true,
-	api.MethodPAgentCreate:              true,
-	api.MethodPAgentAdd:                 true,
+	api.MethodBotCreate:                 true,
+	api.MethodBotAdd:                    true,
 }
 
 // serverAddressed methods go to the node named by node_id, or to the gateway

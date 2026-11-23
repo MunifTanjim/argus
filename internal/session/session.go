@@ -101,11 +101,11 @@ const (
 	// InteractionIdle: Claude finished and is waiting for the next message, or a
 	// generic notification needing attention.
 	InteractionIdle InteractionKind = "idle"
-	// InteractionHandoff: a persistent agent asks the user to do a step it
+	// InteractionHandoff: a bot asks the user to do a step it
 	// cannot (take over the terminal, then mark it done).
 	InteractionHandoff InteractionKind = "handoff"
-	// InteractionSecret: a persistent agent asks the user for a secret value,
-	// which is stored on the node and never shown to the agent.
+	// InteractionSecret: a bot asks the user for a secret value,
+	// which is stored on the node and never shown to the bot.
 	InteractionSecret InteractionKind = "secret"
 )
 
@@ -164,10 +164,10 @@ type Interaction struct {
 	// RequestID identifies the pending request this interaction shows, for agents
 	// that queue several (Codex). Clients echo it in RespondParams.RequestID.
 	RequestID string `json:"request_id,omitempty"`
-	// Classes are the warning classes of an agent action: outward,
+	// Classes are the warning classes of a bot's action: outward,
 	// irreversible, security.
 	Classes []string `json:"classes,omitempty"`
-	// StartedBy is how the agent work that asks was started (you, routine, ...).
+	// StartedBy is how the bot work that asks was started (you, routine, ...).
 	StartedBy string `json:"started_by,omitempty"`
 	// SecretName is the variable a secret interaction stores its value under.
 	SecretName string `json:"secret_name,omitempty"`
@@ -279,10 +279,10 @@ type Session struct {
 	// Parent is the session that spawned this one through argus, when known.
 	Parent *ParentRef `json:"parent,omitempty"`
 
-	// PAgentID and PAgentThreadID name the persistent agent and thread the
+	// BotID and BotThreadID name the bot and thread the
 	// session runs for, when it does. Node-computed on emit.
-	PAgentID       string `json:"pagent_id,omitempty"`
-	PAgentThreadID string `json:"pagent_thread_id,omitempty"`
+	BotID       string `json:"bot_id,omitempty"`
+	BotThreadID string `json:"bot_thread_id,omitempty"`
 
 	// Origin fields — populated only when surfaced through a gateway.
 	NodeID    string `json:"node_id,omitempty"`    // originating node (also composite ID prefix)

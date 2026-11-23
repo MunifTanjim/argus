@@ -14,7 +14,7 @@ import (
 
 	"github.com/spf13/viper"
 
-	"github.com/MunifTanjim/argus/internal/pagent/routine"
+	"github.com/MunifTanjim/argus/internal/bot/routine"
 )
 
 // Config is the resolved argus configuration. Precedence: flags > env > file > defaults.
@@ -35,7 +35,7 @@ type Config struct {
 	Workspace WorkspaceConfig
 	TUI       TUIConfig
 	MCP       MCPConfig
-	Agents    AgentsConfig
+	Bots      BotsConfig
 	// LuaPath is the init.lua to load; empty when config is off.
 	LuaPath string
 }
@@ -159,16 +159,16 @@ type LockConfig struct {
 	Genesis string
 }
 
-// AgentsConfig configures persistent agents. Empty directory settings resolve
+// BotsConfig configures bots. Empty directory settings resolve
 // to the argus data directory.
-type AgentsConfig struct {
+type BotsConfig struct {
 	DefaultDir string
 	ProfileDir string
 	SkillsDir  string
 	Primary    string
 	// WebhookListen is the address of the node's routine webhook listener; empty disables it.
 	WebhookListen string
-	// Execution is the node's execution policy for agent actions: ask, allow
+	// Execution is the node's execution policy for bot actions: ask, allow
 	// or never-unattended.
 	Execution string
 	Approvals struct {
@@ -178,12 +178,12 @@ type AgentsConfig struct {
 		// Hook is the node's policy hook; no Command and no URL means none.
 		Hook ApprovalHook
 	}
-	Defaults AgentDefaults
-	// Coordination lets agents ask each other for work.
+	Defaults BotDefaults
+	// Coordination lets bots ask each other for work.
 	Coordination Coordination
 }
 
-// Coordination limits agent hand-offs.
+// Coordination limits bot hand-offs.
 type Coordination struct {
 	Enabled            bool
 	MaxDepth           int
@@ -199,7 +199,7 @@ const (
 	HookFailClosed = "fail-closed"
 )
 
-// ApprovalHook is a program or HTTPS endpoint asked about every agent action.
+// ApprovalHook is a program or HTTPS endpoint asked about every bot action.
 type ApprovalHook struct {
 	Command string
 	URL     string
@@ -209,9 +209,9 @@ type ApprovalHook struct {
 	Timeout time.Duration
 }
 
-// AgentDefaults are the settings an agent inherits when its own definition
+// BotDefaults are the settings a bot inherits when its own definition
 // leaves them unset.
-type AgentDefaults struct {
+type BotDefaults struct {
 	Agent                 string
 	Model                 string
 	Timezone              string
@@ -328,50 +328,50 @@ var defaults = map[string]any{
 	"tui.verbose-transcript":          false,
 	"mcp.port":                        7734,
 
-	"agents.default-dir":                              "",
-	"agents.profile-dir":                              "",
-	"agents.skills-dir":                               "",
-	"agents.primary":                                  "",
-	"agents.webhook.listen-addr":                      "",
-	"agents.coordination.enabled":                     false,
-	"agents.coordination.max-depth":                   3,
-	"agents.coordination.max-requests-per-root":       12,
-	"agents.coordination.answer-timeout":              "1h",
-	"agents.execution":                                "ask",
-	"agents.approvals.unattended-expiry":              "30m",
-	"agents.approvals.hook.command":                   "",
-	"agents.approvals.hook.url":                       "",
-	"agents.approvals.hook.mode":                      "shadow",
-	"agents.approvals.hook.timeout":                   "5s",
-	"agents.defaults.agent":                           "claude",
-	"agents.defaults.model":                           "",
-	"agents.defaults.timezone":                        "auto",
-	"agents.defaults.idle-close":                      "30m",
-	"agents.defaults.max-concurrent-sessions":         2,
-	"agents.defaults.git.mode":                        "nested",
-	"agents.defaults.git.commit-files":                false,
-	"agents.defaults.memory.mode":                     "auto",
-	"agents.defaults.memory.core-budget":              "24KB",
-	"agents.defaults.memory.capture-after":            "2m",
-	"agents.defaults.memory.tidy-at":                  "03:00",
-	"agents.defaults.memory.log-entries":              20,
-	"agents.defaults.memory.extractor":                "",
-	"agents.defaults.proactivity":                     "default",
-	"agents.defaults.quiet-hours":                     "",
-	"agents.defaults.brief.enabled":                   false,
-	"agents.defaults.brief.at":                        "08:00",
-	"agents.defaults.notify-delay":                    "3m",
-	"agents.defaults.notify":                          "needs-you",
-	"agents.defaults.limits.min-interval":             "15m",
-	"agents.defaults.limits.max-enabled-routines":     20,
-	"agents.defaults.limits.max-check-backs":          10,
-	"agents.defaults.limits.run-timeout":              "1h",
-	"agents.defaults.limits.max-runs-per-hour":        12,
-	"agents.defaults.limits.max-consecutive-failures": 10,
-	"agents.defaults.limits.check-back-min":           "15m",
-	"agents.defaults.limits.check-back-max":           "7d",
-	"agents.defaults.limits.catch-up-window":          "12h",
-	"agents.defaults.limits.pause-after-away":         "7d",
+	"bots.default-dir":                              "",
+	"bots.profile-dir":                              "",
+	"bots.skills-dir":                               "",
+	"bots.primary":                                  "",
+	"bots.webhook.listen-addr":                      "",
+	"bots.coordination.enabled":                     false,
+	"bots.coordination.max-depth":                   3,
+	"bots.coordination.max-requests-per-root":       12,
+	"bots.coordination.answer-timeout":              "1h",
+	"bots.execution":                                "ask",
+	"bots.approvals.unattended-expiry":              "30m",
+	"bots.approvals.hook.command":                   "",
+	"bots.approvals.hook.url":                       "",
+	"bots.approvals.hook.mode":                      "shadow",
+	"bots.approvals.hook.timeout":                   "5s",
+	"bots.defaults.agent":                           "claude",
+	"bots.defaults.model":                           "",
+	"bots.defaults.timezone":                        "auto",
+	"bots.defaults.idle-close":                      "30m",
+	"bots.defaults.max-concurrent-sessions":         2,
+	"bots.defaults.git.mode":                        "nested",
+	"bots.defaults.git.commit-files":                false,
+	"bots.defaults.memory.mode":                     "auto",
+	"bots.defaults.memory.core-budget":              "24KB",
+	"bots.defaults.memory.capture-after":            "2m",
+	"bots.defaults.memory.tidy-at":                  "03:00",
+	"bots.defaults.memory.log-entries":              20,
+	"bots.defaults.memory.extractor":                "",
+	"bots.defaults.proactivity":                     "default",
+	"bots.defaults.quiet-hours":                     "",
+	"bots.defaults.brief.enabled":                   false,
+	"bots.defaults.brief.at":                        "08:00",
+	"bots.defaults.notify-delay":                    "3m",
+	"bots.defaults.notify":                          "needs-you",
+	"bots.defaults.limits.min-interval":             "15m",
+	"bots.defaults.limits.max-enabled-routines":     20,
+	"bots.defaults.limits.max-check-backs":          10,
+	"bots.defaults.limits.run-timeout":              "1h",
+	"bots.defaults.limits.max-runs-per-hour":        12,
+	"bots.defaults.limits.max-consecutive-failures": 10,
+	"bots.defaults.limits.check-back-min":           "15m",
+	"bots.defaults.limits.check-back-max":           "7d",
+	"bots.defaults.limits.catch-up-window":          "12h",
+	"bots.defaults.limits.pause-after-away":         "7d",
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
@@ -442,53 +442,53 @@ func (c Config) Validate() error {
 	if c.MCP.Port < 0 || c.MCP.Port > 65535 {
 		return fmt.Errorf("mcp.port %d must be between 0 and 65535", c.MCP.Port)
 	}
-	d := c.Agents.Defaults
+	d := c.Bots.Defaults
 	for _, e := range []struct {
 		key, val string
 		allowed  []string
 	}{
-		{"agents.execution", c.Agents.Execution, []string{"ask", "allow", "never-unattended"}},
-		{"agents.approvals.hook.mode", c.Agents.Approvals.Hook.Mode, []string{HookShadow, HookFailOpen, HookFailClosed}},
-		{"agents.defaults.git.mode", d.Git.Mode, []string{"nested", "outer"}},
-		{"agents.defaults.memory.mode", d.Memory.Mode, []string{"auto", "review", "off"}},
-		{"agents.defaults.notify", d.Notify, []string{"all", "needs-you", "off"}},
-		{"agents.defaults.proactivity", d.Proactivity, []string{"off", "low", "default", "high"}},
+		{"bots.execution", c.Bots.Execution, []string{"ask", "allow", "never-unattended"}},
+		{"bots.approvals.hook.mode", c.Bots.Approvals.Hook.Mode, []string{HookShadow, HookFailOpen, HookFailClosed}},
+		{"bots.defaults.git.mode", d.Git.Mode, []string{"nested", "outer"}},
+		{"bots.defaults.memory.mode", d.Memory.Mode, []string{"auto", "review", "off"}},
+		{"bots.defaults.notify", d.Notify, []string{"all", "needs-you", "off"}},
+		{"bots.defaults.proactivity", d.Proactivity, []string{"off", "low", "default", "high"}},
 	} {
 		if e.val != "" && !slices.Contains(e.allowed, e.val) {
 			return fmt.Errorf("%s %q must be one of %s", e.key, e.val, strings.Join(e.allowed, ", "))
 		}
 	}
-	if c.Agents.Approvals.UnattendedExpiry < 0 {
-		return errors.New("agents.approvals.unattended-expiry must be a duration such as 30m")
+	if c.Bots.Approvals.UnattendedExpiry < 0 {
+		return errors.New("bots.approvals.unattended-expiry must be a duration such as 30m")
 	}
-	if err := c.Agents.Approvals.Hook.validate(); err != nil {
+	if err := c.Bots.Approvals.Hook.validate(); err != nil {
 		return err
 	}
 	if d.NotifyDelay < 0 {
-		return errors.New("agents.defaults.notify-delay must be a duration such as 3m")
+		return errors.New("bots.defaults.notify-delay must be a duration such as 3m")
 	}
 	if d.QuietHours != "" {
 		if _, _, err := ParseQuietHours(d.QuietHours); err != nil {
-			return fmt.Errorf("agents.defaults.quiet-hours: %w", err)
+			return fmt.Errorf("bots.defaults.quiet-hours: %w", err)
 		}
 	}
 	if d.Memory.CoreBudget < 0 {
-		return errors.New("agents.defaults.memory.core-budget must be a size such as 24KB")
+		return errors.New("bots.defaults.memory.core-budget must be a size such as 24KB")
 	}
-	if c.Agents.Coordination.AnswerTimeout < 0 {
-		return errors.New("agents.coordination.answer-timeout must be a duration such as 1h")
+	if c.Bots.Coordination.AnswerTimeout < 0 {
+		return errors.New("bots.coordination.answer-timeout must be a duration such as 1h")
 	}
 	if d.Limits.CatchUpWindow < 0 {
-		return errors.New("agents.defaults.limits.catch-up-window must be a duration such as 12h")
+		return errors.New("bots.defaults.limits.catch-up-window must be a duration such as 12h")
 	}
 	if d.Limits.PauseAfterAway < 0 {
-		return errors.New("agents.defaults.limits.pause-after-away must be a duration such as 7d")
+		return errors.New("bots.defaults.limits.pause-after-away must be a duration such as 7d")
 	}
 	if d.Limits.CheckBackMin < 0 {
-		return errors.New("agents.defaults.limits.check-back-min must be a duration such as 15m")
+		return errors.New("bots.defaults.limits.check-back-min must be a duration such as 15m")
 	}
 	if d.Limits.CheckBackMax < 0 {
-		return errors.New("agents.defaults.limits.check-back-max must be a duration such as 7d")
+		return errors.New("bots.defaults.limits.check-back-max must be a duration such as 7d")
 	}
 	return nil
 }
@@ -571,33 +571,33 @@ func FromViper(v *viper.Viper) Config {
 		MCP: MCPConfig{
 			Port: v.GetInt("mcp.port"),
 		},
-		Agents: agentsFromViper(v),
+		Bots: botsFromViper(v),
 	}
 }
 
-func agentsFromViper(v *viper.Viper) AgentsConfig {
-	const p = "agents.defaults."
-	a := AgentsConfig{
-		DefaultDir: resolveDir(v.GetString("agents.default-dir"), "agents"),
-		ProfileDir: resolveDir(v.GetString("agents.profile-dir"), "profile"),
-		SkillsDir:  resolveDir(v.GetString("agents.skills-dir"), "skills"),
-		Primary:    v.GetString("agents.primary"),
+func botsFromViper(v *viper.Viper) BotsConfig {
+	const p = "bots.defaults."
+	a := BotsConfig{
+		DefaultDir: resolveDir(v.GetString("bots.default-dir"), "bots"),
+		ProfileDir: resolveDir(v.GetString("bots.profile-dir"), "profile"),
+		SkillsDir:  resolveDir(v.GetString("bots.skills-dir"), "skills"),
+		Primary:    v.GetString("bots.primary"),
 
-		WebhookListen: strings.TrimSpace(v.GetString("agents.webhook.listen-addr")),
-		Execution:     strings.TrimSpace(v.GetString("agents.execution")),
+		WebhookListen: strings.TrimSpace(v.GetString("bots.webhook.listen-addr")),
+		Execution:     strings.TrimSpace(v.GetString("bots.execution")),
 	}
-	a.Approvals.UnattendedExpiry = days(v, "agents.approvals.unattended-expiry")
+	a.Approvals.UnattendedExpiry = days(v, "bots.approvals.unattended-expiry")
 	a.Approvals.Hook = ApprovalHook{
-		Command: strings.TrimSpace(v.GetString("agents.approvals.hook.command")),
-		URL:     strings.TrimSpace(v.GetString("agents.approvals.hook.url")),
-		Mode:    strings.TrimSpace(v.GetString("agents.approvals.hook.mode")),
-		Timeout: days(v, "agents.approvals.hook.timeout"),
+		Command: strings.TrimSpace(v.GetString("bots.approvals.hook.command")),
+		URL:     strings.TrimSpace(v.GetString("bots.approvals.hook.url")),
+		Mode:    strings.TrimSpace(v.GetString("bots.approvals.hook.mode")),
+		Timeout: days(v, "bots.approvals.hook.timeout"),
 	}
 	a.Coordination = Coordination{
-		Enabled:            v.GetBool("agents.coordination.enabled"),
-		MaxDepth:           v.GetInt("agents.coordination.max-depth"),
-		MaxRequestsPerRoot: v.GetInt("agents.coordination.max-requests-per-root"),
-		AnswerTimeout:      days(v, "agents.coordination.answer-timeout"),
+		Enabled:            v.GetBool("bots.coordination.enabled"),
+		MaxDepth:           v.GetInt("bots.coordination.max-depth"),
+		MaxRequestsPerRoot: v.GetInt("bots.coordination.max-requests-per-root"),
+		AnswerTimeout:      days(v, "bots.coordination.answer-timeout"),
 	}
 	d := &a.Defaults
 	d.Agent = v.GetString(p + "agent")
@@ -664,24 +664,24 @@ func ParseQuietHours(s string) (start, end int, err error) {
 
 func (h ApprovalHook) validate() error {
 	if h.Command != "" && h.URL != "" {
-		return errors.New("agents.approvals.hook: set command or url, not both")
+		return errors.New("bots.approvals.hook: set command or url, not both")
 	}
 	if h.Timeout < 0 {
-		return errors.New("agents.approvals.hook.timeout must be a duration such as 5s")
+		return errors.New("bots.approvals.hook.timeout must be a duration such as 5s")
 	}
 	if h.URL == "" {
 		return nil
 	}
 	u, err := url.Parse(h.URL)
 	if err != nil || u.Host == "" {
-		return fmt.Errorf("agents.approvals.hook.url %q is not a URL", h.URL)
+		return fmt.Errorf("bots.approvals.hook.url %q is not a URL", h.URL)
 	}
 	loopback := u.Hostname() == "localhost"
 	if ip := net.ParseIP(u.Hostname()); ip != nil && ip.IsLoopback() {
 		loopback = true
 	}
 	if u.Scheme != "https" && !(u.Scheme == "http" && loopback) {
-		return fmt.Errorf("agents.approvals.hook.url %q must use https (http only on this machine)", h.URL)
+		return fmt.Errorf("bots.approvals.hook.url %q must use https (http only on this machine)", h.URL)
 	}
 	return nil
 }

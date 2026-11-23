@@ -20,7 +20,7 @@ type Sinks struct {
 }
 
 // argusNotified reports whether s awaits an interaction the node notifies
-// about itself, under the agent's notification policy: a persistent agent's
+// about itself, under the bot's notification policy: a bot's
 // hand-off request.
 func argusNotified(s session.Session) bool {
 	return s.Interaction != nil && s.Interaction.Kind == session.InteractionHandoff

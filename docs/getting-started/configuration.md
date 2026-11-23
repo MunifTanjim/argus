@@ -57,57 +57,57 @@ starts. The Claude Code plugin does not use this setting.
 the tools off. Argus then removes its entries from the agent configs. If the
 port is in use, the node runs without the tools and logs an error.
 
-## Agents
+## Bots
 
-Persistent agents read these keys under `agents`. An agent's own definition
-overrides the `agents.defaults` values.
+Bots read these keys under `bots`. A bot's own definition
+overrides the `bots.defaults` values.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `agents.default-dir` | data directory `agents` | Where new agent directories go. |
-| `agents.profile-dir` | data directory `profile` | Where the profile is kept. |
-| `agents.skills-dir` | data directory `skills` | Where shared skills are kept. |
-| `agents.primary` | none | The agent that receives requests when none is named. |
-| `agents.webhook.listen-addr` | none (off) | Address, such as `127.0.0.1:7420`, where the node accepts routine webhooks. Reachability from other machines is up to your network. |
-| `agents.coordination.enabled` | `false` | Lets agents ask each other for work. |
-| `agents.coordination.max-depth` | `3` | How many hand-offs deep one request may go. |
-| `agents.coordination.max-requests-per-root` | `12` | How many hand-offs one request may cause in all. |
-| `agents.coordination.answer-timeout` | `1h` | How long an agent waits for another agent's answer. |
-| `agents.execution` | `ask` | What agents may do on this node without a matching approval rule. `ask` asks you about risky actions from your own requests and denies actions from unattended work. `allow` lets unattended work and ordinary actions run, and still asks about risky actions from your requests. `never-unattended` denies every action from unattended work. |
-| `agents.approvals.unattended-expiry` | `30m` | How long a request for approval from unattended work waits for your answer before it is denied. |
-| `agents.approvals.hook.command` | none | A program asked about every agent action. See [Agents](/guide/agents#policy-hook). |
-| `agents.approvals.hook.url` | none | An HTTPS address asked about every agent action, instead of a program. |
-| `agents.approvals.hook.mode` | `shadow` | `shadow` only records the hook's answers. `fail-open` lets them decide, falling back to the rules when the hook fails. `fail-closed` lets them decide and denies when the hook fails. |
-| `agents.approvals.hook.timeout` | `5s` | How long Argus waits for the hook. |
-| `agents.defaults.agent` | `claude` | The coding agent that runs the sessions. |
-| `agents.defaults.model` | none | The model of the sessions. |
-| `agents.defaults.timezone` | `auto` | The timezone of schedules and quiet hours. |
-| `agents.defaults.idle-close` | `30m` | How long an idle session stays open. |
-| `agents.defaults.max-concurrent-sessions` | `2` | Sessions an agent runs at once. |
-| `agents.defaults.git.mode` | `nested` | `nested` gives each agent its own repository. `outer` uses an enclosing repository when there is one. |
-| `agents.defaults.git.commit-files` | `false` | Whether the `files` directory is committed. |
-| `agents.defaults.memory.mode` | `auto` | `auto`, `review` or `off`. |
-| `agents.defaults.memory.core-budget` | `24KB` | Size limit of the core memory. |
-| `agents.defaults.memory.capture-after` | `2m` | How long after a session goes quiet its memory is captured. |
-| `agents.defaults.memory.tidy-at` | `03:00` | Time of the daily memory tidy. |
-| `agents.defaults.memory.log-entries` | `20` | Recent log entries loaded into a session. |
-| `agents.defaults.memory.extractor` | none | The model that captures memory. |
-| `agents.defaults.proactivity` | `default` | `off`, `low`, `default` or `high`. |
-| `agents.defaults.quiet-hours` | none | Hours, such as `22:00-07:00`, when background work does not notify you; you get one summary when they end. |
-| `agents.defaults.notify` | `needs-you` | `all`, `needs-you` or `off`. |
-| `agents.defaults.notify-delay` | `3m` | While you are connected, how long a notification waits; it is dropped if you read the thread meanwhile. |
-| `agents.defaults.brief.enabled` | `false` | Whether the agent writes a daily brief. |
-| `agents.defaults.brief.at` | `08:00` | Time of the daily brief. |
-| `agents.defaults.limits.min-interval` | `15m` | Shortest interval between runs of a routine. |
-| `agents.defaults.limits.max-enabled-routines` | `20` | Routines an agent can have enabled. |
-| `agents.defaults.limits.max-check-backs` | `10` | Pending check-backs an agent can have. |
-| `agents.defaults.limits.run-timeout` | `1h` | Longest time a run can take. |
-| `agents.defaults.limits.max-runs-per-hour` | `12` | Routine runs an agent can start in an hour. |
-| `agents.defaults.limits.max-consecutive-failures` | `10` | Failed runs in a row after which a routine pauses. |
-| `agents.defaults.limits.check-back-min` | `15m` | Shortest time a self-paced routine can wait before its next run. |
-| `agents.defaults.limits.check-back-max` | `7d` | Longest time a self-paced routine can wait before its next run. |
-| `agents.defaults.limits.catch-up-window` | `12h` | How old a missed run can be and still run when the node comes back. |
-| `agents.defaults.limits.pause-after-away` | `7d` | Routines pause when no client has connected for this long. |
+| `bots.default-dir` | data directory `bots` | Where new bot directories go. |
+| `bots.profile-dir` | data directory `profile` | Where the profile is kept. |
+| `bots.skills-dir` | data directory `skills` | Where shared skills are kept. |
+| `bots.primary` | none | The bot that receives requests when none is named. |
+| `bots.webhook.listen-addr` | none (off) | Address, such as `127.0.0.1:7420`, where the node accepts routine webhooks. Reachability from other machines is up to your network. |
+| `bots.coordination.enabled` | `false` | Lets bots ask each other for work. |
+| `bots.coordination.max-depth` | `3` | How many hand-offs deep one request may go. |
+| `bots.coordination.max-requests-per-root` | `12` | How many hand-offs one request may cause in all. |
+| `bots.coordination.answer-timeout` | `1h` | How long a bot waits for another bot's answer. |
+| `bots.execution` | `ask` | What bots may do on this node without a matching approval rule. `ask` asks you about risky actions from your own requests and denies actions from unattended work. `allow` lets unattended work and ordinary actions run, and still asks about risky actions from your requests. `never-unattended` denies every action from unattended work. |
+| `bots.approvals.unattended-expiry` | `30m` | How long a request for approval from unattended work waits for your answer before it is denied. |
+| `bots.approvals.hook.command` | none | A program asked about every bot action. See [Bots](/guide/bots#policy-hook). |
+| `bots.approvals.hook.url` | none | An HTTPS address asked about every bot action, instead of a program. |
+| `bots.approvals.hook.mode` | `shadow` | `shadow` only records the hook's answers. `fail-open` lets them decide, falling back to the rules when the hook fails. `fail-closed` lets them decide and denies when the hook fails. |
+| `bots.approvals.hook.timeout` | `5s` | How long Argus waits for the hook. |
+| `bots.defaults.agent` | `claude` | The coding agent that runs the sessions. |
+| `bots.defaults.model` | none | The model of the sessions. |
+| `bots.defaults.timezone` | `auto` | The timezone of schedules and quiet hours. |
+| `bots.defaults.idle-close` | `30m` | How long an idle session stays open. |
+| `bots.defaults.max-concurrent-sessions` | `2` | Sessions a bot runs at once. |
+| `bots.defaults.git.mode` | `nested` | `nested` gives each bot its own repository. `outer` uses an enclosing repository when there is one. |
+| `bots.defaults.git.commit-files` | `false` | Whether the `files` directory is committed. |
+| `bots.defaults.memory.mode` | `auto` | `auto`, `review` or `off`. |
+| `bots.defaults.memory.core-budget` | `24KB` | Size limit of the core memory. |
+| `bots.defaults.memory.capture-after` | `2m` | How long after a session goes quiet its memory is captured. |
+| `bots.defaults.memory.tidy-at` | `03:00` | Time of the daily memory tidy. |
+| `bots.defaults.memory.log-entries` | `20` | Recent log entries loaded into a session. |
+| `bots.defaults.memory.extractor` | none | The model that captures memory. |
+| `bots.defaults.proactivity` | `default` | `off`, `low`, `default` or `high`. |
+| `bots.defaults.quiet-hours` | none | Hours, such as `22:00-07:00`, when background work does not notify you; you get one summary when they end. |
+| `bots.defaults.notify` | `needs-you` | `all`, `needs-you` or `off`. |
+| `bots.defaults.notify-delay` | `3m` | While you are connected, how long a notification waits; it is dropped if you read the thread meanwhile. |
+| `bots.defaults.brief.enabled` | `false` | Whether the bot writes a daily brief. |
+| `bots.defaults.brief.at` | `08:00` | Time of the daily brief. |
+| `bots.defaults.limits.min-interval` | `15m` | Shortest interval between runs of a routine. |
+| `bots.defaults.limits.max-enabled-routines` | `20` | Routines a bot can have enabled. |
+| `bots.defaults.limits.max-check-backs` | `10` | Pending check-backs a bot can have. |
+| `bots.defaults.limits.run-timeout` | `1h` | Longest time a run can take. |
+| `bots.defaults.limits.max-runs-per-hour` | `12` | Routine runs a bot can start in an hour. |
+| `bots.defaults.limits.max-consecutive-failures` | `10` | Failed runs in a row after which a routine pauses. |
+| `bots.defaults.limits.check-back-min` | `15m` | Shortest time a self-paced routine can wait before its next run. |
+| `bots.defaults.limits.check-back-max` | `7d` | Longest time a self-paced routine can wait before its next run. |
+| `bots.defaults.limits.catch-up-window` | `12h` | How old a missed run can be and still run when the node comes back. |
+| `bots.defaults.limits.pause-after-away` | `7d` | Routines pause when no client has connected for this long. |
 
 ## Projects & Workspaces
 

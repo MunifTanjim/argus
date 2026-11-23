@@ -16,10 +16,10 @@ type leftTab int
 const (
 	leftProjects leftTab = iota
 	leftSessions
-	leftAgents
+	leftBots
 )
 
-var leftTabNames = []string{"Projects", "Sessions", "Agents"}
+var leftTabNames = []string{"Projects", "Sessions", "Bots"}
 
 // key is the tab's name in tui.json.
 func (t leftTab) key() string { return strings.ToLower(leftTabNames[t]) }
@@ -33,7 +33,7 @@ type leftSidebarState struct {
 	tab      leftTab
 	tree     projectTreeComp
 	sessions sidebarSessionsComp
-	agents   agentsSidebarComp
+	bots     botsSidebarComp
 	hidden   bool // the user toggled it off
 	width    int  // 0 = default
 }
@@ -42,8 +42,8 @@ func (l leftSidebarState) current() component {
 	switch l.tab {
 	case leftSessions:
 		return l.sessions
-	case leftAgents:
-		return l.agents
+	case leftBots:
+		return l.bots
 	}
 	return l.tree
 }
@@ -54,8 +54,8 @@ func (l leftSidebarState) store(comp component) leftSidebarState {
 		l.tree = comp
 	case sidebarSessionsComp:
 		l.sessions = comp
-	case agentsSidebarComp:
-		l.agents = comp
+	case botsSidebarComp:
+		l.bots = comp
 	}
 	return l
 }
@@ -114,8 +114,8 @@ func (l leftSidebarState) view(c *ctx, w, h int) string {
 		suffix = l.tree.titleSuffix()
 	case leftSessions:
 		suffix = l.sessions.titleSuffix(c)
-	case leftAgents:
-		suffix = l.agents.titleSuffix(c)
+	case leftBots:
+		suffix = l.bots.titleSuffix(c)
 	}
 	// A suffix that does not fit after the strip takes the row under it.
 	var below string

@@ -9,30 +9,60 @@ import (
 	"context"
 )
 
-const countPAgentHandoffsByRoot = `-- name: CountPAgentHandoffsByRoot :one
-SELECT COUNT(*) FROM pagent_handoff WHERE root_id = ?
+const botHandoffByToThread = `-- name: BotHandoffByToThread :one
+SELECT id, root_id, depth, ancestors, from_node, from_bot, from_name, from_thread, from_session, to_node, to_bot, to_name, to_thread, request, state, answer, created_at, answered_at FROM bot_handoff WHERE to_thread = ? AND to_thread != '' LIMIT 1
 `
 
-func (q *Queries) CountPAgentHandoffsByRoot(ctx context.Context, rootID string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countPAgentHandoffsByRoot, rootID)
+func (q *Queries) BotHandoffByToThread(ctx context.Context, toThread string) (BotHandoff, error) {
+	row := q.db.QueryRowContext(ctx, botHandoffByToThread, toThread)
+	var i BotHandoff
+	err := row.Scan(
+		&i.ID,
+		&i.RootID,
+		&i.Depth,
+		&i.Ancestors,
+		&i.FromNode,
+		&i.FromBot,
+		&i.FromName,
+		&i.FromThread,
+		&i.FromSession,
+		&i.ToNode,
+		&i.ToBot,
+		&i.ToName,
+		&i.ToThread,
+		&i.Request,
+		&i.State,
+		&i.Answer,
+		&i.CreatedAt,
+		&i.AnsweredAt,
+	)
+	return i, err
+}
+
+const countBotHandoffsByRoot = `-- name: CountBotHandoffsByRoot :one
+SELECT COUNT(*) FROM bot_handoff WHERE root_id = ?
+`
+
+func (q *Queries) CountBotHandoffsByRoot(ctx context.Context, rootID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countBotHandoffsByRoot, rootID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
-const endPAgentHandoff = `-- name: EndPAgentHandoff :execrows
-UPDATE pagent_handoff SET state = ?, answer = ?, answered_at = ? WHERE id = ? AND state = 'pending'
+const endBotHandoff = `-- name: EndBotHandoff :execrows
+UPDATE bot_handoff SET state = ?, answer = ?, answered_at = ? WHERE id = ? AND state = 'pending'
 `
 
-type EndPAgentHandoffParams struct {
+type EndBotHandoffParams struct {
 	State      string
 	Answer     string
 	AnsweredAt int64
 	ID         string
 }
 
-func (q *Queries) EndPAgentHandoff(ctx context.Context, arg EndPAgentHandoffParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, endPAgentHandoff,
+func (q *Queries) EndBotHandoff(ctx context.Context, arg EndBotHandoffParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, endBotHandoff,
 		arg.State,
 		arg.Answer,
 		arg.AnsweredAt,
@@ -44,25 +74,25 @@ func (q *Queries) EndPAgentHandoff(ctx context.Context, arg EndPAgentHandoffPara
 	return result.RowsAffected()
 }
 
-const getPAgentHandoff = `-- name: GetPAgentHandoff :one
-SELECT id, root_id, depth, ancestors, from_node, from_agent, from_name, from_thread, from_session, to_node, to_agent, to_name, to_thread, request, state, answer, created_at, answered_at FROM pagent_handoff WHERE id = ?
+const getBotHandoff = `-- name: GetBotHandoff :one
+SELECT id, root_id, depth, ancestors, from_node, from_bot, from_name, from_thread, from_session, to_node, to_bot, to_name, to_thread, request, state, answer, created_at, answered_at FROM bot_handoff WHERE id = ?
 `
 
-func (q *Queries) GetPAgentHandoff(ctx context.Context, id string) (PagentHandoff, error) {
-	row := q.db.QueryRowContext(ctx, getPAgentHandoff, id)
-	var i PagentHandoff
+func (q *Queries) GetBotHandoff(ctx context.Context, id string) (BotHandoff, error) {
+	row := q.db.QueryRowContext(ctx, getBotHandoff, id)
+	var i BotHandoff
 	err := row.Scan(
 		&i.ID,
 		&i.RootID,
 		&i.Depth,
 		&i.Ancestors,
 		&i.FromNode,
-		&i.FromAgent,
+		&i.FromBot,
 		&i.FromName,
 		&i.FromThread,
 		&i.FromSession,
 		&i.ToNode,
-		&i.ToAgent,
+		&i.ToBot,
 		&i.ToName,
 		&i.ToThread,
 		&i.Request,
@@ -74,25 +104,25 @@ func (q *Queries) GetPAgentHandoff(ctx context.Context, id string) (PagentHandof
 	return i, err
 }
 
-const insertPAgentHandoff = `-- name: InsertPAgentHandoff :exec
-INSERT INTO pagent_handoff (
-    id, root_id, depth, ancestors, from_node, from_agent, from_name, from_thread, from_session,
-    to_node, to_agent, to_name, to_thread, request, state, created_at
+const insertBotHandoff = `-- name: InsertBotHandoff :exec
+INSERT INTO bot_handoff (
+    id, root_id, depth, ancestors, from_node, from_bot, from_name, from_thread, from_session,
+    to_node, to_bot, to_name, to_thread, request, state, created_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
-type InsertPAgentHandoffParams struct {
+type InsertBotHandoffParams struct {
 	ID          string
 	RootID      string
 	Depth       int64
 	Ancestors   string
 	FromNode    string
-	FromAgent   string
+	FromBot     string
 	FromName    string
 	FromThread  string
 	FromSession string
 	ToNode      string
-	ToAgent     string
+	ToBot       string
 	ToName      string
 	ToThread    string
 	Request     string
@@ -100,19 +130,19 @@ type InsertPAgentHandoffParams struct {
 	CreatedAt   int64
 }
 
-func (q *Queries) InsertPAgentHandoff(ctx context.Context, arg InsertPAgentHandoffParams) error {
-	_, err := q.db.ExecContext(ctx, insertPAgentHandoff,
+func (q *Queries) InsertBotHandoff(ctx context.Context, arg InsertBotHandoffParams) error {
+	_, err := q.db.ExecContext(ctx, insertBotHandoff,
 		arg.ID,
 		arg.RootID,
 		arg.Depth,
 		arg.Ancestors,
 		arg.FromNode,
-		arg.FromAgent,
+		arg.FromBot,
 		arg.FromName,
 		arg.FromThread,
 		arg.FromSession,
 		arg.ToNode,
-		arg.ToAgent,
+		arg.ToBot,
 		arg.ToName,
 		arg.ToThread,
 		arg.Request,
@@ -122,61 +152,31 @@ func (q *Queries) InsertPAgentHandoff(ctx context.Context, arg InsertPAgentHando
 	return err
 }
 
-const pAgentHandoffByToThread = `-- name: PAgentHandoffByToThread :one
-SELECT id, root_id, depth, ancestors, from_node, from_agent, from_name, from_thread, from_session, to_node, to_agent, to_name, to_thread, request, state, answer, created_at, answered_at FROM pagent_handoff WHERE to_thread = ? AND to_thread != '' LIMIT 1
+const pendingBotHandoffsBefore = `-- name: PendingBotHandoffsBefore :many
+SELECT id, root_id, depth, ancestors, from_node, from_bot, from_name, from_thread, from_session, to_node, to_bot, to_name, to_thread, request, state, answer, created_at, answered_at FROM bot_handoff WHERE state = 'pending' AND created_at < ? AND from_node = '' ORDER BY created_at
 `
 
-func (q *Queries) PAgentHandoffByToThread(ctx context.Context, toThread string) (PagentHandoff, error) {
-	row := q.db.QueryRowContext(ctx, pAgentHandoffByToThread, toThread)
-	var i PagentHandoff
-	err := row.Scan(
-		&i.ID,
-		&i.RootID,
-		&i.Depth,
-		&i.Ancestors,
-		&i.FromNode,
-		&i.FromAgent,
-		&i.FromName,
-		&i.FromThread,
-		&i.FromSession,
-		&i.ToNode,
-		&i.ToAgent,
-		&i.ToName,
-		&i.ToThread,
-		&i.Request,
-		&i.State,
-		&i.Answer,
-		&i.CreatedAt,
-		&i.AnsweredAt,
-	)
-	return i, err
-}
-
-const pendingPAgentHandoffsBefore = `-- name: PendingPAgentHandoffsBefore :many
-SELECT id, root_id, depth, ancestors, from_node, from_agent, from_name, from_thread, from_session, to_node, to_agent, to_name, to_thread, request, state, answer, created_at, answered_at FROM pagent_handoff WHERE state = 'pending' AND created_at < ? AND from_node = '' ORDER BY created_at
-`
-
-func (q *Queries) PendingPAgentHandoffsBefore(ctx context.Context, createdAt int64) ([]PagentHandoff, error) {
-	rows, err := q.db.QueryContext(ctx, pendingPAgentHandoffsBefore, createdAt)
+func (q *Queries) PendingBotHandoffsBefore(ctx context.Context, createdAt int64) ([]BotHandoff, error) {
+	rows, err := q.db.QueryContext(ctx, pendingBotHandoffsBefore, createdAt)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []PagentHandoff{}
+	items := []BotHandoff{}
 	for rows.Next() {
-		var i PagentHandoff
+		var i BotHandoff
 		if err := rows.Scan(
 			&i.ID,
 			&i.RootID,
 			&i.Depth,
 			&i.Ancestors,
 			&i.FromNode,
-			&i.FromAgent,
+			&i.FromBot,
 			&i.FromName,
 			&i.FromThread,
 			&i.FromSession,
 			&i.ToNode,
-			&i.ToAgent,
+			&i.ToBot,
 			&i.ToName,
 			&i.ToThread,
 			&i.Request,
@@ -198,16 +198,16 @@ func (q *Queries) PendingPAgentHandoffsBefore(ctx context.Context, createdAt int
 	return items, nil
 }
 
-const setPAgentHandoffToThread = `-- name: SetPAgentHandoffToThread :exec
-UPDATE pagent_handoff SET to_thread = ? WHERE id = ?
+const setBotHandoffToThread = `-- name: SetBotHandoffToThread :exec
+UPDATE bot_handoff SET to_thread = ? WHERE id = ?
 `
 
-type SetPAgentHandoffToThreadParams struct {
+type SetBotHandoffToThreadParams struct {
 	ToThread string
 	ID       string
 }
 
-func (q *Queries) SetPAgentHandoffToThread(ctx context.Context, arg SetPAgentHandoffToThreadParams) error {
-	_, err := q.db.ExecContext(ctx, setPAgentHandoffToThread, arg.ToThread, arg.ID)
+func (q *Queries) SetBotHandoffToThread(ctx context.Context, arg SetBotHandoffToThreadParams) error {
+	_, err := q.db.ExecContext(ctx, setBotHandoffToThread, arg.ToThread, arg.ID)
 	return err
 }

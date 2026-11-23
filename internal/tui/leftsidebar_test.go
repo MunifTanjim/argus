@@ -20,8 +20,8 @@ func TestLeftTabKeysCycle(t *testing.T) {
 		t.Fatalf("focused component = %T, want sidebarSessionsComp", m.focusedComp())
 	}
 	m = typeKeys(m, "gt")
-	if m.left.tab != leftAgents {
-		t.Fatalf("gt: tab = %v, want agents", m.left.tab)
+	if m.left.tab != leftBots {
+		t.Fatalf("gt: tab = %v, want bots", m.left.tab)
 	}
 	m = typeKeys(m, "gT")
 	if m.left.tab != leftSessions {
@@ -82,7 +82,7 @@ func TestLeftSidebarStrip(t *testing.T) {
 }
 
 func TestLeftTabKeysSections(t *testing.T) {
-	for _, s := range []string{"project-tree", "sidebar-sessions", "sidebar-agents"} {
+	for _, s := range []string{"project-tree", "sidebar-sessions", "sidebar-bots"} {
 		if !offersKey(sectionLists[s].container, projectsKeys.SideTabNext) {
 			t.Errorf("%s lacks gt in its container keys", s)
 		}

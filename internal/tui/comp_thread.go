@@ -11,14 +11,14 @@ import (
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
-// threadComp is an agent thread's timeline: its sessions' transcripts with
+// threadComp is a bot thread's timeline: its sessions' transcripts with
 // Argus's events in between, drawn by an embedded past-session transcript.
 type threadComp struct {
-	agentID  string
+	botID    string
 	threadID string
 	title    string
 	tr       transcriptComp
-	sessions []api.PAgentTimelineSession
+	sessions []api.BotTimelineSession
 	loaded   bool
 	reply    chatPrompt
 	undo     string // the commit that awaits an undo confirmation
@@ -27,7 +27,7 @@ type threadComp struct {
 // threadTimelineMsg is one load of a thread's timeline.
 type threadTimelineMsg struct {
 	threadID string
-	res      api.PAgentTimeline
+	res      api.BotTimeline
 	err      error
 }
 
@@ -38,12 +38,12 @@ type threadActionMsg struct {
 	err      error
 }
 
-func newThreadComp(t api.PAgentThreadInfo) threadComp {
-	return threadComp{agentID: t.AgentID, threadID: t.ID, title: t.Title, tr: newTranscript()}
+func newThreadComp(t api.BotThreadInfo) threadComp {
+	return threadComp{botID: t.BotID, threadID: t.ID, title: t.Title, tr: newTranscript()}
 }
 
-// openThread opens a thread's timeline over the agent view.
-func openThread(c *ctx, t api.PAgentThreadInfo) tea.Cmd {
+// openThread opens a thread's timeline over the bot view.
+func openThread(c *ctx, t api.BotThreadInfo) tea.Cmd {
 	c.open(newThreadComp(t))
 	c.focusOn(mainPane)
 	return c.m.loadTimelineCmd(t.ID)
@@ -52,8 +52,8 @@ func openThread(c *ctx, t api.PAgentThreadInfo) tea.Cmd {
 func (m model) loadTimelineCmd(threadID string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		var res api.PAgentTimeline
-		err := client.Call(api.MethodPAgentThreadTimeline, api.PAgentTimelineParams{ThreadID: threadID}, &res)
+		var res api.BotTimeline
+		err := client.Call(api.MethodBotThreadTimeline, api.BotTimelineParams{ThreadID: threadID}, &res)
 		return threadTimelineMsg{threadID: threadID, res: res, err: err}
 	}
 }
@@ -61,24 +61,24 @@ func (m model) loadTimelineCmd(threadID string) tea.Cmd {
 func (m model) markThreadReadCmd(threadID string, pos int64) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		_ = client.Call(api.MethodPAgentThreadMarkRead, api.PAgentMarkReadParams{ThreadID: threadID, Position: pos}, nil)
+		_ = client.Call(api.MethodBotThreadMarkRead, api.BotMarkReadParams{ThreadID: threadID, Position: pos}, nil)
 		return nil
 	}
 }
 
-func (m model) sendThreadCmd(agentID, threadID, text string) tea.Cmd {
+func (m model) sendThreadCmd(botID, threadID, text string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		err := client.Call(api.MethodPAgentThreadSend, api.PAgentSendParams{AgentID: agentID, ThreadID: threadID, Text: text}, &api.PAgentSendResult{})
+		err := client.Call(api.MethodBotThreadSend, api.BotSendParams{BotID: botID, ThreadID: threadID, Text: text}, &api.BotSendResult{})
 		return threadActionMsg{threadID: threadID, verb: "send", err: err}
 	}
 }
 
-func (m model) undoMemoryCmd(agentID, threadID, commit string) tea.Cmd {
+func (m model) undoMemoryCmd(botID, threadID, commit string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		p := api.PAgentMemoryUndoParams{AgentID: agentID, Commit: commit, ThreadID: threadID}
-		err := client.Call(api.MethodPAgentMemoryUndo, p, &api.PAgentMemoryUndoResult{})
+		p := api.BotMemoryUndoParams{BotID: botID, Commit: commit, ThreadID: threadID}
+		err := client.Call(api.MethodBotMemoryUndo, p, &api.BotMemoryUndoResult{})
 		return threadActionMsg{threadID: threadID, verb: "undo", err: err}
 	}
 }
@@ -87,12 +87,12 @@ func (m model) undoMemoryCmd(agentID, threadID, commit string) tea.Cmd {
 func (m model) offerCmd(threadID, offerID string, start bool) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		p := api.PAgentOfferParams{ThreadID: threadID, OfferID: offerID}
+		p := api.BotOfferParams{ThreadID: threadID, OfferID: offerID}
 		if start {
-			err := client.Call(api.MethodPAgentOfferStart, p, &api.PAgentSendResult{})
+			err := client.Call(api.MethodBotOfferStart, p, &api.BotSendResult{})
 			return threadActionMsg{threadID: threadID, verb: "start offer", err: err}
 		}
-		err := client.Call(api.MethodPAgentOfferDismiss, p, nil)
+		err := client.Call(api.MethodBotOfferDismiss, p, nil)
 		return threadActionMsg{threadID: threadID, verb: "dismiss offer", err: err}
 	}
 }
@@ -105,7 +105,7 @@ func (m model) markTopThreadReadCmd() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	for _, info := range m.pagentThreads[t.agentID] {
+	for _, info := range m.botThreads[t.botID] {
 		if info.ID == t.threadID && info.Unread {
 			return m.markThreadReadCmd(t.threadID, info.LastActiveAt.UnixNano())
 		}
@@ -209,7 +209,7 @@ func (t threadComp) visualActive() bool          { return t.tr.visualActive() }
 func (t *threadComp) bind(c *ctx) tview          { return t.tr.bind(c) }
 func (t threadComp) liveSession() (string, bool) { return lastLive(t.sessions) }
 
-func lastLive(ss []api.PAgentTimelineSession) (string, bool) {
+func lastLive(ss []api.BotTimelineSession) (string, bool) {
 	for i := len(ss) - 1; i >= 0; i-- {
 		if ss[i].Live {
 			return ss[i].SessionID, true
@@ -260,7 +260,7 @@ func (t threadComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 		v.transcript.err = nil
 		v.restoreEntryCursor(prevID, atBottom, wasLast || !t.loaded)
 		t.sessions, t.loaded = msg.res.Sessions, true
-		a, _ := c.m.pagent(t.agentID)
+		a, _ := c.m.bot(t.botID)
 		t.tr.sourceAt = timelineSource(a.NodeID, msg.res.Sessions)
 	case threadActionMsg:
 		if msg.err != nil {
@@ -285,7 +285,7 @@ func (t threadComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 // timelineSource maps a timeline entry to the session it was read from: its
 // id is prefixed "s<index>:". The live session that writes that transcript, if
 // any, serves its tool details; else the file does.
-func timelineSource(nodeID string, ss []api.PAgentTimelineSession) func(string) (entrySource, bool) {
+func timelineSource(nodeID string, ss []api.BotTimelineSession) func(string) (entrySource, bool) {
 	return func(id string) (entrySource, bool) {
 		n, _, ok := strings.Cut(strings.TrimPrefix(id, "s"), ":")
 		i, err := strconv.Atoi(n)
@@ -309,7 +309,7 @@ func (t threadComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, 
 	if commit := t.undo; commit != "" {
 		t.undo = ""
 		if msg.String() == "y" {
-			return t, m.undoMemoryCmd(t.agentID, t.threadID, commit), true
+			return t, m.undoMemoryCmd(t.botID, t.threadID, commit), true
 		}
 		return t, nil, true
 	}
@@ -318,7 +318,7 @@ func (t threadComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, 
 		var text string
 		t.reply, cmd, text = t.reply.handleKey(msg)
 		if text != "" {
-			cmd = m.sendThreadCmd(t.agentID, t.threadID, text)
+			cmd = m.sendThreadCmd(t.botID, t.threadID, text)
 		}
 		return t, cmd, true
 	}
@@ -340,8 +340,8 @@ func (t threadComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, 
 	case m.matches(msg, transcriptKeys.Back):
 		c.back()
 	case m.matches(msg, sessionKeys.FocusPrompt):
-		if a, ok := m.pagent(t.agentID); ok && a.Status == pagentUnreachable {
-			c.setFlash(agentOffline)
+		if a, ok := m.bot(t.botID); ok && a.Status == botUnreachable {
+			c.setFlash(botOffline)
 			return t, nil, true
 		}
 		var cmd tea.Cmd
@@ -404,7 +404,7 @@ func (t threadComp) wheel(c *ctx, d int) (component, tea.Cmd) {
 }
 
 func (t threadComp) paneHeader(c *ctx, _ int) (string, int) {
-	a, _ := c.m.pagent(t.agentID)
+	a, _ := c.m.bot(t.botID)
 	return c.m.paneHeadStyle().Render(a.Name) + dimStyle.Render(" · ") + t.headTitle(), c.m.transcriptTextX()
 }
 

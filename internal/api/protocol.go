@@ -1431,91 +1431,91 @@ type LockStatusResult struct {
 	Quarantined    bool     `json:"quarantined,omitempty"`
 }
 
-// Persistent-agent registry.
+// Bot registry.
 const (
-	MethodPAgentCreate     = "pagent.create"     // request: PAgentCreateParams; result: PAgentInfo
-	MethodPAgentAdd        = "pagent.add"        // request: PAgentAddParams; result: PAgentAddResult
-	MethodPAgentList       = "pagent.list"       // request: PAgentListParams; result: PAgentListResult
-	MethodPAgentShow       = "pagent.show"       // request: PAgentRef; result: PAgentInfo
-	MethodPAgentRename     = "pagent.rename"     // request: PAgentRenameParams; result: PAgentInfo
-	MethodPAgentForget     = "pagent.forget"     // request: PAgentForgetParams; result: nil
-	MethodPAgentSetPrimary = "pagent.setPrimary" // request: PAgentPrimaryParams; result: nil (empty AgentID unsets)
-	MethodPAgentChanged    = "pagent.changed"    // notification, no params
+	MethodBotCreate     = "bot.create"     // request: BotCreateParams; result: BotInfo
+	MethodBotAdd        = "bot.add"        // request: BotAddParams; result: BotAddResult
+	MethodBotList       = "bot.list"       // request: BotListParams; result: BotListResult
+	MethodBotShow       = "bot.show"       // request: BotRef; result: BotInfo
+	MethodBotRename     = "bot.rename"     // request: BotRenameParams; result: BotInfo
+	MethodBotForget     = "bot.forget"     // request: BotForgetParams; result: nil
+	MethodBotSetPrimary = "bot.setPrimary" // request: BotPrimaryParams; result: nil (empty BotID unsets)
+	MethodBotChanged    = "bot.changed"    // notification, no params
 
-	MethodPAgentThreadSend     = "pagent.thread.send"     // request: PAgentSendParams; result: PAgentSendResult
-	MethodPAgentThreadList     = "pagent.thread.list"     // request: PAgentRef; result: PAgentThreadsResult
-	MethodPAgentThreadMarkRead = "pagent.thread.markRead" // request: PAgentMarkReadParams; result: nil
-	MethodPAgentThreadTimeline = "pagent.thread.timeline" // request: PAgentTimelineParams; result: PAgentTimeline
+	MethodBotThreadSend     = "bot.thread.send"     // request: BotSendParams; result: BotSendResult
+	MethodBotThreadList     = "bot.thread.list"     // request: BotRef; result: BotThreadsResult
+	MethodBotThreadMarkRead = "bot.thread.markRead" // request: BotMarkReadParams; result: nil
+	MethodBotThreadTimeline = "bot.thread.timeline" // request: BotTimelineParams; result: BotTimeline
 
-	MethodPAgentMemoryShow      = "pagent.memory.show"      // request: PAgentRef; result: PAgentMemoryShowResult
-	MethodPAgentMemoryLog       = "pagent.memory.log"       // request: PAgentMemoryLogParams; result: PAgentMemoryLogResult
-	MethodPAgentMemoryUndo      = "pagent.memory.undo"      // request: PAgentMemoryUndoParams; result: PAgentMemoryUndoResult
-	MethodPAgentMemoryProposals = "pagent.memory.proposals" // request: PAgentRef; result: PAgentMemoryProposalsResult
-	MethodPAgentMemoryImport    = "pagent.memory.import"    // request: PAgentMemoryImportParams; result: PAgentMemoryImportResult
-	MethodPAgentMemoryDecide    = "pagent.memory.decide"    // request: PAgentMemoryDecideParams; result: PAgentMemoryDecideResult
+	MethodBotMemoryShow      = "bot.memory.show"      // request: BotRef; result: BotMemoryShowResult
+	MethodBotMemoryLog       = "bot.memory.log"       // request: BotMemoryLogParams; result: BotMemoryLogResult
+	MethodBotMemoryUndo      = "bot.memory.undo"      // request: BotMemoryUndoParams; result: BotMemoryUndoResult
+	MethodBotMemoryProposals = "bot.memory.proposals" // request: BotRef; result: BotMemoryProposalsResult
+	MethodBotMemoryImport    = "bot.memory.import"    // request: BotMemoryImportParams; result: BotMemoryImportResult
+	MethodBotMemoryDecide    = "bot.memory.decide"    // request: BotMemoryDecideParams; result: BotMemoryDecideResult
 
-	MethodPAgentRoutineList       = "pagent.routine.list"       // request: PAgentRef; result: PAgentRoutineListResult
-	MethodPAgentRoutineRun        = "pagent.routine.run"        // request: PAgentRoutineRef; result: PAgentRoutineRunResult (a test run, started now)
-	MethodPAgentRoutinePause      = "pagent.routine.pause"      // request: PAgentRoutineRef; result: PAgentRoutineInfo
-	MethodPAgentRoutineResume     = "pagent.routine.resume"     // request: PAgentRoutineRef; result: PAgentRoutineInfo
-	MethodPAgentRoutineRuns       = "pagent.routine.runs"       // request: PAgentRoutineRunsParams; result: PAgentRoutineRunsResult
-	MethodPAgentRoutineHookSecret = "pagent.routine.hookSecret" // request: PAgentRoutineRef; result: PAgentRoutineHookSecretResult (rotates)
+	MethodBotRoutineList       = "bot.routine.list"       // request: BotRef; result: BotRoutineListResult
+	MethodBotRoutineRun        = "bot.routine.run"        // request: BotRoutineRef; result: BotRoutineRunResult (a test run, started now)
+	MethodBotRoutinePause      = "bot.routine.pause"      // request: BotRoutineRef; result: BotRoutineInfo
+	MethodBotRoutineResume     = "bot.routine.resume"     // request: BotRoutineRef; result: BotRoutineInfo
+	MethodBotRoutineRuns       = "bot.routine.runs"       // request: BotRoutineRunsParams; result: BotRoutineRunsResult
+	MethodBotRoutineHookSecret = "bot.routine.hookSecret" // request: BotRoutineRef; result: BotRoutineHookSecretResult (rotates)
 )
 
-// PAgentRoutineRef names one routine of an agent.
-type PAgentRoutineRef struct {
-	AgentID string `json:"agent_id"`
-	Slug    string `json:"slug"`
+// BotRoutineRef names one routine of a bot.
+type BotRoutineRef struct {
+	BotID string `json:"bot_id"`
+	Slug  string `json:"slug"`
 }
 
-// PAgentRoutineBudget is a routine's budget or its use; 0 is unlimited in a budget.
-type PAgentRoutineBudget struct {
+// BotRoutineBudget is a routine's budget or its use; 0 is unlimited in a budget.
+type BotRoutineBudget struct {
 	Sessions int64   `json:"sessions"`
 	Cost     float64 `json:"cost"`
 	Tokens   int64   `json:"tokens"`
 }
 
-// PAgentRoutineInfo is a routine with its runtime state. State is "active",
+// BotRoutineInfo is a routine with its runtime state. State is "active",
 // "paused" (PausedReason says why), "disabled" (enabled: false in the file),
 // "completed" (a goal that is done) or "invalid" (Error says why).
-type PAgentRoutineInfo struct {
-	AgentID             string              `json:"agent_id"`
-	Slug                string              `json:"slug"`
-	What                string              `json:"what,omitempty"`
-	Starts              []string            `json:"starts,omitempty"` // each start in words
-	Does                string              `json:"does,omitempty"`
-	Until               string              `json:"until,omitempty"`
-	Outcome             string              `json:"outcome,omitempty"`
-	Verify              string              `json:"verify,omitempty"`
-	ReportTo            string              `json:"report_to,omitempty"`
-	State               string              `json:"state"`
-	PausedReason        string              `json:"paused_reason,omitempty"`
-	NextDue             *time.Time          `json:"next_due,omitempty"`
-	LastRunAt           *time.Time          `json:"last_run_at,omitempty"`
-	LastResult          string              `json:"last_result,omitempty"`
-	ConsecutiveFailures int                 `json:"consecutive_failures,omitempty"`
-	Budget              PAgentRoutineBudget `json:"budget"`
-	Used                PAgentRoutineBudget `json:"used"`
-	Webhook             bool                `json:"webhook,omitempty"`
-	Error               string              `json:"error,omitempty"`
+type BotRoutineInfo struct {
+	BotID               string           `json:"bot_id"`
+	Slug                string           `json:"slug"`
+	What                string           `json:"what,omitempty"`
+	Starts              []string         `json:"starts,omitempty"` // each start in words
+	Does                string           `json:"does,omitempty"`
+	Until               string           `json:"until,omitempty"`
+	Outcome             string           `json:"outcome,omitempty"`
+	Verify              string           `json:"verify,omitempty"`
+	ReportTo            string           `json:"report_to,omitempty"`
+	State               string           `json:"state"`
+	PausedReason        string           `json:"paused_reason,omitempty"`
+	NextDue             *time.Time       `json:"next_due,omitempty"`
+	LastRunAt           *time.Time       `json:"last_run_at,omitempty"`
+	LastResult          string           `json:"last_result,omitempty"`
+	ConsecutiveFailures int              `json:"consecutive_failures,omitempty"`
+	Budget              BotRoutineBudget `json:"budget"`
+	Used                BotRoutineBudget `json:"used"`
+	Webhook             bool             `json:"webhook,omitempty"`
+	Error               string           `json:"error,omitempty"`
 }
 
-type PAgentRoutineListResult struct {
-	Routines []PAgentRoutineInfo `json:"routines"`
+type BotRoutineListResult struct {
+	Routines []BotRoutineInfo `json:"routines"`
 }
 
-type PAgentRoutineRunResult struct {
+type BotRoutineRunResult struct {
 	RunID string `json:"run_id"`
 }
 
-type PAgentRoutineRunsParams struct {
-	AgentID string `json:"agent_id"`
-	Slug    string `json:"slug"`
-	Limit   int    `json:"limit,omitempty"` // 0 = 20
+type BotRoutineRunsParams struct {
+	BotID string `json:"bot_id"`
+	Slug  string `json:"slug"`
+	Limit int    `json:"limit,omitempty"` // 0 = 20
 }
 
-// PAgentRoutineRunInfo is one run of a routine.
-type PAgentRoutineRunInfo struct {
+// BotRoutineRunInfo is one run of a routine.
+type BotRoutineRunInfo struct {
 	ID             string     `json:"id"`
 	Slug           string     `json:"slug"`
 	StartedBy      string     `json:"started_by"`
@@ -1536,22 +1536,22 @@ type PAgentRoutineRunInfo struct {
 	Error          string     `json:"error,omitempty"`
 }
 
-type PAgentRoutineRunsResult struct {
-	Runs []PAgentRoutineRunInfo `json:"runs"`
+type BotRoutineRunsResult struct {
+	Runs []BotRoutineRunInfo `json:"runs"`
 }
 
-// PAgentRoutineHookSecretResult is a new webhook secret, shown once. Path is
+// BotRoutineHookSecretResult is a new webhook secret, shown once. Path is
 // the webhook path on the node's listener; Listen is the listener address,
 // empty when webhooks are off.
-type PAgentRoutineHookSecretResult struct {
+type BotRoutineHookSecretResult struct {
 	Secret string `json:"secret"`
 	Path   string `json:"path"`
 	Listen string `json:"listen,omitempty"`
 }
 
-// PAgentCreateParams creates an agent directory and registers it. NodeID is a
+// BotCreateParams creates a bot directory and registers it. NodeID is a
 // gateway routing key the node ignores.
-type PAgentCreateParams struct {
+type BotCreateParams struct {
 	Name         string `json:"name,omitempty"`
 	Dir          string `json:"dir,omitempty"`
 	Agent        string `json:"agent,omitempty"`
@@ -1562,55 +1562,55 @@ type PAgentCreateParams struct {
 	Instructions string `json:"instructions,omitempty"`
 }
 
-// PAgentAddParams registers an existing agent directory.
-type PAgentAddParams struct {
+// BotAddParams registers an existing bot directory.
+type BotAddParams struct {
 	Dir                string `json:"dir"`
 	Name               string `json:"name,omitempty"`
 	ImportInstructions bool   `json:"import_instructions,omitempty"`
 	NodeID             string `json:"node_id,omitempty"`
 }
 
-// PAgentAddResult holds the registered agent. When FoundInstructions is set
+// BotAddResult holds the registered bot. When FoundInstructions is set
 // and ImportInstructions was not, nothing was registered.
-type PAgentAddResult struct {
-	Agent             PAgentInfo `json:"agent"`
-	FoundInstructions bool       `json:"found_instructions,omitempty"`
+type BotAddResult struct {
+	Bot               BotInfo `json:"bot"`
+	FoundInstructions bool    `json:"found_instructions,omitempty"`
 }
 
-type PAgentListParams struct {
+type BotListParams struct {
 	IncludeArchived bool `json:"include_archived,omitempty"`
 }
 
-// PAgentListResult's Primary is the primary agent's id, or empty.
+// BotListResult's Primary is the primary bot's id, or empty.
 // PrimarySince is when it was set, zero when unknown; clients keep the newest
 // primary across nodes.
-type PAgentListResult struct {
-	Agents       []PAgentInfo `json:"agents"`
-	Primary      string       `json:"primary,omitempty"`
-	PrimarySince time.Time    `json:"primary_since,omitzero"`
+type BotListResult struct {
+	Bots         []BotInfo `json:"bots"`
+	Primary      string    `json:"primary,omitempty"`
+	PrimarySince time.Time `json:"primary_since,omitzero"`
 }
 
-type PAgentRef struct {
-	AgentID string `json:"agent_id"`
+type BotRef struct {
+	BotID string `json:"bot_id"`
 }
 
-type PAgentRenameParams struct {
-	AgentID string `json:"agent_id"`
-	Name    string `json:"name"`
+type BotRenameParams struct {
+	BotID string `json:"bot_id"`
+	Name  string `json:"name"`
 }
 
-type PAgentForgetParams struct {
-	AgentID string `json:"agent_id"`
-	Purge   bool   `json:"purge,omitempty"`
+type BotForgetParams struct {
+	BotID string `json:"bot_id"`
+	Purge bool   `json:"purge,omitempty"`
 }
 
-type PAgentPrimaryParams struct {
-	AgentID string `json:"agent_id,omitempty"`
+type BotPrimaryParams struct {
+	BotID string `json:"bot_id,omitempty"`
 }
 
-// PAgentInfo describes a registered agent. Status is needs_you, waiting,
+// BotInfo describes a registered bot. Status is needs_you, waiting,
 // working or idle.
-type PAgentInfo struct {
+type BotInfo struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Dir         string `json:"dir"`
@@ -1623,33 +1623,33 @@ type PAgentInfo struct {
 	NodeID      string `json:"node_id,omitempty"`
 	NodeLabel   string `json:"node_label,omitempty"`
 	// Settings are notify, proactivity and memory_mode as they apply.
-	Settings map[string]PAgentSetting `json:"settings,omitempty"`
+	Settings map[string]BotSetting `json:"settings,omitempty"`
 }
 
-// PAgentSendParams sends Text to a chat thread of the agent: ThreadID when
+// BotSendParams sends Text to a chat thread of the bot: ThreadID when
 // set, else a new thread when New, else the most recently active chat thread
 // (or a new one).
-type PAgentSendParams struct {
-	AgentID  string `json:"agent_id"`
+type BotSendParams struct {
+	BotID    string `json:"bot_id"`
 	ThreadID string `json:"thread_id,omitempty"`
 	Text     string `json:"text"`
 	New      bool   `json:"new,omitempty"`
 }
 
-type PAgentSendResult struct {
+type BotSendResult struct {
 	ThreadID  string `json:"thread_id"`
 	SessionID string `json:"session_id"`
 }
 
-type PAgentThreadsResult struct {
-	Threads []PAgentThreadInfo `json:"threads"`
+type BotThreadsResult struct {
+	Threads []BotThreadInfo `json:"threads"`
 }
 
-// PAgentThreadInfo describes a thread. SessionID and SessionStatus name its
+// BotThreadInfo describes a thread. SessionID and SessionStatus name its
 // live session, when it has one.
-type PAgentThreadInfo struct {
+type BotThreadInfo struct {
 	ID            string    `json:"id"`
-	AgentID       string    `json:"agent_id"`
+	BotID         string    `json:"bot_id"`
 	Kind          string    `json:"kind"`
 	StartedBy     string    `json:"started_by"`
 	Title         string    `json:"title"`
@@ -1660,30 +1660,30 @@ type PAgentThreadInfo struct {
 	SessionStatus string    `json:"session_status,omitempty"`
 }
 
-// PAgentMarkReadParams marks a thread read up to Position, a time in Unix
+// BotMarkReadParams marks a thread read up to Position, a time in Unix
 // nanoseconds (a thread's LastActiveAt); zero means now.
-type PAgentMarkReadParams struct {
+type BotMarkReadParams struct {
 	ThreadID string `json:"thread_id"`
 	Position int64  `json:"position,omitempty"`
 }
 
-type PAgentTimelineParams struct {
+type BotTimelineParams struct {
 	ThreadID string `json:"thread_id"`
 }
 
-// PAgentTimeline is a thread's session transcripts in order with Argus's
+// BotTimeline is a thread's session transcripts in order with Argus's
 // events spliced in. Sessions lists the thread's sessions; StartIndex is where
 // each one's entries begin in Entries.
-type PAgentTimeline struct {
-	ThreadID string                  `json:"thread_id"`
-	Entries  []transcript.Entry      `json:"entries"`
-	Sessions []PAgentTimelineSession `json:"sessions"`
+type BotTimeline struct {
+	ThreadID string               `json:"thread_id"`
+	Entries  []transcript.Entry   `json:"entries"`
+	Sessions []BotTimelineSession `json:"sessions"`
 }
 
-// PAgentTimelineSession is one session of a thread. Entries read from its
+// BotTimelineSession is one session of a thread. Entries read from its
 // transcript have ids prefixed "s<index>:", index into Sessions; CLI and
 // TranscriptPath address that transcript for tool details.
-type PAgentTimelineSession struct {
+type BotTimelineSession struct {
 	SessionID      string `json:"session_id"`
 	StartIndex     int    `json:"start_index"`
 	Live           bool   `json:"live,omitempty"`
@@ -1692,10 +1692,10 @@ type PAgentTimelineSession struct {
 	TranscriptPath string `json:"transcript_path,omitempty"`
 }
 
-// PAgentMemoryOp is one memory edit. Action is add, update or remove; File is
+// BotMemoryOp is one memory edit. Action is add, update or remove; File is
 // MEMORY.md (when empty), USER.md, PROFILE.md or topics/<name>.md; Match is a
 // substring of the entry an update or remove targets.
-type PAgentMemoryOp struct {
+type BotMemoryOp struct {
 	Action string `json:"action"`
 	File   string `json:"file,omitempty"`
 	Match  string `json:"match,omitempty"`
@@ -1703,9 +1703,9 @@ type PAgentMemoryOp struct {
 	Until  string `json:"until,omitempty"`
 }
 
-// PAgentMemoryShowResult holds the agent's memory files. Usage is the size of
+// BotMemoryShowResult holds the bot's memory files. Usage is the size of
 // MEMORY.md in bytes and Budget its limit.
-type PAgentMemoryShowResult struct {
+type BotMemoryShowResult struct {
 	Memory  string   `json:"memory"`
 	User    string   `json:"user"`
 	Profile string   `json:"profile"`
@@ -1714,17 +1714,17 @@ type PAgentMemoryShowResult struct {
 	Budget  int64    `json:"budget"`
 }
 
-// PAgentMemoryLogParams lists memory commits, newest first; Profile lists the
+// BotMemoryLogParams lists memory commits, newest first; Profile lists the
 // shared profile's commits instead. Limit 0 means all.
-type PAgentMemoryLogParams struct {
-	AgentID string `json:"agent_id"`
+type BotMemoryLogParams struct {
+	BotID   string `json:"bot_id"`
 	Limit   int    `json:"limit,omitempty"`
 	Profile bool   `json:"profile,omitempty"`
 }
 
-// PAgentMemoryCommit is one memory change. Source is capture, agent, tidy,
+// BotMemoryCommit is one memory change. Source is capture, bot, tidy,
 // you or run.
-type PAgentMemoryCommit struct {
+type BotMemoryCommit struct {
 	Hash     string    `json:"hash"`
 	Subject  string    `json:"subject"`
 	Source   string    `json:"source,omitempty"`
@@ -1732,66 +1732,66 @@ type PAgentMemoryCommit struct {
 	When     time.Time `json:"when"`
 }
 
-type PAgentMemoryLogResult struct {
-	Commits []PAgentMemoryCommit `json:"commits"`
+type BotMemoryLogResult struct {
+	Commits []BotMemoryCommit `json:"commits"`
 }
 
-// PAgentMemoryUndoParams reverts Commit (a full hash or unique prefix) of the
-// agent's memory, or of the shared profile when Profile is set. ThreadID, when
-// set, is the agent's thread the undo was asked from: it gets a memory.undone
+// BotMemoryUndoParams reverts Commit (a full hash or unique prefix) of the
+// bot's memory, or of the shared profile when Profile is set. ThreadID, when
+// set, is the bot's thread the undo was asked from: it gets a memory.undone
 // event.
-type PAgentMemoryUndoParams struct {
-	AgentID  string `json:"agent_id"`
+type BotMemoryUndoParams struct {
+	BotID    string `json:"bot_id"`
 	Commit   string `json:"commit"`
 	Profile  bool   `json:"profile,omitempty"`
 	ThreadID string `json:"thread_id,omitempty"`
 }
 
-type PAgentMemoryUndoResult struct {
+type BotMemoryUndoResult struct {
 	Commit string `json:"commit"`
 }
 
-// PAgentMemoryImportParams carries memory exported from another assistant.
+// BotMemoryImportParams carries memory exported from another assistant.
 // What the extractor finds is staged for review, whatever the memory mode.
-type PAgentMemoryImportParams struct {
-	AgentID string `json:"agent_id"`
+type BotMemoryImportParams struct {
+	BotID   string `json:"bot_id"`
 	Content string `json:"content"`
 }
 
-// PAgentMemoryImportResult reports how many changes were staged.
-type PAgentMemoryImportResult struct {
+// BotMemoryImportResult reports how many changes were staged.
+type BotMemoryImportResult struct {
 	Staged int `json:"staged"`
 }
 
-type PAgentMemoryProposalsResult struct {
-	Proposals []PAgentMemoryProposal `json:"proposals"`
+type BotMemoryProposalsResult struct {
+	Proposals []BotMemoryProposal `json:"proposals"`
 }
 
-// PAgentMemoryProposal is a staged change awaiting accept or reject. Log is a
+// BotMemoryProposal is a staged change awaiting accept or reject. Log is a
 // work-log line written on accept.
-type PAgentMemoryProposal struct {
-	ID        string           `json:"id"`
-	AgentID   string           `json:"agent_id"`
-	ThreadID  string           `json:"thread_id,omitempty"`
-	Source    string           `json:"source"`
-	Kind      string           `json:"kind,omitempty"`    // "instructions" for an instruction rewrite, "routine" for a routine file
-	Slug      string           `json:"slug,omitempty"`    // the routine of a "routine" proposal
-	Summary   string           `json:"summary,omitempty"` // a "routine" proposal in words, e.g. "change goal billing: outcome, verify"
-	Text      string           `json:"text,omitempty"`
-	Reason    string           `json:"reason,omitempty"`
-	Ops       []PAgentMemoryOp `json:"ops"`
-	Log       string           `json:"log,omitempty"`
-	CreatedAt time.Time        `json:"created_at"`
+type BotMemoryProposal struct {
+	ID        string        `json:"id"`
+	BotID     string        `json:"bot_id"`
+	ThreadID  string        `json:"thread_id,omitempty"`
+	Source    string        `json:"source"`
+	Kind      string        `json:"kind,omitempty"`    // "instructions" for an instruction rewrite, "routine" for a routine file
+	Slug      string        `json:"slug,omitempty"`    // the routine of a "routine" proposal
+	Summary   string        `json:"summary,omitempty"` // a "routine" proposal in words, e.g. "change goal billing: outcome, verify"
+	Text      string        `json:"text,omitempty"`
+	Reason    string        `json:"reason,omitempty"`
+	Ops       []BotMemoryOp `json:"ops"`
+	Log       string        `json:"log,omitempty"`
+	CreatedAt time.Time     `json:"created_at"`
 }
 
-type PAgentMemoryDecideParams struct {
+type BotMemoryDecideParams struct {
 	ProposalID string `json:"proposal_id"`
 	Accept     bool   `json:"accept"`
 }
 
-// PAgentMemoryDecideResult reports an accept: the commit(s) made, how many
+// BotMemoryDecideResult reports an accept: the commit(s) made, how many
 // ops applied, and why the others were rejected against the current files.
-type PAgentMemoryDecideResult struct {
+type BotMemoryDecideResult struct {
 	Commit        string   `json:"commit,omitempty"`
 	ProfileCommit string   `json:"profile_commit,omitempty"`
 	Applied       int      `json:"applied"`

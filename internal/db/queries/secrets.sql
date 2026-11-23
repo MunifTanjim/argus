@@ -1,18 +1,18 @@
--- name: UpsertPAgentSecret :exec
-INSERT INTO pagent_secret (agent_id, name, description, value_enc, updated_at)
+-- name: UpsertBotSecret :exec
+INSERT INTO bot_secret (bot_id, name, description, value_enc, updated_at)
 VALUES (?, ?, ?, ?, ?)
-ON CONFLICT (agent_id, name) DO UPDATE SET
+ON CONFLICT (bot_id, name) DO UPDATE SET
     description = excluded.description,
     value_enc = excluded.value_enc,
     updated_at = excluded.updated_at;
 
--- name: ListPAgentSecrets :many
-SELECT agent_id, name, description, value_enc, updated_at
-FROM pagent_secret WHERE agent_id = ?
+-- name: ListBotSecrets :many
+SELECT bot_id, name, description, value_enc, updated_at
+FROM bot_secret WHERE bot_id = ?
 ORDER BY name;
 
--- name: DeletePAgentSecret :execrows
-DELETE FROM pagent_secret WHERE agent_id = ? AND name = ?;
+-- name: DeleteBotSecret :execrows
+DELETE FROM bot_secret WHERE bot_id = ? AND name = ?;
 
--- name: DeletePAgentSecrets :exec
-DELETE FROM pagent_secret WHERE agent_id = ?;
+-- name: DeleteBotSecrets :exec
+DELETE FROM bot_secret WHERE bot_id = ?;

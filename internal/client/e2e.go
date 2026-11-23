@@ -99,14 +99,14 @@ type E2EClient struct {
 	// Per-node session mirror, kept so the client can synthesize the events a node
 	// that went away can no longer send. nodeSessions maps nodeID -> stamped session
 	// id -> the last session seen for it; offlineTimers holds the per-node grace timer.
-	nodeSessions   map[string]map[string]session.Session
-	offlineTimers  map[string]*time.Timer
-	offlineGrace   time.Duration
-	pagentCache    map[string][]api.PAgentInfo // nodeID -> last stamped pagent.list agents
-	pagentPrimary  map[string]pagentPrimary    // nodeID -> last reported primary
-	pagentEpoch    map[string]uint64           // nodeID -> bumped on loseNode, invalidates in-flight lists
-	pagentListHook func(nodeID string)         // test hook: runs after a node's pagent.list returns
-	opening        map[string]chan struct{}    // node id -> closed when its in-flight open finishes
+	nodeSessions  map[string]map[string]session.Session
+	offlineTimers map[string]*time.Timer
+	offlineGrace  time.Duration
+	botCache      map[string][]api.BotInfo // nodeID -> last stamped bot.list bots
+	botPrimary    map[string]botPrimary    // nodeID -> last reported primary
+	botEpoch      map[string]uint64        // nodeID -> bumped on loseNode, invalidates in-flight lists
+	botListHook   func(nodeID string)      // test hook: runs after a node's bot.list returns
+	opening       map[string]chan struct{} // node id -> closed when its in-flight open finishes
 
 	events chan api.Notification
 	kick   chan struct{} // buffered(1); nudges trustSyncLoop from the Peer read loop without blocking it
@@ -161,9 +161,9 @@ func newE2EClientWithGate(conn net.Conn, static e2e.KeyPair, genesisHash []byte,
 		offlineTimers: map[string]*time.Timer{},
 		opening:       map[string]chan struct{}{},
 		offlineGrace:  defaultOfflineGrace,
-		pagentCache:   map[string][]api.PAgentInfo{},
-		pagentPrimary: map[string]pagentPrimary{},
-		pagentEpoch:   map[string]uint64{},
+		botCache:      map[string][]api.BotInfo{},
+		botPrimary:    map[string]botPrimary{},
+		botEpoch:      map[string]uint64{},
 		events:        make(chan api.Notification, 256),
 		kick:          make(chan struct{}, 1),
 		tipMiss:       map[string]*tipMissState{},
@@ -471,13 +471,13 @@ func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
 			} else {
 				m.byNode[nc.nodeID] = nc
 				m.everConnected[string(nc.identityPub)] = true
-				// Agents cached from before are shown unreachable until the
+				// Bots cached from before are shown unreachable until the
 				// next list.
-				_, reopened = m.pagentCache[nc.nodeID]
+				_, reopened = m.botCache[nc.nodeID]
 			}
 			m.mu.Unlock()
 			if reopened {
-				m.notifyPAgentChanged(nc.nodeID)
+				m.notifyBotChanged(nc.nodeID)
 			}
 		}
 		select {
@@ -543,7 +543,7 @@ func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
 			params = stampTasksChanged(params, nc.nodeID)
 		} else if f.Method == api.MethodTerminalChanged {
 			params, _ = json.Marshal(api.TerminalChanged{NodeID: nc.nodeID})
-		} else if f.Method == api.MethodPAgentChanged {
+		} else if f.Method == api.MethodBotChanged {
 			params, _ = json.Marshal(map[string]string{"node_id": nc.nodeID})
 		}
 		select {
@@ -582,17 +582,17 @@ func (m *E2EClient) Call(method string, params, out any) error {
 		return m.fanoutHistoryProjects(raw, out)
 	case method == api.MethodProjectList:
 		return m.fanoutProjects(raw, out)
-	case method == api.MethodPAgentList:
-		return m.fanoutPAgents(raw, out)
-	case method == api.MethodPAgentSetPrimary && pagentIDEmpty(raw):
-		m.unsetPAgentPrimary("")
+	case method == api.MethodBotList:
+		return m.fanoutBots(raw, out)
+	case method == api.MethodBotSetPrimary && botIDEmpty(raw):
+		m.unsetBotPrimary("")
 		return nil
-	case pagentAddressed[method]:
-		return m.routeByPAgent(method, raw, out)
-	case pagentThreadAddressed[method]:
-		return m.routeByPAgentThread(method, raw, out)
-	case method == api.MethodPAgentMemoryDecide:
-		return m.routeByPAgentProposal(method, raw, out)
+	case botAddressed[method]:
+		return m.routeByBot(method, raw, out)
+	case botThreadAddressed[method]:
+		return m.routeByBotThread(method, raw, out)
+	case method == api.MethodBotMemoryDecide:
+		return m.routeByBotProposal(method, raw, out)
 	case method == api.MethodTerminalList:
 		return m.fanoutTerminals(raw, out)
 	case terminalAddressed[method], method == api.MethodTerminalOpen && hasTerminalID(raw):
@@ -1062,19 +1062,19 @@ func (m *E2EClient) routeByNode(method string, raw json.RawMessage, out any) err
 		}
 		return assignRaw(out, res)
 	}
-	if method == api.MethodPAgentCreate {
-		var info api.PAgentInfo
+	if method == api.MethodBotCreate {
+		var info api.BotInfo
 		if err := m.callNode(nodeID, method, raw, &info); err != nil {
 			return err
 		}
-		return assign(out, m.pagentOrigin(info, nodeID))
+		return assign(out, m.botOrigin(info, nodeID))
 	}
-	if method == api.MethodPAgentAdd {
-		var res api.PAgentAddResult
+	if method == api.MethodBotAdd {
+		var res api.BotAddResult
 		if err := m.callNode(nodeID, method, raw, &res); err != nil {
 			return err
 		}
-		res.Agent = m.pagentOrigin(res.Agent, nodeID)
+		res.Bot = m.botOrigin(res.Bot, nodeID)
 		return assign(out, res)
 	}
 	if method == api.MethodSessionsHistorySessions {
@@ -1555,10 +1555,10 @@ func (m *E2EClient) loseNode(nodeID string, gone bool) {
 	}
 	var events []registry.Event
 	sessions := m.nodeSessions[nodeID]
-	m.pagentEpoch[nodeID]++
+	m.botEpoch[nodeID]++
 	if gone {
-		delete(m.pagentCache, nodeID)
-		delete(m.pagentPrimary, nodeID)
+		delete(m.botCache, nodeID)
+		delete(m.botPrimary, nodeID)
 	}
 	if gone {
 		delete(m.nodeSessions, nodeID)
@@ -1577,14 +1577,14 @@ func (m *E2EClient) loseNode(nodeID string, gone bool) {
 	}
 	m.mu.Unlock()
 	m.emitSessionEvents(events)
-	m.notifyPAgentChanged(nodeID)
+	m.notifyBotChanged(nodeID)
 }
 
-// notifyPAgentChanged tells consumers that nodeID's agents changed, without
+// notifyBotChanged tells consumers that nodeID's bots changed, without
 // blocking.
-func (m *E2EClient) notifyPAgentChanged(nodeID string) {
+func (m *E2EClient) notifyBotChanged(nodeID string) {
 	select {
-	case m.events <- api.Notification{Method: api.MethodPAgentChanged, Params: []byte(`{"node_id":` + strconv.Quote(nodeID) + `}`)}:
+	case m.events <- api.Notification{Method: api.MethodBotChanged, Params: []byte(`{"node_id":` + strconv.Quote(nodeID) + `}`)}:
 	default:
 	}
 }

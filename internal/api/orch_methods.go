@@ -50,24 +50,24 @@ const (
 	MethodOrchPeerParentEnded = "orch.peer.parent_ended"
 	// request: OrchPeerStateParams; result: nil. Needs cross_node_orch 2.
 	MethodOrchPeerState = "orch.peer.state"
-	// request: OrchPeerHandoffParams; result: nil. An agent of the sending node
-	// asks an agent of the receiver for work.
+	// request: OrchPeerHandoffParams; result: nil. A bot of the sending node
+	// asks a bot of the receiver for work.
 	MethodOrchPeerHandoff = "orch.peer.handoff"
 	// request: OrchPeerHandoffAnswerParams; result: nil. The answer to a
 	// hand-off the receiver sent.
 	MethodOrchPeerHandoffAnswer = "orch.peer.handoff_answer"
 )
 
-// OrchPeerHandoffParams is a hand-off from an agent of the sending node.
-// Ancestors are the agents up the chain as "node:agent", the asker last.
+// OrchPeerHandoffParams is a hand-off from a bot of the sending node.
+// Ancestors are the bots up the chain as "node:bot", the asker last.
 type OrchPeerHandoffParams struct {
 	HandoffID string          `json:"handoff_id"`
 	RootID    string          `json:"root_id"`
 	Depth     int             `json:"depth"`
 	Ancestors []string        `json:"ancestors"`
-	FromAgent string          `json:"from_agent"`
+	FromBot   string          `json:"from_bot"`
 	FromName  string          `json:"from_name"`
-	ToAgent   string          `json:"to_agent"`
+	ToBot     string          `json:"to_bot"`
 	Request   json.RawMessage `json:"request"`
 }
 

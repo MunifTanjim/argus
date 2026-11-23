@@ -12,11 +12,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/bot"
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/db"
 	"github.com/MunifTanjim/argus/internal/node"
 	"github.com/MunifTanjim/argus/internal/orch"
-	"github.com/MunifTanjim/argus/internal/pagent"
 	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/shell"
 )
@@ -36,7 +36,7 @@ func enableNodeDB(d *node.Node, cfg *config.Config, log *slog.Logger) error {
 		return err
 	}
 	d.SetOrchStore(orch.NewStore(sqlDB, time.Now))
-	d.SetAgentStore(pagent.NewStore(sqlDB, time.Now), cfg.Agents)
+	d.SetBotStore(bot.NewStore(sqlDB, time.Now), cfg.Bots)
 	return nil
 }
 

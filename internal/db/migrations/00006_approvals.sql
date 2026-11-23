@@ -1,9 +1,9 @@
 -- +goose Up
 -- +goose StatementBegin
 
-CREATE TABLE pagent_activity (
+CREATE TABLE bot_activity (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_id   TEXT NOT NULL,
+    bot_id   TEXT NOT NULL,
     thread_id  TEXT NOT NULL DEFAULT '',
     session_id TEXT NOT NULL DEFAULT '',
     started_by TEXT NOT NULL DEFAULT '',
@@ -18,15 +18,15 @@ CREATE TABLE pagent_activity (
     created_at INTEGER NOT NULL
 );
 
-CREATE INDEX pagent_activity_idx_agent_id ON pagent_activity (agent_id, id);
+CREATE INDEX bot_activity_idx_bot_id ON bot_activity (bot_id, id);
 
-CREATE TABLE pagent_secret (
-    agent_id    TEXT NOT NULL,
+CREATE TABLE bot_secret (
+    bot_id    TEXT NOT NULL,
     name        TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     value_enc   BLOB NOT NULL,
     updated_at  INTEGER NOT NULL,
-    PRIMARY KEY (agent_id, name)
+    PRIMARY KEY (bot_id, name)
 );
 
 -- +goose StatementEnd
@@ -34,7 +34,7 @@ CREATE TABLE pagent_secret (
 -- +goose Down
 -- +goose StatementBegin
 
-DROP TABLE pagent_secret;
-DROP TABLE pagent_activity;
+DROP TABLE bot_secret;
+DROP TABLE bot_activity;
 
 -- +goose StatementEnd

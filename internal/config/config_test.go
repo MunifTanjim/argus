@@ -450,10 +450,10 @@ func TestMCPPortFromEnv(t *testing.T) {
 	}
 }
 
-func TestAgentsDefaults(t *testing.T) {
+func TestBotsDefaults(t *testing.T) {
 	isolateConfigDir(t)
-	a := load(t, "").Agents
-	if a.DefaultDir != config.GetDataPath("agents") || a.ProfileDir != config.GetDataPath("profile") || a.SkillsDir != config.GetDataPath("skills") {
+	a := load(t, "").Bots
+	if a.DefaultDir != config.GetDataPath("bots") || a.ProfileDir != config.GetDataPath("profile") || a.SkillsDir != config.GetDataPath("skills") {
 		t.Errorf("dirs = %q %q %q", a.DefaultDir, a.ProfileDir, a.SkillsDir)
 	}
 	if a.Primary != "" {
@@ -489,30 +489,30 @@ func TestAgentsDefaults(t *testing.T) {
 	}
 }
 
-func TestAgentsApprovalsFromFile(t *testing.T) {
+func TestBotsApprovalsFromFile(t *testing.T) {
 	isolateConfigDir(t)
-	a := load(t, writeConfig(t, "agents:\n  execution: never-unattended\n  approvals:\n    unattended-expiry: 5m\n")).Agents
+	a := load(t, writeConfig(t, "bots:\n  execution: never-unattended\n  approvals:\n    unattended-expiry: 5m\n")).Bots
 	if a.Execution != "never-unattended" || a.Approvals.UnattendedExpiry != 5*time.Minute {
 		t.Errorf("approvals = %q %v", a.Execution, a.Approvals.UnattendedExpiry)
 	}
 	for key, body := range map[string]string{
-		"agents.execution":                   "execution: sometimes",
-		"agents.approvals.unattended-expiry": "approvals:\n    unattended-expiry: soon",
+		"bots.execution":                   "execution: sometimes",
+		"bots.approvals.unattended-expiry": "approvals:\n    unattended-expiry: soon",
 	} {
-		err := load(t, writeConfig(t, "agents:\n  "+body+"\n")).Validate()
+		err := load(t, writeConfig(t, "bots:\n  "+body+"\n")).Validate()
 		if err == nil || !strings.Contains(err.Error(), key) {
 			t.Errorf("%s: Validate = %v", key, err)
 		}
 	}
 }
 
-func TestAgentsApprovalHook(t *testing.T) {
+func TestBotsApprovalHook(t *testing.T) {
 	isolateConfigDir(t)
-	h := load(t, "").Agents.Approvals.Hook
+	h := load(t, "").Bots.Approvals.Hook
 	if h.Command != "" || h.URL != "" || h.Mode != "shadow" || h.Timeout != 5*time.Second {
 		t.Errorf("defaults = %+v", h)
 	}
-	h = load(t, writeConfig(t, "agents:\n  approvals:\n    hook:\n      url: https://policy.example/check\n      mode: fail-closed\n      timeout: 2s\n")).Agents.Approvals.Hook
+	h = load(t, writeConfig(t, "bots:\n  approvals:\n    hook:\n      url: https://policy.example/check\n      mode: fail-closed\n      timeout: 2s\n")).Bots.Approvals.Hook
 	if h.URL != "https://policy.example/check" || h.Mode != "fail-closed" || h.Timeout != 2*time.Second {
 		t.Errorf("file = %+v", h)
 	}
@@ -522,20 +522,20 @@ func TestAgentsApprovalHook(t *testing.T) {
 		"http":    "url: http://policy.example/check",
 		"timeout": "timeout: soon",
 	} {
-		if err := load(t, writeConfig(t, "agents:\n  approvals:\n    hook:\n      "+body+"\n")).Validate(); err == nil || !strings.Contains(err.Error(), "agents.approvals.hook") {
+		if err := load(t, writeConfig(t, "bots:\n  approvals:\n    hook:\n      "+body+"\n")).Validate(); err == nil || !strings.Contains(err.Error(), "bots.approvals.hook") {
 			t.Errorf("%s: Validate = %v", name, err)
 		}
 	}
-	if err := load(t, writeConfig(t, "agents:\n  approvals:\n    hook:\n      url: http://127.0.0.1:9/check\n")).Validate(); err != nil {
+	if err := load(t, writeConfig(t, "bots:\n  approvals:\n    hook:\n      url: http://127.0.0.1:9/check\n")).Validate(); err != nil {
 		t.Errorf("loopback http: %v", err)
 	}
 }
 
-func TestAgentsFromFile(t *testing.T) {
+func TestBotsFromFile(t *testing.T) {
 	isolateConfigDir(t)
 	path := writeConfig(t, `
-agents:
-  default-dir: ~/agents
+bots:
+  default-dir: ~/bots
   primary: ada
   defaults:
     agent: codex
@@ -565,10 +565,10 @@ agents:
       catch-up-window: 1d
       pause-after-away: 2d
 `)
-	a := load(t, path).Agents
+	a := load(t, path).Bots
 	home, _ := os.UserHomeDir()
-	if a.DefaultDir != filepath.Join(home, "agents") || a.Primary != "ada" {
-		t.Errorf("agents = %+v", a)
+	if a.DefaultDir != filepath.Join(home, "bots") || a.Primary != "ada" {
+		t.Errorf("bots = %+v", a)
 	}
 	d := a.Defaults
 	if d.Agent != "codex" || d.Model != "opus" || d.IdleClose != 5*time.Minute || d.MaxConcurrentSessions != 4 {
@@ -589,7 +589,7 @@ agents:
 	}
 }
 
-func TestAgentsInvalidGitMode(t *testing.T) {
+func TestBotsInvalidGitMode(t *testing.T) {
 	isolateConfigDir(t)
 	for key, body := range map[string]string{
 		"git.mode":    "git:\n      mode: sideways",
@@ -598,7 +598,7 @@ func TestAgentsInvalidGitMode(t *testing.T) {
 		"proactivity": "proactivity: extreme",
 		"core-budget": "memory:\n      core-budget: lots",
 	} {
-		c := load(t, writeConfig(t, "agents:\n  defaults:\n    "+body+"\n"))
+		c := load(t, writeConfig(t, "bots:\n  defaults:\n    "+body+"\n"))
 		err := c.Validate()
 		if err == nil || !strings.Contains(err.Error(), key) {
 			t.Errorf("%s: Validate = %v", key, err)
@@ -606,21 +606,21 @@ func TestAgentsInvalidGitMode(t *testing.T) {
 	}
 }
 
-func TestAgentNotifySettings(t *testing.T) {
+func TestBotNotifySettings(t *testing.T) {
 	v := viper.New()
 	if err := config.Load(v, "", true); err != nil {
 		t.Fatal(err)
 	}
 	c := config.FromViper(v)
-	if c.Agents.Defaults.NotifyDelay != 3*time.Minute {
-		t.Errorf("notify-delay = %s", c.Agents.Defaults.NotifyDelay)
+	if c.Bots.Defaults.NotifyDelay != 3*time.Minute {
+		t.Errorf("notify-delay = %s", c.Bots.Defaults.NotifyDelay)
 	}
 	for spec, ok := range map[string]bool{"22:00-07:00": true, "09:00-17:30": true, "22:00": false, "25:00-07:00": false, "08:00-08:00": false} {
 		if _, _, err := config.ParseQuietHours(spec); (err == nil) != ok {
 			t.Errorf("ParseQuietHours(%q) err = %v", spec, err)
 		}
 	}
-	c.Agents.Defaults.QuietHours = "late"
+	c.Bots.Defaults.QuietHours = "late"
 	if err := c.Validate(); err == nil {
 		t.Error("bad quiet-hours accepted")
 	}

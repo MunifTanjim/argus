@@ -17,11 +17,11 @@ func newRoutineCmd() *cobra.Command { return routineCmd(localCallerFor) }
 func routineCmd(dial callerFor) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "routine",
-		Short: "Inspect and run agents' routines and goals",
-		Long: `Inspect and run agents' routines and goals.
+		Short: "Inspect and run bots' routines and goals",
+		Long: `Inspect and run bots' routines and goals.
 
-Routines live in files under an agent's routines/ folder; edit those to change
-them. A routine is named <agent>/<slug>, for example scout/inbox.`,
+Routines live in files under a bot's routines/ folder; edit those to change
+them. A routine is named <bot>/<slug>, for example scout/inbox.`,
 		SilenceUsage: true,
 	}
 	cmd.AddCommand(
@@ -31,13 +31,13 @@ them. A routine is named <agent>/<slug>, for example scout/inbox.`,
 	return cmd
 }
 
-// resolveRoutine splits "<agent>/<slug>" and resolves the agent.
-func resolveRoutine(call caller, ref string) (api.PAgentInfo, string, error) {
+// resolveRoutine splits "<bot>/<slug>" and resolves the bot.
+func resolveRoutine(call caller, ref string) (api.BotInfo, string, error) {
 	i := strings.LastIndex(ref, "/")
 	if i <= 0 || i == len(ref)-1 {
-		return api.PAgentInfo{}, "", fmt.Errorf("name a routine as <agent>/<slug>, got %q", ref)
+		return api.BotInfo{}, "", fmt.Errorf("name a routine as <bot>/<slug>, got %q", ref)
 	}
-	a, err := resolveAgent(call, ref[:i])
+	a, err := resolveBot(call, ref[:i])
 	return a, ref[i+1:], err
 }
 
@@ -61,7 +61,7 @@ func usedText(used, limit float64, money bool) string {
 	return f(used) + "/" + f(limit)
 }
 
-func routineState(r api.PAgentRoutineInfo) string {
+func routineState(r api.BotRoutineInfo) string {
 	if r.State == "paused" && r.PausedReason != "" {
 		return "paused (" + r.PausedReason + ")"
 	}
@@ -69,32 +69,32 @@ func routineState(r api.PAgentRoutineInfo) string {
 }
 
 func routineList(dial callerFor) *cobra.Command {
-	return sessionSub(dial, "list [agent]", "List routines",
+	return sessionSub(dial, "list [bot]", "List routines",
 		"  argus routine list\n  argus routine list scout", cobra.MaximumNArgs(1), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			var agents []api.PAgentInfo
+			var bots []api.BotInfo
 			if len(args) == 1 {
-				a, err := resolveAgent(call, args[0])
+				a, err := resolveBot(call, args[0])
 				if err != nil {
 					return err
 				}
-				agents = []api.PAgentInfo{a}
+				bots = []api.BotInfo{a}
 			} else {
-				var res api.PAgentListResult
-				if err := call(api.MethodPAgentList, api.PAgentListParams{}, &res); err != nil {
+				var res api.BotListResult
+				if err := call(api.MethodBotList, api.BotListParams{}, &res); err != nil {
 					return err
 				}
-				for _, a := range res.Agents {
+				for _, a := range res.Bots {
 					if a.Status != "unreachable" {
-						agents = append(agents, a)
+						bots = append(bots, a)
 					}
 				}
 			}
-			all := api.PAgentRoutineListResult{Routines: []api.PAgentRoutineInfo{}}
+			all := api.BotRoutineListResult{Routines: []api.BotRoutineInfo{}}
 			var rows [][]string
-			for _, a := range agents {
-				var res api.PAgentRoutineListResult
-				if err := call(api.MethodPAgentRoutineList, api.PAgentRef{AgentID: a.ID}, &res); err != nil {
+			for _, a := range bots {
+				var res api.BotRoutineListResult
+				if err := call(api.MethodBotRoutineList, api.BotRef{BotID: a.ID}, &res); err != nil {
 					return fmt.Errorf("%s: %w", a.Name, err)
 				}
 				all.Routines = append(all.Routines, res.Routines...)
@@ -114,24 +114,24 @@ func routineList(dial callerFor) *cobra.Command {
 		})
 }
 
-func findRoutine(call caller, ref string) (api.PAgentInfo, api.PAgentRoutineInfo, error) {
+func findRoutine(call caller, ref string) (api.BotInfo, api.BotRoutineInfo, error) {
 	a, slug, err := resolveRoutine(call, ref)
 	if err != nil {
-		return a, api.PAgentRoutineInfo{}, err
+		return a, api.BotRoutineInfo{}, err
 	}
-	var res api.PAgentRoutineListResult
-	if err := call(api.MethodPAgentRoutineList, api.PAgentRef{AgentID: a.ID}, &res); err != nil {
-		return a, api.PAgentRoutineInfo{}, err
+	var res api.BotRoutineListResult
+	if err := call(api.MethodBotRoutineList, api.BotRef{BotID: a.ID}, &res); err != nil {
+		return a, api.BotRoutineInfo{}, err
 	}
 	for _, r := range res.Routines {
 		if r.Slug == slug {
 			return a, r, nil
 		}
 	}
-	return a, api.PAgentRoutineInfo{}, fmt.Errorf("unknown routine %q", ref)
+	return a, api.BotRoutineInfo{}, fmt.Errorf("unknown routine %q", ref)
 }
 
-func routineFields(r api.PAgentRoutineInfo) [][2]string {
+func routineFields(r api.BotRoutineInfo) [][2]string {
 	last := r.LastResult
 	if r.ConsecutiveFailures > 0 {
 		last += fmt.Sprintf(" (%d failures in a row)", r.ConsecutiveFailures)
@@ -148,7 +148,7 @@ func routineFields(r api.PAgentRoutineInfo) [][2]string {
 }
 
 func routineShow(dial callerFor) *cobra.Command {
-	return sessionSub(dial, "show <agent>/<slug>", "Show a routine",
+	return sessionSub(dial, "show <bot>/<slug>", "Show a routine",
 		"  argus routine show scout/inbox", cobra.ExactArgs(1), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
 			_, r, err := findRoutine(call, args[0])
@@ -164,15 +164,15 @@ func routineShow(dial callerFor) *cobra.Command {
 }
 
 func routineRun(dial callerFor) *cobra.Command {
-	return sessionSub(dial, "run <agent>/<slug>", "Run a routine now, as a test run",
+	return sessionSub(dial, "run <bot>/<slug>", "Run a routine now, as a test run",
 		"  argus routine run scout/inbox", cobra.ExactArgs(1), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
 			a, slug, err := resolveRoutine(call, args[0])
 			if err != nil {
 				return err
 			}
-			var res api.PAgentRoutineRunResult
-			if err := call(api.MethodPAgentRoutineRun, api.PAgentRoutineRef{AgentID: a.ID, Slug: slug}, &res); err != nil {
+			var res api.BotRoutineRunResult
+			if err := call(api.MethodBotRoutineRun, api.BotRoutineRef{BotID: a.ID, Slug: slug}, &res); err != nil {
 				return err
 			}
 			if asJSON {
@@ -184,15 +184,15 @@ func routineRun(dial callerFor) *cobra.Command {
 }
 
 func routineToggle(dial callerFor, use, short, method, done string) *cobra.Command {
-	return sessionSub(dial, use+" <agent>/<slug>", short,
+	return sessionSub(dial, use+" <bot>/<slug>", short,
 		"  argus routine "+use+" scout/inbox", cobra.ExactArgs(1), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
 			a, slug, err := resolveRoutine(call, args[0])
 			if err != nil {
 				return err
 			}
-			var res api.PAgentRoutineInfo
-			if err := call(method, api.PAgentRoutineRef{AgentID: a.ID, Slug: slug}, &res); err != nil {
+			var res api.BotRoutineInfo
+			if err := call(method, api.BotRoutineRef{BotID: a.ID, Slug: slug}, &res); err != nil {
 				return err
 			}
 			if asJSON {
@@ -204,16 +204,16 @@ func routineToggle(dial callerFor, use, short, method, done string) *cobra.Comma
 }
 
 func routinePause(dial callerFor) *cobra.Command {
-	return routineToggle(dial, "pause", "Pause a routine without editing its file", api.MethodPAgentRoutinePause, "paused")
+	return routineToggle(dial, "pause", "Pause a routine without editing its file", api.MethodBotRoutinePause, "paused")
 }
 
 func routineResume(dial callerFor) *cobra.Command {
-	return routineToggle(dial, "resume", "Resume a paused routine from now", api.MethodPAgentRoutineResume, "resumed")
+	return routineToggle(dial, "resume", "Resume a paused routine from now", api.MethodBotRoutineResume, "resumed")
 }
 
 func routineRuns(dial callerFor) *cobra.Command {
 	var limit int
-	return sessionSub(dial, "runs <agent>/<slug>", "List a routine's runs, newest first",
+	return sessionSub(dial, "runs <bot>/<slug>", "List a routine's runs, newest first",
 		"  argus routine runs scout/inbox --limit 5", cobra.ExactArgs(1),
 		func(cmd *cobra.Command) { cmd.Flags().IntVar(&limit, "limit", 20, "number of runs to list") },
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
@@ -221,8 +221,8 @@ func routineRuns(dial callerFor) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var res api.PAgentRoutineRunsResult
-			if err := call(api.MethodPAgentRoutineRuns, api.PAgentRoutineRunsParams{AgentID: a.ID, Slug: slug, Limit: limit}, &res); err != nil {
+			var res api.BotRoutineRunsResult
+			if err := call(api.MethodBotRoutineRuns, api.BotRoutineRunsParams{BotID: a.ID, Slug: slug, Limit: limit}, &res); err != nil {
 				return err
 			}
 			if asJSON {
@@ -247,15 +247,15 @@ func routineRuns(dial callerFor) *cobra.Command {
 }
 
 func routineHookSecret(dial callerFor) *cobra.Command {
-	return sessionSub(dial, "hook-secret <agent>/<slug>", "Make a new webhook secret for a routine and print it",
+	return sessionSub(dial, "hook-secret <bot>/<slug>", "Make a new webhook secret for a routine and print it",
 		"  argus routine hook-secret scout/alerts", cobra.ExactArgs(1), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
 			a, slug, err := resolveRoutine(call, args[0])
 			if err != nil {
 				return err
 			}
-			var res api.PAgentRoutineHookSecretResult
-			if err := call(api.MethodPAgentRoutineHookSecret, api.PAgentRoutineRef{AgentID: a.ID, Slug: slug}, &res); err != nil {
+			var res api.BotRoutineHookSecretResult
+			if err := call(api.MethodBotRoutineHookSecret, api.BotRoutineRef{BotID: a.ID, Slug: slug}, &res); err != nil {
 				return err
 			}
 			if asJSON {
@@ -264,7 +264,7 @@ func routineHookSecret(dial callerFor) *cobra.Command {
 			shell.StdOutF("secret: %s\n", res.Secret)
 			shell.StdOutF("path:   %s\n", res.Path)
 			if res.Listen == "" {
-				shell.StdOutF("webhooks are off on this node; set agents.webhook.listen-addr to accept them\n")
+				shell.StdOutF("webhooks are off on this node; set bots.webhook.listen-addr to accept them\n")
 			} else {
 				shell.StdOutF("listen: %s\n", res.Listen)
 			}

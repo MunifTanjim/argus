@@ -63,7 +63,7 @@ func (cs *connSubs) closeAll() {
 // the connection's Notifier (the *Peer). Called from OnConnect.
 func (d *Node) registerConn(n api.Notifier) *connSubs {
 	cs := newConnSubs()
-	cs.opened = d.pagentNow()
+	cs.opened = d.botNow()
 	d.subsMu.Lock()
 	d.conns[n] = cs
 	d.subsMu.Unlock()
@@ -96,7 +96,7 @@ func (d *Node) getOrCreateConnSubs(ctx context.Context, n api.Notifier) *connSub
 	cs, ok := d.conns[n]
 	if !ok {
 		cs = newConnSubs()
-		cs.opened = d.pagentNow()
+		cs.opened = d.botNow()
 		d.conns[n] = cs
 	}
 	d.subsMu.Unlock()

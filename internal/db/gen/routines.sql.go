@@ -9,29 +9,29 @@ import (
 	"context"
 )
 
-const activePAgentRoutineRuns = `-- name: ActivePAgentRoutineRuns :many
-SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM pagent_routine_run
-WHERE agent_id = ? AND slug = ? AND state IN ('claimed', 'running', 'queued')
+const activeBotRoutineRuns = `-- name: ActiveBotRoutineRuns :many
+SELECT id, bot_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM bot_routine_run
+WHERE bot_id = ? AND slug = ? AND state IN ('claimed', 'running', 'queued')
 ORDER BY started_at, id
 `
 
-type ActivePAgentRoutineRunsParams struct {
-	AgentID string
-	Slug    string
+type ActiveBotRoutineRunsParams struct {
+	BotID string
+	Slug  string
 }
 
-func (q *Queries) ActivePAgentRoutineRuns(ctx context.Context, arg ActivePAgentRoutineRunsParams) ([]PagentRoutineRun, error) {
-	rows, err := q.db.QueryContext(ctx, activePAgentRoutineRuns, arg.AgentID, arg.Slug)
+func (q *Queries) ActiveBotRoutineRuns(ctx context.Context, arg ActiveBotRoutineRunsParams) ([]BotRoutineRun, error) {
+	rows, err := q.db.QueryContext(ctx, activeBotRoutineRuns, arg.BotID, arg.Slug)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []PagentRoutineRun{}
+	items := []BotRoutineRun{}
 	for rows.Next() {
-		var i PagentRoutineRun
+		var i BotRoutineRun
 		if err := rows.Scan(
 			&i.ID,
-			&i.AgentID,
+			&i.BotID,
 			&i.Slug,
 			&i.Occurrence,
 			&i.StartedBy,
@@ -65,103 +65,50 @@ func (q *Queries) ActivePAgentRoutineRuns(ctx context.Context, arg ActivePAgentR
 	return items, nil
 }
 
-const advancePAgentRoutineNextDue = `-- name: AdvancePAgentRoutineNextDue :exec
-UPDATE pagent_routine_state SET next_due_at = ?, updated_at = ? WHERE agent_id = ? AND slug = ?
+const advanceBotRoutineNextDue = `-- name: AdvanceBotRoutineNextDue :exec
+UPDATE bot_routine_state SET next_due_at = ?, updated_at = ? WHERE bot_id = ? AND slug = ?
 `
 
-type AdvancePAgentRoutineNextDueParams struct {
+type AdvanceBotRoutineNextDueParams struct {
 	NextDueAt int64
 	UpdatedAt int64
-	AgentID   string
+	BotID     string
 	Slug      string
 }
 
-func (q *Queries) AdvancePAgentRoutineNextDue(ctx context.Context, arg AdvancePAgentRoutineNextDueParams) error {
-	_, err := q.db.ExecContext(ctx, advancePAgentRoutineNextDue,
+func (q *Queries) AdvanceBotRoutineNextDue(ctx context.Context, arg AdvanceBotRoutineNextDueParams) error {
+	_, err := q.db.ExecContext(ctx, advanceBotRoutineNextDue,
 		arg.NextDueAt,
 		arg.UpdatedAt,
-		arg.AgentID,
+		arg.BotID,
 		arg.Slug,
 	)
 	return err
 }
 
-const countPAgentRoutineRunsSince = `-- name: CountPAgentRoutineRunsSince :one
-SELECT COUNT(*) FROM pagent_routine_run
-WHERE agent_id = ? AND started_at >= ? AND test = 0 AND state NOT IN ('skipped', 'missed')
-`
-
-type CountPAgentRoutineRunsSinceParams struct {
-	AgentID   string
-	StartedAt int64
-}
-
-func (q *Queries) CountPAgentRoutineRunsSince(ctx context.Context, arg CountPAgentRoutineRunsSinceParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countPAgentRoutineRunsSince, arg.AgentID, arg.StartedAt)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const deletePAgentRoutineRuns = `-- name: DeletePAgentRoutineRuns :exec
-DELETE FROM pagent_routine_run WHERE agent_id = ?
-`
-
-func (q *Queries) DeletePAgentRoutineRuns(ctx context.Context, agentID string) error {
-	_, err := q.db.ExecContext(ctx, deletePAgentRoutineRuns, agentID)
-	return err
-}
-
-const deletePAgentRoutineState = `-- name: DeletePAgentRoutineState :exec
-DELETE FROM pagent_routine_state WHERE agent_id = ? AND slug = ?
-`
-
-type DeletePAgentRoutineStateParams struct {
-	AgentID string
-	Slug    string
-}
-
-func (q *Queries) DeletePAgentRoutineState(ctx context.Context, arg DeletePAgentRoutineStateParams) error {
-	_, err := q.db.ExecContext(ctx, deletePAgentRoutineState, arg.AgentID, arg.Slug)
-	return err
-}
-
-const deletePAgentRoutineStates = `-- name: DeletePAgentRoutineStates :exec
-DELETE FROM pagent_routine_state WHERE agent_id = ?
-`
-
-func (q *Queries) DeletePAgentRoutineStates(ctx context.Context, agentID string) error {
-	_, err := q.db.ExecContext(ctx, deletePAgentRoutineStates, agentID)
-	return err
-}
-
-const deletePAgentWebhookSecrets = `-- name: DeletePAgentWebhookSecrets :exec
-DELETE FROM pagent_webhook_secret WHERE agent_id = ?
-`
-
-func (q *Queries) DeletePAgentWebhookSecrets(ctx context.Context, agentID string) error {
-	_, err := q.db.ExecContext(ctx, deletePAgentWebhookSecrets, agentID)
-	return err
-}
-
-const expiredPAgentRoutineRuns = `-- name: ExpiredPAgentRoutineRuns :many
-SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM pagent_routine_run
-WHERE state IN ('claimed', 'running') AND lease_until > 0 AND lease_until < ?
+const botRoutineRunsByBotSince = `-- name: BotRoutineRunsByBotSince :many
+SELECT id, bot_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM bot_routine_run
+WHERE bot_id = ?1 AND started_at >= ?2
 ORDER BY started_at, id
 `
 
-func (q *Queries) ExpiredPAgentRoutineRuns(ctx context.Context, leaseUntil int64) ([]PagentRoutineRun, error) {
-	rows, err := q.db.QueryContext(ctx, expiredPAgentRoutineRuns, leaseUntil)
+type BotRoutineRunsByBotSinceParams struct {
+	BotID     string
+	StartedAt int64
+}
+
+func (q *Queries) BotRoutineRunsByBotSince(ctx context.Context, arg BotRoutineRunsByBotSinceParams) ([]BotRoutineRun, error) {
+	rows, err := q.db.QueryContext(ctx, botRoutineRunsByBotSince, arg.BotID, arg.StartedAt)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []PagentRoutineRun{}
+	items := []BotRoutineRun{}
 	for rows.Next() {
-		var i PagentRoutineRun
+		var i BotRoutineRun
 		if err := rows.Scan(
 			&i.ID,
-			&i.AgentID,
+			&i.BotID,
 			&i.Slug,
 			&i.Occurrence,
 			&i.StartedBy,
@@ -195,16 +142,182 @@ func (q *Queries) ExpiredPAgentRoutineRuns(ctx context.Context, leaseUntil int64
 	return items, nil
 }
 
-const getPAgentRoutineRun = `-- name: GetPAgentRoutineRun :one
-SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM pagent_routine_run WHERE id = ?
+const botRoutineRunsSince = `-- name: BotRoutineRunsSince :many
+SELECT id, bot_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM bot_routine_run
+WHERE bot_id = ? AND slug = ? AND started_at >= ?
+ORDER BY started_at, id
 `
 
-func (q *Queries) GetPAgentRoutineRun(ctx context.Context, id string) (PagentRoutineRun, error) {
-	row := q.db.QueryRowContext(ctx, getPAgentRoutineRun, id)
-	var i PagentRoutineRun
+type BotRoutineRunsSinceParams struct {
+	BotID     string
+	Slug      string
+	StartedAt int64
+}
+
+func (q *Queries) BotRoutineRunsSince(ctx context.Context, arg BotRoutineRunsSinceParams) ([]BotRoutineRun, error) {
+	rows, err := q.db.QueryContext(ctx, botRoutineRunsSince, arg.BotID, arg.Slug, arg.StartedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BotRoutineRun{}
+	for rows.Next() {
+		var i BotRoutineRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.Slug,
+			&i.Occurrence,
+			&i.StartedBy,
+			&i.Test,
+			&i.State,
+			&i.LeaseUntil,
+			&i.ThreadID,
+			&i.Result,
+			&i.Summary,
+			&i.ActionsDone,
+			&i.ActionsPending,
+			&i.Unverified,
+			&i.Sources,
+			&i.Cost,
+			&i.Tokens,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.Error,
+			&i.RetryOf,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countBotRoutineRunsSince = `-- name: CountBotRoutineRunsSince :one
+SELECT COUNT(*) FROM bot_routine_run
+WHERE bot_id = ? AND started_at >= ? AND test = 0 AND state NOT IN ('skipped', 'missed')
+`
+
+type CountBotRoutineRunsSinceParams struct {
+	BotID     string
+	StartedAt int64
+}
+
+func (q *Queries) CountBotRoutineRunsSince(ctx context.Context, arg CountBotRoutineRunsSinceParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countBotRoutineRunsSince, arg.BotID, arg.StartedAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const deleteBotRoutineRuns = `-- name: DeleteBotRoutineRuns :exec
+DELETE FROM bot_routine_run WHERE bot_id = ?
+`
+
+func (q *Queries) DeleteBotRoutineRuns(ctx context.Context, botID string) error {
+	_, err := q.db.ExecContext(ctx, deleteBotRoutineRuns, botID)
+	return err
+}
+
+const deleteBotRoutineState = `-- name: DeleteBotRoutineState :exec
+DELETE FROM bot_routine_state WHERE bot_id = ? AND slug = ?
+`
+
+type DeleteBotRoutineStateParams struct {
+	BotID string
+	Slug  string
+}
+
+func (q *Queries) DeleteBotRoutineState(ctx context.Context, arg DeleteBotRoutineStateParams) error {
+	_, err := q.db.ExecContext(ctx, deleteBotRoutineState, arg.BotID, arg.Slug)
+	return err
+}
+
+const deleteBotRoutineStates = `-- name: DeleteBotRoutineStates :exec
+DELETE FROM bot_routine_state WHERE bot_id = ?
+`
+
+func (q *Queries) DeleteBotRoutineStates(ctx context.Context, botID string) error {
+	_, err := q.db.ExecContext(ctx, deleteBotRoutineStates, botID)
+	return err
+}
+
+const deleteBotWebhookSecrets = `-- name: DeleteBotWebhookSecrets :exec
+DELETE FROM bot_webhook_secret WHERE bot_id = ?
+`
+
+func (q *Queries) DeleteBotWebhookSecrets(ctx context.Context, botID string) error {
+	_, err := q.db.ExecContext(ctx, deleteBotWebhookSecrets, botID)
+	return err
+}
+
+const expiredBotRoutineRuns = `-- name: ExpiredBotRoutineRuns :many
+SELECT id, bot_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM bot_routine_run
+WHERE state IN ('claimed', 'running') AND lease_until > 0 AND lease_until < ?
+ORDER BY started_at, id
+`
+
+func (q *Queries) ExpiredBotRoutineRuns(ctx context.Context, leaseUntil int64) ([]BotRoutineRun, error) {
+	rows, err := q.db.QueryContext(ctx, expiredBotRoutineRuns, leaseUntil)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BotRoutineRun{}
+	for rows.Next() {
+		var i BotRoutineRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.Slug,
+			&i.Occurrence,
+			&i.StartedBy,
+			&i.Test,
+			&i.State,
+			&i.LeaseUntil,
+			&i.ThreadID,
+			&i.Result,
+			&i.Summary,
+			&i.ActionsDone,
+			&i.ActionsPending,
+			&i.Unverified,
+			&i.Sources,
+			&i.Cost,
+			&i.Tokens,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.Error,
+			&i.RetryOf,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getBotRoutineRun = `-- name: GetBotRoutineRun :one
+SELECT id, bot_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM bot_routine_run WHERE id = ?
+`
+
+func (q *Queries) GetBotRoutineRun(ctx context.Context, id string) (BotRoutineRun, error) {
+	row := q.db.QueryRowContext(ctx, getBotRoutineRun, id)
+	var i BotRoutineRun
 	err := row.Scan(
 		&i.ID,
-		&i.AgentID,
+		&i.BotID,
 		&i.Slug,
 		&i.Occurrence,
 		&i.StartedBy,
@@ -228,31 +341,31 @@ func (q *Queries) GetPAgentRoutineRun(ctx context.Context, id string) (PagentRou
 	return i, err
 }
 
-const getPAgentWebhookSecretHash = `-- name: GetPAgentWebhookSecretHash :one
-SELECT secret_hash FROM pagent_webhook_secret WHERE agent_id = ? AND slug = ?
+const getBotWebhookSecretHash = `-- name: GetBotWebhookSecretHash :one
+SELECT secret_hash FROM bot_webhook_secret WHERE bot_id = ? AND slug = ?
 `
 
-type GetPAgentWebhookSecretHashParams struct {
-	AgentID string
-	Slug    string
+type GetBotWebhookSecretHashParams struct {
+	BotID string
+	Slug  string
 }
 
-func (q *Queries) GetPAgentWebhookSecretHash(ctx context.Context, arg GetPAgentWebhookSecretHashParams) (string, error) {
-	row := q.db.QueryRowContext(ctx, getPAgentWebhookSecretHash, arg.AgentID, arg.Slug)
+func (q *Queries) GetBotWebhookSecretHash(ctx context.Context, arg GetBotWebhookSecretHashParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, getBotWebhookSecretHash, arg.BotID, arg.Slug)
 	var secret_hash string
 	err := row.Scan(&secret_hash)
 	return secret_hash, err
 }
 
-const insertPAgentRoutineRun = `-- name: InsertPAgentRoutineRun :execrows
-INSERT INTO pagent_routine_run (id, agent_id, slug, occurrence, started_by, test, state, lease_until, started_at, retry_of)
+const insertBotRoutineRun = `-- name: InsertBotRoutineRun :execrows
+INSERT INTO bot_routine_run (id, bot_id, slug, occurrence, started_by, test, state, lease_until, started_at, retry_of)
 VALUES (?, ?, ?, ?, ?, ?, 'claimed', ?, ?, ?)
-ON CONFLICT (agent_id, slug, occurrence) DO NOTHING
+ON CONFLICT (bot_id, slug, occurrence) DO NOTHING
 `
 
-type InsertPAgentRoutineRunParams struct {
+type InsertBotRoutineRunParams struct {
 	ID         string
-	AgentID    string
+	BotID      string
 	Slug       string
 	Occurrence int64
 	StartedBy  string
@@ -262,10 +375,10 @@ type InsertPAgentRoutineRunParams struct {
 	RetryOf    string
 }
 
-func (q *Queries) InsertPAgentRoutineRun(ctx context.Context, arg InsertPAgentRoutineRunParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, insertPAgentRoutineRun,
+func (q *Queries) InsertBotRoutineRun(ctx context.Context, arg InsertBotRoutineRunParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, insertBotRoutineRun,
 		arg.ID,
-		arg.AgentID,
+		arg.BotID,
 		arg.Slug,
 		arg.Occurrence,
 		arg.StartedBy,
@@ -280,20 +393,20 @@ func (q *Queries) InsertPAgentRoutineRun(ctx context.Context, arg InsertPAgentRo
 	return result.RowsAffected()
 }
 
-const interruptPAgentRoutineRun = `-- name: InterruptPAgentRoutineRun :execrows
-UPDATE pagent_routine_run SET state = 'interrupted', error = ?1, ended_at = ?2
+const interruptBotRoutineRun = `-- name: InterruptBotRoutineRun :execrows
+UPDATE bot_routine_run SET state = 'interrupted', error = ?1, ended_at = ?2
 WHERE id = ?3 AND state IN ('claimed', 'running') AND result = '' AND lease_until < ?4
 `
 
-type InterruptPAgentRoutineRunParams struct {
+type InterruptBotRoutineRunParams struct {
 	Error   string
 	EndedAt int64
 	ID      string
 	Now     int64
 }
 
-func (q *Queries) InterruptPAgentRoutineRun(ctx context.Context, arg InterruptPAgentRoutineRunParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, interruptPAgentRoutineRun,
+func (q *Queries) InterruptBotRoutineRun(ctx context.Context, arg InterruptBotRoutineRunParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, interruptBotRoutineRun,
 		arg.Error,
 		arg.EndedAt,
 		arg.ID,
@@ -305,24 +418,24 @@ func (q *Queries) InterruptPAgentRoutineRun(ctx context.Context, arg InterruptPA
 	return result.RowsAffected()
 }
 
-const lastStartedPAgentRoutineRun = `-- name: LastStartedPAgentRoutineRun :one
-SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM pagent_routine_run
-WHERE agent_id = ? AND slug = ? AND test = 0 AND state NOT IN ('skipped', 'missed', 'queued')
+const lastStartedBotRoutineRun = `-- name: LastStartedBotRoutineRun :one
+SELECT id, bot_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM bot_routine_run
+WHERE bot_id = ? AND slug = ? AND test = 0 AND state NOT IN ('skipped', 'missed', 'queued')
 ORDER BY started_at DESC, id DESC
 LIMIT 1
 `
 
-type LastStartedPAgentRoutineRunParams struct {
-	AgentID string
-	Slug    string
+type LastStartedBotRoutineRunParams struct {
+	BotID string
+	Slug  string
 }
 
-func (q *Queries) LastStartedPAgentRoutineRun(ctx context.Context, arg LastStartedPAgentRoutineRunParams) (PagentRoutineRun, error) {
-	row := q.db.QueryRowContext(ctx, lastStartedPAgentRoutineRun, arg.AgentID, arg.Slug)
-	var i PagentRoutineRun
+func (q *Queries) LastStartedBotRoutineRun(ctx context.Context, arg LastStartedBotRoutineRunParams) (BotRoutineRun, error) {
+	row := q.db.QueryRowContext(ctx, lastStartedBotRoutineRun, arg.BotID, arg.Slug)
+	var i BotRoutineRun
 	err := row.Scan(
 		&i.ID,
-		&i.AgentID,
+		&i.BotID,
 		&i.Slug,
 		&i.Occurrence,
 		&i.StartedBy,
@@ -346,21 +459,21 @@ func (q *Queries) LastStartedPAgentRoutineRun(ctx context.Context, arg LastStart
 	return i, err
 }
 
-const listPAgentRoutineStates = `-- name: ListPAgentRoutineStates :many
-SELECT agent_id, slug, def_hash, enabled, next_due_at, last_run_at, last_result, consecutive_failures, paused_reason, sessions_used, cost_used, tokens_used, check_back_at, anchor_at, updated_at FROM pagent_routine_state WHERE agent_id = ? ORDER BY slug
+const listBotRoutineStates = `-- name: ListBotRoutineStates :many
+SELECT bot_id, slug, def_hash, enabled, next_due_at, last_run_at, last_result, consecutive_failures, paused_reason, sessions_used, cost_used, tokens_used, check_back_at, anchor_at, updated_at FROM bot_routine_state WHERE bot_id = ? ORDER BY slug
 `
 
-func (q *Queries) ListPAgentRoutineStates(ctx context.Context, agentID string) ([]PagentRoutineState, error) {
-	rows, err := q.db.QueryContext(ctx, listPAgentRoutineStates, agentID)
+func (q *Queries) ListBotRoutineStates(ctx context.Context, botID string) ([]BotRoutineState, error) {
+	rows, err := q.db.QueryContext(ctx, listBotRoutineStates, botID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []PagentRoutineState{}
+	items := []BotRoutineState{}
 	for rows.Next() {
-		var i PagentRoutineState
+		var i BotRoutineState
 		if err := rows.Scan(
-			&i.AgentID,
+			&i.BotID,
 			&i.Slug,
 			&i.DefHash,
 			&i.Enabled,
@@ -389,132 +502,19 @@ func (q *Queries) ListPAgentRoutineStates(ctx context.Context, agentID string) (
 	return items, nil
 }
 
-const pAgentRoutineRunsByAgentSince = `-- name: PAgentRoutineRunsByAgentSince :many
-SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM pagent_routine_run
-WHERE agent_id = ?1 AND started_at >= ?2
-ORDER BY started_at, id
-`
-
-type PAgentRoutineRunsByAgentSinceParams struct {
-	AgentID   string
-	StartedAt int64
-}
-
-func (q *Queries) PAgentRoutineRunsByAgentSince(ctx context.Context, arg PAgentRoutineRunsByAgentSinceParams) ([]PagentRoutineRun, error) {
-	rows, err := q.db.QueryContext(ctx, pAgentRoutineRunsByAgentSince, arg.AgentID, arg.StartedAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []PagentRoutineRun{}
-	for rows.Next() {
-		var i PagentRoutineRun
-		if err := rows.Scan(
-			&i.ID,
-			&i.AgentID,
-			&i.Slug,
-			&i.Occurrence,
-			&i.StartedBy,
-			&i.Test,
-			&i.State,
-			&i.LeaseUntil,
-			&i.ThreadID,
-			&i.Result,
-			&i.Summary,
-			&i.ActionsDone,
-			&i.ActionsPending,
-			&i.Unverified,
-			&i.Sources,
-			&i.Cost,
-			&i.Tokens,
-			&i.StartedAt,
-			&i.EndedAt,
-			&i.Error,
-			&i.RetryOf,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const pAgentRoutineRunsSince = `-- name: PAgentRoutineRunsSince :many
-SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM pagent_routine_run
-WHERE agent_id = ? AND slug = ? AND started_at >= ?
-ORDER BY started_at, id
-`
-
-type PAgentRoutineRunsSinceParams struct {
-	AgentID   string
-	Slug      string
-	StartedAt int64
-}
-
-func (q *Queries) PAgentRoutineRunsSince(ctx context.Context, arg PAgentRoutineRunsSinceParams) ([]PagentRoutineRun, error) {
-	rows, err := q.db.QueryContext(ctx, pAgentRoutineRunsSince, arg.AgentID, arg.Slug, arg.StartedAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []PagentRoutineRun{}
-	for rows.Next() {
-		var i PagentRoutineRun
-		if err := rows.Scan(
-			&i.ID,
-			&i.AgentID,
-			&i.Slug,
-			&i.Occurrence,
-			&i.StartedBy,
-			&i.Test,
-			&i.State,
-			&i.LeaseUntil,
-			&i.ThreadID,
-			&i.Result,
-			&i.Summary,
-			&i.ActionsDone,
-			&i.ActionsPending,
-			&i.Unverified,
-			&i.Sources,
-			&i.Cost,
-			&i.Tokens,
-			&i.StartedAt,
-			&i.EndedAt,
-			&i.Error,
-			&i.RetryOf,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const recordPAgentRoutineOutcome = `-- name: RecordPAgentRoutineOutcome :one
-UPDATE pagent_routine_state
+const recordBotRoutineOutcome = `-- name: RecordBotRoutineOutcome :one
+UPDATE bot_routine_state
 SET last_run_at = ?1, last_result = ?2,
     consecutive_failures = (consecutive_failures + 1) * ?3,
     sessions_used = sessions_used + ?4,
     cost_used = cost_used + ?5,
     tokens_used = tokens_used + ?6,
     updated_at = ?7
-WHERE agent_id = ?8 AND slug = ?9
-RETURNING agent_id, slug, def_hash, enabled, next_due_at, last_run_at, last_result, consecutive_failures, paused_reason, sessions_used, cost_used, tokens_used, check_back_at, anchor_at, updated_at
+WHERE bot_id = ?8 AND slug = ?9
+RETURNING bot_id, slug, def_hash, enabled, next_due_at, last_run_at, last_result, consecutive_failures, paused_reason, sessions_used, cost_used, tokens_used, check_back_at, anchor_at, updated_at
 `
 
-type RecordPAgentRoutineOutcomeParams struct {
+type RecordBotRoutineOutcomeParams struct {
 	LastRunAt  int64
 	LastResult string
 	Failed     int64
@@ -522,12 +522,12 @@ type RecordPAgentRoutineOutcomeParams struct {
 	Cost       float64
 	Tokens     int64
 	UpdatedAt  int64
-	AgentID    string
+	BotID      string
 	Slug       string
 }
 
-func (q *Queries) RecordPAgentRoutineOutcome(ctx context.Context, arg RecordPAgentRoutineOutcomeParams) (PagentRoutineState, error) {
-	row := q.db.QueryRowContext(ctx, recordPAgentRoutineOutcome,
+func (q *Queries) RecordBotRoutineOutcome(ctx context.Context, arg RecordBotRoutineOutcomeParams) (BotRoutineState, error) {
+	row := q.db.QueryRowContext(ctx, recordBotRoutineOutcome,
 		arg.LastRunAt,
 		arg.LastResult,
 		arg.Failed,
@@ -535,12 +535,12 @@ func (q *Queries) RecordPAgentRoutineOutcome(ctx context.Context, arg RecordPAge
 		arg.Cost,
 		arg.Tokens,
 		arg.UpdatedAt,
-		arg.AgentID,
+		arg.BotID,
 		arg.Slug,
 	)
-	var i PagentRoutineState
+	var i BotRoutineState
 	err := row.Scan(
-		&i.AgentID,
+		&i.BotID,
 		&i.Slug,
 		&i.DefHash,
 		&i.Enabled,
@@ -559,13 +559,13 @@ func (q *Queries) RecordPAgentRoutineOutcome(ctx context.Context, arg RecordPAge
 	return i, err
 }
 
-const recordPAgentRoutineRunResult = `-- name: RecordPAgentRoutineRunResult :execrows
-UPDATE pagent_routine_run
+const recordBotRoutineRunResult = `-- name: RecordBotRoutineRunResult :execrows
+UPDATE bot_routine_run
 SET result = ?, summary = ?, actions_done = ?, actions_pending = ?, unverified = ?, sources = ?, cost = ?, tokens = ?
 WHERE id = ?
 `
 
-type RecordPAgentRoutineRunResultParams struct {
+type RecordBotRoutineRunResultParams struct {
 	Result         string
 	Summary        string
 	ActionsDone    string
@@ -577,8 +577,8 @@ type RecordPAgentRoutineRunResultParams struct {
 	ID             string
 }
 
-func (q *Queries) RecordPAgentRoutineRunResult(ctx context.Context, arg RecordPAgentRoutineRunResultParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, recordPAgentRoutineRunResult,
+func (q *Queries) RecordBotRoutineRunResult(ctx context.Context, arg RecordBotRoutineRunResultParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, recordBotRoutineRunResult,
 		arg.Result,
 		arg.Summary,
 		arg.ActionsDone,
@@ -595,104 +595,104 @@ func (q *Queries) RecordPAgentRoutineRunResult(ctx context.Context, arg RecordPA
 	return result.RowsAffected()
 }
 
-const renewPAgentRoutineRunLease = `-- name: RenewPAgentRoutineRunLease :execrows
-UPDATE pagent_routine_run SET lease_until = ? WHERE id = ? AND state IN ('claimed', 'running')
+const renewBotRoutineRunLease = `-- name: RenewBotRoutineRunLease :execrows
+UPDATE bot_routine_run SET lease_until = ? WHERE id = ? AND state IN ('claimed', 'running')
 `
 
-type RenewPAgentRoutineRunLeaseParams struct {
+type RenewBotRoutineRunLeaseParams struct {
 	LeaseUntil int64
 	ID         string
 }
 
-func (q *Queries) RenewPAgentRoutineRunLease(ctx context.Context, arg RenewPAgentRoutineRunLeaseParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, renewPAgentRoutineRunLease, arg.LeaseUntil, arg.ID)
+func (q *Queries) RenewBotRoutineRunLease(ctx context.Context, arg RenewBotRoutineRunLeaseParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, renewBotRoutineRunLease, arg.LeaseUntil, arg.ID)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
 }
 
-const setPAgentRoutineCheckBack = `-- name: SetPAgentRoutineCheckBack :exec
-UPDATE pagent_routine_state SET check_back_at = ?1, updated_at = ?2
-WHERE agent_id = ?3 AND slug = ?4
+const setBotRoutineCheckBack = `-- name: SetBotRoutineCheckBack :exec
+UPDATE bot_routine_state SET check_back_at = ?1, updated_at = ?2
+WHERE bot_id = ?3 AND slug = ?4
 `
 
-type SetPAgentRoutineCheckBackParams struct {
+type SetBotRoutineCheckBackParams struct {
 	CheckBackAt int64
 	UpdatedAt   int64
-	AgentID     string
+	BotID       string
 	Slug        string
 }
 
-func (q *Queries) SetPAgentRoutineCheckBack(ctx context.Context, arg SetPAgentRoutineCheckBackParams) error {
-	_, err := q.db.ExecContext(ctx, setPAgentRoutineCheckBack,
+func (q *Queries) SetBotRoutineCheckBack(ctx context.Context, arg SetBotRoutineCheckBackParams) error {
+	_, err := q.db.ExecContext(ctx, setBotRoutineCheckBack,
 		arg.CheckBackAt,
 		arg.UpdatedAt,
-		arg.AgentID,
+		arg.BotID,
 		arg.Slug,
 	)
 	return err
 }
 
-const setPAgentRoutineDef = `-- name: SetPAgentRoutineDef :exec
-UPDATE pagent_routine_state SET def_hash = ?, next_due_at = ?, updated_at = ? WHERE agent_id = ? AND slug = ?
+const setBotRoutineDef = `-- name: SetBotRoutineDef :exec
+UPDATE bot_routine_state SET def_hash = ?, next_due_at = ?, updated_at = ? WHERE bot_id = ? AND slug = ?
 `
 
-type SetPAgentRoutineDefParams struct {
+type SetBotRoutineDefParams struct {
 	DefHash   string
 	NextDueAt int64
 	UpdatedAt int64
-	AgentID   string
+	BotID     string
 	Slug      string
 }
 
-func (q *Queries) SetPAgentRoutineDef(ctx context.Context, arg SetPAgentRoutineDefParams) error {
-	_, err := q.db.ExecContext(ctx, setPAgentRoutineDef,
+func (q *Queries) SetBotRoutineDef(ctx context.Context, arg SetBotRoutineDefParams) error {
+	_, err := q.db.ExecContext(ctx, setBotRoutineDef,
 		arg.DefHash,
 		arg.NextDueAt,
 		arg.UpdatedAt,
-		arg.AgentID,
+		arg.BotID,
 		arg.Slug,
 	)
 	return err
 }
 
-const setPAgentRoutineEnabled = `-- name: SetPAgentRoutineEnabled :exec
-UPDATE pagent_routine_state SET enabled = ?, paused_reason = ?, updated_at = ? WHERE agent_id = ? AND slug = ?
+const setBotRoutineEnabled = `-- name: SetBotRoutineEnabled :exec
+UPDATE bot_routine_state SET enabled = ?, paused_reason = ?, updated_at = ? WHERE bot_id = ? AND slug = ?
 `
 
-type SetPAgentRoutineEnabledParams struct {
+type SetBotRoutineEnabledParams struct {
 	Enabled      int64
 	PausedReason string
 	UpdatedAt    int64
-	AgentID      string
+	BotID        string
 	Slug         string
 }
 
-func (q *Queries) SetPAgentRoutineEnabled(ctx context.Context, arg SetPAgentRoutineEnabledParams) error {
-	_, err := q.db.ExecContext(ctx, setPAgentRoutineEnabled,
+func (q *Queries) SetBotRoutineEnabled(ctx context.Context, arg SetBotRoutineEnabledParams) error {
+	_, err := q.db.ExecContext(ctx, setBotRoutineEnabled,
 		arg.Enabled,
 		arg.PausedReason,
 		arg.UpdatedAt,
-		arg.AgentID,
+		arg.BotID,
 		arg.Slug,
 	)
 	return err
 }
 
-const setPAgentRoutineRunState = `-- name: SetPAgentRoutineRunState :execrows
-UPDATE pagent_routine_run SET state = ?, error = ?, ended_at = ? WHERE id = ? AND state IN ('claimed', 'running', 'queued')
+const setBotRoutineRunState = `-- name: SetBotRoutineRunState :execrows
+UPDATE bot_routine_run SET state = ?, error = ?, ended_at = ? WHERE id = ? AND state IN ('claimed', 'running', 'queued')
 `
 
-type SetPAgentRoutineRunStateParams struct {
+type SetBotRoutineRunStateParams struct {
 	State   string
 	Error   string
 	EndedAt int64
 	ID      string
 }
 
-func (q *Queries) SetPAgentRoutineRunState(ctx context.Context, arg SetPAgentRoutineRunStateParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, setPAgentRoutineRunState,
+func (q *Queries) SetBotRoutineRunState(ctx context.Context, arg SetBotRoutineRunStateParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setBotRoutineRunState,
 		arg.State,
 		arg.Error,
 		arg.EndedAt,
@@ -704,30 +704,30 @@ func (q *Queries) SetPAgentRoutineRunState(ctx context.Context, arg SetPAgentRou
 	return result.RowsAffected()
 }
 
-const setPAgentRoutineRunThread = `-- name: SetPAgentRoutineRunThread :execrows
-UPDATE pagent_routine_run SET thread_id = ?, state = 'running', lease_until = ? WHERE id = ? AND state IN ('claimed', 'running', 'queued')
+const setBotRoutineRunThread = `-- name: SetBotRoutineRunThread :execrows
+UPDATE bot_routine_run SET thread_id = ?, state = 'running', lease_until = ? WHERE id = ? AND state IN ('claimed', 'running', 'queued')
 `
 
-type SetPAgentRoutineRunThreadParams struct {
+type SetBotRoutineRunThreadParams struct {
 	ThreadID   string
 	LeaseUntil int64
 	ID         string
 }
 
-func (q *Queries) SetPAgentRoutineRunThread(ctx context.Context, arg SetPAgentRoutineRunThreadParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, setPAgentRoutineRunThread, arg.ThreadID, arg.LeaseUntil, arg.ID)
+func (q *Queries) SetBotRoutineRunThread(ctx context.Context, arg SetBotRoutineRunThreadParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setBotRoutineRunThread, arg.ThreadID, arg.LeaseUntil, arg.ID)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
 }
 
-const upsertPAgentRoutineState = `-- name: UpsertPAgentRoutineState :exec
-INSERT INTO pagent_routine_state (
-    agent_id, slug, def_hash, enabled, next_due_at, last_run_at, last_result, consecutive_failures,
+const upsertBotRoutineState = `-- name: UpsertBotRoutineState :exec
+INSERT INTO bot_routine_state (
+    bot_id, slug, def_hash, enabled, next_due_at, last_run_at, last_result, consecutive_failures,
     paused_reason, sessions_used, cost_used, tokens_used, check_back_at, anchor_at, updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT (agent_id, slug) DO UPDATE SET
+ON CONFLICT (bot_id, slug) DO UPDATE SET
     def_hash = excluded.def_hash,
     enabled = excluded.enabled,
     next_due_at = excluded.next_due_at,
@@ -743,8 +743,8 @@ ON CONFLICT (agent_id, slug) DO UPDATE SET
     updated_at = excluded.updated_at
 `
 
-type UpsertPAgentRoutineStateParams struct {
-	AgentID             string
+type UpsertBotRoutineStateParams struct {
+	BotID               string
 	Slug                string
 	DefHash             string
 	Enabled             int64
@@ -761,9 +761,9 @@ type UpsertPAgentRoutineStateParams struct {
 	UpdatedAt           int64
 }
 
-func (q *Queries) UpsertPAgentRoutineState(ctx context.Context, arg UpsertPAgentRoutineStateParams) error {
-	_, err := q.db.ExecContext(ctx, upsertPAgentRoutineState,
-		arg.AgentID,
+func (q *Queries) UpsertBotRoutineState(ctx context.Context, arg UpsertBotRoutineStateParams) error {
+	_, err := q.db.ExecContext(ctx, upsertBotRoutineState,
+		arg.BotID,
 		arg.Slug,
 		arg.DefHash,
 		arg.Enabled,
@@ -782,21 +782,21 @@ func (q *Queries) UpsertPAgentRoutineState(ctx context.Context, arg UpsertPAgent
 	return err
 }
 
-const upsertPAgentWebhookSecret = `-- name: UpsertPAgentWebhookSecret :exec
-INSERT INTO pagent_webhook_secret (agent_id, slug, secret_hash, created_at) VALUES (?, ?, ?, ?)
-ON CONFLICT (agent_id, slug) DO UPDATE SET secret_hash = excluded.secret_hash, created_at = excluded.created_at
+const upsertBotWebhookSecret = `-- name: UpsertBotWebhookSecret :exec
+INSERT INTO bot_webhook_secret (bot_id, slug, secret_hash, created_at) VALUES (?, ?, ?, ?)
+ON CONFLICT (bot_id, slug) DO UPDATE SET secret_hash = excluded.secret_hash, created_at = excluded.created_at
 `
 
-type UpsertPAgentWebhookSecretParams struct {
-	AgentID    string
+type UpsertBotWebhookSecretParams struct {
+	BotID      string
 	Slug       string
 	SecretHash string
 	CreatedAt  int64
 }
 
-func (q *Queries) UpsertPAgentWebhookSecret(ctx context.Context, arg UpsertPAgentWebhookSecretParams) error {
-	_, err := q.db.ExecContext(ctx, upsertPAgentWebhookSecret,
-		arg.AgentID,
+func (q *Queries) UpsertBotWebhookSecret(ctx context.Context, arg UpsertBotWebhookSecretParams) error {
+	_, err := q.db.ExecContext(ctx, upsertBotWebhookSecret,
+		arg.BotID,
 		arg.Slug,
 		arg.SecretHash,
 		arg.CreatedAt,

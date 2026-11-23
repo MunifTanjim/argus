@@ -21,11 +21,11 @@ const (
 	groupByWorkspace groupBy = "workspace"
 	groupByAgent     groupBy = "agent"
 	groupByStatus    groupBy = "status"
-	groupByPAgent    groupBy = "pagent"
+	groupByBot       groupBy = "bot"
 )
 
 // groupByCycle is every dimension, in the order the cycle key steps through.
-var groupByCycle = []groupBy{groupByHost, groupByProject, groupByWorkspace, groupByAgent, groupByStatus, groupByPAgent}
+var groupByCycle = []groupBy{groupByHost, groupByProject, groupByWorkspace, groupByAgent, groupByStatus, groupByBot}
 
 func parseGroupBy(s string) (groupBy, bool) {
 	g := groupBy(s)
@@ -120,19 +120,19 @@ func (m model) sessionSection(s session.Session) sectionInfo {
 			return otherSection(StyledIcon{Glyph: glyphRobotSolid})
 		}
 		return sectionInfo{key: name, title: name, rank: rankGroup, icon: StyledIcon{glyphRobotSolid, accent}}
-	case groupByPAgent:
+	case groupByBot:
 		icon := StyledIcon{Glyph: glyphRobotSolid}
-		if s.PAgentID == "" {
+		if s.BotID == "" {
 			sec := otherSection(icon)
-			sec.key, sec.title = "", "no agent"
+			sec.key, sec.title = "", "no bot"
 			return sec
 		}
-		id := pagentCompositeID(s)
-		title := m.pagentNames[id]
+		id := botCompositeID(s)
+		title := m.botNames[id]
 		if title == "" {
-			title = s.PAgentID
+			title = s.BotID
 		}
-		return sectionInfo{key: title + "\x00pagent:" + id, title: title, rank: rankGroup, icon: icon}
+		return sectionInfo{key: title + "\x00bot:" + id, title: title, rank: rankGroup, icon: icon}
 	case groupByStatus:
 		i := slices.Index(statusOrder, s.Status)
 		if i < 0 {
@@ -145,20 +145,20 @@ func (m model) sessionSection(s session.Session) sectionInfo {
 	}
 }
 
-// pagentCompositeID is the session's agent id as pagent.list reports it. The
-// client composites list ids with the node id but leaves a session's PAgentID
-// node-local, so the two are matched by (NodeID, PAgentID).
-func pagentCompositeID(s session.Session) string {
+// botCompositeID is the session's bot id as bot.list reports it. The
+// client composites list ids with the node id but leaves a session's BotID
+// node-local, so the two are matched by (NodeID, BotID).
+func botCompositeID(s session.Session) string {
 	if s.NodeID == "" {
-		return s.PAgentID
+		return s.BotID
 	}
-	return session.CompositeID(s.NodeID, s.PAgentID)
+	return session.CompositeID(s.NodeID, s.BotID)
 }
 
 // groupByTitle names a dimension in flashes.
 func (g groupBy) title() string {
-	if g == groupByPAgent {
-		return "persistent agent"
+	if g == groupByBot {
+		return "bot"
 	}
 	return string(g)
 }

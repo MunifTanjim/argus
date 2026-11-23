@@ -28,9 +28,9 @@ var sectionOffers = func() map[string]offer {
 	return map[string]offer{
 		"project-tree":     {keys: helpQuit},
 		"sidebar-sessions": {keys: helpQuit},
-		"sidebar-agents":   {keys: helpQuit},
-		"agent":            {keys: helpQuit},
-		"agent-memory":     {keys: helpQuit},
+		"sidebar-bots":     {keys: helpQuit},
+		"bot":              {keys: helpQuit},
+		"bot-memory":       {keys: helpQuit},
 		"workspace":        {keys: helpQuit},
 		"project":          {keys: helpQuit},
 		"node":             {keys: helpQuit},
@@ -120,18 +120,18 @@ var sectionLists = map[string]sectionList{
 		container: bindingsOf(leftSidebarTabKeys...),
 		focus:     focusFor("sidebar-sessions"),
 	},
-	"sidebar-agents": {
+	"sidebar-bots": {
 		own: bindingsOf(projectsKeys.Back, projectsKeys.Up, projectsKeys.Down, projectsKeys.Top, projectsKeys.Bottom,
-			projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Enter, projectsKeys.Hover, agentKeys.Filter, projectsKeys.Refresh),
+			projectsKeys.HalfUp, projectsKeys.HalfDown, projectsKeys.Enter, projectsKeys.Hover, botKeys.Filter, projectsKeys.Refresh),
 		container: bindingsOf(leftSidebarTabKeys...),
-		focus:     focusFor("sidebar-agents"),
+		focus:     focusFor("sidebar-bots"),
 	},
-	"agent": {
+	"bot": {
 		own: append(bindingsOf(listKeys.Up, listKeys.Down, listKeys.Top, listKeys.Bottom, listKeys.HalfUp, listKeys.HalfDown,
-			listKeys.Open, listKeys.Back, listKeys.Refresh, agentKeys.NewChat, agentKeys.Memory, agentKeys.MakePrimary,
-			agentKeys.UnsetPrimary, routineKeys.Run, routineKeys.Pause, routineKeys.Resume, routineKeys.TogglePause,
-			agentKeys.CycleSetting), settingKeys()...),
-		focus: focusFor("agent"),
+			listKeys.Open, listKeys.Back, listKeys.Refresh, botKeys.NewChat, botKeys.Memory, botKeys.MakePrimary,
+			botKeys.UnsetPrimary, routineKeys.Run, routineKeys.Pause, routineKeys.Resume, routineKeys.TogglePause,
+			botKeys.CycleSetting), settingKeys()...),
+		focus: focusFor("bot"),
 	},
 	"workspace": {
 		own: bindingsOf(slices.Concat(treeKeys, leftSidebarKeys, []any{projectsKeys.Up, projectsKeys.Down,
@@ -145,10 +145,10 @@ var sectionLists = map[string]sectionList{
 		own:   append(slices.Clone(summaryKeys), listKeys.TabPrev, listKeys.TabNext, nodeKeys.Wakelock),
 		focus: focusFor("node"),
 	},
-	"agent-memory": {
+	"bot-memory": {
 		own: bindingsOf(listKeys.Up, listKeys.Down, listKeys.Top, listKeys.Bottom, listKeys.HalfUp, listKeys.HalfDown,
 			listKeys.TabPrev, listKeys.TabNext, listKeys.Back, listKeys.Refresh, memoryKeys.Undo, memoryKeys.Accept, memoryKeys.Reject),
-		focus: focusFor("agent-memory"),
+		focus: focusFor("bot-memory"),
 	},
 	"thread": {
 		own: bindingsOf(slices.Concat(transcriptViewKeys, []any{detailKeys, sessionKeys.FocusPrompt, threadKeys.OpenSession,

@@ -198,7 +198,7 @@ func TestSidebarSessionsFilter(t *testing.T) {
 	if m.sessionFilter != "" {
 		t.Errorf("the home list's filter changed to %q", m.sessionFilter)
 	}
-	if !strings.Contains(ansi.Strip(m.View().Content), "Projects  Sessions  Agents  /ga") {
+	if !strings.Contains(ansi.Strip(m.View().Content), "Projects  Sessions  Bots  /ga") {
 		t.Errorf("the strip does not name the filter")
 	}
 	// Esc clears the filter before it leaves the sidebar.

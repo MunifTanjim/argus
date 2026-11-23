@@ -138,15 +138,15 @@ var terminalKeys = struct {
 	Kill:   nm("terminal kill", "dd", "kill"),
 }
 
-var agentKeys = struct {
+var botKeys = struct {
 	Filter, NewChat, Memory, MakePrimary, UnsetPrimary, CycleSetting binding
 }{
-	CycleSetting: nm("cycle agent-setting", "zs", "setting"),
-	Filter:       nb("filter-agents", "/", "filter"),
-	NewChat:      nm("agent new-chat", "n", "new chat"),
-	Memory:       nm("agent memory", "m", "memory"),
-	MakePrimary:  nm("agent make-primary", "", "make primary"),
-	UnsetPrimary: nm("agent unset-primary", "", "unset primary"),
+	CycleSetting: nm("cycle bot-setting", "zs", "setting"),
+	Filter:       nb("filter-bots", "/", "filter"),
+	NewChat:      nm("bot new-chat", "n", "new chat"),
+	Memory:       nm("bot memory", "m", "memory"),
+	MakePrimary:  nm("bot make-primary", "", "make primary"),
+	UnsetPrimary: nm("bot unset-primary", "", "unset primary"),
 }
 
 var offerKeys = struct {
@@ -473,7 +473,7 @@ var settingsKeys = struct {
 
 func keySets() []any {
 	sets := []any{listKeys, projectsKeys, fileViewKeys, transcriptKeys, redactListKeys,
-		detailKeys, visualKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, agentKeys, threadKeys, memoryKeys, routineKeys, offerKeys, upgradeKeys, spawnKeys,
+		detailKeys, visualKeys, sessionKeys, paneKeys, historyProjectsKeys, historySessionsKeys, logsKeys, terminalKeys, nodeKeys, botKeys, threadKeys, memoryKeys, routineKeys, offerKeys, upgradeKeys, spawnKeys,
 		settingsKeys}
 	for _, b := range settingKeys() {
 		sets = append(sets, b)

@@ -121,7 +121,7 @@ func TestGroupByCycle(t *testing.T) {
 		g = g.next()
 		seen = append(seen, g)
 	}
-	want := []groupBy{groupByProject, groupByWorkspace, groupByAgent, groupByStatus, groupByPAgent, groupByHost}
+	want := []groupBy{groupByProject, groupByWorkspace, groupByAgent, groupByStatus, groupByBot, groupByHost}
 	if !slices.Equal(seen, want) {
 		t.Fatalf("cycle = %q, want %q", seen, want)
 	}
@@ -295,43 +295,43 @@ func TestSectionHeaderIcons(t *testing.T) {
 	}
 }
 
-func TestGroupByCycleIncludesPAgent(t *testing.T) {
-	if !slices.Contains(groupByCycle, groupByPAgent) {
-		t.Fatal("cycle lacks pagent")
+func TestGroupByCycleIncludesBot(t *testing.T) {
+	if !slices.Contains(groupByCycle, groupByBot) {
+		t.Fatal("cycle lacks bot")
 	}
-	if g, ok := parseGroupBy("pagent"); !ok || g != groupByPAgent {
-		t.Fatalf("parseGroupBy(pagent) = %q, %v", g, ok)
+	if g, ok := parseGroupBy("bot"); !ok || g != groupByBot {
+		t.Fatalf("parseGroupBy(bot) = %q, %v", g, ok)
 	}
-	if groupByPAgent.title() != "persistent agent" || groupByHost.title() != "host" {
+	if groupByBot.title() != "bot" || groupByHost.title() != "host" {
 		t.Fatal("unexpected titles")
 	}
 }
 
-func TestGroupByPAgentSections(t *testing.T) {
+func TestGroupByBotSections(t *testing.T) {
 	idle := session.StatusIdle
 	mk := func(id, label, pa string) session.Session {
 		s := gs(id, label, "", "", idle)
-		s.PAgentID = pa
+		s.BotID = pa
 		return s
 	}
-	m := groupedModel(groupByPAgent,
+	m := groupedModel(groupByBot,
 		mk("a:1", "alpha", "x1"), mk("a:2", "alpha", "x2"), mk("b:1", "beta", "x1"), mk("a:3", "alpha", ""))
-	m.pagentNames = map[string]string{"alpha:x1": "Zed", "alpha:x2": "Amy", "beta:x1": "Bob"}
+	m.botNames = map[string]string{"alpha:x1": "Zed", "alpha:x2": "Amy", "beta:x1": "Bob"}
 	m.reorder()
-	want := []string{"Amy", "Bob", "Zed", "no agent"}
+	want := []string{"Amy", "Bob", "Zed", "no bot"}
 	if got := sectionTitles(m); !slices.Equal(got, want) {
 		t.Fatalf("titles = %q, want %q", got, want)
 	}
 }
 
-func TestPAgentsMsgStoresNames(t *testing.T) {
-	m := groupedModel(groupByPAgent)
-	m, _ = upd(m, pagentsMsg{names: map[string]string{"n:1": "Amy"}})
-	if m.pagentNames["n:1"] != "Amy" {
-		t.Fatalf("names = %v", m.pagentNames)
+func TestBotsMsgStoresNames(t *testing.T) {
+	m := groupedModel(groupByBot)
+	m, _ = upd(m, botsMsg{names: map[string]string{"n:1": "Amy"}})
+	if m.botNames["n:1"] != "Amy" {
+		t.Fatalf("names = %v", m.botNames)
 	}
-	m, _ = upd(m, pagentsMsg{err: errors.New("boom")})
-	if m.pagentNames["n:1"] != "Amy" {
+	m, _ = upd(m, botsMsg{err: errors.New("boom")})
+	if m.botNames["n:1"] != "Amy" {
 		t.Fatal("an error should keep the last names")
 	}
 }

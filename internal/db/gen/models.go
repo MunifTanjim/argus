@@ -8,6 +8,162 @@ import (
 	"time"
 )
 
+type Bot struct {
+	ID         string
+	Name       string
+	Dir        string
+	ArchivedAt int64
+	CreatedAt  int64
+}
+
+type BotActivity struct {
+	ID        int64
+	BotID     string
+	ThreadID  string
+	SessionID string
+	StartedBy string
+	Tool      string
+	Target    string
+	Class     string
+	Decision  string
+	DecidedBy string
+	Rule      string
+	Reason    string
+	Hook      string
+	CreatedAt int64
+}
+
+type BotCaptureCursor struct {
+	ThreadID    string
+	SessionID   string
+	EntryCount  int64
+	LastEntryID string
+	UpdatedAt   int64
+}
+
+type BotHandoff struct {
+	ID          string
+	RootID      string
+	Depth       int64
+	Ancestors   string
+	FromNode    string
+	FromBot     string
+	FromName    string
+	FromThread  string
+	FromSession string
+	ToNode      string
+	ToBot       string
+	ToName      string
+	ToThread    string
+	Request     string
+	State       string
+	Answer      string
+	CreatedAt   int64
+	AnsweredAt  int64
+}
+
+type BotMemoryProposal struct {
+	ID        string
+	BotID     string
+	ThreadID  string
+	Ops       string
+	CreatedAt int64
+	DecidedAt int64
+	Decision  string
+}
+
+type BotRoutineRun struct {
+	ID             string
+	BotID          string
+	Slug           string
+	Occurrence     int64
+	StartedBy      string
+	Test           int64
+	State          string
+	LeaseUntil     int64
+	ThreadID       string
+	Result         string
+	Summary        string
+	ActionsDone    string
+	ActionsPending string
+	Unverified     string
+	Sources        string
+	Cost           float64
+	Tokens         int64
+	StartedAt      int64
+	EndedAt        int64
+	Error          string
+	RetryOf        string
+}
+
+type BotRoutineState struct {
+	BotID               string
+	Slug                string
+	DefHash             string
+	Enabled             int64
+	NextDueAt           int64
+	LastRunAt           int64
+	LastResult          string
+	ConsecutiveFailures int64
+	PausedReason        string
+	SessionsUsed        int64
+	CostUsed            float64
+	TokensUsed          int64
+	CheckBackAt         int64
+	AnchorAt            int64
+	UpdatedAt           int64
+}
+
+type BotSecret struct {
+	BotID       string
+	Name        string
+	Description string
+	ValueEnc    []byte
+	UpdatedAt   int64
+}
+
+type BotThread struct {
+	ID           string
+	BotID        string
+	Kind         string
+	StartedBy    string
+	Title        string
+	Status       string
+	ReadPosition int64
+	CreatedAt    int64
+	LastActiveAt int64
+}
+
+type BotThreadEvent struct {
+	ID            int64
+	ThreadID      string
+	Kind          string
+	StartedBy     string
+	Payload       string
+	AnchorSession string
+	AnchorIndex   int64
+	CreatedAt     int64
+}
+
+type BotThreadSession struct {
+	ThreadID       string
+	SessionID      string
+	Cli            string
+	AgentSessionID string
+	TranscriptPath string
+	StartedBy      string
+	StartedAt      int64
+	EndedAt        int64
+	EndReason      string
+}
+
+type BotWebhookSecret struct {
+	BotID      string
+	Slug       string
+	SecretHash string
+	CreatedAt  int64
+}
+
 type OrchLink struct {
 	ChildNode   string
 	ChildKey    string
@@ -52,162 +208,6 @@ type OrchPeerOutbox struct {
 	Attempts      int64
 	Parked        int64
 	LastAttemptAt int64
-}
-
-type Pagent struct {
-	ID         string
-	Name       string
-	Dir        string
-	ArchivedAt int64
-	CreatedAt  int64
-}
-
-type PagentActivity struct {
-	ID        int64
-	AgentID   string
-	ThreadID  string
-	SessionID string
-	StartedBy string
-	Tool      string
-	Target    string
-	Class     string
-	Decision  string
-	DecidedBy string
-	Rule      string
-	Reason    string
-	Hook      string
-	CreatedAt int64
-}
-
-type PagentCaptureCursor struct {
-	ThreadID    string
-	SessionID   string
-	EntryCount  int64
-	LastEntryID string
-	UpdatedAt   int64
-}
-
-type PagentHandoff struct {
-	ID          string
-	RootID      string
-	Depth       int64
-	Ancestors   string
-	FromNode    string
-	FromAgent   string
-	FromName    string
-	FromThread  string
-	FromSession string
-	ToNode      string
-	ToAgent     string
-	ToName      string
-	ToThread    string
-	Request     string
-	State       string
-	Answer      string
-	CreatedAt   int64
-	AnsweredAt  int64
-}
-
-type PagentMemoryProposal struct {
-	ID        string
-	AgentID   string
-	ThreadID  string
-	Ops       string
-	CreatedAt int64
-	DecidedAt int64
-	Decision  string
-}
-
-type PagentRoutineRun struct {
-	ID             string
-	AgentID        string
-	Slug           string
-	Occurrence     int64
-	StartedBy      string
-	Test           int64
-	State          string
-	LeaseUntil     int64
-	ThreadID       string
-	Result         string
-	Summary        string
-	ActionsDone    string
-	ActionsPending string
-	Unverified     string
-	Sources        string
-	Cost           float64
-	Tokens         int64
-	StartedAt      int64
-	EndedAt        int64
-	Error          string
-	RetryOf        string
-}
-
-type PagentRoutineState struct {
-	AgentID             string
-	Slug                string
-	DefHash             string
-	Enabled             int64
-	NextDueAt           int64
-	LastRunAt           int64
-	LastResult          string
-	ConsecutiveFailures int64
-	PausedReason        string
-	SessionsUsed        int64
-	CostUsed            float64
-	TokensUsed          int64
-	CheckBackAt         int64
-	AnchorAt            int64
-	UpdatedAt           int64
-}
-
-type PagentSecret struct {
-	AgentID     string
-	Name        string
-	Description string
-	ValueEnc    []byte
-	UpdatedAt   int64
-}
-
-type PagentThread struct {
-	ID           string
-	AgentID      string
-	Kind         string
-	StartedBy    string
-	Title        string
-	Status       string
-	ReadPosition int64
-	CreatedAt    int64
-	LastActiveAt int64
-}
-
-type PagentThreadEvent struct {
-	ID            int64
-	ThreadID      string
-	Kind          string
-	StartedBy     string
-	Payload       string
-	AnchorSession string
-	AnchorIndex   int64
-	CreatedAt     int64
-}
-
-type PagentThreadSession struct {
-	ThreadID       string
-	SessionID      string
-	Cli            string
-	AgentSessionID string
-	TranscriptPath string
-	StartedBy      string
-	StartedAt      int64
-	EndedAt        int64
-	EndReason      string
-}
-
-type PagentWebhookSecret struct {
-	AgentID    string
-	Slug       string
-	SecretHash string
-	CreatedAt  int64
 }
 
 type Project struct {

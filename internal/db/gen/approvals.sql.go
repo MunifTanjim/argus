@@ -9,23 +9,23 @@ import (
 	"context"
 )
 
-const deletePAgentActivity = `-- name: DeletePAgentActivity :exec
-DELETE FROM pagent_activity WHERE agent_id = ?
+const deleteBotActivity = `-- name: DeleteBotActivity :exec
+DELETE FROM bot_activity WHERE bot_id = ?
 `
 
-func (q *Queries) DeletePAgentActivity(ctx context.Context, agentID string) error {
-	_, err := q.db.ExecContext(ctx, deletePAgentActivity, agentID)
+func (q *Queries) DeleteBotActivity(ctx context.Context, botID string) error {
+	_, err := q.db.ExecContext(ctx, deleteBotActivity, botID)
 	return err
 }
 
-const insertPAgentActivity = `-- name: InsertPAgentActivity :one
-INSERT INTO pagent_activity (agent_id, thread_id, session_id, started_by, tool, target, class, decision, decided_by, rule, reason, hook, created_at)
+const insertBotActivity = `-- name: InsertBotActivity :one
+INSERT INTO bot_activity (bot_id, thread_id, session_id, started_by, tool, target, class, decision, decided_by, rule, reason, hook, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id
 `
 
-type InsertPAgentActivityParams struct {
-	AgentID   string
+type InsertBotActivityParams struct {
+	BotID     string
 	ThreadID  string
 	SessionID string
 	StartedBy string
@@ -40,9 +40,9 @@ type InsertPAgentActivityParams struct {
 	CreatedAt int64
 }
 
-func (q *Queries) InsertPAgentActivity(ctx context.Context, arg InsertPAgentActivityParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, insertPAgentActivity,
-		arg.AgentID,
+func (q *Queries) InsertBotActivity(ctx context.Context, arg InsertBotActivityParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, insertBotActivity,
+		arg.BotID,
 		arg.ThreadID,
 		arg.SessionID,
 		arg.StartedBy,
@@ -61,32 +61,32 @@ func (q *Queries) InsertPAgentActivity(ctx context.Context, arg InsertPAgentActi
 	return id, err
 }
 
-const listPAgentActivity = `-- name: ListPAgentActivity :many
-SELECT id, agent_id, thread_id, session_id, started_by, tool, target, class, decision, decided_by, rule, reason, hook, created_at
-FROM pagent_activity
-WHERE agent_id = ?1 AND (CAST(?2 AS INTEGER) = 0 OR started_by != 'you')
+const listBotActivity = `-- name: ListBotActivity :many
+SELECT id, bot_id, thread_id, session_id, started_by, tool, target, class, decision, decided_by, rule, reason, hook, created_at
+FROM bot_activity
+WHERE bot_id = ?1 AND (CAST(?2 AS INTEGER) = 0 OR started_by != 'you')
 ORDER BY id DESC
 LIMIT ?3
 `
 
-type ListPAgentActivityParams struct {
-	AgentID    string
+type ListBotActivityParams struct {
+	BotID      string
 	Unattended int64
 	Lim        int64
 }
 
-func (q *Queries) ListPAgentActivity(ctx context.Context, arg ListPAgentActivityParams) ([]PagentActivity, error) {
-	rows, err := q.db.QueryContext(ctx, listPAgentActivity, arg.AgentID, arg.Unattended, arg.Lim)
+func (q *Queries) ListBotActivity(ctx context.Context, arg ListBotActivityParams) ([]BotActivity, error) {
+	rows, err := q.db.QueryContext(ctx, listBotActivity, arg.BotID, arg.Unattended, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []PagentActivity{}
+	items := []BotActivity{}
 	for rows.Next() {
-		var i PagentActivity
+		var i BotActivity
 		if err := rows.Scan(
 			&i.ID,
-			&i.AgentID,
+			&i.BotID,
 			&i.ThreadID,
 			&i.SessionID,
 			&i.StartedBy,

@@ -29,7 +29,7 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"argus-managed":       true, // `hook` only: install marker, parsed and ignored
 		"argus-log-file":      true, // `start` only: detached child's log path, set by the TUI
 		"unattended":          true, // `agent activity` only: output filter
-		"description":         true, // `agent secret set` only: per-secret text
+		"description":         true, // `bot secret set` only: per-secret text
 		"redact":              true, // `view` only: offline viewer flag, not a node/client setting
 		"json":                true, // `project list` only: output format, not a node/client setting
 		"source":              true, // `workspace create` only: what the name argument is
@@ -56,17 +56,17 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"answer":              true, // `session respond` only: per-invocation answer
 		"last":                true, // `session transcript` only: per-invocation entry count
 		"import-instructions": true, // `agent add` only: per-invocation import choice
-		"message":             true, // `agent chat` only: per-invocation message
-		"new":                 true, // `agent chat` only: per-invocation new thread
+		"message":             true, // `bot chat` only: per-invocation message
+		"new":                 true, // `bot chat` only: per-invocation new thread
 		"dir":                 true, // `agent create` only: per-invocation directory
 		"from":                true, // `agent create` only: per-invocation source agent
 		"purge":               true, // `agent forget` only: must never be config-backed, a stored true would delete data
 		"all":                 true, // `agent list` only: per-invocation listing scope
-		"unset":               true, // `agent primary` only: per-invocation action
-		"limit":               true, // `agent memory log` only: per-invocation page size
-		"profile":             true, // `agent memory` only: per-invocation target
-		"accept":              true, // `agent memory review` only: per-invocation decision
-		"reject":              true, // `agent memory review` only: per-invocation decision
+		"unset":               true, // `bot primary` only: per-invocation action
+		"limit":               true, // `bot memory log` only: per-invocation page size
+		"profile":             true, // `bot memory` only: per-invocation target
+		"accept":              true, // `bot memory review` only: per-invocation decision
+		"reject":              true, // `bot memory review` only: per-invocation decision
 		"since":               true, // `agent usage` only: per-invocation time window
 	}
 

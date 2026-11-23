@@ -32,7 +32,7 @@ const (
 	EntrySystem   EntryKind = "system"   // runtime event / meta row
 	EntryCompact  EntryKind = "compact"  // context-compression boundary
 	EntryShell    EntryKind = "shell"    // user ran `!cmd` directly in the CLI
-	EntryArgus    EntryKind = "argus"    // Argus's own event in an agent thread timeline
+	EntryArgus    EntryKind = "argus"    // Argus's own event in a bot thread timeline
 )
 
 // Subagent is one referenced agent. A teammate is also modeled here with

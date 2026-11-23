@@ -26,17 +26,17 @@ func threadEntries() []transcript.Entry {
 	}
 }
 
-func threadClient() *pagentClient {
-	cl := agentViewClient()
-	cl.timeline = api.PAgentTimeline{ThreadID: "n1:t1", Entries: threadEntries(),
-		Sessions: []api.PAgentTimelineSession{{SessionID: "n1:s1", Live: true}}}
+func threadClient() *botClient {
+	cl := botViewClient()
+	cl.timeline = api.BotTimeline{ThreadID: "n1:t1", Entries: threadEntries(),
+		Sessions: []api.BotTimelineSession{{SessionID: "n1:s1", Live: true}}}
 	return cl
 }
 
-// openedThread opens thread t1 from unready's agent view and loads it.
-func openedThread(t *testing.T, cl *pagentClient) model {
+// openedThread opens thread t1 from unready's bot view and loads it.
+func openedThread(t *testing.T, cl *botClient) model {
 	t.Helper()
-	m := loadedAgentView(t, cl)
+	m := loadedBotView(t, cl)
 	m, cmd := upd(m, keyMsg("enter"))
 	if _, ok := m.main.top().(threadComp); !ok || cmd == nil {
 		t.Fatalf("enter opens the thread: %T", m.main.top())
@@ -73,7 +73,7 @@ func TestThreadViewKeepsCursorOnRefresh(t *testing.T) {
 		Timestamp: threadT0.Add(-time.Minute).Format(time.RFC3339Nano)}}, threadEntries()...)
 	cl.timeline.Entries = append(es, transcript.Entry{ID: "a3", Kind: transcript.EntryText, Text: "more",
 		Timestamp: threadT0.Add(5 * time.Minute).Format(time.RFC3339Nano)})
-	m, _ = upd(m, m.applyEvent(api.Notification{Method: api.MethodPAgentChanged})())
+	m, _ = upd(m, m.applyEvent(api.Notification{Method: api.MethodBotChanged})())
 	m, _ = upd(m, m.loadTimelineCmd("n1:t1")())
 	if id := threadCursorID(m); id != "ev:7" {
 		t.Fatalf("refresh moved the cursor to %q", id)
@@ -83,11 +83,11 @@ func TestThreadViewKeepsCursorOnRefresh(t *testing.T) {
 func TestThreadViewMarksRead(t *testing.T) {
 	cl := threadClient()
 	m := openedThread(t, cl)
-	markReads := func() []api.PAgentMarkReadParams {
-		var got []api.PAgentMarkReadParams
+	markReads := func() []api.BotMarkReadParams {
+		var got []api.BotMarkReadParams
 		for i, call := range cl.calls {
-			if call == api.MethodPAgentThreadMarkRead {
-				got = append(got, cl.params[i].(api.PAgentMarkReadParams))
+			if call == api.MethodBotThreadMarkRead {
+				got = append(got, cl.params[i].(api.BotMarkReadParams))
 			}
 		}
 		return got
@@ -95,21 +95,21 @@ func TestThreadViewMarksRead(t *testing.T) {
 	// The thread's last activity (a turn's end) comes after its last entry:
 	// marking at the entry would leave it unread.
 	active := threadT0.Add(4*time.Minute + 123)
-	m.pagentThreads["n1:u"][0].LastActiveAt = active
+	m.botThreads["n1:u"][0].LastActiveAt = active
 	m2, cmd := m.Update(m.loadTimelineCmd("n1:t1")())
 	m = m2.(model)
 	if cmd == nil {
 		t.Fatal("a shown unread thread is marked read")
 	}
 	runCmd(cmd)
-	want := api.PAgentMarkReadParams{ThreadID: "n1:t1", Position: active.UnixNano()}
+	want := api.BotMarkReadParams{ThreadID: "n1:t1", Position: active.UnixNano()}
 	if got := markReads(); len(got) != 1 || got[0] != want {
 		t.Fatalf("markRead = %+v, want %+v", got, want)
 	}
 
 	// A read thread is not marked again.
 	cl.calls, cl.params = nil, nil
-	m.pagentThreads["n1:u"][0].Unread = false
+	m.botThreads["n1:u"][0].Unread = false
 	m2, cmd = m.Update(m.loadTimelineCmd("n1:t1")())
 	m = m2.(model)
 	runCmd(cmd)
@@ -118,11 +118,11 @@ func TestThreadViewMarksRead(t *testing.T) {
 	}
 
 	// A thread under another view is not marked when its activity changes.
-	m.main = m.main.push(agentComp{agentID: "n1:u"})
-	threads := agentViewThreads()
+	m.main = m.main.push(botComp{botID: "n1:u"})
+	threads := botViewThreads()
 	threads[0].LastActiveAt = active.Add(time.Minute)
-	m2, cmd = m.Update(pagentsMsg{names: map[string]string{}, agents: m.pagents,
-		threads: map[string][]api.PAgentThreadInfo{"n1:u": threads}})
+	m2, cmd = m.Update(botsMsg{names: map[string]string{}, bots: m.bots,
+		threads: map[string][]api.BotThreadInfo{"n1:u": threads}})
 	m = m2.(model)
 	runCmd(cmd)
 	if got := markReads(); len(got) != 0 {
@@ -152,8 +152,8 @@ func TestThreadViewUndoMemoryEvent(t *testing.T) {
 	}
 	cl.undoErr = errors.New("conflicts with a later change")
 	m, _ = upd(m, cmd())
-	p, n := pagentParams[api.PAgentMemoryUndoParams](cl, api.MethodPAgentMemoryUndo)
-	if n != 1 || p != (api.PAgentMemoryUndoParams{AgentID: "n1:u", Commit: "abc123", ThreadID: "n1:t1"}) {
+	p, n := botParams[api.BotMemoryUndoParams](cl, api.MethodBotMemoryUndo)
+	if n != 1 || p != (api.BotMemoryUndoParams{BotID: "n1:u", Commit: "abc123", ThreadID: "n1:t1"}) {
 		t.Fatalf("undo params = %+v (%d calls)", p, n)
 	}
 	if !strings.Contains(m.flash, "conflicts with a later change") {
@@ -199,13 +199,13 @@ func TestThreadViewOpenSessionAndReply(t *testing.T) {
 		t.Fatal("enter sends the reply")
 	}
 	cmd()
-	var p api.PAgentSendParams
+	var p api.BotSendParams
 	for i, call := range cl.calls {
-		if call == api.MethodPAgentThreadSend {
-			p = cl.params[i].(api.PAgentSendParams)
+		if call == api.MethodBotThreadSend {
+			p = cl.params[i].(api.BotSendParams)
 		}
 	}
-	if p != (api.PAgentSendParams{AgentID: "n1:u", ThreadID: "n1:t1", Text: "go on"}) {
+	if p != (api.BotSendParams{BotID: "n1:u", ThreadID: "n1:t1", Text: "go on"}) {
 		t.Fatalf("send params = %+v", p)
 	}
 	cl.timeline.Sessions = nil
@@ -216,9 +216,9 @@ func TestThreadViewOpenSessionAndReply(t *testing.T) {
 }
 
 func threadViewModel() model {
-	m := agentViewModel()
+	m := botViewModel()
 	m.client = threadClient()
-	th := newThreadComp(api.PAgentThreadInfo{ID: "n1:t1", AgentID: "n1:u", Title: "flat search"})
+	th := newThreadComp(api.BotThreadInfo{ID: "n1:t1", BotID: "n1:u", Title: "flat search"})
 	c := &ctx{m: &m}
 	comp, _ := th.update(c, m.loadTimelineCmd("n1:t1")())
 	m.main = m.main.push(comp)
@@ -241,10 +241,10 @@ func TestThreadViewDetail(t *testing.T) {
 
 // toolThread is a thread of two sessions, each with one tool call: the first
 // ended, the second live.
-func toolThread() *pagentClient {
+func toolThread() *botClient {
 	cl := threadClient()
 	ts := func(m int) string { return threadT0.Add(time.Duration(m) * time.Minute).Format(time.RFC3339Nano) }
-	cl.timeline = api.PAgentTimeline{ThreadID: "n1:t1",
+	cl.timeline = api.BotTimeline{ThreadID: "n1:t1",
 		Entries: []transcript.Entry{
 			{ID: "s0:u", Kind: transcript.EntryUser, Text: "list", Timestamp: ts(0)},
 			{ID: "s0:t", Kind: transcript.EntryTool, ToolName: "Bash", ToolID: "tool-old", InputPreview: "ls old", Timestamp: ts(1)},
@@ -253,7 +253,7 @@ func toolThread() *pagentClient {
 			{ID: "s1:t", Kind: transcript.EntryTool, ToolName: "Bash", ToolID: "tool-new", InputPreview: "ls new", Timestamp: ts(4)},
 			{ID: "s1:a", Kind: transcript.EntryText, Text: "listed again", Timestamp: ts(5)},
 		},
-		Sessions: []api.PAgentTimelineSession{
+		Sessions: []api.BotTimelineSession{
 			{SessionID: "n1:old", StartIndex: 0, CLI: "claude", TranscriptPath: "/t/old.jsonl"},
 			{SessionID: "n1:new", StartIndex: 3, CLI: "claude", TranscriptPath: "/t/new.jsonl", Live: true},
 		}}
@@ -294,7 +294,7 @@ func TestThreadToolDetailEndedSession(t *testing.T) {
 	cl := toolThread()
 	m := openedThread(t, cl)
 	m = drillTool(t, m, "s0:t")
-	p, n := pagentParams[api.HistoryToolDetailParams](cl, api.MethodSessionHistoryToolDetail)
+	p, n := botParams[api.HistoryToolDetailParams](cl, api.MethodSessionHistoryToolDetail)
 	if n != 1 || p.TranscriptPath != "/t/old.jsonl" || p.Agent != "claude" || p.ToolID != "tool-old" {
 		t.Fatalf("history tool detail = %+v (%d calls)", p, n)
 	}
@@ -307,7 +307,7 @@ func TestThreadToolDetailLiveSession(t *testing.T) {
 	cl := toolThread()
 	m := openedThread(t, cl)
 	m = drillTool(t, m, "s1:t")
-	p, n := pagentParams[api.ToolDetailParams](cl, api.MethodSessionToolDetail)
+	p, n := botParams[api.ToolDetailParams](cl, api.MethodSessionToolDetail)
 	if n != 1 || p.SessionID != "n1:new" || p.ToolID != "tool-new" {
 		t.Fatalf("session tool detail = %+v (%d calls)", p, n)
 	}
@@ -322,7 +322,7 @@ func TestThreadSubagentDrillReadsItsSession(t *testing.T) {
 		Subagents: []transcript.Subagent{{ID: "agent-7", Type: "explore", HasTrace: true}}, Timestamp: cl.timeline.Entries[1].Timestamp}
 	m := openedThread(t, cl)
 	m = drillTool(t, m, "s0:t")
-	p, n := pagentParams[api.HistoryTranscriptParams](cl, api.MethodSessionsHistoryTranscript)
+	p, n := botParams[api.HistoryTranscriptParams](cl, api.MethodSessionsHistoryTranscript)
 	if n != 1 || p.TranscriptPath != "/t/old.jsonl" || p.Agent != "claude" || p.AgentID != "agent-7" {
 		t.Fatalf("subagent read = %+v (%d calls)", p, n)
 	}

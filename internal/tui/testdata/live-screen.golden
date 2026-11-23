@@ -1,6 +1,6 @@
   󰚩 Argus                            · fix-login  [%1]                                                              
 
-  Projects  Sessions  Agents         │ ╭─────────────────────────────────────────────────────────────────────────────╮
+  Projects  Sessions  Bots           │ ╭─────────────────────────────────────────────────────────────────────────────╮
                                      │ │$ go test ./...                                                              │
 ▌ 󰋜 Home                         ○ 3 │ │ok      github.com/MunifTanjim/argus                                         │
   ▾  home                           │ │$                                                                            │

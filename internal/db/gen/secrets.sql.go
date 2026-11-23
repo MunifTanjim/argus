@@ -9,49 +9,49 @@ import (
 	"context"
 )
 
-const deletePAgentSecret = `-- name: DeletePAgentSecret :execrows
-DELETE FROM pagent_secret WHERE agent_id = ? AND name = ?
+const deleteBotSecret = `-- name: DeleteBotSecret :execrows
+DELETE FROM bot_secret WHERE bot_id = ? AND name = ?
 `
 
-type DeletePAgentSecretParams struct {
-	AgentID string
-	Name    string
+type DeleteBotSecretParams struct {
+	BotID string
+	Name  string
 }
 
-func (q *Queries) DeletePAgentSecret(ctx context.Context, arg DeletePAgentSecretParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deletePAgentSecret, arg.AgentID, arg.Name)
+func (q *Queries) DeleteBotSecret(ctx context.Context, arg DeleteBotSecretParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteBotSecret, arg.BotID, arg.Name)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
 }
 
-const deletePAgentSecrets = `-- name: DeletePAgentSecrets :exec
-DELETE FROM pagent_secret WHERE agent_id = ?
+const deleteBotSecrets = `-- name: DeleteBotSecrets :exec
+DELETE FROM bot_secret WHERE bot_id = ?
 `
 
-func (q *Queries) DeletePAgentSecrets(ctx context.Context, agentID string) error {
-	_, err := q.db.ExecContext(ctx, deletePAgentSecrets, agentID)
+func (q *Queries) DeleteBotSecrets(ctx context.Context, botID string) error {
+	_, err := q.db.ExecContext(ctx, deleteBotSecrets, botID)
 	return err
 }
 
-const listPAgentSecrets = `-- name: ListPAgentSecrets :many
-SELECT agent_id, name, description, value_enc, updated_at
-FROM pagent_secret WHERE agent_id = ?
+const listBotSecrets = `-- name: ListBotSecrets :many
+SELECT bot_id, name, description, value_enc, updated_at
+FROM bot_secret WHERE bot_id = ?
 ORDER BY name
 `
 
-func (q *Queries) ListPAgentSecrets(ctx context.Context, agentID string) ([]PagentSecret, error) {
-	rows, err := q.db.QueryContext(ctx, listPAgentSecrets, agentID)
+func (q *Queries) ListBotSecrets(ctx context.Context, botID string) ([]BotSecret, error) {
+	rows, err := q.db.QueryContext(ctx, listBotSecrets, botID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []PagentSecret{}
+	items := []BotSecret{}
 	for rows.Next() {
-		var i PagentSecret
+		var i BotSecret
 		if err := rows.Scan(
-			&i.AgentID,
+			&i.BotID,
 			&i.Name,
 			&i.Description,
 			&i.ValueEnc,
@@ -70,26 +70,26 @@ func (q *Queries) ListPAgentSecrets(ctx context.Context, agentID string) ([]Page
 	return items, nil
 }
 
-const upsertPAgentSecret = `-- name: UpsertPAgentSecret :exec
-INSERT INTO pagent_secret (agent_id, name, description, value_enc, updated_at)
+const upsertBotSecret = `-- name: UpsertBotSecret :exec
+INSERT INTO bot_secret (bot_id, name, description, value_enc, updated_at)
 VALUES (?, ?, ?, ?, ?)
-ON CONFLICT (agent_id, name) DO UPDATE SET
+ON CONFLICT (bot_id, name) DO UPDATE SET
     description = excluded.description,
     value_enc = excluded.value_enc,
     updated_at = excluded.updated_at
 `
 
-type UpsertPAgentSecretParams struct {
-	AgentID     string
+type UpsertBotSecretParams struct {
+	BotID       string
 	Name        string
 	Description string
 	ValueEnc    []byte
 	UpdatedAt   int64
 }
 
-func (q *Queries) UpsertPAgentSecret(ctx context.Context, arg UpsertPAgentSecretParams) error {
-	_, err := q.db.ExecContext(ctx, upsertPAgentSecret,
-		arg.AgentID,
+func (q *Queries) UpsertBotSecret(ctx context.Context, arg UpsertBotSecretParams) error {
+	_, err := q.db.ExecContext(ctx, upsertBotSecret,
+		arg.BotID,
 		arg.Name,
 		arg.Description,
 		arg.ValueEnc,

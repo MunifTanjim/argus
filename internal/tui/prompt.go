@@ -939,7 +939,7 @@ func interactionBody(m model, agent string, ix *session.Interaction, width int) 
 		if ix.Message != "" {
 			parts = append(parts, hardWrap(StyleSecondary.Render(ix.Message), width-2))
 		}
-		parts = append(parts, hardWrap(StyleDim.Render("Kept on this node; the agent sees only $"+ix.SecretName+"."), width-2))
+		parts = append(parts, hardWrap(StyleDim.Render("Kept on this node; the bot sees only $"+ix.SecretName+"."), width-2))
 		return strings.Join(parts, "\n")
 	case session.InteractionPermission:
 		var parts []string

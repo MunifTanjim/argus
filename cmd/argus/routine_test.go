@@ -11,7 +11,7 @@ import (
 )
 
 type fakeRoutineNode struct {
-	agents []api.PAgentInfo
+	bots   []api.BotInfo
 	calls  []string
 	params map[string]any
 }
@@ -24,25 +24,25 @@ func (f *fakeRoutineNode) call(method string, params, out any) error {
 	f.params[method] = params
 	next := time.Date(2026, 11, 23, 9, 0, 0, 0, time.UTC)
 	switch method {
-	case api.MethodPAgentList:
-		*out.(*api.PAgentListResult) = api.PAgentListResult{Agents: f.agents}
-	case api.MethodPAgentRoutineList:
-		*out.(*api.PAgentRoutineListResult) = api.PAgentRoutineListResult{Routines: []api.PAgentRoutineInfo{{
-			AgentID: params.(api.PAgentRef).AgentID, Slug: "inbox", What: "check inbox", Starts: []string{"every 2 hours"},
-			State: "active", NextDue: &next, Budget: api.PAgentRoutineBudget{Sessions: 5}, Used: api.PAgentRoutineBudget{Sessions: 2, Cost: 0.5},
+	case api.MethodBotList:
+		*out.(*api.BotListResult) = api.BotListResult{Bots: f.bots}
+	case api.MethodBotRoutineList:
+		*out.(*api.BotRoutineListResult) = api.BotRoutineListResult{Routines: []api.BotRoutineInfo{{
+			BotID: params.(api.BotRef).BotID, Slug: "inbox", What: "check inbox", Starts: []string{"every 2 hours"},
+			State: "active", NextDue: &next, Budget: api.BotRoutineBudget{Sessions: 5}, Used: api.BotRoutineBudget{Sessions: 2, Cost: 0.5},
 		}}}
-	case api.MethodPAgentRoutineRun:
-		*out.(*api.PAgentRoutineRunResult) = api.PAgentRoutineRunResult{RunID: "rr1"}
-	case api.MethodPAgentRoutinePause:
-		*out.(*api.PAgentRoutineInfo) = api.PAgentRoutineInfo{Slug: "inbox", State: "paused", PausedReason: "you"}
-	case api.MethodPAgentRoutineResume:
-		*out.(*api.PAgentRoutineInfo) = api.PAgentRoutineInfo{Slug: "inbox", State: "active"}
-	case api.MethodPAgentRoutineRuns:
-		*out.(*api.PAgentRoutineRunsResult) = api.PAgentRoutineRunsResult{Runs: []api.PAgentRoutineRunInfo{
+	case api.MethodBotRoutineRun:
+		*out.(*api.BotRoutineRunResult) = api.BotRoutineRunResult{RunID: "rr1"}
+	case api.MethodBotRoutinePause:
+		*out.(*api.BotRoutineInfo) = api.BotRoutineInfo{Slug: "inbox", State: "paused", PausedReason: "you"}
+	case api.MethodBotRoutineResume:
+		*out.(*api.BotRoutineInfo) = api.BotRoutineInfo{Slug: "inbox", State: "active"}
+	case api.MethodBotRoutineRuns:
+		*out.(*api.BotRoutineRunsResult) = api.BotRoutineRunsResult{Runs: []api.BotRoutineRunInfo{
 			{ID: "rr1", StartedBy: "you", Test: true, State: "done", Result: "progress", Summary: "moved invoices", StartedAt: next},
 		}}
-	case api.MethodPAgentRoutineHookSecret:
-		*out.(*api.PAgentRoutineHookSecretResult) = api.PAgentRoutineHookSecretResult{Secret: "whs_abc", Path: "/hooks/scout/inbox"}
+	case api.MethodBotRoutineHookSecret:
+		*out.(*api.BotRoutineHookSecretResult) = api.BotRoutineHookSecretResult{Secret: "whs_abc", Path: "/hooks/scout/inbox"}
 	}
 	return nil
 }
@@ -64,7 +64,7 @@ func execRoutineErr(t *testing.T, f *fakeRoutineNode, args ...string) (string, s
 }
 
 func routineNode() *fakeRoutineNode {
-	return &fakeRoutineNode{agents: []api.PAgentInfo{{ID: "n1:a1", Name: "scout", Status: "idle"}, {ID: "n1:a2", Name: "other", Status: "idle"}}}
+	return &fakeRoutineNode{bots: []api.BotInfo{{ID: "n1:a1", Name: "scout", Status: "idle"}, {ID: "n1:a2", Name: "other", Status: "idle"}}}
 }
 
 func TestRoutineList(t *testing.T) {
@@ -93,7 +93,7 @@ func TestRoutineShow(t *testing.T) {
 	if _, err := execRoutine(t, routineNode(), "show", "scout/nope"); err == nil {
 		t.Fatal("unknown routine shown")
 	}
-	if _, errOut, err := execRoutineErr(t, routineNode(), "show", "scout"); err == nil || !strings.Contains(errOut, "<agent>/<slug>") {
+	if _, errOut, err := execRoutineErr(t, routineNode(), "show", "scout"); err == nil || !strings.Contains(errOut, "<bot>/<slug>") {
 		t.Fatalf("bad name: %v %q", err, errOut)
 	}
 }
@@ -104,7 +104,7 @@ func TestRoutineActions(t *testing.T) {
 	if err != nil || !strings.Contains(out, "rr1") {
 		t.Fatalf("run: %v\n%s", err, out)
 	}
-	if p := f.params[api.MethodPAgentRoutineRun].(api.PAgentRoutineRef); p.AgentID != "n1:a1" || p.Slug != "inbox" {
+	if p := f.params[api.MethodBotRoutineRun].(api.BotRoutineRef); p.BotID != "n1:a1" || p.Slug != "inbox" {
 		t.Fatalf("run params: %+v", p)
 	}
 	if out, err := execRoutine(t, f, "pause", "scout/inbox"); err != nil || !strings.Contains(out, "paused (you)") {
@@ -117,7 +117,7 @@ func TestRoutineActions(t *testing.T) {
 	if err != nil || !strings.Contains(out, "you (test)") || !strings.Contains(out, "moved invoices") {
 		t.Fatalf("runs: %v\n%s", err, out)
 	}
-	if p := f.params[api.MethodPAgentRoutineRuns].(api.PAgentRoutineRunsParams); p.Limit != 5 {
+	if p := f.params[api.MethodBotRoutineRuns].(api.BotRoutineRunsParams); p.Limit != 5 {
 		t.Fatalf("runs params: %+v", p)
 	}
 	out, err = execRoutine(t, f, "hook-secret", "scout/inbox")

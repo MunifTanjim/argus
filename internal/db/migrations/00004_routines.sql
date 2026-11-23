@@ -1,8 +1,8 @@
 -- +goose Up
 -- +goose StatementBegin
 
-CREATE TABLE pagent_routine_state (
-    agent_id             TEXT NOT NULL,
+CREATE TABLE bot_routine_state (
+    bot_id             TEXT NOT NULL,
     slug                 TEXT NOT NULL,
     def_hash             TEXT NOT NULL DEFAULT '',
     enabled              INTEGER NOT NULL DEFAULT 1,
@@ -17,12 +17,12 @@ CREATE TABLE pagent_routine_state (
     check_back_at        INTEGER NOT NULL DEFAULT 0,
     anchor_at            INTEGER NOT NULL DEFAULT 0,
     updated_at           INTEGER NOT NULL,
-    PRIMARY KEY (agent_id, slug)
+    PRIMARY KEY (bot_id, slug)
 );
 
-CREATE TABLE pagent_routine_run (
+CREATE TABLE bot_routine_run (
     id              TEXT PRIMARY KEY,
-    agent_id        TEXT NOT NULL,
+    bot_id        TEXT NOT NULL,
     slug            TEXT NOT NULL,
     occurrence      INTEGER NOT NULL,
     started_by      TEXT NOT NULL,
@@ -43,16 +43,16 @@ CREATE TABLE pagent_routine_run (
     error           TEXT NOT NULL DEFAULT ''
 );
 
-CREATE UNIQUE INDEX pagent_routine_run_idx_occurrence ON pagent_routine_run (agent_id, slug, occurrence);
-CREATE INDEX pagent_routine_run_idx_agent_started ON pagent_routine_run (agent_id, started_at);
-CREATE INDEX pagent_routine_run_idx_state_lease ON pagent_routine_run (state, lease_until);
+CREATE UNIQUE INDEX bot_routine_run_idx_occurrence ON bot_routine_run (bot_id, slug, occurrence);
+CREATE INDEX bot_routine_run_idx_bot_started ON bot_routine_run (bot_id, started_at);
+CREATE INDEX bot_routine_run_idx_state_lease ON bot_routine_run (state, lease_until);
 
-CREATE TABLE pagent_webhook_secret (
-    agent_id    TEXT NOT NULL,
+CREATE TABLE bot_webhook_secret (
+    bot_id    TEXT NOT NULL,
     slug        TEXT NOT NULL,
     secret_hash TEXT NOT NULL,
     created_at  INTEGER NOT NULL,
-    PRIMARY KEY (agent_id, slug)
+    PRIMARY KEY (bot_id, slug)
 );
 
 -- +goose StatementEnd
@@ -60,8 +60,8 @@ CREATE TABLE pagent_webhook_secret (
 -- +goose Down
 -- +goose StatementBegin
 
-DROP TABLE pagent_webhook_secret;
-DROP TABLE pagent_routine_run;
-DROP TABLE pagent_routine_state;
+DROP TABLE bot_webhook_secret;
+DROP TABLE bot_routine_run;
+DROP TABLE bot_routine_state;
 
 -- +goose StatementEnd

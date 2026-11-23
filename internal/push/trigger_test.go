@@ -375,8 +375,8 @@ func TestWatchDelayedRendersLatestSnapshot(t *testing.T) {
 }
 
 func TestWatchSkipsHandoff(t *testing.T) {
-	// A persistent agent's hand-off request is pushed by the node under the
-	// agent's notification policy, not by Watch.
+	// A bot's hand-off request is pushed by the node under the
+	// bot's notification policy, not by Watch.
 	handoff := ev(registry.EventUpdated, "s1", session.StatusAwaitingInput)
 	handoff.Session.Interaction = &session.Interaction{Kind: session.InteractionHandoff}
 	perm := ev(registry.EventUpdated, "s2", session.StatusAwaitingInput)

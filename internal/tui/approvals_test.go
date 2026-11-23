@@ -155,15 +155,15 @@ func TestThreadDraftSendAndDiscard(t *testing.T) {
 	cmd()
 	var got []string
 	for i, call := range cl.calls {
-		if call == api.MethodPAgentDraftSend || call == api.MethodPAgentDraftDiscard {
-			p := cl.params[i].(api.PAgentDraftParams)
+		if call == api.MethodBotDraftSend || call == api.MethodBotDraftDiscard {
+			p := cl.params[i].(api.BotDraftParams)
 			got = append(got, call+" "+p.ThreadID)
 			if p.EventID != 1 {
 				t.Errorf("event id = %d", p.EventID)
 			}
 		}
 	}
-	if strings.Join(got, ",") != api.MethodPAgentDraftSend+" n1:t1,"+api.MethodPAgentDraftDiscard+" n1:t1" {
+	if strings.Join(got, ",") != api.MethodBotDraftSend+" n1:t1,"+api.MethodBotDraftDiscard+" n1:t1" {
 		t.Fatalf("draft calls = %v", got)
 	}
 }

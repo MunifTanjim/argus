@@ -153,7 +153,7 @@ keys come from a default keymap, for example `P` runs `:toggle pin<CR>`. The
 |---|---|
 | `project-tree` | The tree of projects and workspaces |
 | `sidebar-sessions` | The sessions in the left sidebar |
-| `sidebar-agents` | The agents in the left sidebar |
+| `sidebar-bots` | The bots in the left sidebar |
 | `workspace` | The session list of a workspace |
 | `project` | The summary of a project |
 | `node` | The summary of a node |
@@ -168,9 +168,9 @@ keys come from a default keymap, for example `P` runs `:toggle pin<CR>`. The
 | `file-tree` | The Files tab |
 | `changes` | The Changes tab |
 | `terminals` | The terminals of Home, a node, or a workspace |
-| `agent` | An agent |
-| `thread` | An agent thread |
-| `agent-memory` | An agent's memory |
+| `bot` | A bot |
+| `thread` | A bot thread |
+| `bot-memory` | A bot's memory |
 | `global` | Every section |
 
 ### Key notation
@@ -245,26 +245,26 @@ To run Lua code on a key, see [Lua](/getting-started/configuration#lua).
 <!-- keymap-commands:start -->
 | Command | Action | Sections | Built-in keys | Default mappings |
 |---|---|---|---|---|
-| `agent make-primary` |  | agent |  |  |
-| `agent memory` |  | agent |  | `m` |
-| `agent new-chat` |  | agent |  | `n` |
-| `agent set memory auto` |  | agent |  |  |
-| `agent set memory off` |  | agent |  |  |
-| `agent set memory review` |  | agent |  |  |
-| `agent set notify all` |  | agent |  |  |
-| `agent set notify needs-you` |  | agent |  |  |
-| `agent set notify off` |  | agent |  |  |
-| `agent set proactivity default` |  | agent |  |  |
-| `agent set proactivity high` |  | agent |  |  |
-| `agent set proactivity low` |  | agent |  |  |
-| `agent set proactivity off` |  | agent |  |  |
-| `agent unset memory` |  | agent |  |  |
-| `agent unset notify` |  | agent |  |  |
-| `agent unset proactivity` |  | agent |  |  |
-| `agent unset-primary` |  | agent |  |  |
 | `answer note` |  | session-dock | `n` |  |
 | `answer submit` |  | session-dock | `<CR>` |  |
-| `back` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, spawn, terminals, thread, transcript, visual, workspace | `<Esc>` |  |
+| `back` |  | bot, bot-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, session-dock, settings, sidebar-bots, sidebar-sessions, spawn, terminals, thread, transcript, visual, workspace | `<Esc>` |  |
+| `bot make-primary` |  | bot |  |  |
+| `bot memory` |  | bot |  | `m` |
+| `bot new-chat` |  | bot |  | `n` |
+| `bot set memory auto` |  | bot |  |  |
+| `bot set memory off` |  | bot |  |  |
+| `bot set memory review` |  | bot |  |  |
+| `bot set notify all` |  | bot |  |  |
+| `bot set notify needs-you` |  | bot |  |  |
+| `bot set notify off` |  | bot |  |  |
+| `bot set proactivity default` |  | bot |  |  |
+| `bot set proactivity high` |  | bot |  |  |
+| `bot set proactivity low` |  | bot |  |  |
+| `bot set proactivity off` |  | bot |  |  |
+| `bot unset memory` |  | bot |  |  |
+| `bot unset notify` |  | bot |  |  |
+| `bot unset proactivity` |  | bot |  |  |
+| `bot unset-primary` |  | bot |  |  |
 | `copy` |  | thread, transcript, visual | `y` |  |
 | `cursor down` |  | visual | `<Down>` `j` |  |
 | `cursor first-non-blank` |  | visual | `^` |  |
@@ -276,59 +276,59 @@ To run Lua code on a key, see [Lua](/getting-started/configuration#lua).
 | `cursor word-end` |  | visual | `e` |  |
 | `cursor word-next` |  | visual | `w` |  |
 | `cursor word-prev` |  | visual | `b` |  |
-| `cycle agent-setting` |  | agent |  | `zs` |
+| `cycle bot-setting` |  | bot |  | `zs` |
 | `cycle group-by` |  | home |  | `zg` |
-| `filter-agents` |  | sidebar-agents | `/` |  |
+| `filter-bots` |  | sidebar-bots | `/` |  |
 | `filter-directories` |  | spawn | `/` |  |
 | `filter-projects` |  | history, node, project, project-tree | `/` |  |
 | `filter-sessions` |  | history, home, sidebar-sessions, workspace | `/` |  |
-| `focus down` | `client.pane.focus.down` | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace | `<C-w><Down>` `<C-w>j` |  |
-| `focus left` | `client.pane.focus.left` | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace | `<C-w><Left>` `<C-w>h` |  |
-| `focus next` | `client.pane.focus_next` | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace | `<C-w>w` |  |
-| `focus prev` | `client.pane.focus_previous` | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace | `<C-w>W` |  |
+| `focus down` | `client.pane.focus.down` | bot, bot-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-bots, sidebar-sessions, terminals, thread, transcript, visual, workspace | `<C-w><Down>` `<C-w>j` |  |
+| `focus left` | `client.pane.focus.left` | bot, bot-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-bots, sidebar-sessions, terminals, thread, transcript, visual, workspace | `<C-w><Left>` `<C-w>h` |  |
+| `focus next` | `client.pane.focus_next` | bot, bot-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-bots, sidebar-sessions, terminals, thread, transcript, visual, workspace | `<C-w>w` |  |
+| `focus prev` | `client.pane.focus_previous` | bot, bot-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-bots, sidebar-sessions, terminals, thread, transcript, visual, workspace | `<C-w>W` |  |
 | `focus prompt` |  | file, thread, transcript |  | `<Tab>` |
-| `focus right` | `client.pane.focus.right` | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace | `<C-w><Right>` `<C-w>l` |  |
+| `focus right` | `client.pane.focus.right` | bot, bot-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-bots, sidebar-sessions, terminals, thread, transcript, visual, workspace | `<C-w><Right>` `<C-w>l` |  |
 | `focus transcript` |  | session-dock | `<Tab>` | `<Tab>` |
-| `focus up` | `client.pane.focus.up` | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace | `<C-w><Up>` `<C-w>k` |  |
+| `focus up` | `client.pane.focus.up` | bot, bot-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-bots, sidebar-sessions, terminals, thread, transcript, visual, workspace | `<C-w><Up>` `<C-w>k` |  |
 | `fold close` |  | changes, file-tree, project-tree, thread, transcript | `<Left>` `h` `zc` |  |
 | `fold open` |  | changes, file-tree, project-tree, thread, transcript | `<Right>` `l` `zo` |  |
-| `goto bottom` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, project-tree, settings, sidebar-agents, sidebar-sessions, spawn, terminals, thread, transcript, visual, workspace | `G` |  |
-| `goto top` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, project-tree, settings, sidebar-agents, sidebar-sessions, spawn, terminals, thread, transcript, visual, workspace | `gg` |  |
-| `help` |  | agent, agent-memory, changes (over the workspace pane), file (over the workspace pane), file-tree (over the workspace pane), history (project list), home, logs, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, workspace |  | `g?` |
-| `hover` |  | changes, file-tree, project-tree, sidebar-agents, sidebar-sessions |  | `K` |
-| `memory accept` |  | agent-memory |  | `a` |
-| `memory reject` |  | agent-memory |  | `x` |
-| `memory undo` |  | agent-memory, thread |  | `u` |
-| `next` |  | agent, agent-memory, changes, file-tree, history, home, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, spawn, terminals, thread, transcript, workspace | `<Down>` `j` |  |
+| `goto bottom` |  | bot, bot-memory, changes, file, file-tree, history, home, logs, project-tree, settings, sidebar-bots, sidebar-sessions, spawn, terminals, thread, transcript, visual, workspace | `G` |  |
+| `goto top` |  | bot, bot-memory, changes, file, file-tree, history, home, logs, project-tree, settings, sidebar-bots, sidebar-sessions, spawn, terminals, thread, transcript, visual, workspace | `gg` |  |
+| `help` |  | bot, bot-memory, changes (over the workspace pane), file (over the workspace pane), file-tree (over the workspace pane), history (project list), home, logs, node, project, project-tree, settings, sidebar-bots, sidebar-sessions, terminals, workspace |  | `g?` |
+| `hover` |  | changes, file-tree, project-tree, sidebar-bots, sidebar-sessions |  | `K` |
+| `memory accept` |  | bot-memory |  | `a` |
+| `memory reject` |  | bot-memory |  | `x` |
+| `memory undo` |  | bot-memory, thread |  | `u` |
+| `next` |  | bot, bot-memory, changes, file-tree, history, home, project-tree, session-dock, settings, sidebar-bots, sidebar-sessions, spawn, terminals, thread, transcript, workspace | `<Down>` `j` |  |
 | `next diff-file` |  | file |  | `]f` |
 | `next prompt` |  | thread, transcript | `}` |  |
 | `node wakelock` |  | node, project-tree |  | `w` |
 | `offer dismiss` |  | thread |  | `x` |
 | `offer start` |  | thread |  | `a` |
-| `open` |  | agent, changes, file-tree, history, home, project-tree, sidebar-agents, sidebar-sessions, spawn, terminals, thread, transcript, workspace | `<CR>` |  |
+| `open` |  | bot, changes, file-tree, history, home, project-tree, sidebar-bots, sidebar-sessions, spawn, terminals, thread, transcript, workspace | `<CR>` |  |
 | `open live-screen` |  | session-dock, transcript |  | `<C-t>` |
-| `open palette` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace |  | `<C-k>` |
+| `open palette` |  | bot, bot-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-bots, sidebar-sessions, terminals, thread, transcript, visual, workspace |  | `<C-k>` |
 | `open setup-log` |  | project-tree, workspace |  | `L` |
 | `open shell` |  | session-dock, transcript |  |  |
 | `open subagent` |  | session-dock, transcript |  |  |
 | `open tmux-pane` |  | home, workspace |  | `O` |
-| `prev` |  | agent, agent-memory, changes, file-tree, history, home, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, spawn, terminals, thread, transcript, workspace | `<Up>` `k` |  |
+| `prev` |  | bot, bot-memory, changes, file-tree, history, home, project-tree, session-dock, settings, sidebar-bots, sidebar-sessions, spawn, terminals, thread, transcript, workspace | `<Up>` `k` |  |
 | `prev diff-file` |  | file |  | `[f` |
 | `prev prompt` |  | thread, transcript | `{` |  |
 | `project forget` |  | project-tree |  | `F` |
 | `project rename` |  | project-tree |  | `r` |
-| `quit` |  | agent, agent-memory, changes (over the workspace pane), file (over the workspace pane), file-tree (over the workspace pane), home, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, workspace |  | `Q` |
+| `quit` |  | bot, bot-memory, changes (over the workspace pane), file (over the workspace pane), file-tree (over the workspace pane), home, node, project, project-tree, settings, sidebar-bots, sidebar-sessions, terminals, workspace |  | `Q` |
 | `redaction add` |  | transcript |  | `d` |
 | `redaction list` |  | transcript |  | `D` |
 | `redaction remove` |  | transcript |  | `u` |
 | `redaction save` |  | transcript |  | `W` |
-| `refresh` |  | agent, agent-memory, changes, file, file-tree, history, home, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, thread, workspace |  | `gr` |
-| `routine pause` |  | agent |  |  |
-| `routine resume` |  | agent |  |  |
-| `routine run` |  | agent |  | `R` |
+| `refresh` |  | bot, bot-memory, changes, file, file-tree, history, home, node, project, project-tree, settings, sidebar-bots, sidebar-sessions, terminals, thread, workspace |  | `gr` |
+| `routine pause` |  | bot |  |  |
+| `routine resume` |  | bot |  |  |
+| `routine run` |  | bot |  | `R` |
 | `scroll down` |  | file, logs, settings, thread, transcript | `<Down>` `j` |  |
-| `scroll half-page-down` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, spawn, terminals, thread, transcript, visual, workspace | `<C-d>` |  |
-| `scroll half-page-up` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, spawn, terminals, thread, transcript, visual, workspace | `<C-u>` |  |
+| `scroll half-page-down` |  | bot, bot-memory, changes, file, file-tree, history, home, logs, project-tree, session-dock, settings, sidebar-bots, sidebar-sessions, spawn, terminals, thread, transcript, visual, workspace | `<C-d>` |  |
+| `scroll half-page-up` |  | bot, bot-memory, changes, file, file-tree, history, home, logs, project-tree, session-dock, settings, sidebar-bots, sidebar-sessions, spawn, terminals, thread, transcript, visual, workspace | `<C-u>` |  |
 | `scroll page-down` |  | changes, file, file-tree, history, home, logs, project-tree, session-dock, settings, spawn, terminals, thread, transcript, visual, workspace | `<C-f>` `<PageDown>` |  |
 | `scroll page-up` |  | changes, file, file-tree, history, home, logs, project-tree, session-dock, settings, spawn, terminals, thread, transcript, visual, workspace | `<C-b>` `<PageUp>` |  |
 | `scroll up` |  | file, logs, settings, thread, transcript | `<Up>` `k` |  |
@@ -337,7 +337,7 @@ To run Lua code on a key, see [Lua](/getting-started/configuration#lua).
 | `session rename` |  | home, sidebar-sessions, workspace |  | `r` |
 | `session resume` |  | history, transcript |  | `R` |
 | `session spawn` |  | home, project-tree, sidebar-sessions, workspace |  | `s` |
-| `settings` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace |  | `g,` |
+| `settings` |  | bot, bot-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-bots, sidebar-sessions, terminals, thread, transcript, visual, workspace |  | `g,` |
 | `settings details` |  | settings | `i` |  |
 | `settings log` |  | settings | `L` |  |
 | `settings pair` |  | settings | `a` |  |
@@ -346,10 +346,10 @@ To run Lua code on a key, see [Lua](/getting-started/configuration#lua).
 | `settings sign` |  | settings | `s` |  |
 | `settings sign-tui` |  | settings | `S` |  |
 | `settings unpin` |  | settings | `P` |  |
-| `sidebar narrower` |  | changes, file-tree, node, project, project-tree, sidebar-agents, sidebar-sessions, workspace | `<C-w><lt>` |  |
-| `sidebar wider` |  | changes, file-tree, node, project, project-tree, sidebar-agents, sidebar-sessions, workspace | `<C-w>>` |  |
-| `tab next` | `client.pane.tab.next` | agent-memory, changes, file-tree, history, home, logs, node, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, terminals, workspace | `<Right>` `gt` |  |
-| `tab prev` | `client.pane.tab.previous` | agent-memory, changes, file-tree, history, home, logs, node, project-tree, session-dock, settings, sidebar-agents, sidebar-sessions, terminals, workspace | `<Left>` `gT` |  |
+| `sidebar narrower` |  | changes, file-tree, node, project, project-tree, sidebar-bots, sidebar-sessions, workspace | `<C-w><lt>` |  |
+| `sidebar wider` |  | changes, file-tree, node, project, project-tree, sidebar-bots, sidebar-sessions, workspace | `<C-w>>` |  |
+| `tab next` | `client.pane.tab.next` | bot-memory, changes, file-tree, history, home, logs, node, project-tree, session-dock, settings, sidebar-bots, sidebar-sessions, terminals, workspace | `<Right>` `gt` |  |
+| `tab prev` | `client.pane.tab.previous` | bot-memory, changes, file-tree, history, home, logs, node, project-tree, session-dock, settings, sidebar-bots, sidebar-sessions, terminals, workspace | `<Left>` `gT` |  |
 | `terminal kill` |  | terminals |  | `dd` |
 | `terminal rename` |  | terminals |  | `r` |
 | `terminal spawn` |  | terminals |  | `a` |
@@ -357,20 +357,20 @@ To run Lua code on a key, see [Lua](/getting-started/configuration#lua).
 | `toggle active-only` |  | home, workspace |  | `za` |
 | `toggle diff-vs-target` |  | changes |  | `t` |
 | `toggle hidden` |  | project-tree |  | `H` |
-| `toggle left-sidebar` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace |  | `<Leader>o` |
+| `toggle left-sidebar` |  | bot, bot-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-bots, sidebar-sessions, terminals, thread, transcript, visual, workspace |  | `<Leader>o` |
 | `toggle line-wrap` |  | file |  | `yow` |
-| `toggle mouse` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace |  |  |
+| `toggle mouse` |  | bot, bot-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-bots, sidebar-sessions, terminals, thread, transcript, visual, workspace |  |  |
 | `toggle pin` |  | project-tree |  | `P` |
-| `toggle right-sidebar` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace |  | `<Leader>e` |
-| `toggle routine-pause` |  | agent |  | `zp` |
+| `toggle right-sidebar` |  | bot, bot-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, sidebar-bots, sidebar-sessions, terminals, thread, transcript, visual, workspace |  | `<Leader>e` |
+| `toggle routine-pause` |  | bot |  | `zp` |
 | `toggle selection` |  | session-dock | `<Space>` |  |
 | `toggle show-gone` |  | node, project, project-tree, workspace |  | `zx` |
 | `toggle show-hidden` |  | node, project, project-tree, workspace |  | `z.` |
-| `toggle verbose-transcript` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace |  |  |
+| `toggle verbose-transcript` |  | bot, bot-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-bots, sidebar-sessions, terminals, thread, transcript, visual, workspace |  |  |
 | `toggle workspace-only` |  | sidebar-sessions |  | `zw` |
 | `transcript export` |  | history, transcript |  | `E` |
-| `upgrade gateway` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace |  |  |
-| `upgrade node` |  | agent, agent-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-agents, sidebar-sessions, terminals, thread, transcript, visual, workspace |  |  |
+| `upgrade gateway` |  | bot, bot-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-bots, sidebar-sessions, terminals, thread, transcript, visual, workspace |  |  |
+| `upgrade node` |  | bot, bot-memory, changes, file, file-tree, history, home, logs, node, project, project-tree, settings, sidebar-bots, sidebar-sessions, terminals, thread, transcript, visual, workspace |  |  |
 | `visual char` |  | thread, transcript, visual | `v` |  |
 | `visual line` |  | thread, transcript, visual | `V` |  |
 | `visual swap` |  | visual | `o` |  |

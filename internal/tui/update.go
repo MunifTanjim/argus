@@ -24,7 +24,7 @@ func (m model) Init() tea.Cmd {
 	if t, ok := m.baseComp().(transcriptComp); ok && m.viewer {
 		return tea.Batch(m.fetchHistTranscript(t.history.addr()), m.kittyCheckCmd())
 	}
-	return tea.Batch(m.refreshCmd(), m.fetchProjects(), m.loadPAgentsCmd(), m.loadTerminalsCmd(), m.kittyCheckCmd())
+	return tea.Batch(m.refreshCmd(), m.fetchProjects(), m.loadBotsCmd(), m.loadTerminalsCmd(), m.kittyCheckCmd())
 }
 
 // refreshCmd asks the node to rescan; results stream back as registry events.
@@ -140,7 +140,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.connected {
 			// Reconnected: resync authoritatively; live events resume on their own.
 			m.reconnecting = false
-			cmd := tea.Batch(m.resyncCmd(), m.loadProjects(), m.loadPAgentsCmd(), m.loadTerminalsCmd(), m.resubscribeLive(""))
+			cmd := tea.Batch(m.resyncCmd(), m.loadProjects(), m.loadBotsCmd(), m.loadTerminalsCmd(), m.resubscribeLive(""))
 			return m, cmd
 		}
 		m.reconnecting = true // keep the last-known list visible meanwhile
@@ -216,32 +216,32 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flash = "spawn failed: " + msg.err.Error()
 		}
 		return m, nil
-	case pagentsMsg:
+	case botsMsg:
 		if msg.err == nil {
-			m.pagentNames = msg.names
-			m.pagents, m.pagentPrimary, m.pagentThreads = msg.agents, msg.primary, msg.threads
+			m.botNames = msg.names
+			m.bots, m.botPrimary, m.botThreads = msg.bots, msg.primary, msg.threads
 			m.reorder()
 			return m, m.markTopThreadReadCmd()
 		}
 		return m, nil
-	case agentMemoryMsg:
-		return m.updateAgentMemory(msg, msg.agentID)
-	case agentMemoryActionMsg:
-		return m.updateAgentMemory(msg, msg.agentID)
+	case botMemoryMsg:
+		return m.updateBotMemory(msg, msg.botID)
+	case botMemoryActionMsg:
+		return m.updateBotMemory(msg, msg.botID)
 	case threadTimelineMsg:
 		return m.updateThreadView(msg, msg.threadID)
 	case threadActionMsg:
 		return m.updateThreadView(msg, msg.threadID)
-	case agentViewMsg:
-		return m.updateAgentView(msg, msg.agentID)
-	case agentSentMsg:
-		return m.updateAgentView(msg, msg.agentID)
-	case agentPrimaryMsg:
-		return m.updateAgentView(msg, msg.agentID)
-	case agentRoutineMsg:
-		return m.updateAgentView(msg, msg.agentID)
-	case agentSetMsg:
-		return m.updateAgentView(msg, msg.agentID)
+	case botViewMsg:
+		return m.updateBotView(msg, msg.botID)
+	case botSentMsg:
+		return m.updateBotView(msg, msg.botID)
+	case botPrimaryMsg:
+		return m.updateBotView(msg, msg.botID)
+	case botRoutineMsg:
+		return m.updateBotView(msg, msg.botID)
+	case botSetMsg:
+		return m.updateBotView(msg, msg.botID)
 	case terminalsMsg:
 		m.terminalsDone = true
 		m.terminalsErr = msg.err
@@ -478,8 +478,8 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 	if n.Method == api.MethodProjectChanged {
 		return m.loadProjects()
 	}
-	if n.Method == api.MethodPAgentChanged {
-		return tea.Batch(m.loadPAgentsCmd(), m.reloadThreadViewsCmd(), m.reloadAgentViewsCmd())
+	if n.Method == api.MethodBotChanged {
+		return tea.Batch(m.loadBotsCmd(), m.reloadThreadViewsCmd(), m.reloadBotViewsCmd())
 	}
 	if n.Method == api.MethodTerminalChanged {
 		return m.loadTerminalsCmd()

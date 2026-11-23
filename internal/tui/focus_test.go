@@ -152,10 +152,10 @@ func sectionStates() []sectionState {
 		{"live transcript", "transcript", waitingSession},
 		{"history transcript", "transcript", func() model { return historyTranscript(false) }},
 		{"session dock", "session-dock", func() model { return withFocus(waitingSession(), sessionDock) }},
-		{"Agents tab", "sidebar-agents", calmAgentsModel},
-		{"agent view", "agent", agentViewModel},
+		{"Bots tab", "sidebar-bots", calmBotsModel},
+		{"bot view", "bot", botViewModel},
 		{"thread view", "thread", threadViewModel},
-		{"agent memory", "agent-memory", agentMemoryModel},
+		{"bot memory", "bot-memory", botMemoryModel},
 	}
 }
 

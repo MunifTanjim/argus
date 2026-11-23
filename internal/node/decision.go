@@ -8,7 +8,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
-	"github.com/MunifTanjim/argus/internal/pagent/policy"
+	"github.com/MunifTanjim/argus/internal/bot/policy"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -55,7 +55,7 @@ func (d *Node) claimPending(sessionID, requestID string) *pendingDecision {
 // alone: the main thread is still running. A cancel interrupts the turn, so it
 // surfaces the idle composer instead of clearing to working.
 //
-// Requests of an agent thread session go through the approval policy first:
+// Requests of a bot thread session go through the approval policy first:
 // an allow, deny or draft is answered at once, and an ask parks as an approval
 // card.
 func (d *Node) awaitDecision(ctx context.Context, a adapter.Adapter, sid, id string, ev adapter.HookEvent) string {

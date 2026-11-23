@@ -546,7 +546,7 @@ func systemRow(e transcript.Entry, expanded bool, iw int) (string, []cardSpan) {
 	return head, spans
 }
 
-// argusRow is an Argus event in an agent thread: dim, with the undo key on a
+// argusRow is an Argus event in a bot thread: dim, with the undo key on a
 // memory or routine change.
 func (m tview) argusRow(e transcript.Entry, iw int) (string, []cardSpan) {
 	if e.Event != nil && e.Event.Kind == "handoff.answered" {
@@ -570,7 +570,7 @@ func (m tview) argusRow(e transcript.Entry, iw int) (string, []cardSpan) {
 	return truncateLine(head, iw), chromeSpans(1)
 }
 
-// briefRow is an agent's brief, shown whole.
+// briefRow is a bot's brief, shown whole.
 func (m tview) briefRow(e transcript.Entry, iw int) (string, []cardSpan) {
 	head := Icon.Output.Render() + " " + StylePrimaryBold.Render("Brief") + "  " + StyleDim.Render(clockTime(e.Timestamp))
 	spans := chromeSpans(1)
@@ -609,15 +609,15 @@ func offerOpen(es []transcript.Entry, id string) bool {
 	return true
 }
 
-// handoffAnswerRow is another agent's answer: its name, then the answer word
+// handoffAnswerRow is another bot's answer: its name, then the answer word
 // for word.
 func (m tview) handoffAnswerRow(e transcript.Entry, iw int) (string, []cardSpan) {
 	var p struct {
-		Agent string `json:"agent"`
-		Text  string `json:"text"`
+		Bot  string `json:"bot"`
+		Text string `json:"text"`
 	}
 	_ = json.Unmarshal(e.Event.Payload, &p)
-	head := Icon.Output.Render() + " " + StylePrimaryBold.Render(cmp.Or(p.Agent, "Agent")) + "  " +
+	head := Icon.Output.Render() + " " + StylePrimaryBold.Render(cmp.Or(p.Bot, "Bot")) + "  " +
 		StyleDim.Render("answered · "+clockTime(e.Timestamp))
 	spans := chromeSpans(1)
 	if strings.TrimSpace(p.Text) == "" {

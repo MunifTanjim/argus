@@ -20,15 +20,15 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/bot"
+	"github.com/MunifTanjim/argus/internal/bot/memory"
+	"github.com/MunifTanjim/argus/internal/bot/routine"
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/forge"
 	"github.com/MunifTanjim/argus/internal/host"
 	"github.com/MunifTanjim/argus/internal/mcphttp"
 	"github.com/MunifTanjim/argus/internal/orch"
-	"github.com/MunifTanjim/argus/internal/pagent"
-	"github.com/MunifTanjim/argus/internal/pagent/memory"
-	"github.com/MunifTanjim/argus/internal/pagent/routine"
 	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/projectreg"
 	"github.com/MunifTanjim/argus/internal/push"
@@ -121,36 +121,36 @@ type Node struct {
 	instanceID string                                                                                 // tells mods this node process from a restarted one
 	spawnFn    func(ctx context.Context, p api.SpawnParams, presetID string) (api.SpawnResult, error) // seam for tests; defaults to (*Node).spawn
 
-	pagents           *pagent.Store // nil = pagent.* disabled
-	pagentCfg         config.AgentsConfig
-	pagentPrimaryFile string           // node state file holding the primary agent id
-	pagentNow         func() time.Time // clock of idle close and session start grace; tests replace it
-	pagentLocks       sync.Map         // agent id -> *sync.Mutex; serializes session starts per agent
-	pagentPending     sync.Map         // spawned session id -> time.Time; not registered yet
+	bots           *bot.Store // nil = bot.* disabled
+	botCfg         config.BotsConfig
+	botPrimaryFile string           // node state file holding the primary bot id
+	botNow         func() time.Time // clock of idle close and session start grace; tests replace it
+	botLocks       sync.Map         // bot id -> *sync.Mutex; serializes session starts per bot
+	botPending     sync.Map         // spawned session id -> time.Time; not registered yet
 
-	// extractorFor picks the memory extractor for an agent's settings; nil when
+	// extractorFor picks the memory extractor for a bot's settings; nil when
 	// none is available. Tests replace it.
-	extractorFor func(set pagent.Settings) memory.Extractor
+	extractorFor func(set bot.Settings) memory.Extractor
 	captureMu    sync.Mutex
 	captureErrAt map[string]time.Time // thread id -> last memory.error and capture retry gate
 	tidyMu       sync.Mutex
-	tidyAt       map[string]time.Time // agent id -> when tidy last ran
-	tidyTry      map[string]time.Time // agent id -> last tidy attempt
-	tidyIdle     map[string]string    // agent id -> memory commit at the last tidy that changed nothing
+	tidyAt       map[string]time.Time // bot id -> when tidy last ran
+	tidyTry      map[string]time.Time // bot id -> last tidy attempt
+	tidyIdle     map[string]string    // bot id -> memory commit at the last tidy that changed nothing
 
 	// routineStartFn starts a claimed routine run; tests replace it.
-	routineStartFn  func(ctx context.Context, a pagent.Agent, r routine.Routine, run pagent.RoutineRun) error
+	routineStartFn  func(ctx context.Context, a bot.Bot, r routine.Routine, run bot.RoutineRun) error
 	routineMu       sync.Mutex
-	routineCache    map[string]map[string]routineFile // agent id -> slug -> parsed file
-	routineErrSent  map[string]string                 // agent id/slug -> key of the last routine.error
-	routineSkip     map[string]string                 // agent id/slug -> reason of the current skip streak
-	routineStale    map[string]time.Time              // agent id/slug -> due time of the last stale notice
+	routineCache    map[string]map[string]routineFile // bot id -> slug -> parsed file
+	routineErrSent  map[string]string                 // bot id/slug -> key of the last routine.error
+	routineSkip     map[string]string                 // bot id/slug -> reason of the current skip streak
+	routineStale    map[string]time.Time              // bot id/slug -> due time of the last stale notice
 	routineRuns     sync.Map                          // run id -> *runCtl; runs this process executes
 	routineCtx      context.Context                   // the run context of runs started by RPC and webhooks; set by Run
 	routineWG       sync.WaitGroup                    // run goroutines
 	routinePayloads sync.Map                          // run id -> webhook body of a run not started yet
 	chatChains      sync.Map                          // chat thread id -> root of the hand-off chain whose answer it got since the user last wrote
-	notify          notifyState                       // held and delayed agent pushes
+	notify          notifyState                       // held and delayed bot pushes
 	lookPath        func(name string) bool            // whether a CLI is on PATH; tests replace it
 
 	clientMu        sync.Mutex
@@ -198,8 +198,8 @@ type Node struct {
 	modPermsMu sync.Mutex
 	modPerms   map[string]*modPermission // by request id
 
-	approvals approvalState // agent approval cards, thread grants and denials
-	secrets   secretState   // the agent secret store's key
+	approvals approvalState // bot approval cards, thread grants and denials
+	secrets   secretState   // the bot secret store's key
 
 	subsMu      sync.Mutex
 	conns       map[api.Notifier]*connSubs // per-connection transcript subscriptions
@@ -603,7 +603,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	d.spawnFn = d.spawn
 	d.resumeFn = d.resumeAdopt
 	d.killFn = d.killSession
-	d.pagentNow = time.Now
+	d.botNow = time.Now
 	d.extractorFor = defaultExtractor
 
 	srv := api.NewServer()
@@ -728,8 +728,8 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	// Subsequent scans are on demand (client refresh, hook events, spawn/kill).
 	go func() {
 		d.scan(ctx)
-		if d.pagents != nil {
-			d.pagentEndStale(ctx)
+		if d.bots != nil {
+			d.botEndStale(ctx)
 		}
 		if d.orch != nil {
 			d.orchSettle(ctx)
@@ -745,20 +745,20 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 		go d.outboxLoop(ctx)
 	}
 
-	if d.pagents != nil {
-		pagentEvents, stopPAgentEvents := d.reg.Subscribe()
-		defer stopPAgentEvents()
-		go d.pagentWatch(ctx, pagentEvents)
-		go d.pagentIdleLoop(ctx)
-		go d.pagentCaptureLoop(ctx)
-		go d.pagentTidyLoop(ctx)
+	if d.bots != nil {
+		botEvents, stopBotEvents := d.reg.Subscribe()
+		defer stopBotEvents()
+		go d.botWatch(ctx, botEvents)
+		go d.botIdleLoop(ctx)
+		go d.botCaptureLoop(ctx)
+		go d.botTidyLoop(ctx)
 		d.routineMu.Lock()
 		d.routineCtx = ctx
 		d.routineMu.Unlock()
-		go d.pagentRoutineLoop(ctx)
+		go d.botRoutineLoop(ctx)
 		stopWebhooks, err := d.serveWebhooks(ctx)
 		if err != nil {
-			d.log.Warn("pagent: routine webhooks disabled", "err", err)
+			d.log.Warn("bot: routine webhooks disabled", "err", err)
 		} else {
 			defer stopWebhooks()
 		}

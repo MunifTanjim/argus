@@ -156,7 +156,7 @@ func newRootCmd(version string) *cobra.Command {
 
 	addClientFlags(cmd.Flags())
 
-	cmd.AddCommand(newStartCmd(version), newSpawnCmd(), newHooksCmd(), newHookCmd(), newPingCmd(), newPairCmd(), newUnpairCmd(), newFocusCmd(), newPiHostCmd(), newUpgradeCmd(), newStopCmd(), newConfigCmd(), newViewCmd(), newLockCmd(), newProjectCmd(), newWorkspaceCmd(), newSessionCmd(), newAgentCmd(), newRoutineCmd(), newPushPortCmd(pushPortAppID, pushPortBaseURL))
+	cmd.AddCommand(newStartCmd(version), newSpawnCmd(), newHooksCmd(), newHookCmd(), newPingCmd(), newPairCmd(), newUnpairCmd(), newFocusCmd(), newPiHostCmd(), newUpgradeCmd(), newStopCmd(), newConfigCmd(), newViewCmd(), newLockCmd(), newProjectCmd(), newWorkspaceCmd(), newSessionCmd(), newBotCmd(), newRoutineCmd(), newPushPortCmd(pushPortAppID, pushPortBaseURL))
 
 	cmd.InitDefaultCompletionCmd()
 	if subcmd, _, _ := cmd.Find([]string{"completion"}); subcmd != nil && subcmd.Name() == "completion" {
