@@ -413,6 +413,11 @@ func (d *Node) handlePAgentList(ctx context.Context, params json.RawMessage) (an
 			res.Primary = a.ID
 		}
 	}
+	if res.Primary != "" {
+		if fi, err := os.Stat(d.pagentPrimaryFile); err == nil {
+			res.PrimarySince = fi.ModTime().UTC()
+		}
+	}
 	return res, nil
 }
 

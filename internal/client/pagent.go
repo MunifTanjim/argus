@@ -5,6 +5,7 @@ import (
 	"log"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -23,13 +24,15 @@ func (m *E2EClient) pagentOrigin(a api.PAgentInfo, nodeID string) api.PAgentInfo
 // fanoutPAgents merges every node's agents with composite ids, ordered by node
 // id. Agents last seen on a node with no channel, or that failed to answer, are
 // included with status "unreachable" until the node answers again or is gone.
-// At most one agent is Primary: the first flagged one in node order.
+// At most one agent is Primary: the one set most recently. Nodes that answered
+// with an older primary have it cleared, so the fleet keeps one.
 func (m *E2EClient) fanoutPAgents(raw json.RawMessage, out any) error {
 	chans := m.channelsSnapshot()
 	sort.Slice(chans, func(i, j int) bool { return chans[i].nodeID < chans[j].nodeID })
 	type res struct {
 		agents  []api.PAgentInfo
 		primary string
+		since   time.Time
 		ok      bool
 		epoch   uint64
 	}
@@ -60,7 +63,7 @@ func (m *E2EClient) fanoutPAgents(raw json.RawMessage, out any) error {
 			if r.Primary != "" {
 				primary = session.CompositeID(nc.nodeID, r.Primary)
 			}
-			results[i] = res{agents: agents, primary: primary, ok: true, epoch: epoch}
+			results[i] = res{agents: agents, primary: primary, since: r.PrimarySince, ok: true, epoch: epoch}
 		}()
 	}
 	wg.Wait()
@@ -68,6 +71,7 @@ func (m *E2EClient) fanoutPAgents(raw json.RawMessage, out any) error {
 	m.mu.Lock()
 	byNode := map[string][]api.PAgentInfo{}
 	primaryOf := map[string]string{}
+	answered := map[string]bool{}
 	online := map[string]bool{}
 	for i, r := range results {
 		nodeID := chans[i].nodeID
@@ -76,8 +80,9 @@ func (m *E2EClient) fanoutPAgents(raw json.RawMessage, out any) error {
 		// reply is stale and must not replace the cache.
 		if r.ok && m.pagentEpoch[nodeID] == r.epoch && m.byNode[nodeID] != nil {
 			m.pagentCache[nodeID] = r.agents
+			m.pagentPrimary[nodeID] = pagentPrimary{id: r.primary, since: r.since}
 			byNode[nodeID] = r.agents
-			primaryOf[nodeID] = r.primary
+			answered[nodeID] = true
 			continue
 		}
 		byNode[nodeID] = unreachableAgents(m.pagentCache[nodeID])
@@ -87,6 +92,15 @@ func (m *E2EClient) fanoutPAgents(raw json.RawMessage, out any) error {
 			byNode[nodeID] = unreachableAgents(cached)
 		}
 	}
+	for nodeID := range byNode {
+		if p := m.pagentPrimary[nodeID]; p.id != "" {
+			primaryOf[nodeID] = p.id
+		}
+	}
+	since := map[string]time.Time{}
+	for nodeID := range primaryOf {
+		since[nodeID] = m.pagentPrimary[nodeID].since
+	}
 	m.mu.Unlock()
 
 	nodeIDs := make([]string, 0, len(byNode))
@@ -94,29 +108,40 @@ func (m *E2EClient) fanoutPAgents(raw json.RawMessage, out any) error {
 		nodeIDs = append(nodeIDs, id)
 	}
 	sort.Strings(nodeIDs)
+	// The newest primary wins; on a tie, the first in node order.
+	primary, primaryNode := "", ""
+	for _, id := range nodeIDs {
+		if p := primaryOf[id]; p != "" && (primary == "" || since[id].After(since[primaryNode])) {
+			primary, primaryNode = p, id
+		}
+	}
 	merged := []api.PAgentInfo{}
-	primary := ""
 	for _, id := range nodeIDs {
 		for _, a := range byNode[id] {
-			if a.Primary {
-				if primary == "" {
-					primary = a.ID
-				} else {
-					a.Primary = false
-				}
-			}
+			a.Primary = primary != "" && a.ID == primary
 			merged = append(merged, a)
 		}
 	}
-	if primary == "" {
-		for _, id := range nodeIDs {
-			if primaryOf[id] != "" {
-				primary = primaryOf[id]
-				break
-			}
+	for _, id := range nodeIDs {
+		if id != primaryNode && primaryOf[id] != "" && answered[id] {
+			go m.clearStalePrimary(id)
 		}
 	}
 	return assign(out, api.PAgentListResult{Agents: merged, Primary: primary})
+}
+
+// pagentPrimary is a node's primary agent (composite id) and when it was set.
+type pagentPrimary struct {
+	id    string
+	since time.Time
+}
+
+// clearStalePrimary unsets the primary of nodeID, which another node's newer
+// primary replaced while nodeID was away.
+func (m *E2EClient) clearStalePrimary(nodeID string) {
+	if err := m.callNode(nodeID, api.MethodPAgentSetPrimary, api.PAgentPrimaryParams{}, nil); err != nil {
+		log.Printf("client: warn: clear old primary on node %s: %v", nodeID, err)
+	}
 }
 
 func unreachableAgents(in []api.PAgentInfo) []api.PAgentInfo {
@@ -134,17 +159,17 @@ func pagentIDEmpty(raw json.RawMessage) bool {
 }
 
 // unsetPAgentPrimary clears the primary on every connected node except skip.
-func (m *E2EClient) unsetPAgentPrimary(skip string) error {
-	var firstErr error
+// A node it can't reach keeps its primary until a later agent list finds the
+// newer one and clears it.
+func (m *E2EClient) unsetPAgentPrimary(skip string) {
 	for _, nc := range m.channelsSnapshot() {
 		if nc.nodeID == skip {
 			continue
 		}
-		if err := m.callNode(nc.nodeID, api.MethodPAgentSetPrimary, api.PAgentPrimaryParams{}, nil); err != nil && firstErr == nil {
-			firstErr = err
+		if err := m.callNode(nc.nodeID, api.MethodPAgentSetPrimary, api.PAgentPrimaryParams{}, nil); err != nil {
+			log.Printf("client: warn: unset primary on node %s: %v", nc.nodeID, err)
 		}
 	}
-	return firstErr
 }
 
 func splitIDField(raw json.RawMessage, field, what string) (nodeID string, params json.RawMessage, err error) {
@@ -183,7 +208,8 @@ func (m *E2EClient) routeByPAgent(method string, raw json.RawMessage, out any) e
 		if err := m.callNode(nodeID, method, params, out); err != nil {
 			return err
 		}
-		return m.unsetPAgentPrimary(nodeID)
+		m.unsetPAgentPrimary(nodeID)
+		return nil
 	case api.MethodPAgentShow, api.MethodPAgentRename:
 		var info api.PAgentInfo
 		if err := m.callNode(nodeID, method, params, &info); err != nil {

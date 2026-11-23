@@ -82,14 +82,14 @@ func TestPAgentCreateScaffoldsAndLists(t *testing.T) {
 		t.Fatal(err)
 	}
 	list, _ = callPAgent[api.PAgentListResult](t, d.handlePAgentList, api.PAgentListParams{})
-	if list.Primary != info.ID || !list.Agents[0].Primary {
+	if list.Primary != info.ID || !list.Agents[0].Primary || time.Since(list.PrimarySince) > time.Minute {
 		t.Fatalf("primary = %+v", list)
 	}
 	if _, err := callPAgent[struct{}](t, d.handlePAgentSetPrimary, api.PAgentPrimaryParams{}); err != nil {
 		t.Fatal(err)
 	}
 	list, _ = callPAgent[api.PAgentListResult](t, d.handlePAgentList, api.PAgentListParams{})
-	if list.Primary != "" {
+	if list.Primary != "" || !list.PrimarySince.IsZero() {
 		t.Fatalf("primary after unset = %q", list.Primary)
 	}
 

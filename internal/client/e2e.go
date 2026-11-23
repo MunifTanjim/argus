@@ -103,6 +103,7 @@ type E2EClient struct {
 	offlineTimers  map[string]*time.Timer
 	offlineGrace   time.Duration
 	pagentCache    map[string][]api.PAgentInfo // nodeID -> last stamped pagent.list agents
+	pagentPrimary  map[string]pagentPrimary    // nodeID -> last reported primary
 	pagentEpoch    map[string]uint64           // nodeID -> bumped on loseNode, invalidates in-flight lists
 	pagentListHook func(nodeID string)         // test hook: runs after a node's pagent.list returns
 	opening        map[string]chan struct{}    // node id -> closed when its in-flight open finishes
@@ -161,6 +162,7 @@ func newE2EClientWithGate(conn net.Conn, static e2e.KeyPair, genesisHash []byte,
 		opening:       map[string]chan struct{}{},
 		offlineGrace:  defaultOfflineGrace,
 		pagentCache:   map[string][]api.PAgentInfo{},
+		pagentPrimary: map[string]pagentPrimary{},
 		pagentEpoch:   map[string]uint64{},
 		events:        make(chan api.Notification, 256),
 		kick:          make(chan struct{}, 1),
@@ -463,13 +465,20 @@ func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
 			// session snapshot) can be processed — ensuring any consumer that reacts
 			// to the resulting session.event already sees this node in byNode.
 			m.mu.Lock()
+			reopened := false
 			if m.gate.Tripped() {
 				delete(m.byChanID, f.Route.ChanID)
 			} else {
 				m.byNode[nc.nodeID] = nc
 				m.everConnected[string(nc.identityPub)] = true
+				// Agents cached from before are shown unreachable until the
+				// next list.
+				_, reopened = m.pagentCache[nc.nodeID]
 			}
 			m.mu.Unlock()
+			if reopened {
+				m.notifyPAgentChanged(nc.nodeID)
+			}
 		}
 		select {
 		case nc.hs <- err:
@@ -576,7 +585,8 @@ func (m *E2EClient) Call(method string, params, out any) error {
 	case method == api.MethodPAgentList:
 		return m.fanoutPAgents(raw, out)
 	case method == api.MethodPAgentSetPrimary && pagentIDEmpty(raw):
-		return m.unsetPAgentPrimary("")
+		m.unsetPAgentPrimary("")
+		return nil
 	case pagentAddressed[method]:
 		return m.routeByPAgent(method, raw, out)
 	case pagentThreadAddressed[method]:
@@ -1548,6 +1558,7 @@ func (m *E2EClient) loseNode(nodeID string, gone bool) {
 	m.pagentEpoch[nodeID]++
 	if gone {
 		delete(m.pagentCache, nodeID)
+		delete(m.pagentPrimary, nodeID)
 	}
 	if gone {
 		delete(m.nodeSessions, nodeID)
@@ -1566,6 +1577,12 @@ func (m *E2EClient) loseNode(nodeID string, gone bool) {
 	}
 	m.mu.Unlock()
 	m.emitSessionEvents(events)
+	m.notifyPAgentChanged(nodeID)
+}
+
+// notifyPAgentChanged tells consumers that nodeID's agents changed, without
+// blocking.
+func (m *E2EClient) notifyPAgentChanged(nodeID string) {
 	select {
 	case m.events <- api.Notification{Method: api.MethodPAgentChanged, Params: []byte(`{"node_id":` + strconv.Quote(nodeID) + `}`)}:
 	default:

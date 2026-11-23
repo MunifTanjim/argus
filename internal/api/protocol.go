@@ -1582,9 +1582,12 @@ type PAgentListParams struct {
 }
 
 // PAgentListResult's Primary is the primary agent's id, or empty.
+// PrimarySince is when it was set, zero when unknown; clients keep the newest
+// primary across nodes.
 type PAgentListResult struct {
-	Agents  []PAgentInfo `json:"agents"`
-	Primary string       `json:"primary,omitempty"`
+	Agents       []PAgentInfo `json:"agents"`
+	Primary      string       `json:"primary,omitempty"`
+	PrimarySince time.Time    `json:"primary_since,omitzero"`
 }
 
 type PAgentRef struct {
