@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../util/platform.dart';
+
+/// Window width at which the side panel and the desktop navigation appear.
+const double kSidePanelMinWidth = 900;
+
 /// Default maximum content width. Keeps lists, forms, and transcripts readable
 /// and centred on wide screens (tablets, foldables, resized/desktop windows)
 /// instead of stretching edge to edge. On phones the available width is smaller
@@ -28,3 +33,7 @@ class CenteredBody extends StatelessWidget {
     );
   }
 }
+
+/// True on a desktop platform with a window at least [kSidePanelMinWidth] wide.
+bool useDesktopLayout(BuildContext context) =>
+    isDesktop && MediaQuery.sizeOf(context).width >= kSidePanelMinWidth;

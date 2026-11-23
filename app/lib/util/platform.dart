@@ -5,6 +5,8 @@ bool get isMobile =>
     defaultTargetPlatform == TargetPlatform.android ||
     defaultTargetPlatform == TargetPlatform.iOS;
 
+bool get isDesktop => !isMobile;
+
 /// Push delivery (UnifiedPush, FCM, APNs) is wired for the mobile apps only.
 bool get supportsPush => isMobile;
 

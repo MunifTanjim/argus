@@ -15,6 +15,7 @@ import '../state/terminal_prefs.dart';
 import '../state/terminals.dart';
 import 'history_screen.dart';
 import 'project_drawer.dart';
+import 'responsive.dart';
 import 'route_observer.dart';
 import 'session_detail_screen.dart';
 import 'session_list_screen.dart';
@@ -22,7 +23,6 @@ import 'shell_drawer.dart';
 import 'terminal_list_screen.dart';
 import 'workspace_screen.dart';
 
-const double kSidePanelMinWidth = 900;
 const double kSidePanelWidth = 300;
 
 // Material's modal drawer: screen width - 56, at most 400.
