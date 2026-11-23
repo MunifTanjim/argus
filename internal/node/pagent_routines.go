@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/pagent"
@@ -36,6 +37,16 @@ const (
 
 // routineTick is how often the scheduler checks routines.
 var routineTick = 30 * time.Second
+
+// dispatchLocks serializes dispatching runs per agent.
+var dispatchLocks sync.Map
+
+func lockDispatch(agentID string) func() {
+	v, _ := dispatchLocks.LoadOrStore(agentID, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
 
 // routineFile is a parsed routine file, cached by modification time and size.
 type routineFile struct {
@@ -462,6 +473,9 @@ func (d *Node) recordMissed(ctx context.Context, a pagent.Agent, slug string, mi
 // overlap rule or the hourly cap skips (or queues) it. claimFn also moves the
 // routine's next due time in step with the claim.
 func (d *Node) dispatchOccurrence(ctx context.Context, a pagent.Agent, set pagent.Settings, r routine.Routine, occ time.Time, claimFn func() (pagent.RoutineRun, bool, error)) {
+	// The checks and the claim are one step against the scheduler and
+	// webhooks of the same agent.
+	defer lockDispatch(a.ID)()
 	active, err := d.pagents.ActiveRuns(ctx, a.ID, r.Slug)
 	if err != nil {
 		d.log.Warn("pagent: active runs", "agent", a.ID, "routine", r.Slug, "err", err)
@@ -537,6 +551,7 @@ func (d *Node) skippedNotice(ctx context.Context, a pagent.Agent, slug, reason s
 
 // promoteQueued starts the routine's queued run once no run is active.
 func (d *Node) promoteQueued(ctx context.Context, a pagent.Agent, r routine.Routine) {
+	defer lockDispatch(a.ID)()
 	active, err := d.pagents.ActiveRuns(ctx, a.ID, r.Slug)
 	if err != nil || len(active) == 0 {
 		return

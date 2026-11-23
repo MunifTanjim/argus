@@ -516,3 +516,30 @@ func TestExpiredReportedRunFinishes(t *testing.T) {
 		t.Fatalf("counted twice: %+v", st2)
 	}
 }
+
+func TestConcurrentDispatchStartsOneRun(t *testing.T) {
+	r := newSchedRig(t)
+	r.hold = true
+	r.write(t, "inbox", hourly)
+	rt, err := routine.Parse("inbox", []byte(hourly))
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := r.d.pagentSettings(r.agent)
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	for i := range 20 {
+		occ := schedT0.Add(time.Duration(i) * time.Nanosecond)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r.d.dispatchOccurrence(ctx, r.agent, set, rt, occ, func() (pagent.RoutineRun, bool, error) {
+				return r.store.ClaimOccurrence(ctx, r.agent.ID, "inbox", occ, startedByEvent, false)
+			})
+		}()
+	}
+	wg.Wait()
+	if n := r.startCount(); n != 1 {
+		t.Fatalf("started %d runs", n)
+	}
+}
