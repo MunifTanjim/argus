@@ -1,4 +1,4 @@
-/// An agent action's warning classes in words; unknown classes are left out.
+/// A bot action's warning classes in words; unknown classes are left out.
 List<String> classWarnings(Iterable<String> classes) {
   const words = {
     'irreversible': "can't be undone",
@@ -11,7 +11,7 @@ List<String> classWarnings(Iterable<String> classes) {
   ];
 }
 
-/// Who started the agent work that asks, when it was not the user.
+/// Who started the bot work that asks, when it was not the user.
 String startedByLabel(String? by) => switch (by) {
   null || '' || 'you' => '',
   'check-back' => 'started by a check-back',

@@ -1,29 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/pagent.dart';
-import '../state/agent_sections.dart';
+import '../models/bot.dart';
+import '../state/bot_sections.dart';
 import '../state/left_sidebar.dart';
-import '../state/pagents.dart';
-import 'agent_screen.dart';
-import 'pagent_style.dart';
+import '../state/bots.dart';
+import 'bot_screen.dart';
+import 'bot_style.dart';
 import 'project_actions.dart';
 import 'theme.dart';
 
-/// The left sidebar's Agents tab: the persistent agents by section.
-class AgentsSidebarList extends ConsumerWidget {
-  const AgentsSidebarList({super.key, required this.onOpen});
+/// The left sidebar's Bots tab: the bots by section.
+class BotsSidebarList extends ConsumerWidget {
+  const BotsSidebarList({super.key, required this.onOpen});
 
-  /// Runs after a tap opens an agent (closes a modal drawer).
+  /// Runs after a tap opens a bot (closes a modal drawer).
   final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(pagentsProvider);
-    final query = ref.watch(sidebarAgentsFilterProvider).trim();
-    final groups = buildAgentSections(state, query);
+    final state = ref.watch(botsProvider);
+    final query = ref.watch(sidebarBotsFilterProvider).trim();
+    final groups = buildBotSections(state, query);
     Future<void> refresh() =>
-        ref.read(pagentsProvider.notifier).load(ref.read(pagentsClientProvider));
+        ref.read(botsProvider.notifier).load(ref.read(botsClientProvider));
     if (groups.isEmpty) {
       return RefreshIndicator(
         onRefresh: refresh,
@@ -32,7 +32,7 @@ class AgentsSidebarList extends ConsumerWidget {
             const SizedBox(height: 120),
             Center(
               child: Text(
-                query.isNotEmpty ? 'no agents match "$query"' : 'no agents',
+                query.isNotEmpty ? 'no bots match "$query"' : 'no bots',
                 style: const TextStyle(color: AppColors.dim),
               ),
             ),
@@ -53,15 +53,15 @@ class AgentsSidebarList extends ConsumerWidget {
                 style: const TextStyle(color: AppColors.dim, fontSize: 12),
               ),
             ),
-            for (final a in g.agents)
-              _AgentRow(
-                agent: a,
-                place: agentPlace(state, a),
+            for (final a in g.bots)
+              _BotRow(
+                bot: a,
+                place: botPlace(state, a),
                 unread: state.unread(a.id),
                 onTap: () {
                   final ax = ActionContext.of(context);
                   onOpen();
-                  ax.navigator.push(agentRoute(a.id));
+                  ax.navigator.push(botRoute(a.id));
                 },
               ),
           ],
@@ -71,23 +71,23 @@ class AgentsSidebarList extends ConsumerWidget {
   }
 }
 
-class _AgentRow extends StatelessWidget {
-  const _AgentRow({
-    required this.agent,
+class _BotRow extends StatelessWidget {
+  const _BotRow({
+    required this.bot,
     required this.place,
     required this.unread,
     required this.onTap,
   });
 
-  final PAgent agent;
+  final Bot bot;
   final String place;
   final bool unread;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final (glyph, color) = agentGlyph(agent.status);
-    final dim = agent.unreachable;
+    final (glyph, color) = botGlyph(bot.status);
+    final dim = bot.unreachable;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
       child: Material(
@@ -118,7 +118,7 @@ class _AgentRow extends StatelessWidget {
                         children: [
                           Flexible(
                             child: Text(
-                              agent.name,
+                              bot.name,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(

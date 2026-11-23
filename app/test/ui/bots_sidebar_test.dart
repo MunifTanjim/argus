@@ -1,8 +1,8 @@
 import 'package:argus/pairing/gateway_store.dart';
-import 'package:argus/state/agent_sections.dart';
+import 'package:argus/state/bot_sections.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/left_sidebar.dart';
-import 'package:argus/state/pagents.dart';
+import 'package:argus/state/bots.dart';
 import 'package:argus/ui/project_drawer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -24,8 +24,8 @@ final _overrideStore = leftSidebarTabStoreProvider.overrideWithValue(
   LeftSidebarTabStore(_MemKv()),
 );
 
-final _agents = {
-  'agents': [
+final _bots = {
+  'bots': [
     {'id': 'A:i1', 'name': 'idle-one', 'status': 'idle', 'agent': 'claude', 'node_label': 'mbp'},
     {'id': 'A:u1', 'name': 'unread-one', 'status': 'idle'},
     {'id': 'A:w1', 'name': 'working-one', 'status': 'working'},
@@ -40,14 +40,14 @@ final _agents = {
 
 
 FakeGatewayClient _client() => FakeGatewayClient((m, p) async {
-  if (m == 'pagent.list') return _agents;
-  if (m == 'pagent.thread.list') {
-    final id = (p as Map)['agent_id'];
+  if (m == 'bot.list') return _bots;
+  if (m == 'bot.thread.list') {
+    final id = (p as Map)['bot_id'];
     return {
       'threads': [
         {
           'id': 't',
-          'agent_id': id,
+          'bot_id': id,
           'last_active_at': '2026-11-22T10:00:00Z',
           'unread': id == 'A:u1',
         },
@@ -61,8 +61,8 @@ void main() {
   test('sections are ordered primary, needs you, waiting, working, unread, idle, unreachable', () async {
     final c = ProviderContainer();
     addTearDown(c.dispose);
-    await c.read(pagentsProvider.notifier).load(_client());
-    final groups = buildAgentSections(c.read(pagentsProvider), '');
+    await c.read(botsProvider.notifier).load(_client());
+    final groups = buildBotSections(c.read(botsProvider), '');
     expect(groups.map((g) => g.section.title), [
       'Primary',
       'Needs you',
@@ -72,19 +72,19 @@ void main() {
       'Idle',
       'Unreachable',
     ]);
-    expect(groups[0].agents.single.name, 'primary-one');
-    expect(groups[3].agents.single.name, 'working-one');
+    expect(groups[0].bots.single.name, 'primary-one');
+    expect(groups[3].bots.single.name, 'working-one');
     expect(
-      groups.expand((g) => g.agents).any((a) => a.archived),
+      groups.expand((g) => g.bots).any((a) => a.archived),
       false,
     );
     expect(
-      buildAgentSections(c.read(pagentsProvider), 'mbp').single.agents.single.name,
+      buildBotSections(c.read(botsProvider), 'mbp').single.bots.single.name,
       'idle-one',
     );
   });
 
-  testWidgets('the Agents tab lists agents by section and filters', (tester) async {
+  testWidgets('the Bots tab lists bots by section and filters', (tester) async {
     tester.view.physicalSize = const Size(400, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -92,8 +92,8 @@ void main() {
       overrides: [gatewayProvider.overrideWithValue(null), _overrideStore],
     );
     addTearDown(c.dispose);
-    await c.read(pagentsProvider.notifier).load(_client());
-    await c.read(leftSidebarTabProvider.notifier).set(LeftSidebarTab.agents);
+    await c.read(botsProvider.notifier).load(_client());
+    await c.read(leftSidebarTabProvider.notifier).set(LeftSidebarTab.bots);
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: c,
@@ -117,10 +117,10 @@ void main() {
 
     await tester.enterText(find.byType(TextField), 'zzz');
     await tester.pump();
-    expect(find.text('no agents match "zzz"'), findsOneWidget);
+    expect(find.text('no bots match "zzz"'), findsOneWidget);
   });
 
-  testWidgets('tapping an agent opens its screen', (tester) async {
+  testWidgets('tapping a bot opens its screen', (tester) async {
     tester.view.physicalSize = const Size(400, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -129,12 +129,12 @@ void main() {
       overrides: [
         gatewayProvider.overrideWithValue(null),
         _overrideStore,
-        pagentsClientProvider.overrideWithValue(client),
+        botsClientProvider.overrideWithValue(client),
       ],
     );
     addTearDown(c.dispose);
-    await c.read(pagentsProvider.notifier).load(client);
-    await c.read(leftSidebarTabProvider.notifier).set(LeftSidebarTab.agents);
+    await c.read(botsProvider.notifier).load(client);
+    await c.read(leftSidebarTabProvider.notifier).set(LeftSidebarTab.bots);
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: c,

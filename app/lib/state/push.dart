@@ -16,8 +16,8 @@ class PendingOpen {
 /// clears it.
 final pendingOpenSessionProvider = StateProvider<PendingOpen?>((ref) => null);
 
-/// An agent thread a tapped notification wants to open. HomeShell opens it once
-/// the thread's agent is known, then clears it.
+/// A bot thread a tapped notification wants to open. HomeShell opens it once
+/// the thread's bot is known, then clears it.
 final pendingOpenThreadProvider = StateProvider<String?>((ref) => null);
 
 /// The single PushController for the app. Materialized at startup; it sets the

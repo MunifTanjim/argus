@@ -254,8 +254,8 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
     ];
   }
 
-  /// A persistent agent asks for a secret value. It is stored on the node and
-  /// the agent hears only its variable name; the field is hidden and cleared
+  /// A bot asks for a secret value. It is stored on the node and
+  /// the bot hears only its variable name; the field is hidden and cleared
   /// once sent, and the value is never kept anywhere else.
   List<Widget> _secretRequest(Interaction ix) {
     final name = ix.secretName ?? '';
@@ -280,7 +280,7 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
         ],
         const SizedBox(height: 8),
         Text(
-          'Kept on this node; the agent sees only \$$name.',
+          'Kept on this node; the bot sees only \$$name.',
           style: const TextStyle(color: AppColors.dim),
         ),
       ]),
@@ -338,7 +338,7 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
     ];
   }
 
-  /// A persistent agent asks the user to do a step it cannot: take over the
+  /// A bot asks the user to do a step it cannot: take over the
   /// session's terminal, then mark it done.
   List<Widget> _handoff(Interaction ix) {
     const takeover = 'takeover';

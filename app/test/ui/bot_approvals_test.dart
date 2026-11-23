@@ -3,12 +3,12 @@ import 'dart:convert';
 import 'package:argus/core/result.dart';
 import 'package:argus/data/session_repository.dart';
 import 'package:argus/models/entry.dart';
-import 'package:argus/models/pagent.dart';
+import 'package:argus/models/bot.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/state/approval_text.dart';
-import 'package:argus/state/pagents.dart';
+import 'package:argus/state/bots.dart';
 import 'package:argus/transport/jsonrpc.dart';
-import 'package:argus/ui/agent_screen.dart';
+import 'package:argus/ui/bot_screen.dart';
 import 'package:argus/ui/interaction_panel.dart';
 import 'package:argus/ui/thread_screen.dart';
 import 'package:flutter/material.dart';
@@ -162,7 +162,7 @@ void main() {
     final repo = _Repo();
     await _pumpPanel(tester, _session(_secret), repo);
     expect(find.text('Secret requested · GH_TOKEN'), findsOneWidget);
-    expect(find.textContaining('the agent sees only \$GH_TOKEN'), findsOneWidget);
+    expect(find.textContaining('the bot sees only \$GH_TOKEN'), findsOneWidget);
     final field = tester.widget<TextField>(find.byKey(const ValueKey('secret-value')));
     expect(field.obscureText, true);
     expect(field.enableSuggestions, false);
@@ -229,29 +229,29 @@ void main() {
         final x = extra?.call(m, p);
         if (x != null) return x;
         switch (m) {
-          case 'pagent.thread.timeline':
+          case 'bot.thread.timeline':
             return {'thread_id': 'A:t1', 'entries': entries, 'sessions': []};
-          case 'pagent.list':
+          case 'bot.list':
             return {
-              'agents': [
+              'bots': [
                 {'id': 'A:a1', 'name': 'scout', 'status': 'idle'},
               ],
             };
-          case 'pagent.thread.list':
+          case 'bot.thread.list':
             return {'threads': []};
         }
         return null;
       });
       final c = ProviderContainer(
-        overrides: [pagentsClientProvider.overrideWithValue(client)],
+        overrides: [botsClientProvider.overrideWithValue(client)],
       );
       addTearDown(c.dispose);
-      await c.read(pagentsProvider.notifier).load(client);
+      await c.read(botsProvider.notifier).load(client);
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: c,
           child: const MaterialApp(
-            home: ThreadScreen(agentId: 'A:a1', threadId: 'A:t1', title: 'Chat'),
+            home: ThreadScreen(botId: 'A:a1', threadId: 'A:t1', title: 'Chat'),
           ),
         ),
       );
@@ -282,7 +282,7 @@ void main() {
       await tester.tap(find.text('Send'));
       await tester.pumpAndSettle();
       expect(
-        client.calls.firstWhere((c) => c.$1 == 'pagent.draft.send').$2,
+        client.calls.firstWhere((c) => c.$1 == 'bot.draft.send').$2,
         {'thread_id': 'A:t1', 'event_id': 7},
       );
     });
@@ -292,7 +292,7 @@ void main() {
       await tester.tap(find.text('Discard'));
       await tester.pumpAndSettle();
       expect(
-        client.calls.firstWhere((c) => c.$1 == 'pagent.draft.discard').$2,
+        client.calls.firstWhere((c) => c.$1 == 'bot.draft.discard').$2,
         {'thread_id': 'A:t1', 'event_id': 7},
       );
     });
@@ -310,7 +310,7 @@ void main() {
       await pump(
         tester,
         [draft],
-        extra: (m, p) => m == 'pagent.draft.send'
+        extra: (m, p) => m == 'bot.draft.send'
             ? throw const RpcError(-32000, 'draft already sent')
             : null,
       );
@@ -320,19 +320,19 @@ void main() {
     });
   });
 
-  testWidgets('the agent screen lists approval activity and filters unattended', (tester) async {
+  testWidgets('the bot screen lists approval activity and filters unattended', (tester) async {
     tester.view.physicalSize = const Size(500, 2400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final client = FakeGatewayClient((m, p) async {
       switch (m) {
-        case 'pagent.list':
+        case 'bot.list':
           return {
-            'agents': [
+            'bots': [
               {'id': 'A:a1', 'name': 'scout', 'status': 'idle'},
             ],
           };
-        case 'pagent.activity':
+        case 'bot.activity':
           return {
             'activity': [
               {
@@ -350,14 +350,14 @@ void main() {
       return null;
     });
     final c = ProviderContainer(
-      overrides: [pagentsClientProvider.overrideWithValue(client)],
+      overrides: [botsClientProvider.overrideWithValue(client)],
     );
     addTearDown(c.dispose);
-    await c.read(pagentsProvider.notifier).load(client);
+    await c.read(botsProvider.notifier).load(client);
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: c,
-        child: const MaterialApp(home: AgentScreen(agentId: 'A:a1')),
+        child: const MaterialApp(home: BotScreen(botId: 'A:a1')),
       ),
     );
     await tester.pumpAndSettle();
@@ -368,8 +368,8 @@ void main() {
     await tester.tap(find.text('Unattended only'));
     await tester.pumpAndSettle();
     expect(
-      client.calls.where((c) => c.$1 == 'pagent.activity').last.$2,
-      {'agent_id': 'A:a1', 'unattended': true, 'limit': 20},
+      client.calls.where((c) => c.$1 == 'bot.activity').last.$2,
+      {'bot_id': 'A:a1', 'unattended': true, 'limit': 20},
     );
     expect(find.text('deny by floor · started by a routine · just now'), findsOneWidget);
   });

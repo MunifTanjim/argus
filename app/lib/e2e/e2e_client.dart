@@ -91,9 +91,9 @@ class E2EClient implements GatewayClient {
     this.onTrustChainAdvance,
     bool plaintext = false,
     void Function(Uint8List)? sendBytes,
-    Map<String, List<Map<String, dynamic>>>? pagentCache,
+    Map<String, List<Map<String, dynamic>>>? botCache,
   }) : _sendBytes = sendBytes,
-       _pagentCache = pagentCache ?? {},
+       _botCache = botCache ?? {},
        _trust =
            trustStore ??
            (tofu
@@ -198,13 +198,13 @@ class E2EClient implements GatewayClient {
   final _subNode = <String, String>{};
   final _termNode = <String, String>{};
 
-  // Last stamped pagent.list agents per node, served as unreachable while the
+  // Last stamped bot.list bots per node, served as unreachable while the
   // node is offline. The epoch is bumped when a node is lost, so a list still
   // in flight for it cannot refill the cache. The caller may pass one map to
   // every client of a profile so the cache outlives a reconnect; connect drops
   // the nodes no longer in the roster.
-  final Map<String, List<Map<String, dynamic>>> _pagentCache;
-  final _pagentEpoch = <String, int>{};
+  final Map<String, List<Map<String, dynamic>>> _botCache;
+  final _botEpoch = <String, int>{};
 
   // Tip cross-check state (mirrors Go E2EClient tip fields).
   // [_authTip] maps identity-pub hex to the tip each node reported over its
@@ -311,7 +311,7 @@ class E2EClient implements GatewayClient {
         params = {...params, 'session_id': compositeId(e.nodeId, sid)};
       }
     } else if (e.method == 'terminal.changed' ||
-        e.method == 'pagent.changed') {
+        e.method == 'bot.changed') {
       params = {'node_id': e.nodeId};
     }
     return (method: e.method, params: params);
@@ -339,12 +339,12 @@ class E2EClient implements GatewayClient {
     final res = await _gateway.call('nodes.list');
     final nodes = (res is Map ? res['nodes'] : null) as List? ?? const [];
     // A node removed while this profile was disconnected is gone; one that is
-    // only offline stays listed and keeps its agents as unreachable.
+    // only offline stays listed and keeps its bots as unreachable.
     final listed = {
       for (final n in nodes)
         if (n is Map<String, dynamic>) _parseNodeDescriptor(n).id,
     };
-    _pagentCache.removeWhere((id, _) => !listed.contains(id));
+    _botCache.removeWhere((id, _) => !listed.contains(id));
     if (info != null) _gatewayCbor = await info;
     if (_trust != null) {
       // Rollback anchor: re-verify the last-known-good chain before pulling, so the
@@ -480,8 +480,8 @@ class E2EClient implements GatewayClient {
   /// prunes its tip state, so its sessions stop appearing and its stale tip cannot
   /// accumulate equivocation misses. Mirrors Go E2EClient.loseNode.
   void _loseNode(String id, {bool gone = true}) {
-    _pagentEpoch[id] = (_pagentEpoch[id] ?? 0) + 1;
-    if (gone) _pagentCache.remove(id);
+    _botEpoch[id] = (_botEpoch[id] ?? 0) + 1;
+    if (gone) _botCache.remove(id);
     final desc = _roster.remove(id);
     final nc = _byNodeId.remove(id);
     if (nc != null) _byChanId.remove(nc.chanId);
@@ -494,7 +494,7 @@ class E2EClient implements GatewayClient {
     }
     if (!_closed && !_events.isClosed) {
       _events.add((
-        method: 'pagent.changed',
+        method: 'bot.changed',
         params: Uint8List(0),
         nodeId: id,
         cbor: false,
@@ -727,10 +727,10 @@ class E2EClient implements GatewayClient {
         return _fanoutProjects(params);
       case 'terminal.list':
         return _fanoutTerminals(params);
-      case 'pagent.list':
-        return _fanoutPAgents(params);
-      case 'pagent.setPrimary' when (stringField(params, 'agent_id') ?? '').isEmpty:
-        await _unsetPAgentPrimary(null);
+      case 'bot.list':
+        return _fanoutBots(params);
+      case 'bot.setPrimary' when (stringField(params, 'bot_id') ?? '').isEmpty:
+        await _unsetBotPrimary(null);
         return null;
       case 'transcript.unsubscribe':
         final sub = stringField(params, 'sub_id');
@@ -750,12 +750,12 @@ class E2EClient implements GatewayClient {
       return _routeByWorkspace(method, params);
     if (projectAddressed.contains(method))
       return _routeByProject(method, params);
-    if (pagentAddressed.contains(method)) return _routeByPAgent(method, params);
-    if (pagentThreadAddressed.contains(method)) {
-      return _routeByPAgentThread(method, params);
+    if (botAddressed.contains(method)) return _routeByBot(method, params);
+    if (botThreadAddressed.contains(method)) {
+      return _routeByBotThread(method, params);
     }
-    if (method == 'pagent.memory.decide') {
-      return _routeByPAgentProposal(method, params);
+    if (method == 'bot.memory.decide') {
+      return _routeByBotProposal(method, params);
     }
     if (serverAddressed.contains(method)) {
       return routesToNode(params)
@@ -881,38 +881,38 @@ class E2EClient implements GatewayClient {
     };
   }
 
-  Map<String, dynamic> _pagentOrigin(Map<String, dynamic> a, String nodeId) => {
+  Map<String, dynamic> _botOrigin(Map<String, dynamic> a, String nodeId) => {
     ...a,
     'id': compositeId(nodeId, a['id'] is String ? a['id'] as String : ''),
     'node_id': nodeId,
     'node_label': _roster[nodeId]?.label,
   };
 
-  static List<Map<String, dynamic>> _unreachableAgents(
-    List<Map<String, dynamic>> agents,
+  static List<Map<String, dynamic>> _unreachableBots(
+    List<Map<String, dynamic>> bots,
   ) => [
-    for (final a in agents) {...a, 'status': pagentUnreachable},
+    for (final a in bots) {...a, 'status': botUnreachable},
   ];
 
-  /// Merges every node's agents with composite ids, ordered by node id. Agents
+  /// Merges every node's bots with composite ids, ordered by node id. Bots
   /// last seen on a node with no channel, or that failed to answer, are
   /// included as unreachable until the node answers again or is gone. At most
-  /// one agent is primary: the first flagged one in node order.
-  Future<Map<String, dynamic>> _fanoutPAgents(Object? params) async {
+  /// one bot is primary: the first flagged one in node order.
+  Future<Map<String, dynamic>> _fanoutBots(Object? params) async {
     final nodeIds = (await _settledNodeIds())..sort();
     final results = await Future.wait(
       nodeIds.map((nodeId) async {
-        final epoch = _pagentEpoch[nodeId] ?? 0;
+        final epoch = _botEpoch[nodeId] ?? 0;
         try {
-          final r = await _callNodeDecoded(nodeId, 'pagent.list', params);
+          final r = await _callNodeDecoded(nodeId, 'bot.list', params);
           final m = r is Map ? r : const {};
-          final list = m['agents'];
+          final list = m['bots'];
           final primary = m['primary'];
           return (
-            agents: [
+            bots: [
               if (list is List)
                 for (final a in list)
-                  if (a is Map<String, dynamic>) _pagentOrigin(a, nodeId),
+                  if (a is Map<String, dynamic>) _botOrigin(a, nodeId),
             ],
             primary: primary is String && primary.isNotEmpty
                 ? compositeId(nodeId, primary)
@@ -922,7 +922,7 @@ class E2EClient implements GatewayClient {
           );
         } catch (_) {
           return (
-            agents: const <Map<String, dynamic>>[],
+            bots: const <Map<String, dynamic>>[],
             primary: '',
             ok: false,
             epoch: epoch,
@@ -939,17 +939,17 @@ class E2EClient implements GatewayClient {
       // A node lost while its list was in flight bumped the epoch; its reply
       // is stale and must not replace the cache.
       if (r.ok &&
-          (_pagentEpoch[nodeId] ?? 0) == r.epoch &&
+          (_botEpoch[nodeId] ?? 0) == r.epoch &&
           _byNodeId.containsKey(nodeId)) {
-        _pagentCache[nodeId] = r.agents;
-        byNode[nodeId] = r.agents;
+        _botCache[nodeId] = r.bots;
+        byNode[nodeId] = r.bots;
         primaryOf[nodeId] = r.primary;
         continue;
       }
-      byNode[nodeId] = _unreachableAgents(_pagentCache[nodeId] ?? const []);
+      byNode[nodeId] = _unreachableBots(_botCache[nodeId] ?? const []);
     }
-    for (final e in _pagentCache.entries) {
-      if (!nodeIds.contains(e.key)) byNode[e.key] = _unreachableAgents(e.value);
+    for (final e in _botCache.entries) {
+      if (!nodeIds.contains(e.key)) byNode[e.key] = _unreachableBots(e.value);
     }
 
     final ordered = byNode.keys.toList()..sort();
@@ -977,18 +977,18 @@ class E2EClient implements GatewayClient {
         }
       }
     }
-    return {'agents': merged, if (primary.isNotEmpty) 'primary': primary};
+    return {'bots': merged, if (primary.isNotEmpty) 'primary': primary};
   }
 
   /// Clears the primary on every connected node except [skip]. Every node is
   /// tried; the first error surfaces afterwards.
-  Future<void> _unsetPAgentPrimary(String? skip) async {
+  Future<void> _unsetBotPrimary(String? skip) async {
     final nodeIds = (await _settledNodeIds()).where((id) => id != skip);
     Object? first;
     await Future.wait(
       nodeIds.map((nodeId) async {
         try {
-          await _callNodeDecoded(nodeId, 'pagent.setPrimary', {});
+          await _callNodeDecoded(nodeId, 'bot.setPrimary', {});
         } catch (e) {
           first ??= e;
         }
@@ -1017,18 +1017,18 @@ class E2EClient implements GatewayClient {
   String _compositeIf(String nodeId, Object? id) =>
       id is String && id.isNotEmpty ? compositeId(nodeId, id) : '';
 
-  /// Splits the composite agent_id, routes to its node, and composites the
+  /// Splits the composite bot_id, routes to its node, and composites the
   /// node-local ids in the result.
-  Future<Object?> _routeByPAgent(String method, Object? params) async {
-    var (nodeId, local) = _splitIdField(method, params, 'agent_id', 'agent');
-    if (method == 'pagent.thread.send' || method == 'pagent.memory.undo') {
+  Future<Object?> _routeByBot(String method, Object? params) async {
+    var (nodeId, local) = _splitIdField(method, params, 'bot_id', 'bot');
+    if (method == 'bot.thread.send' || method == 'bot.memory.undo') {
       final tid = stringField(params, 'thread_id') ?? '';
       if (tid.isNotEmpty) {
         final (tnode, tlocal, ok) = splitCompositeId(tid);
         if (!ok || tnode != nodeId) {
           throw RpcError(
             -32600,
-            'thread $tid does not belong to the agent\'s node',
+            'thread $tid does not belong to the bot\'s node',
           );
         }
         local = {...local, 'thread_id': tlocal};
@@ -1036,19 +1036,19 @@ class E2EClient implements GatewayClient {
     }
     final res = await _callNodeDecoded(nodeId, method, local);
     switch (method) {
-      case 'pagent.setPrimary':
-        await _unsetPAgentPrimary(nodeId);
+      case 'bot.setPrimary':
+        await _unsetBotPrimary(nodeId);
         return res;
-      case 'pagent.show' || 'pagent.rename':
-        return res is Map<String, dynamic> ? _pagentOrigin(res, nodeId) : res;
-      case 'pagent.thread.send' when res is Map<String, dynamic>:
+      case 'bot.show' || 'bot.rename':
+        return res is Map<String, dynamic> ? _botOrigin(res, nodeId) : res;
+      case 'bot.thread.send' when res is Map<String, dynamic>:
         return {
           ...res,
           'thread_id': compositeId(nodeId, '${res['thread_id'] ?? ''}'),
           if (_compositeIf(nodeId, res['session_id']).isNotEmpty)
             'session_id': _compositeIf(nodeId, res['session_id']),
         };
-      case 'pagent.thread.list' when res is Map<String, dynamic>:
+      case 'bot.thread.list' when res is Map<String, dynamic>:
         return {
           ...res,
           'threads': [
@@ -1057,7 +1057,7 @@ class E2EClient implements GatewayClient {
                 {
                   ...t,
                   'id': compositeId(nodeId, '${t['id'] ?? ''}'),
-                  'agent_id': compositeId(nodeId, '${t['agent_id'] ?? ''}'),
+                  'bot_id': compositeId(nodeId, '${t['bot_id'] ?? ''}'),
                   if (_compositeIf(nodeId, t['session_id']).isNotEmpty)
                     'session_id': _compositeIf(nodeId, t['session_id']),
                 }
@@ -1065,18 +1065,18 @@ class E2EClient implements GatewayClient {
                 t,
           ],
         };
-      case 'pagent.routine.list' when res is Map<String, dynamic>:
+      case 'bot.routine.list' when res is Map<String, dynamic>:
         return {
           ...res,
           'routines': [
             for (final r in (res['routines'] as List?) ?? const [])
               if (r is Map<String, dynamic>)
-                {...r, 'agent_id': compositeId(nodeId, '${r['agent_id'] ?? ''}')}
+                {...r, 'bot_id': compositeId(nodeId, '${r['bot_id'] ?? ''}')}
               else
                 r,
           ],
         };
-      case 'pagent.activity' when res is Map<String, dynamic>:
+      case 'bot.activity' when res is Map<String, dynamic>:
         return {
           ...res,
           'activity': [
@@ -1093,18 +1093,18 @@ class E2EClient implements GatewayClient {
                 a,
           ],
         };
-      case 'pagent.usage' when res is Map<String, dynamic>:
+      case 'bot.usage' when res is Map<String, dynamic>:
         return {
           ...res,
-          'agent_id': compositeId(nodeId, '${res['agent_id'] ?? ''}'),
+          'bot_id': compositeId(nodeId, '${res['bot_id'] ?? ''}'),
         };
-      case 'pagent.routine.pause' ||
-          'pagent.routine.resume' when res is Map<String, dynamic>:
+      case 'bot.routine.pause' ||
+          'bot.routine.resume' when res is Map<String, dynamic>:
         return {
           ...res,
-          'agent_id': compositeId(nodeId, '${res['agent_id'] ?? ''}'),
+          'bot_id': compositeId(nodeId, '${res['bot_id'] ?? ''}'),
         };
-      case 'pagent.routine.runs' when res is Map<String, dynamic>:
+      case 'bot.routine.runs' when res is Map<String, dynamic>:
         return {
           ...res,
           'runs': [
@@ -1119,7 +1119,7 @@ class E2EClient implements GatewayClient {
                 r,
           ],
         };
-      case 'pagent.memory.log' when res is Map<String, dynamic>:
+      case 'bot.memory.log' when res is Map<String, dynamic>:
         return {
           ...res,
           'commits': [
@@ -1134,7 +1134,7 @@ class E2EClient implements GatewayClient {
                 c,
           ],
         };
-      case 'pagent.memory.proposals' when res is Map<String, dynamic>:
+      case 'bot.memory.proposals' when res is Map<String, dynamic>:
         return {
           ...res,
           'proposals': [
@@ -1143,7 +1143,7 @@ class E2EClient implements GatewayClient {
                 {
                   ...p,
                   'id': compositeId(nodeId, '${p['id'] ?? ''}'),
-                  'agent_id': compositeId(nodeId, '${p['agent_id'] ?? ''}'),
+                  'bot_id': compositeId(nodeId, '${p['bot_id'] ?? ''}'),
                   if (_compositeIf(nodeId, p['thread_id']).isNotEmpty)
                     'thread_id': _compositeIf(nodeId, p['thread_id']),
                 }
@@ -1155,15 +1155,15 @@ class E2EClient implements GatewayClient {
     return res;
   }
 
-  Future<Object?> _routeByPAgentProposal(String method, Object? params) {
+  Future<Object?> _routeByBotProposal(String method, Object? params) {
     final (nodeId, local) = _splitIdField(method, params, 'proposal_id', 'proposal');
     return _callNodeDecoded(nodeId, method, local);
   }
 
-  Future<Object?> _routeByPAgentThread(String method, Object? params) async {
+  Future<Object?> _routeByBotThread(String method, Object? params) async {
     final (nodeId, local) = _splitIdField(method, params, 'thread_id', 'thread');
     final res = await _callNodeDecoded(nodeId, method, local);
-    if (method == 'pagent.offer.start' && res is Map<String, dynamic>) {
+    if (method == 'bot.offer.start' && res is Map<String, dynamic>) {
       return {
         ...res,
         'thread_id': compositeId(nodeId, '${res['thread_id'] ?? ''}'),
@@ -1171,7 +1171,7 @@ class E2EClient implements GatewayClient {
           'session_id': _compositeIf(nodeId, res['session_id']),
       };
     }
-    if (method != 'pagent.thread.timeline' || res is! Map<String, dynamic>) {
+    if (method != 'bot.thread.timeline' || res is! Map<String, dynamic>) {
       return res;
     }
     return {
@@ -1372,13 +1372,13 @@ class E2EClient implements GatewayClient {
       }
       return result;
     }
-    if (method == 'pagent.create' && result is Map<String, dynamic>) {
-      return _pagentOrigin(result, nodeId);
+    if (method == 'bot.create' && result is Map<String, dynamic>) {
+      return _botOrigin(result, nodeId);
     }
-    if (method == 'pagent.add' && result is Map<String, dynamic>) {
-      final agent = result['agent'];
-      if (agent is Map<String, dynamic>) {
-        return {...result, 'agent': _pagentOrigin(agent, nodeId)};
+    if (method == 'bot.add' && result is Map<String, dynamic>) {
+      final bot = result['bot'];
+      if (bot is Map<String, dynamic>) {
+        return {...result, 'bot': _botOrigin(bot, nodeId)};
       }
       return result;
     }

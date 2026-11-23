@@ -145,7 +145,7 @@ class PushNotifications {
     if (payload == null || payload.isEmpty) return null;
     try {
       final data = (jsonDecode(payload) as Map).cast<String, dynamic>();
-      final thread = data['pagent_thread_id'];
+      final thread = data['bot_thread_id'];
       if (thread is String && thread.isNotEmpty) return threadTapPrefix + thread;
       return data['session_id'] as String?;
     } catch (_) {
@@ -154,9 +154,9 @@ class PushNotifications {
   }
 }
 
-/// Marks a tap on an agent thread's notification in the tap stream, whose
+/// Marks a tap on a bot thread's notification in the tap stream, whose
 /// other entries are session ids: the rest is the thread id.
-const threadTapPrefix = 'pagent_thread:';
+const threadTapPrefix = 'bot_thread:';
 
 /// The notification id used for [sessionId]. [PushNotifications.show] reuses it so
 /// a session only ever has one notification, and [PushNotifications.cancelForSession]

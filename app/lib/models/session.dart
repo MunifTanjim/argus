@@ -142,10 +142,10 @@ class Interaction {
   /// Identifies the pending request this interaction shows; responds echo it.
   final String? requestId;
 
-  /// Warning classes of an agent action: outward, irreversible, security.
+  /// Warning classes of a bot action: outward, irreversible, security.
   final List<String> classes;
 
-  /// How the agent work that asks was started (you, routine, ...).
+  /// How the bot work that asks was started (you, routine, ...).
   final String? startedBy;
 
   /// The variable a secret request stores its value under.
@@ -269,10 +269,10 @@ class Session {
   final String? nodeLabel;
   final bool offline;
 
-  /// The persistent agent and thread the session runs for, node-local; empty
+  /// The bot and thread the session runs for, node-local; empty
   /// for a plain session.
-  final String pagentId;
-  final String pagentThreadId;
+  final String botId;
+  final String botThreadId;
 
   /// Node-computed on emit: true for a real pane, or a paneless session whose
   /// agent can spawn a viewer here.
@@ -306,8 +306,8 @@ class Session {
     this.nodeId,
     this.nodeLabel,
     this.offline = false,
-    this.pagentId = '',
-    this.pagentThreadId = '',
+    this.botId = '',
+    this.botThreadId = '',
     this.canOpenTerminal = false,
     this.canPrompt = false,
   });
@@ -346,23 +346,23 @@ class Session {
         nodeId: j['node_id'] as String?,
         nodeLabel: j['node_label'] as String?,
         offline: j['offline'] as bool? ?? false,
-        pagentId: j['pagent_id'] as String? ?? '',
-        pagentThreadId: j['pagent_thread_id'] as String? ?? '',
+        botId: j['bot_id'] as String? ?? '',
+        botThreadId: j['bot_thread_id'] as String? ?? '',
         canOpenTerminal: j['can_open_terminal'] as bool? ?? false,
         canPrompt: j['can_prompt'] as bool? ?? false,
       );
 
-  /// [pagentId] as pagent.list reports agent ids: composited with the node id,
+  /// [botId] as bot.list reports bot ids: composited with the node id,
   /// which the session's own field is not. Empty for a plain session.
-  String get pagentCompositeId => pagentId.isEmpty || (nodeId ?? '').isEmpty
-      ? pagentId
-      : '$nodeId:$pagentId';
+  String get botCompositeId => botId.isEmpty || (nodeId ?? '').isEmpty
+      ? botId
+      : '$nodeId:$botId';
 
-  /// [pagentThreadId] composited with the node id, as thread lists report it.
-  String get pagentThreadCompositeId =>
-      pagentThreadId.isEmpty || (nodeId ?? '').isEmpty
-          ? pagentThreadId
-          : '$nodeId:$pagentThreadId';
+  /// [botThreadId] composited with the node id, as thread lists report it.
+  String get botThreadCompositeId =>
+      botThreadId.isEmpty || (nodeId ?? '').isEmpty
+          ? botThreadId
+          : '$nodeId:$botThreadId';
 
   /// The label shown wherever a session needs a title: repo, else name, else id.
   String get displayTitle => (repo?.isNotEmpty ?? false)

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../models/pagent.dart';
+import '../models/bot.dart';
 import 'relative_time.dart';
 import 'theme.dart';
 
-/// An agent's status glyph and color, in the sessions' colors.
-(String, Color) agentGlyph(String status) => switch (status) {
+/// A bot's status glyph and color, in the sessions' colors.
+(String, Color) botGlyph(String status) => switch (status) {
   'needs_you' => ('◆', AppColors.blocked),
   'waiting' => ('◆', AppColors.waiting),
   'working' => ('●', const Color(0xFFb8bb26)),
@@ -14,7 +14,7 @@ import 'theme.dart';
 };
 
 /// The glyph beside a thread: its live session's status, else an empty circle.
-(String, Color) threadGlyph(PAgentThread t) {
+(String, Color) threadGlyph(BotThread t) {
   if (t.sessionId.isEmpty) return ('○', AppColors.border);
   return switch (t.sessionStatus) {
     'working' => ('●', const Color(0xFFb8bb26)),
@@ -40,7 +40,7 @@ class UnreadDot extends StatelessWidget {
   );
 }
 
-const agentOffline = "agent's node is offline";
+const botOffline = "bot's node is offline";
 
 /// "5m ago", or "" when [t] is unknown.
 String agoText(DateTime t) =>
@@ -69,7 +69,7 @@ String untilText(DateTime t, [DateTime? now]) {
 
 /// A routine's use against its budget, like "2/10 sessions · $0.40/$5.00". A
 /// limit of 0 is unlimited, shown by its use alone and only once there is any.
-String routineProgress(PAgentRoutine r) {
+String routineProgress(BotRoutine r) {
   String part(num used, num limit, String Function(num) f, String unit) {
     if (limit > 0) return '${f(used)}/${f(limit)}$unit';
     return used > 0 ? '${f(used)}$unit' : '';
@@ -86,8 +86,8 @@ String routineProgress(PAgentRoutine r) {
 }
 
 /// Usage in words, like "3 sessions · $1.20 · 15.2k tokens". Cost and tokens
-/// are left out when the agent's CLI reports none.
-String usageText(PAgentUsageRow r) {
+/// are left out when the bot's CLI reports none.
+String usageText(BotUsageRow r) {
   String k(int v) => v >= 1000 ? '${(v / 1000).toStringAsFixed(1)}k' : '$v';
   return [
     '${r.sessions} ${r.sessions == 1 ? 'session' : 'sessions'}',
@@ -97,7 +97,7 @@ String usageText(PAgentUsageRow r) {
 }
 
 /// A routine's state in words.
-String routineStateText(PAgentRoutine r) => switch (r.state) {
+String routineStateText(BotRoutine r) => switch (r.state) {
   'paused' => r.pausedReason.isEmpty ? 'paused' : 'paused (${r.pausedReason})',
   'invalid' => r.error.isEmpty ? 'invalid' : 'invalid: ${r.error}',
   _ => r.state,

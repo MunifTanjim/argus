@@ -94,7 +94,7 @@ List<NodeRef> nodesFromSessions(Iterable<Session> sessions) {
 }
 
 /// The dimension that groups the home sessions list.
-enum GroupBy { host, project, workspace, agent, status, pagent }
+enum GroupBy { host, project, workspace, agent, status, bot }
 
 /// What leads a section's header; the UI maps it to an icon.
 enum SectionIcon {
@@ -105,7 +105,7 @@ enum SectionIcon {
   branch,
   agent,
   status,
-  pagent,
+  bot,
 }
 
 class SessionSection {
@@ -182,7 +182,7 @@ class _Group {
 }
 
 _Group _groupOf(Session s, GroupBy by, List<ProjectNode> projects,
-    bool multiNode, Map<String, String> pagentNames) {
+    bool multiNode, Map<String, String> botNames) {
   switch (by) {
     case GroupBy.host:
       final h = _host(s);
@@ -216,13 +216,13 @@ _Group _groupOf(Session s, GroupBy by, List<ProjectNode> projects,
       return s.agent.isEmpty
           ? _Group.other(SectionIcon.agent)
           : _Group(s.agent, agentLabel(s.agent), SectionIcon.agent);
-    case GroupBy.pagent:
-      if (s.pagentId.isEmpty) {
-        return _Group('', 'no agent', SectionIcon.pagent, rank: _rankOther);
+    case GroupBy.bot:
+      if (s.botId.isEmpty) {
+        return _Group('', 'no bot', SectionIcon.bot, rank: _rankOther);
       }
-      final id = s.pagentCompositeId;
-      final name = pagentNames[id] ?? '';
-      return _Group(id, name.isEmpty ? s.pagentId : name, SectionIcon.pagent);
+      final id = s.botCompositeId;
+      final name = botNames[id] ?? '';
+      return _Group(id, name.isEmpty ? s.botId : name, SectionIcon.bot);
     case GroupBy.status:
       final i = _statusOrder.indexOf(s.status);
       return _Group(
@@ -238,7 +238,7 @@ List<SessionSection> buildSections(
   Iterable<Session> sessions, {
   GroupBy by = GroupBy.host,
   List<ProjectNode> projects = const [],
-  Map<String, String> pagentNames = const {},
+  Map<String, String> botNames = const {},
 }) {
   final all = sessions.toList();
   final multiNode = nodesFromSessions(all).isNotEmpty;
@@ -255,7 +255,7 @@ List<SessionSection> buildSections(
   final groups = <String, _Group>{};
   for (final s in all) {
     if (s.status == SessionStatus.awaitingInput) continue;
-    final g = _groupOf(s, by, projects, multiNode, pagentNames);
+    final g = _groupOf(s, by, projects, multiNode, botNames);
     (groups[g.id] ??= g).sessions.add(s);
   }
   final sorted = groups.values.toList()..sort((a, b) => a.compareTo(b));

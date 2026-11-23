@@ -3,13 +3,13 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/pagent.dart';
-import '../state/pagents.dart';
+import '../models/bot.dart';
+import '../state/bots.dart';
 import '../state/projects_api.dart' show actionError;
 import '../state/sessions.dart';
 import '../state/tool_detail.dart';
 import 'entry_row.dart' show DraftActions, OfferActions;
-import 'pagent_style.dart';
+import 'bot_style.dart';
 import 'session_detail_screen.dart';
 import 'theme.dart';
 import 'transcript_feed.dart';
@@ -19,7 +19,7 @@ import 'transcript_feed.dart';
 /// that transcript serves them; otherwise the transcript file does.
 ToolDetailRef timelineDetailRef(
   String nodeId,
-  List<PAgentTimelineSession> sessions,
+  List<BotTimelineSession> sessions,
   String entryId,
 ) {
   final m = RegExp(r'^s(\d+):').firstMatch(entryId);
@@ -43,13 +43,13 @@ ToolDetailRef timelineDetailRef(
 
 /// Opens a thread's timeline.
 Route<void> threadRoute({
-  required String agentId,
+  required String botId,
   required String threadId,
   String title = '',
   String initialText = '',
 }) => MaterialPageRoute(
   builder: (_) => ThreadScreen(
-    agentId: agentId,
+    botId: botId,
     threadId: threadId,
     title: title,
     initialText: initialText,
@@ -61,13 +61,13 @@ Route<void> threadRoute({
 class ThreadScreen extends ConsumerStatefulWidget {
   const ThreadScreen({
     super.key,
-    required this.agentId,
+    required this.botId,
     required this.threadId,
     this.title = '',
     this.initialText = '',
   });
 
-  final String agentId;
+  final String botId;
   final String threadId;
   final String title;
   final String initialText;
@@ -80,7 +80,7 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
   late final TextEditingController _text = TextEditingController(
     text: widget.initialText,
   );
-  PAgentTimeline? _timeline;
+  BotTimeline? _timeline;
   Object? _error;
   int _readPos = 0;
   bool _sending = false;
@@ -98,7 +98,7 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
   }
 
   Future<void> _load() async {
-    final api = ref.read(pagentsApiProvider);
+    final api = ref.read(botsApiProvider);
     try {
       final tl = await api.timeline(widget.threadId);
       if (!mounted) return;
@@ -112,9 +112,9 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
     }
   }
 
-  PAgentThread? get _thread {
-    final threads = ref.read(pagentsProvider).threads[widget.agentId];
-    for (final t in threads ?? const <PAgentThread>[]) {
+  BotThread? get _thread {
+    final threads = ref.read(botsProvider).threads[widget.botId];
+    for (final t in threads ?? const <BotThread>[]) {
       if (t.id == widget.threadId) return t;
     }
     return null;
@@ -133,7 +133,7 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
     _readPos = pos;
     try {
       await ref
-          .read(pagentsApiProvider)
+          .read(botsApiProvider)
           .markRead(widget.threadId, position: pos);
     } catch (_) {}
   }
@@ -142,9 +142,9 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(text)));
 
-  PAgent? get _agent {
-    for (final a in ref.read(pagentsProvider).agents) {
-      if (a.id == widget.agentId) return a;
+  Bot? get _bot {
+    for (final a in ref.read(botsProvider).bots) {
+      if (a.id == widget.botId) return a;
     }
     return null;
   }
@@ -152,15 +152,15 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
   Future<void> _send() async {
     final text = _text.text.trim();
     if (text.isEmpty || _sending) return;
-    if (_agent?.unreachable ?? false) {
-      _say(agentOffline);
+    if (_bot?.unreachable ?? false) {
+      _say(botOffline);
       return;
     }
     setState(() => _sending = true);
     try {
       await ref
-          .read(pagentsApiProvider)
-          .send(widget.agentId, text, threadId: widget.threadId);
+          .read(botsApiProvider)
+          .send(widget.botId, text, threadId: widget.threadId);
       _text.clear();
     } catch (e) {
       if (mounted) _say('send: ${actionError(e)}');
@@ -172,8 +172,8 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
   Future<void> _undo(String commit) async {
     try {
       await ref
-          .read(pagentsApiProvider)
-          .memoryUndo(widget.agentId, commit, threadId: widget.threadId);
+          .read(botsApiProvider)
+          .memoryUndo(widget.botId, commit, threadId: widget.threadId);
     } catch (e) {
       if (mounted) _say('undo: ${actionError(e)}');
     }
@@ -181,7 +181,7 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
   }
 
   Future<void> _offer(String offerId, bool start) async {
-    final api = ref.read(pagentsApiProvider);
+    final api = ref.read(botsApiProvider);
     try {
       if (start) {
         await api.startOffer(widget.threadId, offerId);
@@ -195,7 +195,7 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
   }
 
   Future<void> _draft(int eventId, bool send) async {
-    final api = ref.read(pagentsApiProvider);
+    final api = ref.read(botsApiProvider);
     try {
       if (send) {
         await api.sendDraft(widget.threadId, eventId);
@@ -221,12 +221,12 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
   @override
   Widget build(BuildContext context) {
     // A change on any node (a new event, a finished turn) reloads the timeline.
-    ref.listen(pagentsProvider.select((s) => s.agents), (_, _) => _load());
+    ref.listen(botsProvider.select((s) => s.bots), (_, _) => _load());
     ref.listen(
-      pagentsProvider.select((s) => s.threads[widget.agentId]),
+      botsProvider.select((s) => s.threads[widget.botId]),
       (_, _) => _markRead(),
     );
-    final agent = _agent;
+    final bot = _bot;
     final tl = _timeline;
     final title = widget.title.isEmpty ? 'untitled' : widget.title;
     final Widget body;
@@ -237,7 +237,7 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
             : const CircularProgressIndicator(),
       );
     } else {
-      final nodeId = agent?.nodeId ?? '';
+      final nodeId = bot?.nodeId ?? '';
       final decided = decidedOffers(tl.entries);
       final draftsDone = decidedDrafts(tl.entries);
       final undone = undoneCommits(tl.entries);
@@ -266,9 +266,9 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-            if (agent != null)
+            if (bot != null)
               Text(
-                agent.name,
+                bot.name,
                 style: const TextStyle(fontSize: 12, color: AppColors.dim),
               ),
           ],

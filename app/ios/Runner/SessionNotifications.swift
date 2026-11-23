@@ -13,15 +13,15 @@ func compositeSessionId(from info: [AnyHashable: Any]) -> String? {
   return session
 }
 
-/// Marks an agent thread tap in the tap channel, whose other values are session
+/// Marks a bot thread tap in the tap channel, whose other values are session
 /// ids. Kept identical to the Dart `threadTapPrefix`.
-let threadTapPrefix = "pagent_thread:"
+let threadTapPrefix = "bot_thread:"
 
-/// What a tap on a notification opens, as the app's tap channel expects it: an
-/// agent push names its thread (`pagent_thread:node:thread`), any other push its
+/// What a tap on a notification opens, as the app's tap channel expects it: a
+/// bot push names its thread (`bot_thread:node:thread`), any other push its
 /// composite session id. Nil when the push names neither.
 func tapTarget(from info: [AnyHashable: Any]) -> String? {
-  if let thread = info["pagent_thread_id"] as? String, !thread.isEmpty {
+  if let thread = info["bot_thread_id"] as? String, !thread.isEmpty {
     if let node = info["node_id"] as? String, !node.isEmpty {
       return "\(threadTapPrefix)\(node):\(thread)"
     }

@@ -21,7 +21,7 @@ import '../transport/ssh_ws_link.dart';
 import '../transport/ws_link.dart';
 import 'control.dart';
 import 'device_identity.dart';
-import 'pagents.dart';
+import 'bots.dart';
 import 'profiles.dart';
 import 'projects.dart';
 import 'push.dart';
@@ -55,7 +55,7 @@ Future<GatewayClient> buildE2EClient(
   ChainLoader loadChain = loadChainInBackground,
   void Function(GatewayClient client)? onTrustAdvance,
   void Function(Uint8List)? sendBytes,
-  Map<String, List<Map<String, dynamic>>>? pagentCache,
+  Map<String, List<Map<String, dynamic>>>? botCache,
 }) async {
   final identity = await identityStore.loadOrCreate();
   final Uint8List? seed;
@@ -81,7 +81,7 @@ Future<GatewayClient> buildE2EClient(
     identity,
     trustStore: trust,
     sendBytes: sendBytes,
-    pagentCache: pagentCache,
+    botCache: botCache,
     // Re-sync the trust log periodically so mid-session revocations take effect
     // (channels to now-unauthorized nodes are dropped), persisting each advance.
     trustResyncInterval: const Duration(seconds: 30),
@@ -226,7 +226,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   final store = ref.read(sessionsProvider.notifier);
   final projects = ref.read(projectsProvider.notifier);
   final terminals = ref.read(terminalsProvider.notifier);
-  final pagents = ref.read(pagentsProvider.notifier);
+  final bots = ref.read(botsProvider.notifier);
   final rosterRevision = ref.read(rosterRevisionProvider.notifier);
   final keyStore = ref.read(sshKeyStoreProvider);
   final hostKeys = ref.read(hostKeyStoreProvider);
@@ -243,9 +243,9 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   final testResults = ref.read(connectionTestResultsProvider.notifier);
   final identityStore = ref.read(clientIdentityStoreProvider);
   final chainStore = ref.read(trustChainStoreProvider);
-  // Each node's last agent list, kept across reconnects so an agent whose node
+  // Each node's last bot list, kept across reconnects so a bot whose node
   // is offline at a reconnect shows as unreachable rather than gone.
-  final pagentCache = <String, List<Map<String, dynamic>>>{};
+  final botCache = <String, List<Map<String, dynamic>>>{};
   final manager = ConnectionManager(
     connect: () => connectForCredentials(creds, keyStore, hostKeys),
     clientFactory: (incoming, send, sendBytes) => creds.e2eEnabled
@@ -259,7 +259,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
             onTrustAdvance: (client) => trustSignature.state =
                 trustSignatureOf(trustSummaryOf(client)),
             sendBytes: sendBytes,
-            pagentCache: pagentCache,
+            botCache: botCache,
           )
         : Future(() async {
             final client = E2EClient(
@@ -268,7 +268,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
               KeyPair(Uint8List(32), Uint8List(32)),
               plaintext: true,
               sendBytes: sendBytes,
-              pagentCache: pagentCache,
+              botCache: botCache,
             );
             await client.connect();
             return client;
@@ -285,7 +285,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
       );
       unawaited(projects.load(client));
       unawaited(terminals.load(client));
-      unawaited(pagents.load(client));
+      unawaited(bots.load(client));
       client.notifications.listen((m) {
         dispatchEvent(m, store);
         if (m.method == 'node.event') rosterRevision.state++;
@@ -295,8 +295,8 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
         if (m.method == 'terminal.changed' || m.method == 'node.event') {
           unawaited(terminals.load(client));
         }
-        if (m.method == 'pagent.changed' || m.method == 'node.event') {
-          unawaited(pagents.load(client));
+        if (m.method == 'bot.changed' || m.method == 'node.event') {
+          unawaited(bots.load(client));
         }
       });
       // Register this device's push target now the connection is up (re-runs on
@@ -339,7 +339,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
       store.clear();
       projects.clear();
       terminals.clear();
-      pagents.clear();
+      bots.clear();
     });
   });
   manager.start();

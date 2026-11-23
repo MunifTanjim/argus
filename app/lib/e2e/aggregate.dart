@@ -31,7 +31,7 @@ const Set<String> nodeAddressed = {
   'sessions.exportBundle',
   'sessions.historySessions', 'sessions.historyTranscript', 'sessions.historyToolDetail',
   'terminal.create', 'host.info', 'host.setWakelock', 'host.completeDir',
-  'pagent.create', 'pagent.add',
+  'bot.create', 'bot.add',
 };
 
 /// Methods routed to the node named by node_id, or to the gateway without one
@@ -69,28 +69,28 @@ const Set<String> projectAddressed = {
   'project.issues',
 };
 
-/// Methods carrying a composite agent_id the client splits and routes to the
-/// agent's node.
-const Set<String> pagentAddressed = {
-  'pagent.show', 'pagent.rename', 'pagent.forget', 'pagent.setPrimary',
-  'pagent.thread.send', 'pagent.thread.list',
-  'pagent.memory.show', 'pagent.memory.log', 'pagent.memory.undo',
-  'pagent.memory.import', 'pagent.memory.proposals',
-  'pagent.routine.list', 'pagent.routine.run', 'pagent.routine.pause',
-  'pagent.routine.resume', 'pagent.routine.runs', 'pagent.routine.hookSecret',
-  'pagent.usage', 'pagent.set', 'pagent.activity',
-  'pagent.secret.set', 'pagent.secret.list', 'pagent.secret.rm',
+/// Methods carrying a composite bot_id the client splits and routes to the
+/// bot's node.
+const Set<String> botAddressed = {
+  'bot.show', 'bot.rename', 'bot.forget', 'bot.setPrimary',
+  'bot.thread.send', 'bot.thread.list',
+  'bot.memory.show', 'bot.memory.log', 'bot.memory.undo',
+  'bot.memory.import', 'bot.memory.proposals',
+  'bot.routine.list', 'bot.routine.run', 'bot.routine.pause',
+  'bot.routine.resume', 'bot.routine.runs', 'bot.routine.hookSecret',
+  'bot.usage', 'bot.set', 'bot.activity',
+  'bot.secret.set', 'bot.secret.list', 'bot.secret.rm',
 };
 
 /// Methods carrying a composite thread_id.
-const Set<String> pagentThreadAddressed = {
-  'pagent.thread.timeline', 'pagent.thread.markRead',
-  'pagent.offer.start', 'pagent.offer.dismiss',
-  'pagent.draft.send', 'pagent.draft.discard',
+const Set<String> botThreadAddressed = {
+  'bot.thread.timeline', 'bot.thread.markRead',
+  'bot.offer.start', 'bot.offer.dismiss',
+  'bot.draft.send', 'bot.draft.discard',
 };
 
-/// Status given to an agent whose node is offline, served from the cache.
-const String pagentUnreachable = 'unreachable';
+/// Status given to a bot whose node is offline, served from the cache.
+const String botUnreachable = 'unreachable';
 
 /// Methods whose result carries a node-local session_id that must be composited.
 const Set<String> compositeResultMethods = {'sessions.spawn', 'sessions.resume'};

@@ -5,7 +5,7 @@ import '../pairing/gateway_store.dart';
 import 'navigation.dart';
 import 'sessions.dart';
 
-enum LeftSidebarTab { projects, sessions, agents }
+enum LeftSidebarTab { projects, sessions, bots }
 
 /// Saves the left sidebar's tab on this device.
 class LeftSidebarTabStore {
@@ -69,8 +69,8 @@ final leftSidebarTabProvider =
 /// The Sessions tab's filter text, apart from the Projects filter.
 final sidebarSessionsFilterProvider = StateProvider<String>((ref) => '');
 
-/// The Agents tab's filter text.
-final sidebarAgentsFilterProvider = StateProvider<String>((ref) => '');
+/// The Bots tab's filter text.
+final sidebarBotsFilterProvider = StateProvider<String>((ref) => '');
 
 /// Whether the Sessions tab lists only the shown workspace's sessions.
 final sidebarSessionsWorkspaceOnlyProvider = StateProvider<bool>(

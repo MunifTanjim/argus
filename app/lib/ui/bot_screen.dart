@@ -1,35 +1,35 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/pagent.dart';
+import '../models/bot.dart';
 import '../state/approval_text.dart';
-import '../state/pagents.dart';
+import '../state/bots.dart';
 import '../state/projects_api.dart' show actionError;
 import 'agent_badge.dart';
-import 'agent_memory_screen.dart';
-import 'pagent_style.dart';
+import 'bot_memory_screen.dart';
+import 'bot_style.dart';
 import 'theme.dart';
 import 'thread_screen.dart';
 
-/// Opens an agent's screen: its threads and memory.
-Route<void> agentRoute(String agentId, {String chatText = ''}) =>
+/// Opens a bot's screen: its threads and memory.
+Route<void> botRoute(String botId, {String chatText = ''}) =>
     MaterialPageRoute(
-      builder: (_) => AgentScreen(agentId: agentId, chatText: chatText),
+      builder: (_) => BotScreen(botId: botId, chatText: chatText),
     );
 
-class AgentScreen extends ConsumerStatefulWidget {
-  const AgentScreen({super.key, required this.agentId, this.chatText = ''});
+class BotScreen extends ConsumerStatefulWidget {
+  const BotScreen({super.key, required this.botId, this.chatText = ''});
 
-  final String agentId;
+  final String botId;
 
   /// A message to prefill in a new chat opened with the screen.
   final String chatText;
 
   @override
-  ConsumerState<AgentScreen> createState() => _AgentScreenState();
+  ConsumerState<BotScreen> createState() => _BotScreenState();
 }
 
-class _AgentScreenState extends ConsumerState<AgentScreen> {
+class _BotScreenState extends ConsumerState<BotScreen> {
   bool _unattended = false;
 
   @override
@@ -37,38 +37,38 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
     super.initState();
     if (widget.chatText.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        final a = _agent(ref.read(pagentsProvider));
+        final a = _bot(ref.read(botsProvider));
         if (mounted && a != null) _newChat(a, widget.chatText);
       });
     }
   }
 
-  PAgent? _agent(PAgentsState s) {
-    for (final a in s.agents) {
-      if (a.id == widget.agentId) return a;
+  Bot? _bot(BotsState s) {
+    for (final a in s.bots) {
+      if (a.id == widget.botId) return a;
     }
     return null;
   }
 
   Future<void> _refresh() async {
     await ref
-        .read(pagentsProvider.notifier)
-        .load(ref.read(pagentsClientProvider));
-    ref.invalidate(agentMemoryUsageProvider(widget.agentId));
+        .read(botsProvider.notifier)
+        .load(ref.read(botsClientProvider));
+    ref.invalidate(botMemoryUsageProvider(widget.botId));
   }
 
   void _say(String text) => ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(text)));
 
-  /// Whether an action may run: an unreachable agent's node is not asked.
-  bool _reachable(PAgent a) {
+  /// Whether an action may run: an unreachable bot's node is not asked.
+  bool _reachable(Bot a) {
     if (!a.unreachable) return true;
-    _say(agentOffline);
+    _say(botOffline);
     return false;
   }
 
-  Future<void> _newChat(PAgent a, [String initial = '']) async {
+  Future<void> _newChat(Bot a, [String initial = '']) async {
     if (!_reachable(a)) return;
     final text = await showDialog<String>(
       context: context,
@@ -77,12 +77,12 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
     if (text == null || text.isEmpty || !mounted) return;
     try {
       final res = await ref
-          .read(pagentsApiProvider)
+          .read(botsApiProvider)
           .send(a.id, text, newThread: true);
       if (!mounted) return;
       _refresh();
       await Navigator.of(context).push(
-        threadRoute(agentId: a.id, threadId: res.threadId),
+        threadRoute(botId: a.id, threadId: res.threadId),
       );
     } catch (e) {
       if (mounted) _say('send failed: ${actionError(e)}');
@@ -91,9 +91,9 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
     if (mounted) await _refresh();
   }
 
-  Future<void> _routineAction(PAgent a, PAgentRoutine r, String action) async {
+  Future<void> _routineAction(Bot a, BotRoutine r, String action) async {
     if (!_reachable(a)) return;
-    final api = ref.read(pagentsApiProvider);
+    final api = ref.read(botsApiProvider);
     try {
       switch (action) {
         case 'run':
@@ -107,14 +107,14 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
     } catch (e) {
       if (mounted) _say('$action: ${actionError(e)}');
     }
-    ref.invalidate(agentRoutinesProvider(a.id));
+    ref.invalidate(botRoutinesProvider(a.id));
     await _refresh();
   }
 
-  Future<void> _setSetting(PAgent a, _SettingSpec spec, String value) async {
+  Future<void> _setSetting(Bot a, _SettingSpec spec, String value) async {
     if (!_reachable(a)) return;
     try {
-      await ref.read(pagentsApiProvider).setSetting(a.id, spec.key, value);
+      await ref.read(botsApiProvider).setSetting(a.id, spec.key, value);
     } catch (e) {
       if (mounted) _say('set: ${actionError(e)}');
       return;
@@ -122,15 +122,15 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
     await _refresh();
   }
 
-  void _openMemory(PAgent a) {
+  void _openMemory(Bot a) {
     if (!_reachable(a)) return;
-    Navigator.of(context).push(agentMemoryRoute(a.id));
+    Navigator.of(context).push(botMemoryRoute(a.id));
   }
 
-  Future<void> _setPrimary(PAgent a, bool primary) async {
+  Future<void> _setPrimary(Bot a, bool primary) async {
     if (!_reachable(a)) return;
     try {
-      await ref.read(pagentsApiProvider).setPrimary(primary ? a.id : null);
+      await ref.read(botsApiProvider).setPrimary(primary ? a.id : null);
     } catch (e) {
       if (mounted) _say('primary: ${actionError(e)}');
     }
@@ -139,25 +139,25 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(pagentsProvider);
-    final agent = _agent(state);
-    if (agent == null) {
+    final state = ref.watch(botsProvider);
+    final bot = _bot(state);
+    if (bot == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Agent')),
+        appBar: AppBar(title: const Text('Bot')),
         body: const Center(
-          child: Text('agent not found', style: TextStyle(color: AppColors.dim)),
+          child: Text('bot not found', style: TextStyle(color: AppColors.dim)),
         ),
       );
     }
-    final primary = state.isPrimary(agent);
-    final threads = state.threads[agent.id];
-    final usage = ref.watch(agentMemoryUsageProvider(agent.id)).value;
-    final label = agentLabel(agent.agent).isNotEmpty
-        ? agentLabel(agent.agent)
-        : agent.agent;
+    final primary = state.isPrimary(bot);
+    final threads = state.threads[bot.id];
+    final usage = ref.watch(botMemoryUsageProvider(bot.id)).value;
+    final label = agentLabel(bot.agent).isNotEmpty
+        ? agentLabel(bot.agent)
+        : bot.agent;
     final sub = [
       if (label.isNotEmpty) label,
-      if (agent.nodeLabel.isNotEmpty) 'home: ${agent.nodeLabel}',
+      if (bot.nodeLabel.isNotEmpty) 'home: ${bot.nodeLabel}',
       if (primary) 'primary',
     ].join(' · ');
     return Scaffold(
@@ -165,7 +165,7 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(agent.name),
+            Text(bot.name),
             if (sub.isNotEmpty)
               Text(
                 sub,
@@ -177,12 +177,12 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
           IconButton(
             tooltip: 'New chat',
             icon: const Icon(Icons.add_comment_outlined),
-            onPressed: () => _newChat(agent),
+            onPressed: () => _newChat(bot),
           ),
           PopupMenuButton<String>(
             onSelected: (v) => switch (v) {
-              'memory' => _openMemory(agent),
-              'primary' => _setPrimary(agent, !primary),
+              'memory' => _openMemory(bot),
+              'primary' => _setPrimary(bot, !primary),
               _ => null,
             },
             itemBuilder: (_) => [
@@ -201,8 +201,8 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
           children: [
             const _Heading('Threads'),
-            if (agent.unreachable)
-              const _Note(agentOffline)
+            if (bot.unreachable)
+              const _Note(botOffline)
             else if (threads == null)
               const _Note('loading threads…')
             else if (threads.isEmpty)
@@ -213,7 +213,7 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
                   thread: t,
                   onTap: () => Navigator.of(context).push(
                     threadRoute(
-                      agentId: agent.id,
+                      botId: bot.id,
                       threadId: t.id,
                       title: t.title,
                     ),
@@ -221,20 +221,20 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
                 ),
             const SizedBox(height: 16),
             const _Heading('Routines'),
-            if (agent.unreachable)
-              const _Note(agentOffline)
+            if (bot.unreachable)
+              const _Note(botOffline)
             else
               _RoutinesList(
-                agentId: agent.id,
-                onAction: (r, v) => _routineAction(agent, r, v),
+                botId: bot.id,
+                onAction: (r, v) => _routineAction(bot, r, v),
               ),
             const SizedBox(height: 16),
             const _Heading('Usage'),
-            _UsageLine(agentId: agent.id, unreachable: agent.unreachable),
+            _UsageLine(botId: bot.id, unreachable: bot.unreachable),
             const SizedBox(height: 16),
             const _Heading('Activity'),
-            if (agent.unreachable)
-              const _Note(agentOffline)
+            if (bot.unreachable)
+              const _Note(botOffline)
             else ...[
               Align(
                 alignment: Alignment.centerLeft,
@@ -244,20 +244,20 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
                   onSelected: (v) => setState(() => _unattended = v),
                 ),
               ),
-              _ActivityList(agentId: agent.id, unattended: _unattended),
+              _ActivityList(botId: bot.id, unattended: _unattended),
             ],
             const SizedBox(height: 16),
             const _Heading('Settings'),
             for (final spec in _settings)
               _SettingRow(
                 spec: spec,
-                setting: agent.settings[spec.field],
-                onChanged: (v) => _setSetting(agent, spec, v),
+                setting: bot.settings[spec.field],
+                onChanged: (v) => _setSetting(bot, spec, v),
               ),
             if (usage != null) ...[
               const SizedBox(height: 16),
               InkWell(
-                onTap: () => _openMemory(agent),
+                onTap: () => _openMemory(bot),
                 child: _Heading(
                   [
                   'Memory',
@@ -277,14 +277,14 @@ class _AgentScreenState extends ConsumerState<AgentScreen> {
 }
 
 class _ActivityList extends ConsumerWidget {
-  const _ActivityList({required this.agentId, required this.unattended});
+  const _ActivityList({required this.botId, required this.unattended});
 
-  final String agentId;
+  final String botId;
   final bool unattended;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final res = ref.watch(agentActivityProvider((agentId, unattended)));
+    final res = ref.watch(botActivityProvider((botId, unattended)));
     final list = res.value;
     if (list == null) {
       return res.hasError
@@ -320,7 +320,7 @@ class _ActivityList extends ConsumerWidget {
 class _SettingSpec {
   const _SettingSpec(this.key, this.field, this.title, this.options);
   final String key; // the set RPC's key
-  final String field; // the key in PAgentInfo.settings
+  final String field; // the key in BotInfo.settings
   final String title;
   final List<(String, String)> options; // value, label
 }
@@ -344,7 +344,7 @@ const _settings = [
   ]),
 ];
 
-/// One agent setting. The selected segment is what the agent's own file sets;
+/// One bot setting. The selected segment is what the bot's own file sets;
 /// a setting left to the default selects nothing and shows the value that
 /// applies. Picking the selected value again removes the setting, so the
 /// default applies.
@@ -356,7 +356,7 @@ class _SettingRow extends StatelessWidget {
   });
 
   final _SettingSpec spec;
-  final PAgentSetting? setting;
+  final BotSetting? setting;
   final void Function(String value) onChanged;
 
   @override
@@ -397,15 +397,15 @@ class _SettingRow extends StatelessWidget {
 }
 
 class _UsageLine extends ConsumerWidget {
-  const _UsageLine({required this.agentId, required this.unreachable});
+  const _UsageLine({required this.botId, required this.unreachable});
 
-  final String agentId;
+  final String botId;
   final bool unreachable;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (unreachable) return const _Note(agentOffline);
-    final usage = ref.watch(agentUsageProvider(agentId));
+    if (unreachable) return const _Note(botOffline);
+    final usage = ref.watch(botUsageProvider(botId));
     final u = usage.value;
     if (u == null) {
       return usage.hasError
@@ -417,14 +417,14 @@ class _UsageLine extends ConsumerWidget {
 }
 
 class _RoutinesList extends ConsumerWidget {
-  const _RoutinesList({required this.agentId, required this.onAction});
+  const _RoutinesList({required this.botId, required this.onAction});
 
-  final String agentId;
-  final void Function(PAgentRoutine, String) onAction;
+  final String botId;
+  final void Function(BotRoutine, String) onAction;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final routines = ref.watch(agentRoutinesProvider(agentId));
+    final routines = ref.watch(botRoutinesProvider(botId));
     final list = routines.value;
     if (list == null) {
       return routines.hasError
@@ -443,8 +443,8 @@ class _RoutinesList extends ConsumerWidget {
 class _RoutineRow extends StatelessWidget {
   const _RoutineRow({required this.routine, required this.onAction});
 
-  final PAgentRoutine routine;
-  final void Function(PAgentRoutine, String) onAction;
+  final BotRoutine routine;
+  final void Function(BotRoutine, String) onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -522,7 +522,7 @@ class _Note extends StatelessWidget {
 
 class _ThreadRow extends StatelessWidget {
   const _ThreadRow({required this.thread, required this.onTap});
-  final PAgentThread thread;
+  final BotThread thread;
   final VoidCallback onTap;
 
   @override

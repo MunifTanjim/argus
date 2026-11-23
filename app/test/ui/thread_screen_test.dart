@@ -1,6 +1,6 @@
 import 'package:argus/models/entry.dart';
-import 'package:argus/models/pagent.dart';
-import 'package:argus/state/pagents.dart';
+import 'package:argus/models/bot.dart';
+import 'package:argus/state/bots.dart';
 import 'package:argus/transport/jsonrpc.dart';
 import 'package:argus/ui/thread_screen.dart';
 import 'package:flutter/material.dart';
@@ -16,7 +16,7 @@ Map<String, dynamic> _timeline({bool live = true}) => {
       'id': 'e1',
       'kind': 'text',
       'timestamp': '2026-11-22T10:00:00.123456789Z',
-      'text': 'hello from the agent',
+      'text': 'hello from the bot',
     },
     {
       'id': 'e2',
@@ -74,28 +74,28 @@ Future<FakeGatewayClient> _pump(
   final client = FakeGatewayClient((m, p) async {
     final x = extra?.call(m, p);
     if (x != null) return x;
-    if (m == 'pagent.thread.timeline') return _timeline();
-    if (m == 'pagent.list') {
+    if (m == 'bot.thread.timeline') return _timeline();
+    if (m == 'bot.list') {
       return {
-        'agents': [
+        'bots': [
           {'id': 'A:a1', 'name': 'scout', 'status': status},
         ],
       };
     }
-    if (m == 'pagent.thread.list') return {'threads': []};
+    if (m == 'bot.thread.list') return {'threads': []};
     return null;
   });
   final c = ProviderContainer(
-    overrides: [pagentsClientProvider.overrideWithValue(client)],
+    overrides: [botsClientProvider.overrideWithValue(client)],
   );
   addTearDown(c.dispose);
-  await c.read(pagentsProvider.notifier).load(client);
+  await c.read(botsProvider.notifier).load(client);
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: c,
       child: MaterialApp(
         home: ThreadScreen(
-          agentId: 'A:a1',
+          botId: 'A:a1',
           threadId: 'A:t1',
           title: 'Plan',
           initialText: initialText,
@@ -109,18 +109,18 @@ Future<FakeGatewayClient> _pump(
 
 void main() {
   group('timelineDetailRef', () {
-    const live = PAgentTimelineSession(
+    const live = BotTimelineSession(
       sessionId: 'A:s2',
       live: true,
       cli: 'claude',
       transcriptPath: '/t/b.jsonl',
     );
-    const ended = PAgentTimelineSession(
+    const ended = BotTimelineSession(
       sessionId: 'A:s1',
       cli: 'codex',
       transcriptPath: '/t/a.jsonl',
     );
-    const none = PAgentTimelineSession(sessionId: 'A:s0');
+    const none = BotTimelineSession(sessionId: 'A:s0');
     const sessions = [ended, live, none];
 
     test('a live session serves its entries', () {
@@ -142,7 +142,7 @@ void main() {
       final r = timelineDetailRef(
         'A',
         const [
-          PAgentTimelineSession(
+          BotTimelineSession(
             sessionId: 'A:s1',
             cli: 'claude',
             transcriptPath: '/t/b.jsonl',
@@ -177,7 +177,7 @@ void main() {
   });
 
   test('liveSessionOf picks the last live session', () {
-    final tl = PAgentTimeline.fromJson({
+    final tl = BotTimeline.fromJson({
       'thread_id': 't',
       'sessions': [
         {'session_id': 'a', 'live': true},
@@ -191,13 +191,13 @@ void main() {
 
   testWidgets('renders the timeline with argus events and marks it read', (tester) async {
     final client = await _pump(tester);
-    expect(find.text('hello from the agent'), findsOneWidget);
+    expect(find.text('hello from the bot'), findsOneWidget);
     expect(find.text('  remembered a thing'), findsOneWidget);
     expect(find.text('  check-back set'), findsOneWidget);
     expect(find.text('Undo'), findsNWidgets(2)); // memory and routine changes
     expect(find.text('  Routine billing updated'), findsOneWidget);
     expect(find.text('  session.paused'), findsOneWidget); // no detail: the kind
-    final read = client.calls.firstWhere((c) => c.$1 == 'pagent.thread.markRead');
+    final read = client.calls.firstWhere((c) => c.$1 == 'bot.thread.markRead');
     expect(read.$2, {
       'thread_id': 'A:t1',
       'position': DateTime.utc(2026, 11, 22, 10, 0, 6).millisecondsSinceEpoch * 1000000,
@@ -207,12 +207,12 @@ void main() {
   testWidgets('marks an unread thread read at its last activity', (tester) async {
     final client = await _pump(
       tester,
-      extra: (m, p) => m == 'pagent.thread.list'
+      extra: (m, p) => m == 'bot.thread.list'
           ? {
               'threads': [
                 {
                   'id': 'A:t1',
-                  'agent_id': 'A:a1',
+                  'bot_id': 'A:a1',
                   'unread': true,
                   'last_active_at': '2026-11-22T10:00:09.123456789Z',
                 },
@@ -220,7 +220,7 @@ void main() {
             }
           : null,
     );
-    final reads = client.calls.where((c) => c.$1 == 'pagent.thread.markRead');
+    final reads = client.calls.where((c) => c.$1 == 'bot.thread.markRead');
     expect(reads.map((c) => c.$2), [
       {
         'thread_id': 'A:t1',
@@ -234,7 +234,7 @@ void main() {
     await _pump(
       tester,
       extra: (m, p) {
-        if (m != 'pagent.thread.timeline') return null;
+        if (m != 'bot.thread.timeline') return null;
         final tl = _timeline();
         (tl['entries'] as List).add({
           'id': 'e9',
@@ -253,17 +253,17 @@ void main() {
     expect(find.text('Undo'), findsOneWidget); // the routine change only
   });
 
-  testWidgets('undo calls pagent.memory.undo with the commit and reloads', (tester) async {
+  testWidgets('undo calls bot.memory.undo with the commit and reloads', (tester) async {
     final client = await _pump(tester);
-    final loads = client.calls.where((c) => c.$1 == 'pagent.thread.timeline').length;
+    final loads = client.calls.where((c) => c.$1 == 'bot.thread.timeline').length;
     await tester.tap(find.text('Undo').first);
     await tester.pumpAndSettle();
     expect(
-      client.calls.firstWhere((c) => c.$1 == 'pagent.memory.undo').$2,
-      {'agent_id': 'A:a1', 'commit': 'abc123', 'thread_id': 'A:t1'},
+      client.calls.firstWhere((c) => c.$1 == 'bot.memory.undo').$2,
+      {'bot_id': 'A:a1', 'commit': 'abc123', 'thread_id': 'A:t1'},
     );
     expect(
-      client.calls.where((c) => c.$1 == 'pagent.thread.timeline').length,
+      client.calls.where((c) => c.$1 == 'bot.thread.timeline').length,
       loads + 1,
     );
   });
@@ -273,8 +273,8 @@ void main() {
     await tester.tap(find.text('Undo').last);
     await tester.pumpAndSettle();
     expect(
-      client.calls.firstWhere((c) => c.$1 == 'pagent.memory.undo').$2,
-      {'agent_id': 'A:a1', 'commit': 'def456', 'thread_id': 'A:t1'},
+      client.calls.firstWhere((c) => c.$1 == 'bot.memory.undo').$2,
+      {'bot_id': 'A:a1', 'commit': 'def456', 'thread_id': 'A:t1'},
     );
   });
 
@@ -285,8 +285,8 @@ void main() {
     await tester.tap(find.byTooltip('Send'));
     await tester.pumpAndSettle();
     expect(
-      client.calls.firstWhere((c) => c.$1 == 'pagent.thread.send').$2,
-      {'agent_id': 'A:a1', 'thread_id': 'A:t1', 'text': 'next step'},
+      client.calls.firstWhere((c) => c.$1 == 'bot.thread.send').$2,
+      {'bot_id': 'A:a1', 'thread_id': 'A:t1', 'text': 'next step'},
     );
     expect(find.text('next step'), findsNothing); // cleared
   });
@@ -294,24 +294,24 @@ void main() {
   testWidgets('a failed send keeps the text and shows the error', (tester) async {
     await _pump(
       tester,
-      extra: (m, p) => m == 'pagent.thread.send'
-          ? throw const RpcError(-32000, 'agent busy')
+      extra: (m, p) => m == 'bot.thread.send'
+          ? throw const RpcError(-32000, 'bot busy')
           : null,
     );
     await tester.enterText(find.byType(TextField), 'next step');
     await tester.tap(find.byTooltip('Send'));
     await tester.pumpAndSettle();
-    expect(find.text('send: agent busy'), findsOneWidget);
+    expect(find.text('send: bot busy'), findsOneWidget);
     expect(find.text('next step'), findsOneWidget);
   });
 
-  testWidgets('an unreachable agent does not send', (tester) async {
+  testWidgets('an unreachable bot does not send', (tester) async {
     final client = await _pump(tester, status: 'unreachable');
     await tester.enterText(find.byType(TextField), 'x');
     await tester.tap(find.byTooltip('Send'));
     await tester.pump();
-    expect(find.text("agent's node is offline"), findsOneWidget);
-    expect(client.calls.any((c) => c.$1 == 'pagent.thread.send'), false);
+    expect(find.text("bot's node is offline"), findsOneWidget);
+    expect(client.calls.any((c) => c.$1 == 'bot.thread.send'), false);
   });
 
   testWidgets('open session says so when the live session is unknown', (tester) async {

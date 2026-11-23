@@ -5,12 +5,12 @@ import '../models/project.dart';
 import '../state/gateway.dart';
 import '../state/left_sidebar.dart';
 import '../state/navigation.dart';
-import '../state/pagents.dart';
+import '../state/bots.dart';
 import '../state/project_tree.dart';
 import '../state/projects.dart';
 import '../state/projects_api.dart';
 import '../state/sessions.dart';
-import 'agents_sidebar_list.dart';
+import 'bots_sidebar_list.dart';
 import 'nerd_icon.dart';
 import 'node_screen.dart';
 import 'project_actions.dart';
@@ -35,7 +35,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
   // after unmount, as when the other tab was showing the whole time.
   late final TextEditingController _filter;
   late final TextEditingController _sessionsFilter;
-  late final TextEditingController _agentsFilter;
+  late final TextEditingController _botsFilter;
 
   @override
   void initState() {
@@ -44,8 +44,8 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
     _sessionsFilter = TextEditingController(
       text: ref.read(sidebarSessionsFilterProvider),
     );
-    _agentsFilter = TextEditingController(
-      text: ref.read(sidebarAgentsFilterProvider),
+    _botsFilter = TextEditingController(
+      text: ref.read(sidebarBotsFilterProvider),
     );
   }
 
@@ -53,7 +53,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
   void dispose() {
     _filter.dispose();
     _sessionsFilter.dispose();
-    _agentsFilter.dispose();
+    _botsFilter.dispose();
     super.dispose();
   }
 
@@ -125,8 +125,8 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
             _tabs(tab),
             _search(tab),
             Expanded(
-              child: tab == LeftSidebarTab.agents
-                  ? AgentsSidebarList(onOpen: _close)
+              child: tab == LeftSidebarTab.bots
+                  ? BotsSidebarList(onOpen: _close)
                   : tab == LeftSidebarTab.sessions
                   ? SidebarSessionsList(onOpen: _close)
                   : RefreshIndicator(
@@ -201,13 +201,13 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
             icon: const Icon(Icons.add),
             onPressed: _newSession,
           ),
-        ] else if (ref.watch(leftSidebarTabProvider) == LeftSidebarTab.agents)
+        ] else if (ref.watch(leftSidebarTabProvider) == LeftSidebarTab.bots)
           IconButton(
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh),
             onPressed: () => ref
-                .read(pagentsProvider.notifier)
-                .load(ref.read(pagentsClientProvider)),
+                .read(botsProvider.notifier)
+                .load(ref.read(botsClientProvider)),
           )
         else
           PopupMenuButton<String>(
@@ -278,7 +278,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
       segments: const [
         ButtonSegment(value: LeftSidebarTab.projects, label: Text('Projects')),
         ButtonSegment(value: LeftSidebarTab.sessions, label: Text('Sessions')),
-        ButtonSegment(value: LeftSidebarTab.agents, label: Text('Agents')),
+        ButtonSegment(value: LeftSidebarTab.bots, label: Text('Bots')),
       ],
       selected: {tab},
       onSelectionChanged: (s) =>
@@ -295,7 +295,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
         controller: switch (tab) {
           LeftSidebarTab.projects => _filter,
           LeftSidebarTab.sessions => _sessionsFilter,
-          LeftSidebarTab.agents => _agentsFilter,
+          LeftSidebarTab.bots => _botsFilter,
         },
         style: const TextStyle(fontSize: 13),
         decoration: InputDecoration(
@@ -307,7 +307,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
           hintText: switch (tab) {
             LeftSidebarTab.projects => 'Filter projects',
             LeftSidebarTab.sessions => 'Filter sessions',
-            LeftSidebarTab.agents => 'Filter agents',
+            LeftSidebarTab.bots => 'Filter bots',
           },
           hintStyle: const TextStyle(fontSize: 13, color: AppColors.dim),
           contentPadding: const EdgeInsets.symmetric(vertical: 10),
@@ -320,8 +320,8 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
           LeftSidebarTab.projects => ref.read(treeViewProvider.notifier).setFilter,
           LeftSidebarTab.sessions => (q) =>
               ref.read(sidebarSessionsFilterProvider.notifier).state = q,
-          LeftSidebarTab.agents => (q) =>
-              ref.read(sidebarAgentsFilterProvider.notifier).state = q,
+          LeftSidebarTab.bots => (q) =>
+              ref.read(sidebarBotsFilterProvider.notifier).state = q,
         },
       ),
     ),

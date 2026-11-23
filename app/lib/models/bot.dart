@@ -4,18 +4,18 @@ DateTime _time(Object? v) =>
     (v is String ? DateTime.tryParse(v) : null) ??
     DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
 
-/// One agent setting as it applies: [value] is the resolved value, [explicit]
-/// whether the agent's own file sets it (else it is the default).
-class PAgentSetting {
-  const PAgentSetting(this.value, {this.explicit = false});
+/// One bot setting as it applies: [value] is the resolved value, [explicit]
+/// whether the bot's own file sets it (else it is the default).
+class BotSetting {
+  const BotSetting(this.value, {this.explicit = false});
   final String value;
   final bool explicit;
 }
 
-/// A registered persistent agent. Ids are composite (`node:id`). [status] is
+/// A registered bot. Ids are composite (`node:id`). [status] is
 /// needs_you, waiting, working, idle or unreachable.
-class PAgent {
-  const PAgent({
+class Bot {
+  const Bot({
     required this.id,
     this.name = '',
     this.dir = '',
@@ -44,11 +44,11 @@ class PAgent {
 
   /// notify, proactivity and memory_mode as they apply; empty when the node
   /// does not report them.
-  final Map<String, PAgentSetting> settings;
+  final Map<String, BotSetting> settings;
 
   bool get unreachable => status == 'unreachable';
 
-  factory PAgent.fromJson(Map<String, dynamic> j) => PAgent(
+  factory Bot.fromJson(Map<String, dynamic> j) => Bot(
     id: j['id'] as String? ?? '',
     name: j['name'] as String? ?? '',
     dir: j['dir'] as String? ?? '',
@@ -64,7 +64,7 @@ class PAgent {
       if (j['settings'] is Map)
         for (final e in (j['settings'] as Map).entries)
           if (e.value is Map)
-            '${e.key}': PAgentSetting(
+            '${e.key}': BotSetting(
               (e.value as Map)['value'] as String? ?? '',
               explicit: (e.value as Map)['explicit'] as bool? ?? false,
             ),
@@ -72,30 +72,30 @@ class PAgent {
   );
 }
 
-/// The merged agent list; [primary] is the primary agent's composite id.
-class PAgentList {
-  const PAgentList({this.agents = const [], this.primary = ''});
-  final List<PAgent> agents;
+/// The merged bot list; [primary] is the primary bot's composite id.
+class BotList {
+  const BotList({this.bots = const [], this.primary = ''});
+  final List<Bot> bots;
   final String primary;
 
-  factory PAgentList.fromJson(Object? res) {
+  factory BotList.fromJson(Object? res) {
     final m = res is Map ? res.cast<String, dynamic>() : const <String, dynamic>{};
-    return PAgentList(
-      agents: [
-        for (final a in (m['agents'] as List?) ?? const [])
-          if (a is Map<String, dynamic>) PAgent.fromJson(a),
+    return BotList(
+      bots: [
+        for (final a in (m['bots'] as List?) ?? const [])
+          if (a is Map<String, dynamic>) Bot.fromJson(a),
       ],
       primary: m['primary'] as String? ?? '',
     );
   }
 }
 
-/// A conversation or run of an agent. [kind] is chat or run; [startedBy] is
+/// A conversation or run of a bot. [kind] is chat or run; [startedBy] is
 /// you, routine, check-back, event or handoff; [status] is active or closed.
-class PAgentThread {
-  const PAgentThread({
+class BotThread {
+  const BotThread({
     required this.id,
-    this.agentId = '',
+    this.botId = '',
     this.kind = 'chat',
     this.startedBy = 'you',
     this.title = '',
@@ -108,7 +108,7 @@ class PAgentThread {
   });
 
   final String id;
-  final String agentId;
+  final String botId;
   final String kind;
   final String startedBy;
   final String title;
@@ -122,9 +122,9 @@ class PAgentThread {
   final String sessionId;
   final String sessionStatus;
 
-  factory PAgentThread.fromJson(Map<String, dynamic> j) => PAgentThread(
+  factory BotThread.fromJson(Map<String, dynamic> j) => BotThread(
     id: j['id'] as String? ?? '',
-    agentId: j['agent_id'] as String? ?? '',
+    botId: j['bot_id'] as String? ?? '',
     kind: j['kind'] as String? ?? 'chat',
     startedBy: j['started_by'] as String? ?? 'you',
     title: j['title'] as String? ?? '',
@@ -137,19 +137,19 @@ class PAgentThread {
   );
 }
 
-class PAgentSendResult {
-  const PAgentSendResult({required this.threadId, this.sessionId = ''});
+class BotSendResult {
+  const BotSendResult({required this.threadId, this.sessionId = ''});
   final String threadId;
   final String sessionId;
 
-  factory PAgentSendResult.fromJson(Map<String, dynamic> j) => PAgentSendResult(
+  factory BotSendResult.fromJson(Map<String, dynamic> j) => BotSendResult(
     threadId: j['thread_id'] as String? ?? '',
     sessionId: j['session_id'] as String? ?? '',
   );
 }
 
-class PAgentTimelineSession {
-  const PAgentTimelineSession({
+class BotTimelineSession {
+  const BotTimelineSession({
     required this.sessionId,
     this.startIndex = 0,
     this.live = false,
@@ -164,8 +164,8 @@ class PAgentTimelineSession {
   final String agentSessionId;
   final String transcriptPath;
 
-  factory PAgentTimelineSession.fromJson(Map<String, dynamic> j) =>
-      PAgentTimelineSession(
+  factory BotTimelineSession.fromJson(Map<String, dynamic> j) =>
+      BotTimelineSession(
         sessionId: j['session_id'] as String? ?? '',
         startIndex: (j['start_index'] as num?)?.toInt() ?? 0,
         live: j['live'] as bool? ?? false,
@@ -176,17 +176,17 @@ class PAgentTimelineSession {
 }
 
 /// A thread's session transcripts in order with Argus's events spliced in.
-class PAgentTimeline {
-  const PAgentTimeline({
+class BotTimeline {
+  const BotTimeline({
     required this.threadId,
     this.entries = const [],
     this.sessions = const [],
   });
   final String threadId;
   final List<Entry> entries;
-  final List<PAgentTimelineSession> sessions;
+  final List<BotTimelineSession> sessions;
 
-  factory PAgentTimeline.fromJson(Map<String, dynamic> j) => PAgentTimeline(
+  factory BotTimeline.fromJson(Map<String, dynamic> j) => BotTimeline(
     threadId: j['thread_id'] as String? ?? '',
     entries: [
       for (final e in (j['entries'] as List?) ?? const [])
@@ -194,13 +194,13 @@ class PAgentTimeline {
     ],
     sessions: [
       for (final s in (j['sessions'] as List?) ?? const [])
-        if (s is Map<String, dynamic>) PAgentTimelineSession.fromJson(s),
+        if (s is Map<String, dynamic>) BotTimelineSession.fromJson(s),
     ],
   );
 }
 
-class PAgentMemory {
-  const PAgentMemory({
+class BotMemory {
+  const BotMemory({
     this.memory = '',
     this.user = '',
     this.profile = '',
@@ -215,7 +215,7 @@ class PAgentMemory {
   final int usage;
   final int budget;
 
-  factory PAgentMemory.fromJson(Map<String, dynamic> j) => PAgentMemory(
+  factory BotMemory.fromJson(Map<String, dynamic> j) => BotMemory(
     memory: j['memory'] as String? ?? '',
     user: j['user'] as String? ?? '',
     profile: j['profile'] as String? ?? '',
@@ -225,9 +225,9 @@ class PAgentMemory {
   );
 }
 
-/// One memory change. [source] is capture, agent, tidy, you or run.
-class PAgentMemoryCommit {
-  const PAgentMemoryCommit({
+/// One memory change. [source] is capture, bot, tidy, you or run.
+class BotMemoryCommit {
+  const BotMemoryCommit({
     required this.hash,
     this.subject = '',
     this.source = '',
@@ -240,8 +240,8 @@ class PAgentMemoryCommit {
   final String threadId;
   final DateTime when;
 
-  factory PAgentMemoryCommit.fromJson(Map<String, dynamic> j) =>
-      PAgentMemoryCommit(
+  factory BotMemoryCommit.fromJson(Map<String, dynamic> j) =>
+      BotMemoryCommit(
         hash: j['hash'] as String? ?? '',
         subject: j['subject'] as String? ?? '',
         source: j['source'] as String? ?? '',
@@ -251,8 +251,8 @@ class PAgentMemoryCommit {
 }
 
 /// One memory edit. [action] is add, update or remove.
-class PAgentMemoryOp {
-  const PAgentMemoryOp({
+class BotMemoryOp {
+  const BotMemoryOp({
     required this.action,
     this.file = '',
     this.match = '',
@@ -265,7 +265,7 @@ class PAgentMemoryOp {
   final String text;
   final String until;
 
-  factory PAgentMemoryOp.fromJson(Map<String, dynamic> j) => PAgentMemoryOp(
+  factory BotMemoryOp.fromJson(Map<String, dynamic> j) => BotMemoryOp(
     action: j['action'] as String? ?? '',
     file: j['file'] as String? ?? '',
     match: j['match'] as String? ?? '',
@@ -276,10 +276,10 @@ class PAgentMemoryOp {
 
 /// A staged memory change awaiting accept or reject. [kind] is
 /// `instructions` for an instruction rewrite.
-class PAgentMemoryProposal {
-  const PAgentMemoryProposal({
+class BotMemoryProposal {
+  const BotMemoryProposal({
     required this.id,
-    this.agentId = '',
+    this.botId = '',
     this.threadId = '',
     this.source = '',
     this.kind = '',
@@ -292,7 +292,7 @@ class PAgentMemoryProposal {
     required this.createdAt,
   });
   final String id;
-  final String agentId;
+  final String botId;
   final String threadId;
   final String source;
   final String kind;
@@ -300,18 +300,18 @@ class PAgentMemoryProposal {
   final String summary;
   final String text;
   final String reason;
-  final List<PAgentMemoryOp> ops;
+  final List<BotMemoryOp> ops;
   final String log;
   final DateTime createdAt;
 
   bool get isInstructions => kind == 'instructions';
   bool get isRoutine => kind == 'routine';
-  bool get isAgent => kind == 'agent';
+  bool get isBot => kind == 'bot';
 
-  factory PAgentMemoryProposal.fromJson(Map<String, dynamic> j) =>
-      PAgentMemoryProposal(
+  factory BotMemoryProposal.fromJson(Map<String, dynamic> j) =>
+      BotMemoryProposal(
         id: j['id'] as String? ?? '',
-        agentId: j['agent_id'] as String? ?? '',
+        botId: j['bot_id'] as String? ?? '',
         threadId: j['thread_id'] as String? ?? '',
         source: j['source'] as String? ?? '',
         kind: j['kind'] as String? ?? '',
@@ -321,7 +321,7 @@ class PAgentMemoryProposal {
         reason: j['reason'] as String? ?? '',
         ops: [
           for (final o in (j['ops'] as List?) ?? const [])
-            if (o is Map<String, dynamic>) PAgentMemoryOp.fromJson(o),
+            if (o is Map<String, dynamic>) BotMemoryOp.fromJson(o),
         ],
         log: j['log'] as String? ?? '',
         createdAt: _time(j['created_at']),
@@ -329,8 +329,8 @@ class PAgentMemoryProposal {
 }
 
 /// The outcome of accepting a proposal.
-class PAgentDecideResult {
-  const PAgentDecideResult({
+class BotDecideResult {
+  const BotDecideResult({
     this.commit = '',
     this.profileCommit = '',
     this.applied = 0,
@@ -341,8 +341,8 @@ class PAgentDecideResult {
   final int applied;
   final List<String> rejected;
 
-  factory PAgentDecideResult.fromJson(Map<String, dynamic> j) =>
-      PAgentDecideResult(
+  factory BotDecideResult.fromJson(Map<String, dynamic> j) =>
+      BotDecideResult(
         commit: j['commit'] as String? ?? '',
         profileCommit: j['profile_commit'] as String? ?? '',
         applied: (j['applied'] as num?)?.toInt() ?? 0,
@@ -352,14 +352,14 @@ class PAgentDecideResult {
 
 /// The result of registering an existing directory. When [foundInstructions]
 /// is set and import was not requested, nothing was registered.
-class PAgentAddResult {
-  const PAgentAddResult({required this.agent, this.foundInstructions = false});
-  final PAgent agent;
+class BotAddResult {
+  const BotAddResult({required this.bot, this.foundInstructions = false});
+  final Bot bot;
   final bool foundInstructions;
 
-  factory PAgentAddResult.fromJson(Map<String, dynamic> j) => PAgentAddResult(
-    agent: PAgent.fromJson(
-      (j['agent'] as Map?)?.cast<String, dynamic>() ?? const {},
+  factory BotAddResult.fromJson(Map<String, dynamic> j) => BotAddResult(
+    bot: Bot.fromJson(
+      (j['bot'] as Map?)?.cast<String, dynamic>() ?? const {},
     ),
     foundInstructions: j['found_instructions'] as bool? ?? false,
   );
@@ -415,7 +415,7 @@ int lastEntryNanos(List<Entry> entries) {
 }
 
 /// The id of the timeline's last live session, or ''.
-String liveSessionOf(PAgentTimeline t) {
+String liveSessionOf(BotTimeline t) {
   for (var i = t.sessions.length - 1; i >= 0; i--) {
     if (t.sessions[i].live) return t.sessions[i].sessionId;
   }
@@ -423,15 +423,15 @@ String liveSessionOf(PAgentTimeline t) {
 }
 
 /// A routine's budget, or its use; 0 in a budget is unlimited.
-class PAgentRoutineBudget {
-  const PAgentRoutineBudget({this.sessions = 0, this.cost = 0, this.tokens = 0});
+class BotRoutineBudget {
+  const BotRoutineBudget({this.sessions = 0, this.cost = 0, this.tokens = 0});
   final int sessions;
   final double cost;
   final int tokens;
 
-  factory PAgentRoutineBudget.fromJson(Object? j) {
+  factory BotRoutineBudget.fromJson(Object? j) {
     final m = j is Map ? j : const {};
-    return PAgentRoutineBudget(
+    return BotRoutineBudget(
       sessions: (m['sessions'] as num?)?.toInt() ?? 0,
       cost: (m['cost'] as num?)?.toDouble() ?? 0,
       tokens: (m['tokens'] as num?)?.toInt() ?? 0,
@@ -441,10 +441,10 @@ class PAgentRoutineBudget {
 
 /// A routine with its runtime state. [state] is active, paused, disabled,
 /// completed or invalid.
-class PAgentRoutine {
-  const PAgentRoutine({
+class BotRoutine {
+  const BotRoutine({
     required this.slug,
-    this.agentId = '',
+    this.botId = '',
     this.what = '',
     this.starts = const [],
     this.state = 'active',
@@ -453,13 +453,13 @@ class PAgentRoutine {
     this.lastRunAt,
     this.lastResult = '',
     this.consecutiveFailures = 0,
-    this.budget = const PAgentRoutineBudget(),
-    this.used = const PAgentRoutineBudget(),
+    this.budget = const BotRoutineBudget(),
+    this.used = const BotRoutineBudget(),
     this.error = '',
   });
 
   final String slug;
-  final String agentId;
+  final String botId;
   final String what;
   final List<String> starts;
   final String state;
@@ -468,13 +468,13 @@ class PAgentRoutine {
   final DateTime? lastRunAt;
   final String lastResult;
   final int consecutiveFailures;
-  final PAgentRoutineBudget budget;
-  final PAgentRoutineBudget used;
+  final BotRoutineBudget budget;
+  final BotRoutineBudget used;
   final String error;
 
-  factory PAgentRoutine.fromJson(Map<String, dynamic> j) => PAgentRoutine(
+  factory BotRoutine.fromJson(Map<String, dynamic> j) => BotRoutine(
     slug: j['slug'] as String? ?? '',
-    agentId: j['agent_id'] as String? ?? '',
+    botId: j['bot_id'] as String? ?? '',
     what: j['what'] as String? ?? '',
     starts: [for (final s in (j['starts'] as List?) ?? const []) '$s'],
     state: j['state'] as String? ?? 'active',
@@ -483,15 +483,15 @@ class PAgentRoutine {
     lastRunAt: DateTime.tryParse(j['last_run_at'] as String? ?? ''),
     lastResult: j['last_result'] as String? ?? '',
     consecutiveFailures: (j['consecutive_failures'] as num?)?.toInt() ?? 0,
-    budget: PAgentRoutineBudget.fromJson(j['budget']),
-    used: PAgentRoutineBudget.fromJson(j['used']),
+    budget: BotRoutineBudget.fromJson(j['budget']),
+    used: BotRoutineBudget.fromJson(j['used']),
     error: j['error'] as String? ?? '',
   );
 }
 
 /// The usage of the work one kind of starter began.
-class PAgentUsageRow {
-  const PAgentUsageRow({
+class BotUsageRow {
+  const BotUsageRow({
     this.startedBy = '',
     this.sessions = 0,
     this.cost = 0,
@@ -502,9 +502,9 @@ class PAgentUsageRow {
   final double cost;
   final int tokens;
 
-  factory PAgentUsageRow.fromJson(Object? j) {
+  factory BotUsageRow.fromJson(Object? j) {
     final m = j is Map ? j : const {};
-    return PAgentUsageRow(
+    return BotUsageRow(
       startedBy: m['started_by'] as String? ?? '',
       sessions: (m['sessions'] as num?)?.toInt() ?? 0,
       cost: (m['cost'] as num?)?.toDouble() ?? 0,
@@ -513,18 +513,18 @@ class PAgentUsageRow {
   }
 }
 
-/// An agent's usage by starter, and in total. Cost and tokens count only what
-/// the agent's CLI reports.
-class PAgentUsage {
-  const PAgentUsage({this.rows = const [], this.total = const PAgentUsageRow()});
-  final List<PAgentUsageRow> rows;
-  final PAgentUsageRow total;
+/// A bot's usage by starter, and in total. Cost and tokens count only what
+/// the bot's CLI reports.
+class BotUsage {
+  const BotUsage({this.rows = const [], this.total = const BotUsageRow()});
+  final List<BotUsageRow> rows;
+  final BotUsageRow total;
 
-  factory PAgentUsage.fromJson(Map<String, dynamic> j) => PAgentUsage(
+  factory BotUsage.fromJson(Map<String, dynamic> j) => BotUsage(
     rows: [
-      for (final r in (j['rows'] as List?) ?? const []) PAgentUsageRow.fromJson(r),
+      for (final r in (j['rows'] as List?) ?? const []) BotUsageRow.fromJson(r),
     ],
-    total: PAgentUsageRow.fromJson(j['total']),
+    total: BotUsageRow.fromJson(j['total']),
   );
 }
 
@@ -556,16 +556,16 @@ String argusRowText(Entry e) {
   return detail.isNotEmpty ? detail : (e.event?.kind ?? e.label ?? '');
 }
 
-/// The answering agent's name and the answer of a `handoff.answered` entry, or
+/// The answering bot's name and the answer of a `handoff.answered` entry, or
 /// null for any other entry.
-({String agent, String text})? handoffAnswerOf(Entry e) {
+({String bot, String text})? handoffAnswerOf(Entry e) {
   if (e.kind != EntryKind.argus || e.event?.kind != 'handoff.answered') {
     return null;
   }
   final p = e.event?.payload is Map ? e.event!.payload as Map : const {};
-  final agent = p['agent'] is String ? (p['agent'] as String).trim() : '';
+  final bot = p['bot'] is String ? (p['bot'] as String).trim() : '';
   final text = p['text'] is String ? p['text'] as String : '';
-  return (agent: agent.isEmpty ? 'Agent' : agent, text: text);
+  return (bot: bot.isEmpty ? 'Bot' : bot, text: text);
 }
 
 /// The id of the draft event an argus entry carries, or 0 when it is not one.
@@ -587,10 +587,10 @@ Set<int> decidedDrafts(Iterable<Entry> entries) {
   return out;
 }
 
-/// One approval decision on an agent's action. [decidedBy] is floor, policy,
+/// One approval decision on a bot's action. [decidedBy] is floor, policy,
 /// hook, rule, grant, default, user or expiry.
-class PAgentActivity {
-  const PAgentActivity({
+class BotActivity {
+  const BotActivity({
     required this.id,
     this.threadId = '',
     this.sessionId = '',
@@ -613,7 +613,7 @@ class PAgentActivity {
   final String reason;
   final DateTime createdAt;
 
-  factory PAgentActivity.fromJson(Map<String, dynamic> j) => PAgentActivity(
+  factory BotActivity.fromJson(Map<String, dynamic> j) => BotActivity(
     id: (j['id'] as num?)?.toInt() ?? 0,
     threadId: j['thread_id'] as String? ?? '',
     sessionId: j['session_id'] as String? ?? '',

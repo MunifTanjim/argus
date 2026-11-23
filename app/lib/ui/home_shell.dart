@@ -7,9 +7,9 @@ import '../models/project.dart';
 import '../models/session.dart';
 import '../state/control.dart';
 import '../state/gateway.dart';
-import '../state/agent_link.dart';
+import '../state/bot_link.dart';
 import '../state/navigation.dart';
-import '../state/pagents.dart';
+import '../state/bots.dart';
 import '../state/projects.dart';
 import '../state/push.dart';
 import '../state/sessions.dart';
@@ -19,7 +19,7 @@ import 'history_screen.dart';
 import 'project_drawer.dart';
 import 'route_observer.dart';
 import 'session_detail_screen.dart';
-import 'agent_link.dart';
+import 'bot_link.dart';
 import 'session_list_screen.dart';
 import 'shell_drawer.dart';
 import 'terminal_list_screen.dart';
@@ -60,29 +60,29 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     });
   }
 
-  // Open a link to an agent once its agents are loaded.
+  // Open a link to a bot once its bots are loaded.
   void _openPendingLink() {
     if (!mounted) return;
-    final link = ref.read(pendingAgentLinkProvider);
-    final state = ref.read(pagentsProvider);
+    final link = ref.read(pendingBotLinkProvider);
+    final state = ref.read(botsProvider);
     if (link == null || !state.loaded) return;
-    ref.read(pendingAgentLinkProvider.notifier).state = null;
-    openAgentLink(context, state, link);
+    ref.read(pendingBotLinkProvider.notifier).state = null;
+    openBotLink(context, state, link);
   }
 
-  // Open a tapped notification's agent thread once the thread's agent is
+  // Open a tapped notification's bot thread once the thread's bot is
   // known, like a session tap waits for its session.
   void _openPendingThread() {
     if (!mounted) return;
     final id = ref.read(pendingOpenThreadProvider);
     if (id == null) return;
-    final state = ref.read(pagentsProvider);
+    final state = ref.read(botsProvider);
     final hit = state.findThread(id);
     if (hit == null) return;
-    final (agentId, thread) = hit;
+    final (botId, thread) = hit;
     ref.read(pendingOpenThreadProvider.notifier).state = null;
     Navigator.of(context, rootNavigator: true).push(
-      threadRoute(agentId: agentId, threadId: thread.id, title: thread.title),
+      threadRoute(botId: botId, threadId: thread.id, title: thread.title),
     );
   }
 
@@ -287,11 +287,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // that pointed at a not-yet-known session.
     ref.listen<PendingOpen?>(pendingOpenSessionProvider, (_, _) => _openPending());
     ref.listen<String?>(pendingOpenThreadProvider, (_, _) => _openPendingThread());
-    ref.listen<PAgentsState>(pagentsProvider, (_, _) {
+    ref.listen<BotsState>(botsProvider, (_, _) {
       _openPendingThread();
       _openPendingLink();
     });
-    ref.listen<AgentLink?>(pendingAgentLinkProvider, (_, _) => _openPendingLink());
+    ref.listen<BotLink?>(pendingBotLinkProvider, (_, _) => _openPendingLink());
     ref.listen<Map<String, Session>>(sessionsProvider, _onSessions);
     ref.listen<ProjectsState>(projectsProvider, _onProjects);
     ref.listen<String?>(scopeProvider, _onScope);

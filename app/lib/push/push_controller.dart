@@ -480,7 +480,7 @@ class PushController {
 }
 
 /// Routes a value of the tap stream (local notifications and the APNs channel):
-/// a [threadTapPrefix]-marked agent thread, else a session id.
+/// a [threadTapPrefix]-marked bot thread, else a session id.
 void routeTap(
   String tap, {
   void Function(String sessionId)? onSession,
@@ -493,14 +493,14 @@ void routeTap(
   }
 }
 
-/// Routes a tapped push: to its agent thread when it names one and [onThread]
+/// Routes a tapped push: to its bot thread when it names one and [onThread]
 /// is set, else to its session.
 void routePushOpen(
   PushMessage m, {
   required void Function(String sessionId) onSession,
   void Function(String threadId)? onThread,
 }) {
-  final thread = m.pagentThreadId;
+  final thread = m.botThreadId;
   if (thread != null && thread.isNotEmpty && onThread != null) {
     onThread(thread);
     return;

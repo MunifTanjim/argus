@@ -3,7 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../models/entry.dart';
-import '../models/pagent.dart' show argusRowText, draftIdOf, handoffAnswerOf, offerIdOf, undoCommit;
+import '../models/bot.dart' show argusRowText, draftIdOf, handoffAnswerOf, offerIdOf, undoCommit;
 import '../state/tool_detail.dart';
 import 'code_block.dart';
 import 'item_detail_screen.dart';
@@ -69,7 +69,7 @@ VoidCallback? drillFor(BuildContext context, Entry e, ToolDetailRef ref) {
   return null;
 }
 
-/// What the user can do with an agent's offers in a thread.
+/// What the user can do with a bot's offers in a thread.
 class OfferActions {
   const OfferActions({
     required this.isOpen,
@@ -83,7 +83,7 @@ class OfferActions {
   final void Function(String offerId) onDismiss;
 }
 
-/// What the user can do with an agent's drafted actions in a thread.
+/// What the user can do with a bot's drafted actions in a thread.
 class DraftActions {
   const DraftActions({
     required this.isOpen,
@@ -122,11 +122,11 @@ class EntryRow extends StatelessWidget {
   /// Whether the change is still open to undo; null is always.
   final bool Function(String commit)? canUndoMemory;
 
-  /// Offers Start and Dismiss on an agent's open offers; null leaves offers
+  /// Offers Start and Dismiss on a bot's open offers; null leaves offers
   /// as plain text.
   final OfferActions? offerActions;
 
-  /// Send and Discard on an agent's open drafts; null leaves them as text.
+  /// Send and Discard on a bot's open drafts; null leaves them as text.
   final DraftActions? draftActions;
 
   @override
@@ -690,7 +690,7 @@ class _CompactDivider extends StatelessWidget {
   }
 }
 
-/// Argus's own event in an agent thread: dim, with an undo on a memory or
+/// Argus's own event in a bot thread: dim, with an undo on a memory or
 /// routine change, and Start and Dismiss on an open offer.
 class _ArgusEventRow extends StatelessWidget {
   const _ArgusEventRow({
@@ -805,11 +805,11 @@ class _ArgusEventRow extends StatelessWidget {
   }
 }
 
-/// Another agent's answer to a hand-off: its name, then the answer in full.
+/// Another bot's answer to a hand-off: its name, then the answer in full.
 class _HandoffAnswer extends StatelessWidget {
   const _HandoffAnswer({required this.entry, required this.answer});
   final Entry entry;
-  final ({String agent, String text}) answer;
+  final ({String bot, String text}) answer;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -823,7 +823,7 @@ class _HandoffAnswer extends StatelessWidget {
             const Icon(Icons.reply, size: 13, color: AppColors.accent),
             const SizedBox(width: 6),
             Text(
-              answer.agent,
+              answer.bot,
               style: _mono.copyWith(
                 color: AppColors.text,
                 fontWeight: FontWeight.w600,

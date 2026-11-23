@@ -1,6 +1,6 @@
-import 'package:argus/state/pagents.dart';
+import 'package:argus/state/bots.dart';
 import 'package:argus/transport/jsonrpc.dart';
-import 'package:argus/ui/agent_memory_screen.dart';
+import 'package:argus/ui/bot_memory_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -17,7 +17,7 @@ Future<FakeGatewayClient> _pump(
   var proposals = [
     {
       'id': 'A:mp1',
-      'agent_id': 'A:a1',
+      'bot_id': 'A:a1',
       'source': 'capture',
       'reason': 'learned a preference',
       'ops': [
@@ -27,7 +27,7 @@ Future<FakeGatewayClient> _pump(
     },
     {
       'id': 'A:mp2',
-      'agent_id': 'A:a1',
+      'bot_id': 'A:a1',
       'source': 'tidy',
       'kind': 'instructions',
       'text': 'Be brief.',
@@ -39,13 +39,13 @@ Future<FakeGatewayClient> _pump(
     final x = extra?.call(m, p);
     if (x != null) return x;
     switch (m) {
-      case 'pagent.list':
+      case 'bot.list':
         return {
-          'agents': [
+          'bots': [
             {'id': 'A:a1', 'name': 'scout', 'status': 'idle'},
           ],
         };
-      case 'pagent.memory.show':
+      case 'bot.memory.show':
         return {
           'memory': '- likes coffee',
           'user': '',
@@ -54,7 +54,7 @@ Future<FakeGatewayClient> _pump(
           'usage': 2048,
           'budget': 8192,
         };
-      case 'pagent.memory.log':
+      case 'bot.memory.log':
         return {
           'commits': [
             {
@@ -65,29 +65,29 @@ Future<FakeGatewayClient> _pump(
             },
           ],
         };
-      case 'pagent.memory.proposals':
+      case 'bot.memory.proposals':
         return {'proposals': proposals};
-      case 'pagent.memory.decide':
+      case 'bot.memory.decide':
         final id = (p as Map)['proposal_id'];
         proposals = [
           for (final x in proposals)
             if (x['id'] != id) x,
         ];
         return {'applied': 1, 'rejected': <String>[]};
-      case 'pagent.memory.undo':
+      case 'bot.memory.undo':
         return {'commit': 'h2'};
     }
     return null;
   });
   final c = ProviderContainer(
-    overrides: [pagentsClientProvider.overrideWithValue(client)],
+    overrides: [botsClientProvider.overrideWithValue(client)],
   );
   addTearDown(c.dispose);
-  await c.read(pagentsProvider.notifier).load(client);
+  await c.read(botsProvider.notifier).load(client);
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: c,
-      child: const MaterialApp(home: AgentMemoryScreen(agentId: 'A:a1')),
+      child: const MaterialApp(home: BotMemoryScreen(botId: 'A:a1')),
     ),
   );
   await tester.pumpAndSettle();
@@ -113,18 +113,18 @@ void main() {
     expect(find.text('capture: coffee'), findsOneWidget);
     await tester.tap(find.byTooltip('Undo'));
     await tester.pumpAndSettle();
-    expect(client.calls.any((c) => c.$1 == 'pagent.memory.undo'), false);
+    expect(client.calls.any((c) => c.$1 == 'bot.memory.undo'), false);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-    expect(client.calls.any((c) => c.$1 == 'pagent.memory.undo'), false);
+    expect(client.calls.any((c) => c.$1 == 'bot.memory.undo'), false);
 
     await tester.tap(find.byTooltip('Undo'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Undo'));
     await tester.pumpAndSettle();
     expect(
-      client.calls.firstWhere((c) => c.$1 == 'pagent.memory.undo').$2,
-      {'agent_id': 'A:a1', 'commit': 'h1'},
+      client.calls.firstWhere((c) => c.$1 == 'bot.memory.undo').$2,
+      {'bot_id': 'A:a1', 'commit': 'h1'},
     );
   });
 
@@ -135,8 +135,8 @@ void main() {
     await tester.tap(find.text('Shared profile'));
     await tester.pumpAndSettle();
     expect(
-      client.calls.where((c) => c.$1 == 'pagent.memory.log').last.$2,
-      {'agent_id': 'A:a1', 'profile': true},
+      client.calls.where((c) => c.$1 == 'bot.memory.log').last.$2,
+      {'bot_id': 'A:a1', 'profile': true},
     );
   });
 
@@ -152,7 +152,7 @@ void main() {
     await tester.tap(find.text('Accept').first);
     await tester.pumpAndSettle();
     expect(
-      client.calls.firstWhere((c) => c.$1 == 'pagent.memory.decide').$2,
+      client.calls.firstWhere((c) => c.$1 == 'bot.memory.decide').$2,
       {'proposal_id': 'A:mp1', 'accept': true},
     );
     expect(find.text('likes tea'), findsNothing);
@@ -160,7 +160,7 @@ void main() {
     await tester.tap(find.text('Reject'));
     await tester.pumpAndSettle();
     expect(
-      client.calls.where((c) => c.$1 == 'pagent.memory.decide').last.$2,
+      client.calls.where((c) => c.$1 == 'bot.memory.decide').last.$2,
       {'proposal_id': 'A:mp2', 'accept': false},
     );
     expect(find.text('nothing to review'), findsOneWidget);
@@ -169,7 +169,7 @@ void main() {
   testWidgets('Review shows the server error when a decision fails', (tester) async {
     await _pump(
       tester,
-      extra: (m, p) => m == 'pagent.memory.decide'
+      extra: (m, p) => m == 'bot.memory.decide'
           ? throw const RpcError(-32000, 'file changed')
           : null,
     );

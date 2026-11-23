@@ -1,8 +1,8 @@
 import 'package:argus/state/gateway.dart';
-import 'package:argus/state/pagents.dart';
+import 'package:argus/state/bots.dart';
 import 'package:argus/transport/jsonrpc.dart';
-import 'package:argus/ui/agent_screen.dart';
-import 'package:argus/ui/pagent_style.dart' show agentOffline;
+import 'package:argus/ui/bot_screen.dart';
+import 'package:argus/ui/bot_style.dart' show botOffline;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -23,9 +23,9 @@ Future<(ProviderContainer, FakeGatewayClient)> _pump(
     final x = extra?.call(m, p);
     if (x != null) return x;
     switch (m) {
-      case 'pagent.list':
+      case 'bot.list':
         return {
-          'agents': [
+          'bots': [
             {
               'id': 'A:a1',
               'name': 'scout',
@@ -36,12 +36,12 @@ Future<(ProviderContainer, FakeGatewayClient)> _pump(
           ],
           if (primaryId.isNotEmpty) 'primary': primaryId,
         };
-      case 'pagent.thread.list':
+      case 'bot.thread.list':
         return {
           'threads': [
             {
               'id': 'A:t1',
-              'agent_id': 'A:a1',
+              'bot_id': 'A:a1',
               'kind': 'chat',
               'title': 'Plan the week',
               'unread': true,
@@ -49,9 +49,9 @@ Future<(ProviderContainer, FakeGatewayClient)> _pump(
             },
           ],
         };
-      case 'pagent.memory.show':
+      case 'bot.memory.show':
         return {'memory': 'm', 'usage': 3072, 'budget': 8192};
-      case 'pagent.memory.log':
+      case 'bot.memory.log':
         return {
           'commits': [
             {
@@ -60,10 +60,10 @@ Future<(ProviderContainer, FakeGatewayClient)> _pump(
             },
           ],
         };
-      case 'pagent.setPrimary':
-        primaryId = (p as Map)['agent_id'] as String? ?? '';
+      case 'bot.setPrimary':
+        primaryId = (p as Map)['bot_id'] as String? ?? '';
         return null;
-      case 'pagent.thread.send':
+      case 'bot.thread.send':
         return {'thread_id': 'A:t2', 'session_id': 'A:s2'};
     }
     return null;
@@ -71,15 +71,15 @@ Future<(ProviderContainer, FakeGatewayClient)> _pump(
   final c = ProviderContainer(
     overrides: [
       gatewayProvider.overrideWithValue(null),
-      pagentsClientProvider.overrideWithValue(client),
+      botsClientProvider.overrideWithValue(client),
     ],
   );
   addTearDown(c.dispose);
-  await c.read(pagentsProvider.notifier).load(client);
+  await c.read(botsProvider.notifier).load(client);
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: c,
-      child: const MaterialApp(home: AgentScreen(agentId: 'A:a1')),
+      child: const MaterialApp(home: BotScreen(botId: 'A:a1')),
     ),
   );
   await tester.pumpAndSettle();
@@ -87,7 +87,7 @@ Future<(ProviderContainer, FakeGatewayClient)> _pump(
 }
 
 void main() {
-  testWidgets('shows the agent, its threads and memory usage', (tester) async {
+  testWidgets('shows the bot, its threads and memory usage', (tester) async {
     await _pump(tester);
     expect(find.text('scout'), findsOneWidget);
     expect(find.text('Claude · home: mbp'), findsOneWidget);
@@ -103,14 +103,14 @@ void main() {
     await tester.enterText(find.byType(TextField), 'hello there');
     await tester.tap(find.text('Send'));
     await tester.pumpAndSettle();
-    final call = client.calls.firstWhere((c) => c.$1 == 'pagent.thread.send');
-    expect(call.$2, {'agent_id': 'A:a1', 'text': 'hello there', 'new': true});
+    final call = client.calls.firstWhere((c) => c.$1 == 'bot.thread.send');
+    expect(call.$2, {'bot_id': 'A:a1', 'text': 'hello there', 'new': true});
   });
 
   testWidgets('a failed send shows the error', (tester) async {
     await _pump(
       tester,
-      extra: (m, p) => m == 'pagent.thread.send'
+      extra: (m, p) => m == 'bot.thread.send'
           ? throw const RpcError(-32000, 'no capacity')
           : null,
     );
@@ -129,32 +129,32 @@ void main() {
     await tester.tap(find.text('Make primary'));
     await tester.pumpAndSettle();
     expect(
-      client.calls.firstWhere((x) => x.$1 == 'pagent.setPrimary').$2,
-      {'agent_id': 'A:a1'},
+      client.calls.firstWhere((x) => x.$1 == 'bot.setPrimary').$2,
+      {'bot_id': 'A:a1'},
     );
-    expect(c.read(pagentsProvider).primary, 'A:a1');
+    expect(c.read(botsProvider).primary, 'A:a1');
     expect(find.text('Claude · home: mbp · primary'), findsOneWidget);
 
     await tester.tap(find.byType(PopupMenuButton<String>));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Unset primary'));
     await tester.pumpAndSettle();
-    expect(client.calls.where((x) => x.$1 == 'pagent.setPrimary').last.$2, <String, dynamic>{});
-    expect(c.read(pagentsProvider).primary, '');
+    expect(client.calls.where((x) => x.$1 == 'bot.setPrimary').last.$2, <String, dynamic>{});
+    expect(c.read(botsProvider).primary, '');
   });
 
-  testWidgets('an unreachable agent disables its actions', (tester) async {
+  testWidgets('an unreachable bot disables its actions', (tester) async {
     final (_, client) = await _pump(tester, status: 'unreachable');
-    expect(find.text(agentOffline), findsNWidgets(4));
+    expect(find.text(botOffline), findsNWidgets(4));
     await tester.tap(find.byTooltip('New chat'));
     await tester.pump();
-    expect(find.text(agentOffline), findsNWidgets(5)); // four notes and the snackbar
+    expect(find.text(botOffline), findsNWidgets(5)); // four notes and the snackbar
     expect(find.byType(AlertDialog), findsNothing);
     await tester.tap(find.byType(PopupMenuButton<String>));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Make primary'));
     await tester.pump();
-    expect(client.calls.any((c) => c.$1 == 'pagent.setPrimary'), false);
-    expect(client.calls.any((c) => c.$1 == 'pagent.thread.list'), false);
+    expect(client.calls.any((c) => c.$1 == 'bot.setPrimary'), false);
+    expect(client.calls.any((c) => c.$1 == 'bot.thread.list'), false);
   });
 }

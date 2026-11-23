@@ -4,12 +4,12 @@ import 'package:argus/push/push_message.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('a push naming an agent thread opens the thread', () {
+  test('a push naming a bot thread opens the thread', () {
     final sessions = <String>[];
     final threads = <String>[];
     routePushOpen(
       const PushMessage(
-        data: {'session_id': 'A:s1', 'pagent_thread_id': 'A:t1'},
+        data: {'session_id': 'A:s1', 'bot_thread_id': 'A:t1'},
       ),
       onSession: sessions.add,
       onThread: threads.add,
@@ -34,7 +34,7 @@ void main() {
     final sessions = <String>[];
     routePushOpen(
       const PushMessage(
-        data: {'session_id': 'A:s1', 'pagent_thread_id': 'A:t1'},
+        data: {'session_id': 'A:s1', 'bot_thread_id': 'A:t1'},
       ),
       onSession: sessions.add,
     );
@@ -50,7 +50,7 @@ void main() {
   });
 
   test('a native tap marked as a thread opens the thread', () {
-    // The iOS tap handler sends `pagent_thread:<node>:<thread>` for an agent push.
+    // The iOS tap handler sends `bot_thread:<node>:<thread>` for a bot push.
     final sessions = <String>[];
     final threads = <String>[];
     routeTap('${threadTapPrefix}A:t1', onSession: sessions.add, onThread: threads.add);

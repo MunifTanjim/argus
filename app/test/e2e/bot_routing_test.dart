@@ -46,56 +46,56 @@ Future<_Fixture> _connect(NodeHandler a, NodeHandler b) async {
   return (lnk: lnk, client: client, a: na, b: nb);
 }
 
-NodeHandler _agents(List<Map<String, dynamic>> agents, [String primary = '']) =>
+NodeHandler _bots(List<Map<String, dynamic>> bots, [String primary = '']) =>
     (m, p) => _json({
-      'agents': agents,
+      'bots': bots,
       if (primary.isNotEmpty) 'primary': primary,
     });
 
 void main() {
-  test('pagent.list merges nodes with composite ids in node order', () async {
+  test('bot.list merges nodes with composite ids in node order', () async {
     final f = await _connect(
-      _agents([
+      _bots([
         {'id': 'a1', 'name': 'x', 'status': 'idle', 'primary': true},
       ], 'a1'),
-      _agents([
+      _bots([
         {'id': 'a1', 'name': 'y', 'status': 'working', 'primary': true},
         {'id': 'a2', 'name': 'z', 'status': 'idle'},
       ], 'a1'),
     );
-    final res = await f.client.call('pagent.list', {}) as Map;
-    final agents = (res['agents'] as List).cast<Map>();
-    expect(agents.map((a) => a['id']), ['A:a1', 'B:a1', 'B:a2']);
-    expect(agents[0]['node_id'], 'A');
-    expect(agents[0]['node_label'], 'A-box');
-    expect(agents[0]['primary'], true);
-    expect(agents[1]['primary'], false, reason: 'only the first primary wins');
+    final res = await f.client.call('bot.list', {}) as Map;
+    final bots = (res['bots'] as List).cast<Map>();
+    expect(bots.map((a) => a['id']), ['A:a1', 'B:a1', 'B:a2']);
+    expect(bots[0]['node_id'], 'A');
+    expect(bots[0]['node_label'], 'A-box');
+    expect(bots[0]['primary'], true);
+    expect(bots[1]['primary'], false, reason: 'only the first primary wins');
     expect(res['primary'], 'A:a1');
     await f.client.close();
   });
 
   test('primary falls back to a node-reported primary', () async {
     final f = await _connect(
-      _agents([]),
-      _agents([
+      _bots([]),
+      _bots([
         {'id': 'a1', 'status': 'idle'},
       ], 'a1'),
     );
-    final res = await f.client.call('pagent.list', {}) as Map;
+    final res = await f.client.call('bot.list', {}) as Map;
     expect(res['primary'], 'B:a1');
     await f.client.close();
   });
 
-  test('an offline node keeps its agents as unreachable until removed', () async {
+  test('an offline node keeps its bots as unreachable until removed', () async {
     final f = await _connect(
-      _agents([
+      _bots([
         {'id': 'a1', 'status': 'idle'},
       ]),
-      _agents([
+      _bots([
         {'id': 'b1', 'status': 'working', 'primary': true},
       ]),
     );
-    await f.client.call('pagent.list', {});
+    await f.client.call('bot.list', {});
     final seen = <String>[];
     final sub = f.client.notifications.listen((m) => seen.add(m.method ?? ''));
 
@@ -104,11 +104,11 @@ void main() {
       'node': _descriptor('B', f.b.keyPair, online: false),
     });
     await _until(() => !f.client.connectedNodeIds.contains('B'));
-    expect(seen, contains('pagent.changed'));
+    expect(seen, contains('bot.changed'));
 
-    var res = await f.client.call('pagent.list', {}) as Map;
-    var agents = (res['agents'] as List).cast<Map>();
-    expect(agents.map((a) => '${a['id']}:${a['status']}'), [
+    var res = await f.client.call('bot.list', {}) as Map;
+    var bots = (res['bots'] as List).cast<Map>();
+    expect(bots.map((a) => '${a['id']}:${a['status']}'), [
       'A:a1:idle',
       'B:b1:unreachable',
     ]);
@@ -118,22 +118,22 @@ void main() {
       'type': 'removed',
       'node': _descriptor('B', f.b.keyPair, online: false),
     });
-    await _until(() => seen.where((m) => m == 'pagent.changed').length > 1);
-    res = await f.client.call('pagent.list', {}) as Map;
-    agents = (res['agents'] as List).cast<Map>();
-    expect(agents.map((a) => a['id']), ['A:a1']);
+    await _until(() => seen.where((m) => m == 'bot.changed').length > 1);
+    res = await f.client.call('bot.list', {}) as Map;
+    bots = (res['bots'] as List).cast<Map>();
+    expect(bots.map((a) => a['id']), ['A:a1']);
     await sub.cancel();
     await f.client.close();
   });
 
-  test('a shared cache keeps an offline node\'s agents across reconnects', () async {
+  test('a shared cache keeps an offline node\'s bots across reconnects', () async {
     final cache = <String, List<Map<String, dynamic>>>{};
     final ka = await generateKeyPair();
     final kb = await generateKeyPair();
-    final handlerA = _agents([
+    final handlerA = _bots([
       {'id': 'a1', 'status': 'idle'},
     ]);
-    final handlerB = _agents([
+    final handlerB = _bots([
       {'id': 'b1', 'status': 'working'},
     ]);
     Future<List<String>> listOn(MultiNodeLoopbackLink lnk) async {
@@ -141,14 +141,14 @@ void main() {
         lnk.incoming,
         lnk.send,
         await generateKeyPair(),
-        pagentCache: cache,
+        botCache: cache,
       );
       await client.connect();
       await client.channelsSettled;
-      final res = await client.call('pagent.list', {}) as Map;
+      final res = await client.call('bot.list', {}) as Map;
       await client.close();
       return [
-        for (final a in (res['agents'] as List).cast<Map>())
+        for (final a in (res['bots'] as List).cast<Map>())
           '${a['id']}:${a['status']}',
       ];
     }
@@ -167,108 +167,108 @@ void main() {
       await listOn(MultiNodeLoopbackLink(offline, offline: {'B'})),
       ['A:a1:idle', 'B:b1:unreachable'],
     );
-    // Reconnected after B left the roster: its agents are gone.
+    // Reconnected after B left the roster: its bots are gone.
     expect(
       await listOn(MultiNodeLoopbackLink({'A': LoopbackNode('A', ka, handlerA)})),
       ['A:a1:idle'],
     );
   });
 
-  test('pagent.changed from a node is stamped with its node id', () async {
-    final f = await _connect(_agents([]), _agents([]));
+  test('bot.changed from a node is stamped with its node id', () async {
+    final f = await _connect(_bots([]), _bots([]));
     final got = Completer<Object?>();
     final sub = f.client.notifications.listen((m) {
-      if (m.method == 'pagent.changed' && !got.isCompleted) got.complete(m.params);
+      if (m.method == 'bot.changed' && !got.isCompleted) got.complete(m.params);
     });
-    f.b.emitNotification('pagent.changed', utf8.encode('{}'));
+    f.b.emitNotification('bot.changed', utf8.encode('{}'));
     expect(await got.future.timeout(const Duration(seconds: 3)), {'node_id': 'B'});
     await sub.cancel();
     await f.client.close();
   });
 
-  test('setPrimary routes to the agent node and unsets the others', () async {
+  test('setPrimary routes to the bot node and unsets the others', () async {
     final f = await _connect((m, p) => _json(null), (m, p) => _json(null));
-    await f.client.call('pagent.setPrimary', {'agent_id': 'B:a2'});
-    final bReq = f.b.requests.where((r) => r.method == 'pagent.setPrimary');
-    final aReq = f.a.requests.where((r) => r.method == 'pagent.setPrimary');
-    expect(_params(bReq.single.params), {'agent_id': 'a2'});
+    await f.client.call('bot.setPrimary', {'bot_id': 'B:a2'});
+    final bReq = f.b.requests.where((r) => r.method == 'bot.setPrimary');
+    final aReq = f.a.requests.where((r) => r.method == 'bot.setPrimary');
+    expect(_params(bReq.single.params), {'bot_id': 'a2'});
     expect(_params(aReq.single.params), isEmpty);
 
-    await f.client.call('pagent.setPrimary', {});
+    await f.client.call('bot.setPrimary', {});
     expect(
-      f.a.requests.where((r) => r.method == 'pagent.setPrimary').length,
+      f.a.requests.where((r) => r.method == 'bot.setPrimary').length,
       2,
     );
     expect(
-      f.b.requests.where((r) => r.method == 'pagent.setPrimary').length,
+      f.b.requests.where((r) => r.method == 'bot.setPrimary').length,
       2,
     );
     await f.client.close();
   });
 
-  test('agent-addressed calls split the id and composite the result', () async {
+  test('bot-addressed calls split the id and composite the result', () async {
     final f = await _connect(
       (m, p) => _json(null),
       (m, p) {
         final params = _params(p);
         return switch (m) {
-          'pagent.thread.send' => _json({'thread_id': 't1', 'session_id': 's1'}),
-          'pagent.thread.list' => _json({
+          'bot.thread.send' => _json({'thread_id': 't1', 'session_id': 's1'}),
+          'bot.thread.list' => _json({
             'threads': [
-              {'id': 't1', 'agent_id': 'a1', 'session_id': 's1'},
-              {'id': 't2', 'agent_id': 'a1'},
+              {'id': 't1', 'bot_id': 'a1', 'session_id': 's1'},
+              {'id': 't2', 'bot_id': 'a1'},
             ],
           }),
-          'pagent.show' => _json({'id': params['agent_id'], 'name': 'n'}),
-          'pagent.memory.log' => _json({
+          'bot.show' => _json({'id': params['bot_id'], 'name': 'n'}),
+          'bot.memory.log' => _json({
             'commits': [
               {'hash': 'h1', 'thread_id': 't1'},
               {'hash': 'h2'},
             ],
           }),
-          'pagent.memory.proposals' => _json({
+          'bot.memory.proposals' => _json({
             'proposals': [
-              {'id': 'mp1', 'agent_id': 'a1', 'thread_id': 't1', 'ops': []},
+              {'id': 'mp1', 'bot_id': 'a1', 'thread_id': 't1', 'ops': []},
             ],
           }),
           _ => _json(null),
         };
       },
     );
-    final send = await f.client.call('pagent.thread.send', {
-      'agent_id': 'B:a1',
+    final send = await f.client.call('bot.thread.send', {
+      'bot_id': 'B:a1',
       'thread_id': 'B:t1',
       'text': 'hi',
     }) as Map;
     expect(send, {'thread_id': 'B:t1', 'session_id': 'B:s1'});
     expect(_params(f.b.requests.last.params), {
-      'agent_id': 'a1',
+      'bot_id': 'a1',
       'thread_id': 't1',
       'text': 'hi',
     });
 
-    final threads = await f.client.call('pagent.thread.list', {
-      'agent_id': 'B:a1',
+    final threads = await f.client.call('bot.thread.list', {
+      'bot_id': 'B:a1',
     }) as Map;
     final list = (threads['threads'] as List).cast<Map>();
-    expect(list[0], {'id': 'B:t1', 'agent_id': 'B:a1', 'session_id': 'B:s1'});
+    expect(list[0], {'id': 'B:t1', 'bot_id': 'B:a1', 'session_id': 'B:s1'});
     expect(list[1].containsKey('session_id'), false);
 
-    final show = await f.client.call('pagent.show', {'agent_id': 'B:a1'}) as Map;
+    final show = await f.client.call('bot.show', {'bot_id': 'B:a1'}) as Map;
     expect(show['id'], 'B:a1');
     expect(show['node_id'], 'B');
 
-    final log = await f.client.call('pagent.memory.log', {'agent_id': 'B:a1'}) as Map;
+    final log = await f.client.call('bot.memory.log', {'bot_id': 'B:a1'}) as Map;
     final commits = (log['commits'] as List).cast<Map>();
     expect(commits[0]['thread_id'], 'B:t1');
     expect(commits[1].containsKey('thread_id'), false);
 
-    final props = await f.client.call('pagent.memory.proposals', {
-      'agent_id': 'B:a1',
+    final props = await f.client.call('bot.memory.proposals', {
+      'bot_id': 'B:a1',
     }) as Map;
     expect((props['proposals'] as List).single, {
       'id': 'B:mp1',
-      'agent_id': 'B:a1',
+      'bot_id': 'B:a1',
       'thread_id': 'B:t1',
       'ops': [],
     });
@@ -278,18 +278,18 @@ void main() {
   test('a memory undo from a thread splits the thread id', () async {
     Map<String, dynamic>? got;
     final f = await _connect((m, p) => _json(null), (m, p) {
-      if (m == 'pagent.memory.undo') got = _params(p);
+      if (m == 'bot.memory.undo') got = _params(p);
       return _json({'commit': 'rev'});
     });
-    await f.client.call('pagent.memory.undo', {
-      'agent_id': 'B:a1',
+    await f.client.call('bot.memory.undo', {
+      'bot_id': 'B:a1',
       'commit': 'abc',
       'thread_id': 'B:t1',
     });
-    expect(got, {'agent_id': 'a1', 'commit': 'abc', 'thread_id': 't1'});
+    expect(got, {'bot_id': 'a1', 'commit': 'abc', 'thread_id': 't1'});
     await expectLater(
-      f.client.call('pagent.memory.undo', {
-        'agent_id': 'B:a1',
+      f.client.call('bot.memory.undo', {
+        'bot_id': 'B:a1',
         'commit': 'abc',
         'thread_id': 'A:t1',
       }),
@@ -301,15 +301,15 @@ void main() {
   test('a thread from another node or a bare id is rejected', () async {
     final f = await _connect((m, p) => _json(null), (m, p) => _json(null));
     await expectLater(
-      f.client.call('pagent.thread.send', {
-        'agent_id': 'B:a1',
+      f.client.call('bot.thread.send', {
+        'bot_id': 'B:a1',
         'thread_id': 'A:t1',
         'text': 'x',
       }),
       throwsA(isA<RpcError>()),
     );
     await expectLater(
-      f.client.call('pagent.show', {'agent_id': 'bare'}),
+      f.client.call('bot.show', {'bot_id': 'bare'}),
       throwsA(isA<RpcError>()),
     );
     await f.client.close();
@@ -318,7 +318,7 @@ void main() {
   test('thread-addressed and proposal calls route by their id', () async {
     final f = await _connect(
       (m, p) => _json(null),
-      (m, p) => m == 'pagent.thread.timeline'
+      (m, p) => m == 'bot.thread.timeline'
           ? _json({
               'thread_id': 't1',
               'entries': [],
@@ -328,20 +328,20 @@ void main() {
             })
           : _json(null),
     );
-    final tl = await f.client.call('pagent.thread.timeline', {
+    final tl = await f.client.call('bot.thread.timeline', {
       'thread_id': 'B:t1',
     }) as Map;
     expect(tl['thread_id'], 'B:t1');
     expect(((tl['sessions'] as List).single as Map)['session_id'], 'B:s1');
     expect(
       _params(
-        f.b.requests.firstWhere((r) => r.method == 'pagent.thread.timeline').params,
+        f.b.requests.firstWhere((r) => r.method == 'bot.thread.timeline').params,
       ),
       {'thread_id': 't1'},
     );
 
-    await f.client.call('pagent.thread.markRead', {'thread_id': 'B:t1'});
-    await f.client.call('pagent.memory.decide', {
+    await f.client.call('bot.thread.markRead', {'thread_id': 'B:t1'});
+    await f.client.call('bot.memory.decide', {
       'proposal_id': 'B:mp1',
       'accept': true,
     });
@@ -349,31 +349,31 @@ void main() {
       'proposal_id': 'mp1',
       'accept': true,
     });
-    expect(f.a.requests.where((r) => r.method.startsWith('pagent.')), isEmpty);
+    expect(f.a.requests.where((r) => r.method.startsWith('bot.')), isEmpty);
     await f.client.close();
   });
 
-  test('create and add go to the named node and stamp the agent', () async {
+  test('create and add go to the named node and stamp the bot', () async {
     final f = await _connect(
       (m, p) => _json(null),
-      (m, p) => m == 'pagent.create'
+      (m, p) => m == 'bot.create'
           ? _json({'id': 'a9', 'name': 'n'})
           : _json({
-              'agent': {'id': 'a8', 'name': 'm'},
+              'bot': {'id': 'a8', 'name': 'm'},
               'found_instructions': true,
             }),
     );
-    final created = await f.client.call('pagent.create', {
+    final created = await f.client.call('bot.create', {
       'name': 'n',
       'node_id': 'B',
     }) as Map;
     expect(created['id'], 'B:a9');
     expect(created['node_id'], 'B');
-    final added = await f.client.call('pagent.add', {
+    final added = await f.client.call('bot.add', {
       'dir': '/x',
       'node_id': 'B',
     }) as Map;
-    expect((added['agent'] as Map)['id'], 'B:a8');
+    expect((added['bot'] as Map)['id'], 'B:a8');
     expect(added['found_instructions'], true);
     await f.client.close();
   });
@@ -382,40 +382,40 @@ void main() {
     final f = await _connect(
       (m, p) => _json(null),
       (m, p) => switch (m) {
-        'pagent.activity' => _json({
+        'bot.activity' => _json({
           'activity': [
             {'id': 1, 'thread_id': 't1', 'session_id': 's1'},
             {'id': 2},
           ],
         }),
-        'pagent.secret.list' => _json({'names': ['K']}),
+        'bot.secret.list' => _json({'names': ['K']}),
         _ => _json(null),
       },
     );
-    final act = await f.client.call('pagent.activity', {
-      'agent_id': 'B:a1',
+    final act = await f.client.call('bot.activity', {
+      'bot_id': 'B:a1',
     }) as Map;
     final rows = (act['activity'] as List).cast<Map>();
     expect(rows[0]['thread_id'], 'B:t1');
     expect(rows[0]['session_id'], 'B:s1');
     expect(rows[1].containsKey('thread_id'), false);
-    expect(_params(f.b.requests.last.params)['agent_id'], 'a1');
+    expect(_params(f.b.requests.last.params)['bot_id'], 'a1');
 
-    await f.client.call('pagent.secret.list', {'agent_id': 'B:a1'});
-    expect(f.b.requests.last.method, 'pagent.secret.list');
-    await f.client.call('pagent.secret.set', {
-      'agent_id': 'B:a1',
+    await f.client.call('bot.secret.list', {'bot_id': 'B:a1'});
+    expect(f.b.requests.last.method, 'bot.secret.list');
+    await f.client.call('bot.secret.set', {
+      'bot_id': 'B:a1',
       'name': 'K',
       'value': 'v',
     });
-    expect(_params(f.b.requests.last.params)['agent_id'], 'a1');
+    expect(_params(f.b.requests.last.params)['bot_id'], 'a1');
 
-    await f.client.call('pagent.draft.send', {
+    await f.client.call('bot.draft.send', {
       'thread_id': 'B:t1',
       'event_id': 4,
     });
     expect(_params(f.b.requests.last.params)['thread_id'], 't1');
-    expect(f.a.requests.where((r) => r.method.startsWith('pagent.')), isEmpty);
+    expect(f.a.requests.where((r) => r.method.startsWith('bot.')), isEmpty);
     await f.client.close();
   });
 
@@ -423,36 +423,36 @@ void main() {
     final f = await _connect(
       (m, p) => _json(null),
       (m, p) => switch (m) {
-        'pagent.usage' => _json({
-          'agent_id': 'a1',
+        'bot.usage' => _json({
+          'bot_id': 'a1',
           'rows': [],
           'total': {'sessions': 2},
         }),
-        'pagent.set' => _json({'commit': 'c1'}),
-        'pagent.offer.start' => _json({'thread_id': 't1', 'session_id': 's1'}),
+        'bot.set' => _json({'commit': 'c1'}),
+        'bot.offer.start' => _json({'thread_id': 't1', 'session_id': 's1'}),
         _ => _json(null),
       },
     );
-    final usage = await f.client.call('pagent.usage', {
-      'agent_id': 'B:a1',
+    final usage = await f.client.call('bot.usage', {
+      'bot_id': 'B:a1',
       'since': '2026-11-15T00:00:00Z',
     }) as Map;
-    expect(usage['agent_id'], 'B:a1');
-    expect(_params(f.b.requests.last.params)['agent_id'], 'a1');
+    expect(usage['bot_id'], 'B:a1');
+    expect(_params(f.b.requests.last.params)['bot_id'], 'a1');
 
-    final set = await f.client.call('pagent.set', {
-      'agent_id': 'B:a1',
+    final set = await f.client.call('bot.set', {
+      'bot_id': 'B:a1',
       'key': 'notify',
       'value': 'off',
     }) as Map;
     expect(set['commit'], 'c1');
     expect(_params(f.b.requests.last.params), {
-      'agent_id': 'a1',
+      'bot_id': 'a1',
       'key': 'notify',
       'value': 'off',
     });
 
-    final start = await f.client.call('pagent.offer.start', {
+    final start = await f.client.call('bot.offer.start', {
       'thread_id': 'B:t1',
       'offer_id': 'of_1',
     }) as Map;
@@ -461,31 +461,31 @@ void main() {
       'thread_id': 't1',
       'offer_id': 'of_1',
     });
-    await f.client.call('pagent.offer.dismiss', {
+    await f.client.call('bot.offer.dismiss', {
       'thread_id': 'B:t1',
       'offer_id': 'of_1',
     });
-    expect(f.b.requests.last.method, 'pagent.offer.dismiss');
-    expect(f.a.requests.where((r) => r.method.startsWith('pagent.')), isEmpty);
+    expect(f.b.requests.last.method, 'bot.offer.dismiss');
+    expect(f.a.requests.where((r) => r.method.startsWith('bot.')), isEmpty);
     await f.client.close();
   });
 
-  test('routine calls route by agent and composite their results', () async {
+  test('routine calls route by bot and composite their results', () async {
     final f = await _connect(
       (m, p) => _json(null),
       (m, p) => switch (m) {
-        'pagent.routine.list' => _json({
+        'bot.routine.list' => _json({
           'routines': [
-            {'agent_id': 'a1', 'slug': 'billing', 'state': 'active'},
+            {'bot_id': 'a1', 'slug': 'billing', 'state': 'active'},
           ],
         }),
-        'pagent.routine.pause' || 'pagent.routine.resume' => _json({
-          'agent_id': 'a1',
+        'bot.routine.pause' || 'bot.routine.resume' => _json({
+          'bot_id': 'a1',
           'slug': 'billing',
           'state': 'paused',
         }),
-        'pagent.routine.run' => _json({'run_id': 'r1'}),
-        'pagent.routine.runs' => _json({
+        'bot.routine.run' => _json({'run_id': 'r1'}),
+        'bot.routine.runs' => _json({
           'runs': [
             {'id': 'r1', 'thread_id': 't1'},
             {'id': 'r2'},
@@ -494,40 +494,40 @@ void main() {
         _ => _json(null),
       },
     );
-    final list = await f.client.call('pagent.routine.list', {
-      'agent_id': 'B:a1',
+    final list = await f.client.call('bot.routine.list', {
+      'bot_id': 'B:a1',
     }) as Map;
-    expect(((list['routines'] as List).single as Map)['agent_id'], 'B:a1');
+    expect(((list['routines'] as List).single as Map)['bot_id'], 'B:a1');
 
-    final paused = await f.client.call('pagent.routine.pause', {
-      'agent_id': 'B:a1',
+    final paused = await f.client.call('bot.routine.pause', {
+      'bot_id': 'B:a1',
       'slug': 'billing',
     }) as Map;
-    expect(paused['agent_id'], 'B:a1');
+    expect(paused['bot_id'], 'B:a1');
     expect(
       _params(f.b.requests.last.params),
-      {'agent_id': 'a1', 'slug': 'billing'},
+      {'bot_id': 'a1', 'slug': 'billing'},
     );
-    final resumed = await f.client.call('pagent.routine.resume', {
-      'agent_id': 'B:a1',
+    final resumed = await f.client.call('bot.routine.resume', {
+      'bot_id': 'B:a1',
       'slug': 'billing',
     }) as Map;
-    expect(resumed['agent_id'], 'B:a1');
+    expect(resumed['bot_id'], 'B:a1');
 
-    final run = await f.client.call('pagent.routine.run', {
-      'agent_id': 'B:a1',
+    final run = await f.client.call('bot.routine.run', {
+      'bot_id': 'B:a1',
       'slug': 'billing',
     }) as Map;
     expect(run['run_id'], 'r1');
 
-    final runs = await f.client.call('pagent.routine.runs', {
-      'agent_id': 'B:a1',
+    final runs = await f.client.call('bot.routine.runs', {
+      'bot_id': 'B:a1',
       'slug': 'billing',
     }) as Map;
     final rs = (runs['runs'] as List).cast<Map>();
     expect(rs[0]['thread_id'], 'B:t1');
     expect(rs[1].containsKey('thread_id'), false);
-    expect(f.a.requests.where((r) => r.method.startsWith('pagent.')), isEmpty);
+    expect(f.a.requests.where((r) => r.method.startsWith('bot.')), isEmpty);
     await f.client.close();
   });
 }

@@ -1,26 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/pagent.dart';
-import '../state/pagents.dart';
+import '../models/bot.dart';
+import '../state/bots.dart';
 import '../state/projects_api.dart' show actionError;
-import 'pagent_style.dart';
+import 'bot_style.dart';
 import 'theme.dart';
 
-/// Opens an agent's memory: its files, change history and staged proposals.
-Route<void> agentMemoryRoute(String agentId) =>
-    MaterialPageRoute(builder: (_) => AgentMemoryScreen(agentId: agentId));
+/// Opens a bot's memory: its files, change history and staged proposals.
+Route<void> botMemoryRoute(String botId) =>
+    MaterialPageRoute(builder: (_) => BotMemoryScreen(botId: botId));
 
-class AgentMemoryScreen extends ConsumerWidget {
-  const AgentMemoryScreen({super.key, required this.agentId});
+class BotMemoryScreen extends ConsumerWidget {
+  const BotMemoryScreen({super.key, required this.botId});
 
-  final String agentId;
+  final String botId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final name = ref.watch(
-      pagentsProvider.select(
-        (s) => s.agents.where((a) => a.id == agentId).firstOrNull?.name ?? '',
+      botsProvider.select(
+        (s) => s.bots.where((a) => a.id == botId).firstOrNull?.name ?? '',
       ),
     );
     return DefaultTabController(
@@ -38,9 +38,9 @@ class AgentMemoryScreen extends ConsumerWidget {
         ),
         body: TabBarView(
           children: [
-            _FilesTab(agentId: agentId),
-            _HistoryTab(agentId: agentId),
-            _ReviewTab(agentId: agentId),
+            _FilesTab(botId: botId),
+            _HistoryTab(botId: botId),
+            _ReviewTab(botId: botId),
           ],
         ),
       ),
@@ -59,14 +59,14 @@ Widget _centered(String text) => Center(
   ),
 );
 
-/// Loads a value on mount and again when the agents change (any node's
-/// `pagent.changed`) or [reload] is called.
+/// Loads a value on mount and again when the bots change (any node's
+/// `bot.changed`) or [reload] is called.
 abstract class _LoadingState<W extends ConsumerStatefulWidget, T>
     extends ConsumerState<W> {
   T? value;
   Object? error;
 
-  Future<T> fetch(PAgentsApi api);
+  Future<T> fetch(BotsApi api);
 
   @override
   void initState() {
@@ -76,7 +76,7 @@ abstract class _LoadingState<W extends ConsumerStatefulWidget, T>
 
   Future<void> reload() async {
     try {
-      final v = await fetch(ref.read(pagentsApiProvider));
+      final v = await fetch(ref.read(botsApiProvider));
       if (mounted) {
         setState(() {
           value = v;
@@ -90,7 +90,7 @@ abstract class _LoadingState<W extends ConsumerStatefulWidget, T>
 
   /// A body for the loading and error states, or null once loaded.
   Widget? pending() {
-    ref.listen(pagentsProvider.select((s) => s.agents), (_, _) => reload());
+    ref.listen(botsProvider.select((s) => s.bots), (_, _) => reload());
     if (value != null) return null;
     return error != null
         ? _centered(actionError(error!))
@@ -99,16 +99,16 @@ abstract class _LoadingState<W extends ConsumerStatefulWidget, T>
 }
 
 class _FilesTab extends ConsumerStatefulWidget {
-  const _FilesTab({required this.agentId});
-  final String agentId;
+  const _FilesTab({required this.botId});
+  final String botId;
 
   @override
   ConsumerState<_FilesTab> createState() => _FilesTabState();
 }
 
-class _FilesTabState extends _LoadingState<_FilesTab, PAgentMemory> {
+class _FilesTabState extends _LoadingState<_FilesTab, BotMemory> {
   @override
-  Future<PAgentMemory> fetch(PAgentsApi api) => api.memory(widget.agentId);
+  Future<BotMemory> fetch(BotsApi api) => api.memory(widget.botId);
 
   @override
   Widget build(BuildContext context) {
@@ -164,22 +164,22 @@ class _FilesTabState extends _LoadingState<_FilesTab, PAgentMemory> {
 }
 
 class _HistoryTab extends ConsumerStatefulWidget {
-  const _HistoryTab({required this.agentId});
-  final String agentId;
+  const _HistoryTab({required this.botId});
+  final String botId;
 
   @override
   ConsumerState<_HistoryTab> createState() => _HistoryTabState();
 }
 
 class _HistoryTabState
-    extends _LoadingState<_HistoryTab, List<PAgentMemoryCommit>> {
+    extends _LoadingState<_HistoryTab, List<BotMemoryCommit>> {
   bool _profile = false;
 
   @override
-  Future<List<PAgentMemoryCommit>> fetch(PAgentsApi api) =>
-      api.memoryLog(widget.agentId, profile: _profile);
+  Future<List<BotMemoryCommit>> fetch(BotsApi api) =>
+      api.memoryLog(widget.botId, profile: _profile);
 
-  Future<void> _undo(PAgentMemoryCommit c) async {
+  Future<void> _undo(BotMemoryCommit c) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -200,12 +200,12 @@ class _HistoryTabState
     if (ok != true || !mounted) return;
     try {
       await ref
-          .read(pagentsApiProvider)
-          .memoryUndo(widget.agentId, c.hash, profile: _profile);
+          .read(botsApiProvider)
+          .memoryUndo(widget.botId, c.hash, profile: _profile);
     } catch (e) {
       if (mounted) _say(context, 'undo: ${actionError(e)}');
     }
-    ref.invalidate(agentMemoryUsageProvider(widget.agentId));
+    ref.invalidate(botMemoryUsageProvider(widget.botId));
     await reload();
   }
 
@@ -262,25 +262,25 @@ class _HistoryTabState
 }
 
 class _ReviewTab extends ConsumerStatefulWidget {
-  const _ReviewTab({required this.agentId});
-  final String agentId;
+  const _ReviewTab({required this.botId});
+  final String botId;
 
   @override
   ConsumerState<_ReviewTab> createState() => _ReviewTabState();
 }
 
 class _ReviewTabState
-    extends _LoadingState<_ReviewTab, List<PAgentMemoryProposal>> {
+    extends _LoadingState<_ReviewTab, List<BotMemoryProposal>> {
   final _busy = <String>{};
 
   @override
-  Future<List<PAgentMemoryProposal>> fetch(PAgentsApi api) =>
-      api.proposals(widget.agentId);
+  Future<List<BotMemoryProposal>> fetch(BotsApi api) =>
+      api.proposals(widget.botId);
 
-  Future<void> _decide(PAgentMemoryProposal p, bool accept) async {
+  Future<void> _decide(BotMemoryProposal p, bool accept) async {
     setState(() => _busy.add(p.id));
     try {
-      final r = await ref.read(pagentsApiProvider).decide(p.id, accept);
+      final r = await ref.read(botsApiProvider).decide(p.id, accept);
       if (mounted && accept) {
         _say(
           context,
@@ -293,7 +293,7 @@ class _ReviewTabState
       if (mounted) _say(context, '${accept ? 'accept' : 'reject'}: ${actionError(e)}');
     }
     if (mounted) setState(() => _busy.remove(p.id));
-    ref.invalidate(agentMemoryUsageProvider(widget.agentId));
+    ref.invalidate(botMemoryUsageProvider(widget.botId));
     await reload();
   }
 
@@ -309,7 +309,7 @@ class _ReviewTabState
     );
   }
 
-  Widget _card(PAgentMemoryProposal p) {
+  Widget _card(BotMemoryProposal p) {
     final busy = _busy.contains(p.id);
     return Card(
       color: AppColors.card,
@@ -319,8 +319,8 @@ class _ReviewTabState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              p.isAgent
-                  ? 'New agent'
+              p.isBot
+                  ? 'New bot'
                   : p.isRoutine
                   ? 'Routine change'
                   : p.isInstructions
@@ -336,9 +336,9 @@ class _ReviewTabState
                 p.source,
                 style: const TextStyle(color: AppColors.dim, fontSize: 12),
               ),
-            if (p.isAgent) ...[
+            if (p.isBot) ...[
               const SizedBox(height: 6),
-              Text(p.summary.isEmpty ? 'create an agent' : p.summary),
+              Text(p.summary.isEmpty ? 'create a bot' : p.summary),
             ],
             if (p.isRoutine && (p.slug.isNotEmpty || p.summary.isNotEmpty)) ...[
               const SizedBox(height: 6),

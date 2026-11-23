@@ -13,6 +13,6 @@ class PushMessage {
 
   String? get sessionId => data['session_id'];
 
-  /// The agent thread the push is about, when it is about one.
-  String? get pagentThreadId => data['pagent_thread_id'];
+  /// The bot thread the push is about, when it is about one.
+  String? get botThreadId => data['bot_thread_id'];
 }

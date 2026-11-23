@@ -7,7 +7,7 @@ import UserNotifications
   private var channel: FlutterMethodChannel?
   private var pendingToken: String?
   private var tokenResult: FlutterResult?
-  // What a tap that cold-launched the app opens: a session id, or an agent
+  // What a tap that cold-launched the app opens: a session id, or a bot
   // thread marked by threadTapPrefix.
   private var launchSessionId: String?
   // The session whose detail view is on screen, if any. A foreground push for it is

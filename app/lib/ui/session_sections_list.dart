@@ -6,7 +6,7 @@ import '../models/session.dart';
 import '../state/control.dart';
 import '../state/gateway.dart';
 import '../state/grouping.dart';
-import '../state/pagents.dart';
+import '../state/bots.dart';
 import '../state/projects.dart';
 import '../state/session_filter.dart';
 import '../transport/connection.dart';
@@ -60,14 +60,14 @@ class SessionSectionsList extends ConsumerWidget {
     final projects = groupBy == GroupBy.project || groupBy == GroupBy.workspace
         ? ref.watch(projectsProvider).projects
         : const <ProjectNode>[];
-    final pagentNames = groupBy == GroupBy.pagent
-        ? {for (final a in ref.watch(pagentsProvider).agents) a.id: a.name}
+    final botNames = groupBy == GroupBy.bot
+        ? {for (final a in ref.watch(botsProvider).bots) a.id: a.name}
         : const <String, String>{};
     final sections = buildSections(
       shown,
       by: groupBy,
       projects: projects,
-      pagentNames: pagentNames,
+      botNames: botNames,
     );
     final multiAgent =
         sessions.map((s) => s.agent).where((a) => a.isNotEmpty).toSet().length >
@@ -138,7 +138,7 @@ class GroupByButton extends ConsumerWidget {
     GroupBy.workspace: 'Workspace',
     GroupBy.agent: 'Agent',
     GroupBy.status: 'Status',
-    GroupBy.pagent: 'Persistent agent',
+    GroupBy.bot: 'Bot',
   };
 
   @override
@@ -276,7 +276,7 @@ class _SectionHeader extends ConsumerWidget {
           color: statusColor(first.status),
         ),
       ),
-      SectionIcon.pagent => Icon(
+      SectionIcon.bot => Icon(
         Icons.smart_toy,
         size: 14,
         color: section.other ? AppColors.dim : AppColors.secondary,

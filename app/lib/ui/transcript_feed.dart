@@ -145,16 +145,16 @@ class TranscriptFeed extends ConsumerStatefulWidget {
   final bool stickToBottom;
 
   /// Addresses the transcript an entry was read from, when [detailRef] does
-  /// not name one for all of them (an agent thread spans several sessions).
+  /// not name one for all of them (a bot thread spans several sessions).
   final ToolDetailRef Function(Entry entry)? detailRefOf;
 
-  /// Start and Dismiss on an agent's open offers (agent threads only).
+  /// Start and Dismiss on a bot's open offers (bot threads only).
   final OfferActions? offerActions;
 
-  /// Send and Discard on an agent's open drafts (agent threads only).
+  /// Send and Discard on a bot's open drafts (bot threads only).
   final DraftActions? draftActions;
 
-  /// Offers an undo on memory-change events (agent threads only).
+  /// Offers an undo on memory-change events (bot threads only).
   final void Function(String commit)? onUndoMemory;
 
   /// Whether a change is still open to undo; null is always.
