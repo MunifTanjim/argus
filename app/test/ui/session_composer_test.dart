@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show debugDefaultTargetPlatformOverride, TargetPlatform;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -883,6 +884,133 @@ void main() {
       expect(_field(t), 'hello');
       expect(repo.inputs, isEmpty);
       expect(repo.calls, isEmpty);
+    });
+  });
+
+  group('send key', () {
+    void mac(WidgetTester t) {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    }
+
+    // A key the field leaves unhandled reaches the platform text input,
+    // which inserts the new line; widget tests do not simulate that.
+    bool Function() watchUnhandledEnter() {
+      var unhandled = false;
+      KeyEventResult late(KeyEvent e) {
+        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.enter) {
+          unhandled = true;
+        }
+        return KeyEventResult.ignored;
+      }
+
+      FocusManager.instance.addLateKeyEventHandler(late);
+      addTearDown(() => FocusManager.instance.removeLateKeyEventHandler(late));
+      return () => unhandled;
+    }
+
+    Future<void> typeHi(WidgetTester t) async {
+      await t.enterText(find.byType(TextField), 'hi');
+      await t.pump();
+    }
+
+    testWidgets('Enter sends the reply', (t) async {
+      mac(t);
+      final repo = _Recording();
+      await _pump(t, _s(), repo);
+      await typeHi(t);
+      await t.sendKeyEvent(LogicalKeyboardKey.enter);
+      await t.pumpAndSettle();
+      expect(repo.inputs.single, ['n:%1', 'hi']);
+      expect(_field(t), '');
+    });
+
+    testWidgets('numpad Enter sends the reply', (t) async {
+      mac(t);
+      final repo = _Recording();
+      await _pump(t, _s(), repo);
+      await typeHi(t);
+      await t.sendKeyEvent(LogicalKeyboardKey.numpadEnter);
+      await t.pumpAndSettle();
+      expect(repo.inputs.single, ['n:%1', 'hi']);
+    });
+
+    testWidgets('Shift+Enter adds a new line', (t) async {
+      mac(t);
+      final repo = _Recording();
+      await _pump(t, _s(), repo);
+      await typeHi(t);
+      final unhandled = watchUnhandledEnter();
+      await t.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await t.sendKeyEvent(LogicalKeyboardKey.enter);
+      await t.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await t.pumpAndSettle();
+      expect(unhandled(), isTrue);
+      expect(repo.inputs, isEmpty);
+    });
+
+    testWidgets('Cmd+Enter sends', (t) async {
+      mac(t);
+      final repo = _Recording();
+      await _pump(t, _s(), repo);
+      await typeHi(t);
+      await t.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await t.sendKeyEvent(LogicalKeyboardKey.enter);
+      await t.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await t.pumpAndSettle();
+      expect(repo.inputs.single, ['n:%1', 'hi']);
+    });
+
+    testWidgets('Enter with an open completion menu selects the item',
+        (t) async {
+      mac(t);
+      final repo = _Completing([_compact]);
+      await _pump(t, _s(), repo);
+      await t.enterText(find.byType(TextField), '/');
+      await t.pumpAndSettle();
+      await t.sendKeyEvent(LogicalKeyboardKey.enter);
+      await t.pumpAndSettle();
+      expect(_field(t), '/compact ');
+      expect(repo.inputs, isEmpty);
+    });
+
+    testWidgets('Enter during IME composition does not send', (t) async {
+      mac(t);
+      final repo = _Recording();
+      await _pump(t, _s(), repo);
+      await typeHi(t);
+      final c = t.widget<TextField>(find.byType(TextField)).controller!;
+      c.value = const TextEditingValue(
+          text: 'hi',
+          selection: TextSelection.collapsed(offset: 2),
+          composing: TextRange(start: 0, end: 2));
+      await t.sendKeyEvent(LogicalKeyboardKey.enter);
+      await t.pumpAndSettle();
+      expect(repo.inputs, isEmpty);
+    });
+
+    testWidgets('Enter when sending is blocked does nothing', (t) async {
+      mac(t);
+      final repo = _Recording();
+      await _pump(t, _s(canPrompt: false), repo);
+      await typeHi(t);
+      final unhandled = watchUnhandledEnter();
+      await t.sendKeyEvent(LogicalKeyboardKey.enter);
+      await t.pumpAndSettle();
+      expect(unhandled(), isFalse);
+      expect(repo.inputs, isEmpty);
+      expect(_field(t), 'hi');
+    });
+
+    testWidgets('Enter on Android adds a new line', (t) async {
+      final repo = _Recording();
+      await _pump(t, _s(), repo);
+      await typeHi(t);
+      final unhandled = watchUnhandledEnter();
+      await t.sendKeyEvent(LogicalKeyboardKey.enter);
+      await t.pumpAndSettle();
+      expect(unhandled(), isTrue);
+      expect(repo.inputs, isEmpty);
     });
   });
 }

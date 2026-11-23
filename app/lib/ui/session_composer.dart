@@ -14,6 +14,7 @@ import '../models/session.dart';
 import '../state/grouping.dart';
 import '../state/prompt_drafts.dart';
 import '../state/respond_view_model.dart';
+import '../util/platform.dart';
 import 'interaction_panel.dart';
 import 'prompt_completion.dart';
 import 'running_shells_sheet.dart';
@@ -349,7 +350,8 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
 
   KeyEventResult _menuKey(FocusNode _, KeyEvent e) {
     final items = _matches;
-    if (items.isEmpty || e is KeyUpEvent) return KeyEventResult.ignored;
+    if (items.isEmpty) return _sendKey(e);
+    if (e is KeyUpEvent) return KeyEventResult.ignored;
     final m = _menu!;
     final n = items.length;
     final ctrl = HardwareKeyboard.instance.isControlPressed;
@@ -369,6 +371,22 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     } else {
       return KeyEventResult.ignored;
     }
+    return KeyEventResult.handled;
+  }
+
+  // On desktop Enter sends; Shift+Enter adds a new line, and the input
+  // method keeps Enter while it is composing.
+  KeyEventResult _sendKey(KeyEvent e) {
+    if (!isDesktop || e is! KeyDownEvent) return KeyEventResult.ignored;
+    final k = e.logicalKey;
+    if (k != LogicalKeyboardKey.enter && k != LogicalKeyboardKey.numpadEnter) {
+      return KeyEventResult.ignored;
+    }
+    if (_text.value.composing.isValid ||
+        HardwareKeyboard.instance.isShiftPressed) {
+      return KeyEventResult.ignored;
+    }
+    if (_canSend) _send();
     return KeyEventResult.handled;
   }
 
