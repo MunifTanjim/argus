@@ -126,6 +126,54 @@ void main() {
     await f.client.close();
   });
 
+  test('a shared cache keeps an offline node\'s agents across reconnects', () async {
+    final cache = <String, List<Map<String, dynamic>>>{};
+    final ka = await generateKeyPair();
+    final kb = await generateKeyPair();
+    final handlerA = _agents([
+      {'id': 'a1', 'status': 'idle'},
+    ]);
+    final handlerB = _agents([
+      {'id': 'b1', 'status': 'working'},
+    ]);
+    Future<List<String>> listOn(MultiNodeLoopbackLink lnk) async {
+      final client = E2EClient(
+        lnk.incoming,
+        lnk.send,
+        await generateKeyPair(),
+        pagentCache: cache,
+      );
+      await client.connect();
+      await client.channelsSettled;
+      final res = await client.call('pagent.list', {}) as Map;
+      await client.close();
+      return [
+        for (final a in (res['agents'] as List).cast<Map>())
+          '${a['id']}:${a['status']}',
+      ];
+    }
+
+    final both = {
+      'A': LoopbackNode('A', ka, handlerA),
+      'B': LoopbackNode('B', kb, handlerB),
+    };
+    expect(await listOn(MultiNodeLoopbackLink(both)), ['A:a1:idle', 'B:b1:working']);
+    // Reconnected while B is offline: a new client, the same cache.
+    final offline = {
+      'A': LoopbackNode('A', ka, handlerA),
+      'B': LoopbackNode('B', kb, handlerB),
+    };
+    expect(
+      await listOn(MultiNodeLoopbackLink(offline, offline: {'B'})),
+      ['A:a1:idle', 'B:b1:unreachable'],
+    );
+    // Reconnected after B left the roster: its agents are gone.
+    expect(
+      await listOn(MultiNodeLoopbackLink({'A': LoopbackNode('A', ka, handlerA)})),
+      ['A:a1:idle'],
+    );
+  });
+
   test('pagent.changed from a node is stamped with its node id', () async {
     final f = await _connect(_agents([]), _agents([]));
     final got = Completer<Object?>();
@@ -224,6 +272,29 @@ void main() {
       'thread_id': 'B:t1',
       'ops': [],
     });
+    await f.client.close();
+  });
+
+  test('a memory undo from a thread splits the thread id', () async {
+    Map<String, dynamic>? got;
+    final f = await _connect((m, p) => _json(null), (m, p) {
+      if (m == 'pagent.memory.undo') got = _params(p);
+      return _json({'commit': 'rev'});
+    });
+    await f.client.call('pagent.memory.undo', {
+      'agent_id': 'B:a1',
+      'commit': 'abc',
+      'thread_id': 'B:t1',
+    });
+    expect(got, {'agent_id': 'a1', 'commit': 'abc', 'thread_id': 't1'});
+    await expectLater(
+      f.client.call('pagent.memory.undo', {
+        'agent_id': 'B:a1',
+        'commit': 'abc',
+        'thread_id': 'A:t1',
+      }),
+      throwsA(isA<RpcError>()),
+    );
     await f.client.close();
   });
 

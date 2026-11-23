@@ -55,6 +55,7 @@ Future<GatewayClient> buildE2EClient(
   ChainLoader loadChain = loadChainInBackground,
   void Function(GatewayClient client)? onTrustAdvance,
   void Function(Uint8List)? sendBytes,
+  Map<String, List<Map<String, dynamic>>>? pagentCache,
 }) async {
   final identity = await identityStore.loadOrCreate();
   final Uint8List? seed;
@@ -80,6 +81,7 @@ Future<GatewayClient> buildE2EClient(
     identity,
     trustStore: trust,
     sendBytes: sendBytes,
+    pagentCache: pagentCache,
     // Re-sync the trust log periodically so mid-session revocations take effect
     // (channels to now-unauthorized nodes are dropped), persisting each advance.
     trustResyncInterval: const Duration(seconds: 30),
@@ -241,6 +243,9 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   final testResults = ref.read(connectionTestResultsProvider.notifier);
   final identityStore = ref.read(clientIdentityStoreProvider);
   final chainStore = ref.read(trustChainStoreProvider);
+  // Each node's last agent list, kept across reconnects so an agent whose node
+  // is offline at a reconnect shows as unreachable rather than gone.
+  final pagentCache = <String, List<Map<String, dynamic>>>{};
   final manager = ConnectionManager(
     connect: () => connectForCredentials(creds, keyStore, hostKeys),
     clientFactory: (incoming, send, sendBytes) => creds.e2eEnabled
@@ -254,6 +259,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
             onTrustAdvance: (client) => trustSignature.state =
                 trustSignatureOf(trustSummaryOf(client)),
             sendBytes: sendBytes,
+            pagentCache: pagentCache,
           )
         : Future(() async {
             final client = E2EClient(
@@ -262,6 +268,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
               KeyPair(Uint8List(32), Uint8List(32)),
               plaintext: true,
               sendBytes: sendBytes,
+              pagentCache: pagentCache,
             );
             await client.connect();
             return client;

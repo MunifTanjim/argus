@@ -91,7 +91,9 @@ class E2EClient implements GatewayClient {
     this.onTrustChainAdvance,
     bool plaintext = false,
     void Function(Uint8List)? sendBytes,
+    Map<String, List<Map<String, dynamic>>>? pagentCache,
   }) : _sendBytes = sendBytes,
+       _pagentCache = pagentCache ?? {},
        _trust =
            trustStore ??
            (tofu
@@ -198,8 +200,10 @@ class E2EClient implements GatewayClient {
 
   // Last stamped pagent.list agents per node, served as unreachable while the
   // node is offline. The epoch is bumped when a node is lost, so a list still
-  // in flight for it cannot refill the cache.
-  final _pagentCache = <String, List<Map<String, dynamic>>>{};
+  // in flight for it cannot refill the cache. The caller may pass one map to
+  // every client of a profile so the cache outlives a reconnect; connect drops
+  // the nodes no longer in the roster.
+  final Map<String, List<Map<String, dynamic>>> _pagentCache;
   final _pagentEpoch = <String, int>{};
 
   // Tip cross-check state (mirrors Go E2EClient tip fields).
@@ -334,6 +338,13 @@ class E2EClient implements GatewayClient {
               .catchError((_) => false);
     final res = await _gateway.call('nodes.list');
     final nodes = (res is Map ? res['nodes'] : null) as List? ?? const [];
+    // A node removed while this profile was disconnected is gone; one that is
+    // only offline stays listed and keeps its agents as unreachable.
+    final listed = {
+      for (final n in nodes)
+        if (n is Map<String, dynamic>) _parseNodeDescriptor(n).id,
+    };
+    _pagentCache.removeWhere((id, _) => !listed.contains(id));
     if (info != null) _gatewayCbor = await info;
     if (_trust != null) {
       // Rollback anchor: re-verify the last-known-good chain before pulling, so the
@@ -1010,7 +1021,7 @@ class E2EClient implements GatewayClient {
   /// node-local ids in the result.
   Future<Object?> _routeByPAgent(String method, Object? params) async {
     var (nodeId, local) = _splitIdField(method, params, 'agent_id', 'agent');
-    if (method == 'pagent.thread.send') {
+    if (method == 'pagent.thread.send' || method == 'pagent.memory.undo') {
       final tid = stringField(params, 'thread_id') ?? '';
       if (tid.isNotEmpty) {
         final (tnode, tlocal, ok) = splitCompositeId(tid);
