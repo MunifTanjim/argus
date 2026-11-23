@@ -649,3 +649,43 @@ func TestOuterUndoRefusesCommitBeyondAgent(t *testing.T) {
 		t.Fatalf("agent undo: %v", err)
 	}
 }
+
+func TestOuterFailedMemoryCommitLeavesIndexClean(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	d, s, root := pagentNode(t)
+	d.pagentCfg.Defaults.Git.Mode = agentgit.ModeOuter
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", root, "-c", "user.name=u", "-c", "user.email=u@x"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "--quiet")
+	info, err := callPAgent[api.PAgentInfo](t, d.handlePAgentCreate, api.PAgentCreateParams{Name: "scout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _, _ := s.AgentByID(context.Background(), info.ID)
+	if _, err := d.pagentApplyMemory(context.Background(), a, "", "capture", []memory.Op{{Action: "add", File: "MEMORY.md", Text: "fact one"}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	hook := filepath.Join(git("rev-parse", "--absolute-git-dir"), "hooks", "pre-commit")
+	if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.pagentApplyMemory(context.Background(), a, "", "capture", []memory.Op{{Action: "add", File: "MEMORY.md", Text: "fact two"}}, "logged"); err == nil {
+		t.Fatal("memory commit succeeded despite failing hook")
+	}
+	if got := git("diff", "--cached", "--name-only"); got != "" {
+		t.Fatalf("index after failed commit = %q, want clean", got)
+	}
+	if got := git("status", "--porcelain"); got != "" {
+		t.Fatalf("worktree after failed commit = %q, want clean", got)
+	}
+}

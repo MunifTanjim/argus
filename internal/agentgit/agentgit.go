@@ -108,16 +108,17 @@ func (r *Repo) commitPaths(ctx context.Context, subject string, trailers []Trail
 	if len(paths) == 0 {
 		return "", nil
 	}
-	if _, err := mustGit(ctx, r.Dir, append([]string{"--literal-pathspecs", "add", "--all", "--"}, paths...)...); err != nil {
-		return "", err
-	}
-	if _, ok := runGit(ctx, r.Dir, append([]string{"--literal-pathspecs", "diff", "--cached", "--quiet", "--"}, paths...)...); ok {
-		return "", nil
-	}
 	if argus {
 		if err := r.checkSigning(ctx); err != nil {
 			return "", err
 		}
+	}
+	if _, err := mustGit(ctx, r.Dir, append([]string{"--literal-pathspecs", "add", "--all", "--"}, paths...)...); err != nil {
+		r.unstage(ctx, paths)
+		return "", err
+	}
+	if _, ok := runGit(ctx, r.Dir, append([]string{"--literal-pathspecs", "diff", "--cached", "--quiet", "--"}, paths...)...); ok {
+		return "", nil
 	}
 	args := []string{"--literal-pathspecs"}
 	if argus {
@@ -144,9 +145,20 @@ func (r *Repo) commitPaths(ctx context.Context, subject string, trailers []Trail
 	args = append(args, "--")
 	args = append(args, paths...)
 	if _, err := mustGit(ctx, r.Dir, args...); err != nil {
+		r.unstage(ctx, paths)
 		return "", err
 	}
 	return mustGit(ctx, r.Dir, "rev-parse", "HEAD")
+}
+
+// unstage resets the index entries of paths to HEAD after a failed commit, so
+// the index keeps none of the changes the caller is about to roll back.
+func (r *Repo) unstage(ctx context.Context, paths []string) {
+	if _, ok := runGit(ctx, r.Dir, "rev-parse", "--verify", "--quiet", "HEAD"); ok {
+		runGit(ctx, r.Dir, append([]string{"--literal-pathspecs", "reset", "--quiet", "--"}, paths...)...)
+		return
+	}
+	runGit(ctx, r.Dir, append([]string{"--literal-pathspecs", "rm", "-r", "--cached", "--quiet", "--ignore-unmatch", "--"}, paths...)...)
 }
 
 // ErrSigningKey reports an outer repository that signs commits but names no

@@ -409,6 +409,31 @@ func TestOuterHookFailureReturnsError(t *testing.T) {
 	}
 }
 
+func TestOuterFailedCommitUnstagesPaths(t *testing.T) {
+	outer := newRepo(t)
+	ctx := context.Background()
+	r, _ := Open(ctx, filepath.Join(outer, "agents", "a"), "outer")
+	write(t, filepath.Join(r.Dir, "memory", "MEMORY.md"), "one\n")
+	if _, err := r.CommitPaths(ctx, "first", nil, []string{"memory"}, true); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(outer, "other.txt"), "user\n")
+	run(t, outer, "add", "other.txt")
+	hook := filepath.Join(r.GitDir, "hooks", "pre-commit")
+	write(t, hook, "#!/bin/sh\nexit 1\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(r.Dir, "memory", "MEMORY.md"), "one\ntwo\n")
+	write(t, filepath.Join(r.Dir, "memory", "new.md"), "new\n")
+	if _, err := r.CommitPaths(ctx, "x", nil, []string{"memory"}, true); err == nil {
+		t.Fatal("CommitPaths succeeded despite failing hook")
+	}
+	if got := run(t, outer, "diff", "--cached", "--name-only"); got != "other.txt" {
+		t.Fatalf("staged after failed commit = %q, want only other.txt", got)
+	}
+}
+
 func TestRevertBusyLeavesUserRevertAlone(t *testing.T) {
 	setupEnv(t)
 	ctx := context.Background()
@@ -486,6 +511,9 @@ func TestOuterSigningWithoutKey(t *testing.T) {
 	write(t, filepath.Join(r.Dir, "memory.md"), "x\n")
 	if _, err := r.CommitPaths(ctx, "x", nil, []string{"memory.md"}, true); !errors.Is(err, ErrSigningKey) {
 		t.Fatalf("CommitPaths err = %v, want ErrSigningKey", err)
+	}
+	if got := run(t, outer, "diff", "--cached", "--name-only"); got != "" {
+		t.Fatalf("staged after signing-key failure = %q, want none", got)
 	}
 	if _, err := r.Revert(ctx, "HEAD", nil); !errors.Is(err, ErrSigningKey) {
 		t.Fatalf("Revert err = %v, want ErrSigningKey", err)
