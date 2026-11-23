@@ -85,7 +85,7 @@ var botSectionTitles = []string{"Primary", "Needs you", "Waiting", "Working", "U
 
 func (m model) botSectionOf(a api.BotInfo) botSection {
 	switch {
-	case m.botPrimaryOf(a):
+	case a.Primary:
 		return botSecPrimary
 	case a.Status == botUnreachable:
 		return botSecUnreachable
@@ -107,7 +107,8 @@ type botGroup struct {
 }
 
 // groups lists the shown bots by section, by name in each; empty sections
-// are left out.
+// are left out. Each node has its own primary, so the primaries are ordered
+// by node first.
 func (s botsSidebarComp) groups(c *ctx) []botGroup {
 	m := c.m
 	by := map[botSection][]api.BotInfo{}
@@ -125,6 +126,11 @@ func (s botsSidebarComp) groups(c *ctx) []botGroup {
 			continue
 		}
 		slices.SortFunc(by[sec], func(a, b api.BotInfo) int {
+			if sec == botSecPrimary {
+				if n := strings.Compare(strings.ToLower(a.NodeLabel), strings.ToLower(b.NodeLabel)); n != 0 {
+					return n
+				}
+			}
 			return cmp.Or(strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)), strings.Compare(a.ID, b.ID))
 		})
 		out = append(out, botGroup{sec, by[sec]})

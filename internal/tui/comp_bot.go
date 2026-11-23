@@ -167,12 +167,17 @@ func (m model) sendBotChatCmd(id, text string) tea.Cmd {
 	}
 }
 
-// setBotPrimaryCmd makes the bot primary, or unsets the primary bot
-// when id is empty.
-func (m model) setBotPrimaryCmd(botID, id string) tea.Cmd {
+// setBotPrimaryCmd makes the bot primary on its node, or unsets its node's
+// primary bot when unset is set.
+func (m model) setBotPrimaryCmd(botID string, unset bool) tea.Cmd {
 	client := m.client
+	p := api.BotPrimaryParams{BotID: botID}
+	if unset {
+		a, _ := m.bot(botID)
+		p = api.BotPrimaryParams{NodeID: a.NodeID}
+	}
 	return func() tea.Msg {
-		err := client.Call(api.MethodBotSetPrimary, api.BotPrimaryParams{BotID: id}, nil)
+		err := client.Call(api.MethodBotSetPrimary, p, nil)
 		return botPrimaryMsg{botID: botID, err: err}
 	}
 }
@@ -266,7 +271,7 @@ func (a botComp) info(c *ctx) api.BotInfo {
 // the routine actions off a routine.
 func (a botComp) commands(c *ctx) []binding {
 	drop := []string{botKeys.MakePrimary.name}
-	if !c.m.botPrimaryOf(a.info(c)) {
+	if !a.info(c).Primary {
 		drop = []string{botKeys.UnsetPrimary.name}
 	}
 	if r, ok := a.selectedRoutine(c); !ok {
@@ -447,9 +452,9 @@ func (a botComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, boo
 	case m.matches(msg, botKeys.Memory):
 		return a, openBotMemory(c, a.botID), true
 	case m.matches(msg, botKeys.MakePrimary):
-		return a, m.setBotPrimaryCmd(a.botID, a.botID), true
+		return a, m.setBotPrimaryCmd(a.botID, false), true
 	case m.matches(msg, botKeys.UnsetPrimary):
-		return a, m.setBotPrimaryCmd(a.botID, ""), true
+		return a, m.setBotPrimaryCmd(a.botID, true), true
 	case m.matches(msg, k.Refresh):
 		return a, tea.Batch(m.loadBotViewCmd(a.botID), m.loadBotsCmd()), true
 	case m.matches(msg, k.Back):
@@ -492,7 +497,7 @@ func (a botComp) paneHeader(c *ctx, w int) (string, int) {
 	if ag.NodeLabel != "" {
 		parts = append(parts, "home: "+ag.NodeLabel)
 	}
-	if c.m.botPrimaryOf(ag) {
+	if ag.Primary {
 		parts = append(parts, "primary")
 	}
 	return strings.Join(parts, dimStyle.Render(" · ")), centerGutter(min(w, maxCardWidth), w)

@@ -5,7 +5,6 @@ import (
 	"log"
 	"sort"
 	"sync"
-	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -24,17 +23,15 @@ func (m *E2EClient) botOrigin(a api.BotInfo, nodeID string) api.BotInfo {
 // fanoutBots merges every node's bots with composite ids, ordered by node
 // id. Bots last seen on a node with no channel, or that failed to answer, are
 // included with status "unreachable" until the node answers again or is gone.
-// At most one bot is Primary: the one set most recently. Nodes that answered
-// with an older primary have it cleared, so the fleet keeps one.
+// Each node has its own primary; bots keep the Primary flag their node set.
+// The merged result's Primary is left empty: it names one bot, not one per node.
 func (m *E2EClient) fanoutBots(raw json.RawMessage, out any) error {
 	chans := m.channelsSnapshot()
 	sort.Slice(chans, func(i, j int) bool { return chans[i].nodeID < chans[j].nodeID })
 	type res struct {
-		bots    []api.BotInfo
-		primary string
-		since   time.Time
-		ok      bool
-		epoch   uint64
+		bots  []api.BotInfo
+		ok    bool
+		epoch uint64
 	}
 	results := make([]res, len(chans))
 	var wg sync.WaitGroup
@@ -59,19 +56,13 @@ func (m *E2EClient) fanoutBots(raw json.RawMessage, out any) error {
 				bots[j] = m.botOrigin(a, nc.nodeID)
 				bots[j].NodeLabel = nc.label
 			}
-			primary := ""
-			if r.Primary != "" {
-				primary = session.CompositeID(nc.nodeID, r.Primary)
-			}
-			results[i] = res{bots: bots, primary: primary, since: r.PrimarySince, ok: true, epoch: epoch}
+			results[i] = res{bots: bots, ok: true, epoch: epoch}
 		}()
 	}
 	wg.Wait()
 
 	m.mu.Lock()
 	byNode := map[string][]api.BotInfo{}
-	primaryOf := map[string]string{}
-	answered := map[string]bool{}
 	online := map[string]bool{}
 	for i, r := range results {
 		nodeID := chans[i].nodeID
@@ -80,9 +71,7 @@ func (m *E2EClient) fanoutBots(raw json.RawMessage, out any) error {
 		// reply is stale and must not replace the cache.
 		if r.ok && m.botEpoch[nodeID] == r.epoch && m.byNode[nodeID] != nil {
 			m.botCache[nodeID] = r.bots
-			m.botPrimary[nodeID] = botPrimary{id: r.primary, since: r.since}
 			byNode[nodeID] = r.bots
-			answered[nodeID] = true
 			continue
 		}
 		byNode[nodeID] = unreachableBots(m.botCache[nodeID])
@@ -92,15 +81,6 @@ func (m *E2EClient) fanoutBots(raw json.RawMessage, out any) error {
 			byNode[nodeID] = unreachableBots(cached)
 		}
 	}
-	for nodeID := range byNode {
-		if p := m.botPrimary[nodeID]; p.id != "" {
-			primaryOf[nodeID] = p.id
-		}
-	}
-	since := map[string]time.Time{}
-	for nodeID := range primaryOf {
-		since[nodeID] = m.botPrimary[nodeID].since
-	}
 	m.mu.Unlock()
 
 	nodeIDs := make([]string, 0, len(byNode))
@@ -108,40 +88,11 @@ func (m *E2EClient) fanoutBots(raw json.RawMessage, out any) error {
 		nodeIDs = append(nodeIDs, id)
 	}
 	sort.Strings(nodeIDs)
-	// The newest primary wins; on a tie, the first in node order.
-	primary, primaryNode := "", ""
-	for _, id := range nodeIDs {
-		if p := primaryOf[id]; p != "" && (primary == "" || since[id].After(since[primaryNode])) {
-			primary, primaryNode = p, id
-		}
-	}
 	merged := []api.BotInfo{}
 	for _, id := range nodeIDs {
-		for _, a := range byNode[id] {
-			a.Primary = primary != "" && a.ID == primary
-			merged = append(merged, a)
-		}
+		merged = append(merged, byNode[id]...)
 	}
-	for _, id := range nodeIDs {
-		if id != primaryNode && primaryOf[id] != "" && answered[id] {
-			go m.clearStalePrimary(id)
-		}
-	}
-	return assign(out, api.BotListResult{Bots: merged, Primary: primary})
-}
-
-// botPrimary is a node's primary bot (composite id) and when it was set.
-type botPrimary struct {
-	id    string
-	since time.Time
-}
-
-// clearStalePrimary unsets the primary of nodeID, which another node's newer
-// primary replaced while nodeID was away.
-func (m *E2EClient) clearStalePrimary(nodeID string) {
-	if err := m.callNode(nodeID, api.MethodBotSetPrimary, api.BotPrimaryParams{}, nil); err != nil {
-		log.Printf("client: warn: clear old primary on node %s: %v", nodeID, err)
-	}
+	return assign(out, api.BotListResult{Bots: merged})
 }
 
 func unreachableBots(in []api.BotInfo) []api.BotInfo {
@@ -156,20 +107,6 @@ func unreachableBots(in []api.BotInfo) []api.BotInfo {
 func botIDEmpty(raw json.RawMessage) bool {
 	id, _ := stringField(raw, "bot_id")
 	return id == ""
-}
-
-// unsetBotPrimary clears the primary on every connected node except skip.
-// A node it can't reach keeps its primary until a later bot list finds the
-// newer one and clears it.
-func (m *E2EClient) unsetBotPrimary(skip string) {
-	for _, nc := range m.channelsSnapshot() {
-		if nc.nodeID == skip {
-			continue
-		}
-		if err := m.callNode(nc.nodeID, api.MethodBotSetPrimary, api.BotPrimaryParams{}, nil); err != nil {
-			log.Printf("client: warn: unset primary on node %s: %v", nc.nodeID, err)
-		}
-	}
 }
 
 func splitIDField(raw json.RawMessage, field, what string) (nodeID string, params json.RawMessage, err error) {
@@ -204,12 +141,6 @@ func (m *E2EClient) routeByBot(method string, raw json.RawMessage, out any) erro
 		}
 	}
 	switch method {
-	case api.MethodBotSetPrimary:
-		if err := m.callNode(nodeID, method, params, out); err != nil {
-			return err
-		}
-		m.unsetBotPrimary(nodeID)
-		return nil
 	case api.MethodBotShow, api.MethodBotRename:
 		var info api.BotInfo
 		if err := m.callNode(nodeID, method, params, &info); err != nil {

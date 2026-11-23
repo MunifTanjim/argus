@@ -128,7 +128,11 @@ func TestBotViewMakePrimary(t *testing.T) {
 		t.Fatalf("setPrimary params = %+v", got)
 	}
 
-	m.botPrimary = "n1:u"
+	for i := range m.bots {
+		if m.bots[i].ID == "n1:u" {
+			m.bots[i].Primary, m.bots[i].NodeID = true, "n1"
+		}
+	}
 	m, cmd = upd(m, cmdMsg("bot unset-primary"))
 	if cmd == nil {
 		t.Fatal("unset-primary calls the node")
@@ -140,8 +144,8 @@ func TestBotViewMakePrimary(t *testing.T) {
 			got = append(got, cl.params[i].(api.BotPrimaryParams))
 		}
 	}
-	if len(got) != 2 || got[1].BotID != "" {
-		t.Fatalf("unset sends an empty id: %+v", got)
+	if len(got) != 2 || got[1] != (api.BotPrimaryParams{NodeID: "n1"}) {
+		t.Fatalf("unset sends the bot's node and no id: %+v", got)
 	}
 	a := m.baseComp().(botComp)
 	if h, _ := a.paneHeader(&ctx{m: &m}, 100); !strings.Contains(ansi.Strip(h), "primary") {

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
-	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -37,7 +36,7 @@ func TestBotListFanoutComposites(t *testing.T) {
 		t.Fatalf("bots = %d", len(res.Bots))
 	}
 	a := res.Bots[0]
-	if a.ID != session.CompositeID("n1", "a1") || a.NodeID != "n1" || res.Primary != a.ID {
+	if a.ID != session.CompositeID("n1", "a1") || a.NodeID != "n1" || !a.Primary || res.Primary != "" {
 		t.Errorf("bot %+v primary %q", a, res.Primary)
 	}
 }
@@ -233,26 +232,6 @@ func TestBotUnreachableWhenNodeLost(t *testing.T) {
 	}
 }
 
-func newBotNode(t *testing.T, id string, bots []api.BotInfo, primary string, calls *[]string, mu *sync.Mutex) *fakeNode {
-	t.Helper()
-	k, _ := e2e.GenerateKeyPair()
-	return &fakeNode{id: id, key: k, handle: func(method string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
-		switch method {
-		case api.MethodBotList:
-			b, _ := json.Marshal(api.BotListResult{Bots: bots, Primary: primary})
-			return b, nil, nil
-		case api.MethodBotSetPrimary:
-			var p api.BotPrimaryParams
-			_ = json.Unmarshal(params, &p)
-			mu.Lock()
-			*calls = append(*calls, id+"="+p.BotID)
-			mu.Unlock()
-			return json.RawMessage(`null`), nil, nil
-		}
-		return json.RawMessage(`null`), nil, nil
-	}}
-}
-
 func connectMulti(t *testing.T, nodes ...*fakeNode) *E2EClient {
 	t.Helper()
 	g, conn := newFakeMultiGateway(t, nodes...)
@@ -266,56 +245,6 @@ func connectMulti(t *testing.T, nodes ...*fakeNode) *E2EClient {
 		t.Fatal(err)
 	}
 	return c
-}
-
-func TestBotSetPrimaryUnsetsOtherNodes(t *testing.T) {
-	var mu sync.Mutex
-	var calls []string
-	a := newBotNode(t, "n1", nil, "", &calls, &mu)
-	b := newBotNode(t, "n2", nil, "", &calls, &mu)
-	c := connectMulti(t, a, b)
-
-	if err := c.Call(api.MethodBotSetPrimary, api.BotPrimaryParams{BotID: "n2:a1"}, nil); err != nil {
-		t.Fatal(err)
-	}
-	mu.Lock()
-	got := append([]string(nil), calls...)
-	calls = nil
-	mu.Unlock()
-	if len(got) != 2 || got[0] != "n2=a1" || got[1] != "n1=" {
-		t.Errorf("set calls = %v, want n2=a1 then n1=", got)
-	}
-	if err := c.Call(api.MethodBotSetPrimary, api.BotPrimaryParams{}, nil); err != nil {
-		t.Fatal(err)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(calls) != 2 || calls[0] == "n1=a1" {
-		t.Errorf("unset calls = %v", calls)
-	}
-	for _, x := range calls {
-		if x != "n1=" && x != "n2=" {
-			t.Errorf("unset call %q not empty", x)
-		}
-	}
-}
-
-func TestBotListSinglePrimary(t *testing.T) {
-	var mu sync.Mutex
-	var calls []string
-	a := newBotNode(t, "n1", []api.BotInfo{{ID: "a1", Primary: true}}, "a1", &calls, &mu)
-	b := newBotNode(t, "n2", []api.BotInfo{{ID: "b1", Primary: true}}, "b1", &calls, &mu)
-	c := connectMulti(t, a, b)
-	var res api.BotListResult
-	if err := c.Call(api.MethodBotList, nil, &res); err != nil {
-		t.Fatal(err)
-	}
-	if len(res.Bots) != 2 || res.Primary != "n1:a1" {
-		t.Fatalf("res %+v", res)
-	}
-	if !res.Bots[0].Primary || res.Bots[1].Primary {
-		t.Errorf("flags %+v", res.Bots)
-	}
 }
 
 func TestBotListInFlightLossStaysUnreachable(t *testing.T) {

@@ -21,9 +21,8 @@ func botsTestModel() model {
 		{ID: "n1:x", Name: "offline", Agent: "claude", Status: "unreachable", NodeLabel: "far"},
 		{ID: "n1:n", Name: "needy", Agent: "claude", Status: "needs_you", NodeLabel: "home"},
 		{ID: "n1:q", Name: "waiter", Agent: "claude", Status: "waiting", NodeLabel: "home"},
-		{ID: "n1:p", Name: "prime", Agent: "claude", Status: "idle", NodeLabel: "home"},
+		{ID: "n1:p", Name: "prime", Agent: "claude", Status: "idle", NodeLabel: "home", Primary: true},
 	}
-	m.botPrimary = "n1:p"
 	m.botThreads = map[string][]api.BotThreadInfo{
 		"n1:u": {{ID: "n1:t1", BotID: "n1:u", Unread: true}, {ID: "n1:t2", BotID: "n1:u"}},
 		"n1:i": {{ID: "n1:t3", BotID: "n1:i"}},
@@ -51,6 +50,21 @@ func TestBotsTabListsSections(t *testing.T) {
 	}
 	if ids := (botsSidebarComp{}).ids(c); ids[0] != "n1:p" || ids[len(ids)-1] != "n1:x" {
 		t.Errorf("ids = %v", ids)
+	}
+}
+
+// TestBotsTabPrimaryPerNode: each node's primary is listed first, by node,
+// with its node on the row.
+func TestBotsTabPrimaryPerNode(t *testing.T) {
+	m := botsTestModel()
+	m.bots = append(m.bots, api.BotInfo{ID: "n2:z", Name: "alpha", Agent: "claude", Status: "idle", NodeLabel: "away", Primary: true})
+	c := &ctx{m: &m}
+	if ids := (botsSidebarComp{}).ids(c); ids[0] != "n2:z" || ids[1] != "n1:p" {
+		t.Fatalf("ids = %v", ids)
+	}
+	out := ansi.Strip(botsSidebarComp{}.view(c, 34, 40))
+	if strings.Count(out, "Primary") != 1 || !strings.Contains(out, "Claude · away") || !strings.Contains(out, "Claude · home") {
+		t.Errorf("view:\n%s", out)
 	}
 }
 
@@ -180,8 +194,8 @@ func (c *botClient) Call(method string, params, out any) error {
 
 func TestLoadBotsKeepsBotsAndThreads(t *testing.T) {
 	cl := &botClient{
-		list: api.BotListResult{Primary: "n1:a", Bots: []api.BotInfo{
-			{ID: "n1:a", Name: "amy", Status: "idle"},
+		list: api.BotListResult{Bots: []api.BotInfo{
+			{ID: "n1:a", Name: "amy", Status: "idle", Primary: true},
 			{ID: "n1:b", Name: "bob", Status: "unreachable"},
 		}},
 		threads: map[string][]api.BotThreadInfo{"n1:a": {{ID: "n1:t", Unread: true}}},
@@ -189,8 +203,8 @@ func TestLoadBotsKeepsBotsAndThreads(t *testing.T) {
 	m := testModel()
 	m.client = cl
 	m, _ = upd(m, m.loadBotsCmd()())
-	if m.botPrimary != "n1:a" || len(m.bots) != 2 || m.botNames["n1:b"] != "bob" || !m.botUnread("n1:a") {
-		t.Fatalf("primary=%q bots=%v names=%v threads=%v", m.botPrimary, m.bots, m.botNames, m.botThreads)
+	if len(m.bots) != 2 || !m.bots[0].Primary || m.botNames["n1:b"] != "bob" || !m.botUnread("n1:a") {
+		t.Fatalf("bots=%v names=%v threads=%v", m.bots, m.botNames, m.botThreads)
 	}
 	for i, call := range cl.calls {
 		if call == api.MethodBotThreadList && cl.params[i].(api.BotRef).BotID == "n1:b" {

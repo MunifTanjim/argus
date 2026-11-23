@@ -40,7 +40,7 @@ argus bot chat -m "hello"
 
 A message goes to the bot's latest chat thread, or starts one if there is none or `--new` is given. The command prints the thread ID and returns. With `--wait` it waits for the turn to end (up to ten minutes) and prints the reply; with `--json` the output has `thread_id`, `session_id` and `reply`. If the bot is waiting for you (a permission or question), the command returns what it has so far and says `bot is waiting for you` (`waiting: true` in JSON).
 
-Without a name the primary bot is used, else the only bot. If there are several and none is primary, the command asks for a name. Without a message, `chat` points you to the TUI.
+Without a name the node's primary bot is used, else the only bot. If there are several and none is primary, the command asks for a name. Without a message, `chat` points you to the TUI.
 
 ## Primary bot
 
@@ -49,7 +49,7 @@ argus bot primary scout
 argus bot primary --unset
 ```
 
-There is one primary bot across your nodes. Setting one clears the others. If two nodes have a primary, for example because one was offline when you picked another, the one set most recently is kept and the other is cleared.
+Each node has one primary bot. Making a bot primary replaces its node's primary and leaves other nodes' primaries alone, so with several nodes you can have one primary on each.
 
 ## Renaming and forgetting
 

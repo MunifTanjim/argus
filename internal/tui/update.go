@@ -219,7 +219,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case botsMsg:
 		if msg.err == nil {
 			m.botNames = msg.names
-			m.bots, m.botPrimary, m.botThreads = msg.bots, msg.primary, msg.threads
+			m.bots, m.botThreads = msg.bots, msg.threads
 			m.reorder()
 			return m, m.markTopThreadReadCmd()
 		}

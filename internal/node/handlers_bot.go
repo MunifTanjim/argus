@@ -413,11 +413,6 @@ func (d *Node) handleBotList(ctx context.Context, params json.RawMessage) (any, 
 			res.Primary = a.ID
 		}
 	}
-	if res.Primary != "" {
-		if fi, err := os.Stat(d.botPrimaryFile); err == nil {
-			res.PrimarySince = fi.ModTime().UTC()
-		}
-	}
 	return res, nil
 }
 

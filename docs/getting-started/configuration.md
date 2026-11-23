@@ -67,7 +67,7 @@ overrides the `bots.defaults` values.
 | `bots.default-dir` | data directory `bots` | Where new bot directories go. |
 | `bots.profile-dir` | data directory `profile` | Where the profile is kept. |
 | `bots.skills-dir` | data directory `skills` | Where shared skills are kept. |
-| `bots.primary` | none | The bot that receives requests when none is named. |
+| `bots.primary` | none | This node's primary bot: the one that receives requests when none is named. |
 | `bots.webhook.listen-addr` | none (off) | Address, such as `127.0.0.1:7420`, where the node accepts routine webhooks. Reachability from other machines is up to your network. |
 | `bots.coordination.enabled` | `false` | Lets bots ask each other for work. |
 | `bots.coordination.max-depth` | `3` | How many hand-offs deep one request may go. |

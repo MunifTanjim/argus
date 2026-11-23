@@ -67,7 +67,6 @@ type model struct {
 	groupBy       groupBy                        // the home sessions list's grouping dimension ("" is host)
 	botNames      map[string]string              // bot id (composite on a gateway) -> name, from bot.list
 	bots          []api.BotInfo                  // bots, from bot.list
-	botPrimary    string                         // the primary bot's id, or empty
 	botThreads    map[string][]api.BotThreadInfo // bot id -> its threads, from bot.thread.list
 	statePath     string                         // tui.json; empty: UI state is not saved (tests, viewer)
 	terminals     []api.Terminal                 // every node's terminals, from the last load

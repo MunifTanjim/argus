@@ -103,7 +103,6 @@ type E2EClient struct {
 	offlineTimers map[string]*time.Timer
 	offlineGrace  time.Duration
 	botCache      map[string][]api.BotInfo // nodeID -> last stamped bot.list bots
-	botPrimary    map[string]botPrimary    // nodeID -> last reported primary
 	botEpoch      map[string]uint64        // nodeID -> bumped on loseNode, invalidates in-flight lists
 	botListHook   func(nodeID string)      // test hook: runs after a node's bot.list returns
 	opening       map[string]chan struct{} // node id -> closed when its in-flight open finishes
@@ -162,7 +161,6 @@ func newE2EClientWithGate(conn net.Conn, static e2e.KeyPair, genesisHash []byte,
 		opening:       map[string]chan struct{}{},
 		offlineGrace:  defaultOfflineGrace,
 		botCache:      map[string][]api.BotInfo{},
-		botPrimary:    map[string]botPrimary{},
 		botEpoch:      map[string]uint64{},
 		events:        make(chan api.Notification, 256),
 		kick:          make(chan struct{}, 1),
@@ -585,8 +583,7 @@ func (m *E2EClient) Call(method string, params, out any) error {
 	case method == api.MethodBotList:
 		return m.fanoutBots(raw, out)
 	case method == api.MethodBotSetPrimary && botIDEmpty(raw):
-		m.unsetBotPrimary("")
-		return nil
+		return m.routeByNode(method, raw, out)
 	case botAddressed[method]:
 		return m.routeByBot(method, raw, out)
 	case botThreadAddressed[method]:
@@ -1558,7 +1555,6 @@ func (m *E2EClient) loseNode(nodeID string, gone bool) {
 	m.botEpoch[nodeID]++
 	if gone {
 		delete(m.botCache, nodeID)
-		delete(m.botPrimary, nodeID)
 	}
 	if gone {
 		delete(m.nodeSessions, nodeID)

@@ -272,7 +272,7 @@ func botForget(dial callerFor) *cobra.Command {
 
 func botPrimary(dial callerFor) *cobra.Command {
 	var unset bool
-	return sessionSub(dial, "primary [name]", "Set or clear the primary bot",
+	return sessionSub(dial, "primary [name]", "Set or clear the node's primary bot",
 		"  argus bot primary scout\n  argus bot primary --unset", cobra.MaximumNArgs(1),
 		func(cmd *cobra.Command) { cmd.Flags().BoolVar(&unset, "unset", false, "clear the primary bot") },
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
@@ -303,8 +303,8 @@ func botPrimary(dial callerFor) *cobra.Command {
 		})
 }
 
-// chatTarget picks the bot for chat: the named one, else the primary, else
-// the only one.
+// chatTarget picks the bot for chat: the named one, else the node's primary,
+// else the only one.
 func chatTarget(call caller, name string) (api.BotInfo, error) {
 	if name != "" {
 		return resolveBot(call, name)

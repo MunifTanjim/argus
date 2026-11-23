@@ -82,14 +82,14 @@ func TestBotCreateScaffoldsAndLists(t *testing.T) {
 		t.Fatal(err)
 	}
 	list, _ = callBot[api.BotListResult](t, d.handleBotList, api.BotListParams{})
-	if list.Primary != info.ID || !list.Bots[0].Primary || time.Since(list.PrimarySince) > time.Minute {
+	if list.Primary != info.ID || !list.Bots[0].Primary {
 		t.Fatalf("primary = %+v", list)
 	}
 	if _, err := callBot[struct{}](t, d.handleBotSetPrimary, api.BotPrimaryParams{}); err != nil {
 		t.Fatal(err)
 	}
 	list, _ = callBot[api.BotListResult](t, d.handleBotList, api.BotListParams{})
-	if list.Primary != "" || !list.PrimarySince.IsZero() {
+	if list.Primary != "" || list.Bots[0].Primary {
 		t.Fatalf("primary after unset = %q", list.Primary)
 	}
 

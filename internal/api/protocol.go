@@ -1581,13 +1581,12 @@ type BotListParams struct {
 	IncludeArchived bool `json:"include_archived,omitempty"`
 }
 
-// BotListResult's Primary is the primary bot's id, or empty.
-// PrimarySince is when it was set, zero when unknown; clients keep the newest
-// primary across nodes.
+// BotListResult's Primary is the node's primary bot id, or empty. Each node
+// has its own primary; a list merged across nodes leaves Primary empty and
+// marks each node's primary with BotInfo.Primary.
 type BotListResult struct {
-	Bots         []BotInfo `json:"bots"`
-	Primary      string    `json:"primary,omitempty"`
-	PrimarySince time.Time `json:"primary_since,omitzero"`
+	Bots    []BotInfo `json:"bots"`
+	Primary string    `json:"primary,omitempty"`
 }
 
 type BotRef struct {
@@ -1604,8 +1603,12 @@ type BotForgetParams struct {
 	Purge bool   `json:"purge,omitempty"`
 }
 
+// BotPrimaryParams sets the primary bot of BotID's node. An empty BotID
+// unsets the primary of NodeID, which a client routing across nodes needs
+// when it has more than one.
 type BotPrimaryParams struct {
-	BotID string `json:"bot_id,omitempty"`
+	BotID  string `json:"bot_id,omitempty"`
+	NodeID string `json:"node_id,omitempty"`
 }
 
 // BotInfo describes a registered bot. Status is needs_you, waiting,

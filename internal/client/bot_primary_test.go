@@ -12,15 +12,15 @@ import (
 	"github.com/MunifTanjim/argus/internal/e2e"
 )
 
-// primaryNode is a node whose primary was set at since; its SetPrimary calls
-// are recorded, and fail when failSet is set.
-func primaryNode(t *testing.T, id, bot string, since time.Time, failSet bool, calls *[]string, mu *sync.Mutex) *fakeNode {
+// primaryNode is a node whose primary is bot; its SetPrimary calls are
+// recorded.
+func primaryNode(t *testing.T, id, bot string, calls *[]string, mu *sync.Mutex) *fakeNode {
 	t.Helper()
 	k, _ := e2e.GenerateKeyPair()
 	return &fakeNode{id: id, key: k, handle: func(method string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
 		switch method {
 		case api.MethodBotList:
-			b, _ := json.Marshal(api.BotListResult{Bots: []api.BotInfo{{ID: bot, Primary: true}}, Primary: bot, PrimarySince: since})
+			b, _ := json.Marshal(api.BotListResult{Bots: []api.BotInfo{{ID: bot, Primary: true}, {ID: bot + "x"}}, Primary: bot})
 			return b, nil, nil
 		case api.MethodBotSetPrimary:
 			var p api.BotPrimaryParams
@@ -28,68 +28,71 @@ func primaryNode(t *testing.T, id, bot string, since time.Time, failSet bool, ca
 			mu.Lock()
 			*calls = append(*calls, id+"="+p.BotID)
 			mu.Unlock()
-			if failSet {
-				return nil, &api.RPCError{Code: api.CodeInternalError, Message: "disk full"}, nil
-			}
 		}
 		return json.RawMessage(`null`), nil, nil
 	}}
 }
 
-func waitCalls(t *testing.T, mu *sync.Mutex, calls *[]string, want string) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		mu.Lock()
-		ok := slices.Contains(*calls, want)
-		mu.Unlock()
-		if ok {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	t.Fatalf("calls = %v, want %s", *calls, want)
-}
-
-// TestBotListNewestPrimaryWins: two nodes report a primary (one came back
-// after the user picked another); the newer one is kept and the older one is
-// cleared on its node.
-func TestBotListNewestPrimaryWins(t *testing.T) {
+// TestBotListKeepsEachNodesPrimary: each node's primary stays marked, and
+// no node's primary is cleared.
+func TestBotListKeepsEachNodesPrimary(t *testing.T) {
 	var mu sync.Mutex
 	var calls []string
-	now := time.Now().UTC()
-	a := primaryNode(t, "n1", "a1", now.Add(-time.Hour), false, &calls, &mu)
-	b := primaryNode(t, "n2", "b1", now, false, &calls, &mu)
-	c := connectMulti(t, a, b)
+	c := connectMulti(t, primaryNode(t, "n1", "a1", &calls, &mu), primaryNode(t, "n2", "b1", &calls, &mu))
 	var res api.BotListResult
 	if err := c.Call(api.MethodBotList, nil, &res); err != nil {
 		t.Fatal(err)
 	}
-	if res.Primary != "n2:b1" || len(res.Bots) != 2 || res.Bots[0].Primary || !res.Bots[1].Primary {
-		t.Fatalf("res %+v", res)
+	var primaries []string
+	for _, a := range res.Bots {
+		if a.Primary {
+			primaries = append(primaries, a.ID)
+		}
 	}
-	waitCalls(t, &mu, &calls, "n1=")
+	if !slices.Equal(primaries, []string{"n1:a1", "n2:b1"}) || len(res.Bots) != 4 || res.Primary != "" {
+		t.Fatalf("primaries %v, res %+v", primaries, res)
+	}
+	time.Sleep(50 * time.Millisecond)
 	mu.Lock()
 	defer mu.Unlock()
-	if slices.Contains(calls, "n2=") {
-		t.Errorf("newest primary cleared: %v", calls)
+	if len(calls) != 0 {
+		t.Errorf("bot.list changed primaries: %v", calls)
 	}
 }
 
-// TestBotSetPrimaryIgnoresUnsetFailure: the set succeeded, so a node that
-// fails to clear its old primary doesn't fail the call.
-func TestBotSetPrimaryIgnoresUnsetFailure(t *testing.T) {
+// TestBotSetPrimaryOnlyItsNode: making a bot primary calls its node only.
+func TestBotSetPrimaryOnlyItsNode(t *testing.T) {
 	var mu sync.Mutex
 	var calls []string
-	a := primaryNode(t, "n1", "a1", time.Time{}, false, &calls, &mu)
-	b := primaryNode(t, "n2", "b1", time.Time{}, true, &calls, &mu)
-	c := connectMulti(t, a, b)
-	if err := c.Call(api.MethodBotSetPrimary, api.BotPrimaryParams{BotID: "n1:a1"}, nil); err != nil {
+	c := connectMulti(t, primaryNode(t, "n1", "a1", &calls, &mu), primaryNode(t, "n2", "b1", &calls, &mu))
+	if err := c.Call(api.MethodBotSetPrimary, api.BotPrimaryParams{BotID: "n1:a1x"}, nil); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	waitCalls(t, &mu, &calls, "n2=")
+	time.Sleep(50 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(calls, []string{"n1=a1x"}) {
+		t.Fatalf("calls = %v", calls)
+	}
+}
+
+// TestBotUnsetPrimaryByNode: unsetting names the node when there are
+// several, and clears only that node's primary.
+func TestBotUnsetPrimaryByNode(t *testing.T) {
+	var mu sync.Mutex
+	var calls []string
+	c := connectMulti(t, primaryNode(t, "n1", "a1", &calls, &mu), primaryNode(t, "n2", "b1", &calls, &mu))
+	if err := c.Call(api.MethodBotSetPrimary, api.BotPrimaryParams{}, nil); err == nil {
+		t.Fatal("unset without node_id on several nodes succeeded")
+	}
+	if err := c.Call(api.MethodBotSetPrimary, api.BotPrimaryParams{NodeID: "n2"}, nil); err != nil {
+		t.Fatalf("unset: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(calls, []string{"n2="}) {
+		t.Fatalf("calls = %v", calls)
+	}
 }
 
 // TestBotChangedWhenChannelReopens: a node whose channel reopens after

@@ -6,12 +6,11 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 )
 
-// botsMsg is one load of the bots: the list, the primary
-// bot's id, and each reachable bot's threads.
+// botsMsg is one load of the bots: the list and each reachable bot's
+// threads.
 type botsMsg struct {
 	names   map[string]string
 	bots    []api.BotInfo
-	primary string
 	threads map[string][]api.BotThreadInfo
 	err     error
 }
@@ -38,7 +37,7 @@ func (m model) loadBotsCmd() tea.Cmd {
 				threads[a.ID] = tr.Threads
 			}
 		}
-		return botsMsg{names: names, bots: res.Bots, primary: res.Primary, threads: threads, err: err}
+		return botsMsg{names: names, bots: res.Bots, threads: threads, err: err}
 	}
 }
 
@@ -51,10 +50,6 @@ func (m model) bot(id string) (api.BotInfo, bool) {
 		}
 	}
 	return api.BotInfo{}, false
-}
-
-func (m model) botPrimaryOf(a api.BotInfo) bool {
-	return a.Primary || (a.ID != "" && a.ID == m.botPrimary)
 }
 
 // botUnread reports whether any of the bot's threads has unread activity.
