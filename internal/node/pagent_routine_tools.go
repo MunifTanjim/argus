@@ -101,7 +101,32 @@ func (d *Node) removeOneShot(ctx context.Context, c *runCtl) {
 		return
 	}
 	th, _ := c.ids()
-	a, slug := c.agent, c.r.Slug
+	d.removeCheckBack(ctx, c.agent, th, c.r.Slug)
+}
+
+// checkBackGrace is how long past its time a one-shot check-back that has
+// no active run is kept before it is removed unrun.
+const checkBackGrace = 5 * time.Minute
+
+// sweepCheckBacks removes one-shot check-backs whose time passed without a
+// run that is still active: missed, skipped, over the routine cap or paused.
+func (d *Node) sweepCheckBacks(ctx context.Context, a pagent.Agent, set pagent.Settings, files map[string]routineFile, now time.Time) {
+	for slug, f := range files {
+		if f.err != nil || !oneShotCheckBack(f.r) {
+			continue
+		}
+		if _, ok := routine.NextDue(f.r, now.Add(-checkBackGrace), now, routineLoc(f.r, set)); ok {
+			continue
+		}
+		if active, err := d.pagents.ActiveRuns(ctx, a.ID, slug); err != nil || len(active) > 0 {
+			continue
+		}
+		d.removeCheckBack(ctx, a, "", slug)
+	}
+}
+
+// removeCheckBack deletes a one-shot check-back's file and state.
+func (d *Node) removeCheckBack(ctx context.Context, a pagent.Agent, th, slug string) {
 	rel := filepath.Join(routinesDir, slug+".yaml")
 	_, err := d.commitRoutineFile(ctx, a, th, sourceRun, "routine: remove "+slug, rel, func() error {
 		err := os.Remove(filepath.Join(a.Dir, rel))

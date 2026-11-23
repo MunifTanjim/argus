@@ -334,6 +334,9 @@ func (d *Node) scheduleAgent(ctx context.Context, a pagent.Agent, now time.Time,
 			d.scheduleRoutine(ctx, a, set, f, states[briefSlug], now, away)
 		}
 	}
+	if ctx.Err() == nil {
+		d.sweepCheckBacks(ctx, a, set, files, now)
+	}
 	if len(paused) > 0 {
 		d.agentNotice(ctx, a, evRoutinePaused, map[string]any{"reason": pausedAway, "routines": paused})
 		for _, slug := range paused {

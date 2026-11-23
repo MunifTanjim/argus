@@ -543,3 +543,28 @@ func TestConcurrentDispatchStartsOneRun(t *testing.T) {
 		t.Fatalf("started %d runs", n)
 	}
 }
+
+func TestUnrunCheckBackRemoved(t *testing.T) {
+	r := newSchedRig(t)
+	ctx := context.Background()
+	at := func(d time.Duration) string {
+		return "what: look again\nstarts:\n  - at: \"" + schedT0.Add(d).Format("2006-01-02T15:04") + "\"\n"
+	}
+	r.write(t, "check-back-past", at(-time.Hour))
+	r.write(t, "check-back-future", at(time.Hour))
+	r.write(t, "check-back-active", at(-time.Hour))
+	if _, _, err := r.store.ClaimOccurrence(ctx, r.agent.ID, "check-back-active", schedT0.Add(-time.Hour), startedByCheckBack, false); err != nil {
+		t.Fatal(err)
+	}
+	r.tick()
+	exists := func(slug string) bool { return fileExists(filepath.Join(r.agent.Dir, "routines", slug+".yaml")) }
+	if exists("check-back-past") {
+		t.Fatal("past check-back without a run kept")
+	}
+	if !exists("check-back-future") || !exists("check-back-active") {
+		t.Fatal("pending check-back removed")
+	}
+	if _, ok := r.state(t, "check-back-past"); ok {
+		t.Fatal("state kept")
+	}
+}
