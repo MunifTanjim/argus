@@ -210,6 +210,8 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     super.didChangeDependencies();
     if (ModalRoute.of(context)?.isCurrent ?? true) {
       activeComposerFocus.value = _focus;
+    } else if (activeComposerFocus.value == _focus) {
+      activeComposerFocus.value = null;
     }
   }
 

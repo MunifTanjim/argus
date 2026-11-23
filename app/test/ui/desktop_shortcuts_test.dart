@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,8 +12,10 @@ import 'package:argus/state/navigation.dart';
 import 'package:argus/state/projects.dart';
 import 'package:argus/state/session_filter.dart';
 import 'package:argus/state/sessions.dart';
+import 'package:argus/state/terminal_prefs.dart';
 import 'package:argus/ui/desktop_shortcuts.dart';
 import 'package:argus/ui/home_shell.dart';
+import 'package:argus/ui/live_emulator.dart';
 import 'package:argus/ui/session_card.dart';
 import 'package:argus/ui/session_composer.dart';
 import 'package:argus/ui/session_detail_screen.dart';
@@ -270,10 +274,46 @@ void main() {
     expect(terminal.hasFocus, isTrue);
   });
 
-  testWidgets('on macOS, Cmd+K with the live terminal focused calls onQuickSwitcher',
+  testWidgets(
+      'on macOS, Mod shortcuts other than Cmd+K fire over the real ghostty terminal',
       (tester) async {
     _platform(TargetPlatform.macOS);
-    final terminal = FocusNode();
+    final emulator = LiveEmulator(
+      TerminalEmulator.ghostty,
+      direct: true,
+      sink: LiveSink(
+        send: (_) {},
+        resize: (_, _) {},
+        typed: utf8.encode,
+        pinching: () => false,
+      ),
+    );
+    addTearDown(emulator.dispose);
+    final calls = await _pump(tester, emulator.view(12));
+    liveTerminalFocusNodes.single.requestFocus();
+    await tester.pump();
+    expect(liveTerminalHasFocus(), isTrue);
+    await _chord(tester, LogicalKeyboardKey.keyK);
+    expect(calls.log, isEmpty, reason: 'Cmd+K clears the terminal');
+    await _chord(tester, LogicalKeyboardKey.keyN);
+    await _chord(tester, LogicalKeyboardKey.comma);
+    await _chord(tester, LogicalKeyboardKey.bracketLeft);
+    expect(calls.log, ['spawn', 'settings', 'back']);
+    await _press(tester, LogicalKeyboardKey.escape);
+    await _press(tester, LogicalKeyboardKey.slash, character: '?', shift: true);
+    expect(calls.log, ['spawn', 'settings', 'back']);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'on macOS, Cmd+N fires over a terminal that consumes every key; Cmd+K does not',
+      (tester) async {
+    _platform(TargetPlatform.macOS);
+    final seen = <LogicalKeyboardKey>[];
+    final terminal = FocusNode(onKeyEvent: (_, e) {
+      seen.add(e.logicalKey);
+      return KeyEventResult.handled;
+    });
     addTearDown(terminal.dispose);
     liveTerminalFocusNodes.add(terminal);
     addTearDown(() => liveTerminalFocusNodes.remove(terminal));
@@ -281,8 +321,60 @@ void main() {
         tester, Focus(focusNode: terminal, child: const Text('terminal')));
     terminal.requestFocus();
     await tester.pump();
+    await _chord(tester, LogicalKeyboardKey.keyN);
+    await _chord(tester, LogicalKeyboardKey.digit1);
     await _chord(tester, LogicalKeyboardKey.keyK);
-    expect(calls.log, ['quick']);
+    await _press(tester, LogicalKeyboardKey.escape);
+    expect(calls.log, ['spawn']);
+    expect(seen, isNot(contains(LogicalKeyboardKey.keyN)),
+        reason: 'neither the press nor the release of a taken key');
+    expect(seen, contains(LogicalKeyboardKey.keyK));
+  });
+
+  testWidgets('J and K outside a text field move focus to the next and previous row',
+      (tester) async {
+    _platform(TargetPlatform.macOS);
+    final rows = [FocusNode(), FocusNode(), FocusNode()];
+    for (final n in rows) {
+      addTearDown(n.dispose);
+    }
+    await _pump(
+      tester,
+      Column(children: [
+        for (final (i, n) in rows.indexed)
+          TextButton(focusNode: n, onPressed: () {}, child: Text('row $i')),
+      ]),
+    );
+    rows[0].requestFocus();
+    await tester.pump();
+    expect(await _press(tester, LogicalKeyboardKey.keyJ, character: 'j'), isTrue);
+    expect(rows[1].hasFocus, isTrue);
+    await _press(tester, LogicalKeyboardKey.keyJ, character: 'j');
+    expect(rows[2].hasFocus, isTrue);
+    await _press(tester, LogicalKeyboardKey.keyK, character: 'k');
+    expect(rows[1].hasFocus, isTrue);
+  });
+
+  testWidgets('/ does not focus the composer of a session under another screen',
+      (tester) async {
+    final c = await _shell(tester);
+    await _openSession(tester, c);
+    Navigator.of(tester.element(find.byType(SessionComposer))).push(
+        MaterialPageRoute<void>(builder: (_) => const Scaffold(body: Text('over'))));
+    await _pumpRoute(tester);
+    expect(find.text('over'), findsOneWidget);
+    expect(activeComposerFocus.value, isNull);
+    await _press(tester, LogicalKeyboardKey.slash, character: '/');
+    final composer = find.descendant(
+        of: find.byType(SessionComposer, skipOffstage: false),
+        matching: find.byType(EditableText, skipOffstage: false),
+        skipOffstage: false);
+    expect(tester.widget<EditableText>(composer).focusNode.hasFocus, isFalse);
+
+    Navigator.of(tester.element(find.text('over'))).pop();
+    await _pumpRoute(tester);
+    await _press(tester, LogicalKeyboardKey.slash, character: '/');
+    expect(_composerField(tester).focusNode.hasFocus, isTrue);
   });
 
   testWidgets('Esc with the live terminal focused does not go back',
@@ -343,6 +435,7 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
     expect(mac, hasLength(10));
     expect(mac.first.keys, '⌘K');
+    expect(mac.first.action, contains('terminal'));
     expect(linux.first.keys, 'Ctrl+K');
     expect([for (final d in mac) d.keys],
         containsAll(['/', 'Esc', 'J / K', '?']));
