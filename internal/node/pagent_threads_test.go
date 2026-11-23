@@ -578,3 +578,43 @@ func TestSessionStartPlacesSkills(t *testing.T) {
 		t.Fatalf(".gitignore = %q", ign)
 	}
 }
+
+func TestRunsNeverCrowdOutChat(t *testing.T) {
+	r := newThreadRig(t)
+	ctx := context.Background()
+	r.d.pagentCfg.Defaults.MaxConcurrentSessions = 2
+	a, _, _ := r.store.AgentByID(ctx, r.agent.ID)
+	live := func(threadID, kind string, st session.Status) string {
+		t.Helper()
+		if err := r.store.InsertThread(ctx, pagent.Thread{ID: threadID, AgentID: a.ID, Kind: kind, StartedBy: "routine", Status: pagent.ThreadActive}); err != nil {
+			t.Fatal(err)
+		}
+		sid := r.register("claude", threadID)
+		r.setStatus(sid, st, nil)
+		if err := r.store.InsertThreadSession(ctx, pagent.ThreadSession{ThreadID: threadID, SessionID: sid, CLI: "claude", AgentSessionID: threadID, StartedBy: "routine"}); err != nil {
+			t.Fatal(err)
+		}
+		return sid
+	}
+	// An idle chat and no run: a run fits, and closes nothing.
+	live("th_c1", threadChat, session.StatusIdle)
+	if err := r.d.pagentMakeRoom(ctx, a, 2, true); err != nil || len(r.kills) != 0 {
+		t.Fatalf("run with a free slot: %v, kills %v", err, r.kills)
+	}
+	// One run holds the run slot: a second run waits and closes nothing.
+	live("th_r1", threadRun, session.StatusWorking)
+	if err := r.d.pagentMakeRoom(ctx, a, 2, true); err == nil || len(r.kills) != 0 {
+		t.Fatalf("second run: %v, kills %v", err, r.kills)
+	}
+	// A new chat still starts, closing the idle chat to fit.
+	res, err := r.send(t, api.PAgentSendParams{Text: "hi", New: true})
+	if err != nil || len(r.kills) != 1 {
+		t.Fatalf("chat beside a run: %+v %v, kills %v", res, err, r.kills)
+	}
+	// Even with runs filling the limit, a chat starts.
+	r.setStatus(res.SessionID, session.StatusWorking, nil)
+	live("th_r2", threadRun, session.StatusWorking)
+	if err := r.d.pagentMakeRoom(ctx, a, 2, false); err != nil {
+		t.Fatalf("chat behind runs: %v", err)
+	}
+}

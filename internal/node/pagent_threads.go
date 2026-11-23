@@ -304,7 +304,7 @@ func (d *Node) pagentEnsureSession(ctx context.Context, a pagent.Agent, th pagen
 	if err := d.pagentInstructions(ctx, a, th, def, set); err != nil {
 		return "", false, err
 	}
-	if err := d.pagentMakeRoom(ctx, a, set.MaxConcurrentSessions); err != nil {
+	if err := d.pagentMakeRoom(ctx, a, set.MaxConcurrentSessions, false); err != nil {
 		return "", false, err
 	}
 
@@ -427,25 +427,31 @@ func (d *Node) pagentStarting(sid string, now time.Time) bool {
 	return true
 }
 
-// pagentStartingCount counts the agent's thread sessions that are starting.
-func (d *Node) pagentStartingCount(ctx context.Context, agentID string) int {
+// pagentStartingCount counts the agent's thread sessions that are starting,
+// in chat threads and in run threads.
+func (d *Node) pagentStartingCount(ctx context.Context, agentID string) (chats, runs int) {
 	threads, err := d.pagents.ListThreads(ctx, agentID)
 	if err != nil {
-		return 0
+		return 0, 0
 	}
-	now, n := d.pagentNow(), 0
+	now := d.pagentNow()
 	for _, th := range threads {
 		links, err := d.pagents.ThreadSessions(ctx, th.ID)
 		if err != nil {
 			continue
 		}
 		for _, l := range links {
-			if l.EndedAt.IsZero() && d.pagentStarting(l.SessionID, now) {
-				n++
+			if !l.EndedAt.IsZero() || !d.pagentStarting(l.SessionID, now) {
+				continue
+			}
+			if th.Kind == threadChat {
+				chats++
+			} else {
+				runs++
 			}
 		}
 	}
-	return n
+	return chats, runs
 }
 
 // resumable reports whether a thread session of cli is resumed in place.
@@ -566,15 +572,31 @@ func idleSince(s session.Session) (time.Time, bool) {
 	return t, true
 }
 
-// pagentMakeRoom closes the agent's least recently active idle chat sessions
-// so one more session fits within limit; a limit of zero or less is none.
-func (d *Node) pagentMakeRoom(ctx context.Context, a pagent.Agent, limit int) error {
+// pagentMakeRoom makes room for one more session within limit; a limit of
+// zero or less is none. A chat closes the least recently active idle chat
+// sessions to fit, and is refused only when chat sessions alone fill the
+// limit: it never waits behind runs. A run never closes a chat session, and
+// runs leave one slot free for chat (with a limit above one).
+func (d *Node) pagentMakeRoom(ctx context.Context, a pagent.Agent, limit int, forRun bool) error {
 	if limit <= 0 {
 		return nil
 	}
 	live := d.pagentLive(ctx, d.pagents, a.ID)
-	running := len(live) + d.pagentStartingCount(ctx, a.ID)
-	need := running - limit + 1
+	chats, runs := d.pagentStartingCount(ctx, a.ID)
+	for _, ls := range live {
+		if ls.Thread.Kind == threadChat {
+			chats++
+		} else {
+			runs++
+		}
+	}
+	if forRun {
+		if runs >= max(limit-1, 1) || chats+runs >= limit {
+			return pagentErr("agent busy: %d sessions running", chats+runs)
+		}
+		return nil
+	}
+	need := chats + runs - limit + 1
 	if need <= 0 {
 		return nil
 	}
@@ -591,13 +613,13 @@ func (d *Node) pagentMakeRoom(ctx context.Context, a pagent.Agent, limit int) er
 			idle = append(idle, candidate{ls, since})
 		}
 	}
-	if len(idle) < need {
-		return pagentErr("agent busy: %d sessions running", running)
+	if chats-limit+1 > len(idle) {
+		return pagentErr("agent busy: %d sessions running", chats+runs)
 	}
 	slices.SortStableFunc(idle, func(x, y candidate) int {
 		return cmp.Or(x.since.Compare(y.since), x.ls.Link.StartedAt.Compare(y.ls.Link.StartedAt))
 	})
-	for _, c := range idle[:need] {
+	for _, c := range idle[:min(need, len(idle))] {
 		if err := d.pagentCloseSession(ctx, c.ls, endIdleClosed); err != nil {
 			return pagentErr("close idle session: %v", err)
 		}

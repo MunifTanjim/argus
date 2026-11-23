@@ -254,7 +254,7 @@ func (d *Node) spawnRun(ctx context.Context, c *runCtl) (bool, error) {
 		return false, errors.New(msg)
 	}
 	d.pagentHealthResolved(a, healthCLIMissing)
-	if err := d.pagentMakeRoom(ctx, a, set.MaxConcurrentSessions); err != nil {
+	if err := d.pagentMakeRoom(ctx, a, set.MaxConcurrentSessions, true); err != nil {
 		return false, nil
 	}
 
