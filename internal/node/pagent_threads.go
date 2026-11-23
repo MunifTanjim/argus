@@ -145,6 +145,41 @@ func (d *Node) pagentTag(s session.Session) (agentID, threadID string) {
 	return th.AgentID, th.ID
 }
 
+// pagentEndStale ends the open thread sessions that are not live after the
+// node's first scan: they ended while the node was down. Left open, a pane id
+// reused after tmux restarts would make an unrelated session the agent's.
+func (d *Node) pagentEndStale(ctx context.Context) {
+	agents, err := d.pagents.ListAgents(ctx, true)
+	if err != nil {
+		d.log.Warn("pagent: list agents", "err", err)
+		return
+	}
+	now := d.pagentNow()
+	for _, a := range agents {
+		threads, err := d.pagents.ListThreads(ctx, a.ID)
+		if err != nil {
+			continue
+		}
+		for _, th := range threads {
+			links, err := d.pagents.ThreadSessions(ctx, th.ID)
+			if err != nil {
+				continue
+			}
+			for _, l := range links {
+				if !l.EndedAt.IsZero() || d.pagentStarting(l.SessionID, now) {
+					continue
+				}
+				if _, live := d.linkSession(l); live {
+					continue
+				}
+				if err := d.pagents.SetEndReason(ctx, th.ID, l.SessionID, endEnded); err != nil {
+					d.log.Warn("pagent: end stale thread session", "session", l.SessionID, "err", err)
+				}
+			}
+		}
+	}
+}
+
 // openLink returns the open thread session of threadID that s is.
 func (d *Node) openLink(ctx context.Context, threadID string, s session.Session) (pagent.ThreadSession, bool) {
 	links, err := d.pagents.ThreadSessions(ctx, threadID)

@@ -728,6 +728,9 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	// Subsequent scans are on demand (client refresh, hook events, spawn/kill).
 	go func() {
 		d.scan(ctx)
+		if d.pagents != nil {
+			d.pagentEndStale(ctx)
+		}
 		if d.orch != nil {
 			d.orchSettle(ctx)
 		}

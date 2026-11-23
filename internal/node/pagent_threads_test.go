@@ -618,3 +618,26 @@ func TestRunsNeverCrowdOutChat(t *testing.T) {
 		t.Fatalf("chat behind runs: %v", err)
 	}
 }
+
+func TestStartupEndsStaleThreadSessions(t *testing.T) {
+	r := newThreadRig(t)
+	ctx := context.Background()
+	res, err := r.send(t, api.PAgentSendParams{Text: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A session that ended while the node was down, in a pane id tmux reuses.
+	stale := "argus:%90"
+	if err := r.store.InsertThreadSession(ctx, pagent.ThreadSession{ThreadID: res.ThreadID, SessionID: stale, CLI: "claude", AgentSessionID: "old", StartedBy: "you"}); err != nil {
+		t.Fatal(err)
+	}
+	r.d.pagentEndStale(ctx)
+	links := r.links(t, res.ThreadID)
+	if !links[0].EndedAt.IsZero() || links[1].EndedAt.IsZero() || links[1].EndReason != "ended" {
+		t.Fatalf("links = %+v", links)
+	}
+	newcomer, _ := r.d.reg.ApplyHook(registry.HookUpdate{Agent: "claude", Server: session.TmuxServerArgus, PaneID: "%90", Status: session.StatusIdle})
+	if agentID, _ := r.d.pagentTag(newcomer); agentID != "" {
+		t.Fatalf("newcomer in a reused pane tagged for %s", agentID)
+	}
+}
