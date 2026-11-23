@@ -51,6 +51,7 @@ const (
 	reasonExplain    = "the user asks: explain in plain language what this does and why, then ask again"
 	reasonUserDenied = "denied by the user"
 	reasonRuleDenied = "denied by an approval rule"
+	reasonOpaque     = "Argus cannot see what this action does, so unattended work needs your answer"
 )
 
 const (
@@ -89,6 +90,8 @@ type approvalState struct {
 	seen map[string]string
 	// threadOf maps the sessions approvals were decided for to their thread.
 	threadOf map[string]string
+	// deciding counts headless requests being decided.
+	deciding sync.WaitGroup
 }
 
 // approvalScope is an agent thread session an action comes from.
@@ -238,6 +241,11 @@ func (d *Node) approvalDecide(ctx context.Context, sc approvalScope, tool string
 	}
 	d.approvals.mu.Unlock()
 	v.dec = policy.Decide(a, in)
+	// Argus can't classify an opaque action, so it may be outward: a rule,
+	// grant or policy can't let unattended work run it unseen.
+	if v.dec.Outcome == policy.OutcomeAllow && sc.thread.StartedBy != policy.StartedByYou && policy.Opaque(a) {
+		v.dec = policy.Decision{Outcome: policy.OutcomeAsk, By: policy.ByFloor, Reason: reasonOpaque}
+	}
 	if once && v.dec.By == policy.ByGrant {
 		d.approvals.mu.Lock()
 		if _, kept := d.approvals.grants[sc.thread.ID][key]; !kept {
@@ -303,6 +311,9 @@ func (d *Node) openCard(ctx context.Context, sc approvalScope, requestID string,
 	defer d.approvals.mu.Unlock()
 	d.approvals.init()
 	d.approvals.cards[c.key] = c
+	// A new request can reuse the key of an expired one (OpenCode requests
+	// are keyed by content); answers go to the new card.
+	delete(d.approvals.expired, c.key)
 	if sc.thread.StartedBy != policy.StartedByYou {
 		c.timer = time.AfterFunc(d.unattendedExpiry(), func() { d.expireCard(c) })
 	}
@@ -428,12 +439,14 @@ func (d *Node) approvalAnswer(ctx context.Context, c *approvalCard, p api.Respon
 		d.approvals.mu.Unlock()
 		out.Behavior = "allow"
 	case optAllowAlways:
+		out.Behavior = "allow"
 		r, err := d.alwaysAllow(ctx, c)
 		if err != nil {
 			d.log.Warn("pagent: save approval rule", "agent", c.scope.agent.ID, "err", err)
+			note = "allowed once: " + err.Error()
+			break
 		}
 		rule, note = r.String(), "always allowed"
-		out.Behavior = "allow"
 	case optExplain:
 		out.Behavior, out.Reason = "deny", reasonExplain
 	default:
@@ -450,11 +463,16 @@ func (d *Node) approvalAnswer(ctx context.Context, c *approvalCard, p api.Respon
 	return out
 }
 
+var errNoNarrowRule = errors.New("no rule covers only this action")
+
 // alwaysAllow appends a narrow allow rule (tool and target) to the agent's
 // approvals and commits it.
 func (d *Node) alwaysAllow(ctx context.Context, c *approvalCard) (policy.Rule, error) {
 	a, th := c.scope.agent, c.scope.thread.ID
-	r := policy.Rule{Tool: c.action.Tool, Target: c.action.Target, Decision: policy.OutcomeAllow}
+	r, ok := policy.AlwaysRule(c.action)
+	if !ok {
+		return r, errNoNarrowRule
+	}
 	return r, d.saveAllowRule(ctx, a, th, r)
 }
 
@@ -494,6 +512,9 @@ func (d *Node) enrichCard(ctx context.Context, ix *session.Interaction, c *appro
 	ix.ToolInput = d.redact(ctx, agentID, ix.ToolInput)
 	ix.Message = d.redact(ctx, agentID, ix.Message)
 	ix.Options = slices.Clone(approvalOptions)
+	if _, ok := policy.AlwaysRule(c.action); !ok {
+		ix.Options = slices.DeleteFunc(ix.Options, func(o session.DecisionOption) bool { return o.Value == optAllowAlways })
+	}
 	ix.Classes = slices.Clone(c.action.Class)
 	ix.StartedBy = c.scope.thread.StartedBy
 }
@@ -579,18 +600,46 @@ func (d *Node) approvalTrack(ctx context.Context, ev registry.Event) {
 	d.approvals.seen[s.ID] = key
 	d.approvals.mu.Unlock()
 
+	// The decision can wait on the policy hook; the registry event loop must
+	// not, or it drops events such as session ends.
+	d.approvals.deciding.Add(1)
+	go func() {
+		defer d.approvals.deciding.Done()
+		d.approvalTrackDecide(ctx, s, key)
+	}()
+}
+
+// approvalTrackDecide decides the request key that headless session s shows,
+// unless the session moved on meanwhile.
+func (d *Node) approvalTrackDecide(ctx context.Context, s session.Session, key string) {
+	ix := s.Interaction
 	sc, ok := d.approvalScopeFor(ctx, s)
 	if !ok {
 		return
 	}
 	v := d.approvalDecide(ctx, sc, ix.ToolName, json.RawMessage(ix.ToolInput))
+	if !d.approvalStillSeen(s.ID, key) {
+		return
+	}
 	if v.dec.Outcome == policy.OutcomeAsk {
-		d.openCard(ctx, sc, key, v, true)
+		c := d.openCard(ctx, sc, key, v, true)
+		if !d.approvalStillSeen(s.ID, key) {
+			d.takeCard(c)
+			return
+		}
 		d.reg.Republish(s.ID)
 		return
 	}
 	p := d.approvalImmediate(ctx, sc, v)
-	go d.respondHeadless(context.Background(), s.ID, key, p)
+	d.respondHeadless(context.Background(), s.ID, key, p)
+}
+
+// approvalStillSeen reports whether key is still the request session id
+// shows; false once the request went away or the session ended.
+func (d *Node) approvalStillSeen(id, key string) bool {
+	d.approvals.mu.Lock()
+	defer d.approvals.mu.Unlock()
+	return d.approvals.seen != nil && d.approvals.seen[id] == key
 }
 
 // dropHeadlessCards forgets the headless cards of a session except keep: the
@@ -742,7 +791,7 @@ type draftPayload struct {
 var draftLocks sync.Map
 
 // handlePAgentDraftSend does what a draft holds: a shell command runs again in
-// the agent's directory, any other action goes to the agent as your message.
+// the directory it came from, any other action goes to the agent as your message.
 func (d *Node) handlePAgentDraftSend(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.PAgentDraftParams](params)
 	if err != nil {
@@ -772,7 +821,7 @@ func (d *Node) handlePAgentDraftSend(ctx context.Context, params json.RawMessage
 		}
 		go func() {
 			defer unlock()
-			d.runDraft(a, th.ID, ev.ID, line)
+			d.runDraft(a, th.ID, ev.ID, line, draftDir(a, dp.Input))
 		}()
 		return struct{}{}, nil
 	}
@@ -822,13 +871,35 @@ func draftAction(dp draftPayload) string {
 	return s
 }
 
-// runDraft runs a shell draft in the agent's directory and records its output.
-func (d *Node) runDraft(a pagent.Agent, threadID string, eventID int64, line string) {
+// draftDir is where a shell draft runs: the working directory its input
+// names (Codex sends one), else the agent's directory.
+func draftDir(a pagent.Agent, input json.RawMessage) string {
+	var in struct {
+		Workdir string `json:"workdir"`
+		Cwd     string `json:"cwd"`
+	}
+	if json.Unmarshal(input, &in) == nil {
+		if dir := cmp.Or(in.Workdir, in.Cwd); filepath.IsAbs(dir) {
+			if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+				return dir
+			}
+		}
+	}
+	return a.Dir
+}
+
+// draftWaitDelay bounds the wait for a killed draft's output, when a child
+// process keeps it open.
+const draftWaitDelay = 5 * time.Second
+
+// runDraft runs a shell draft in dir and records its output.
+func (d *Node) runDraft(a pagent.Agent, threadID string, eventID int64, line, dir string) {
 	ctx, cancel := context.WithTimeout(context.Background(), draftTimeout)
 	defer cancel()
 	secrets := d.agentSecrets(ctx, a.ID)
 	cmd := exec.CommandContext(ctx, "sh", "-c", pagent.Unredact(line, secrets))
-	cmd.Dir = a.Dir
+	cmd.Dir = dir
+	cmd.WaitDelay = draftWaitDelay
 	cmd.Env = os.Environ()
 	for _, s := range secrets {
 		cmd.Env = append(cmd.Env, s.Name+"="+s.Value)
@@ -838,7 +909,7 @@ func (d *Node) runDraft(a pagent.Agent, threadID string, eventID int64, line str
 	if len(out) > draftOutputMax {
 		out = append(out[:draftOutputMax:draftOutputMax], "\n[output truncated]"...)
 	}
-	payload := map[string]any{"event_id": eventID, "command": line, "output": string(out)}
+	payload := map[string]any{"event_id": eventID, "command": line, "dir": dir, "output": string(out)}
 	if cmd.ProcessState != nil {
 		payload["exit_code"] = cmd.ProcessState.ExitCode()
 	}

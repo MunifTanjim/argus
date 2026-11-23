@@ -15,6 +15,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapter/claudecode"
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/pagent"
 	"github.com/MunifTanjim/argus/internal/pagent/policy"
 	"github.com/MunifTanjim/argus/internal/registry"
@@ -340,7 +341,7 @@ func TestApprovalAlwaysAllowCommitsRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(def.Approvals) != 1 || def.Approvals[0].Tool != "Bash" || def.Approvals[0].Target != "gh" || def.Approvals[0].Decision != "allow" {
+	if len(def.Approvals) != 1 || def.Approvals[0].Tool != "Bash" || def.Approvals[0].Target != "gh pr create --fill" || def.Approvals[0].Decision != "allow" {
 		t.Fatalf("approvals = %+v", def.Approvals)
 	}
 	out, err := exec.Command("git", "-C", r.a.Dir, "log", "-1", "--format=%an%n%B", "--", "agent.yaml").CombinedOutput()
@@ -481,6 +482,7 @@ func headlessAsk(r *approvalRig, s session.Session, cmd string) session.Session 
 			{Label: "Allow", Value: "allow"}, {Label: "Deny", Value: "deny", Reject: true},
 		}}})
 	r.d.approvalTrack(context.Background(), registry.Event{Type: registry.EventUpdated, Session: s})
+	r.d.approvals.deciding.Wait()
 	return s
 }
 
@@ -527,4 +529,169 @@ func TestApprovalOptionsForNonAgentNode(t *testing.T) {
 	}
 	c.cancel()
 	waitOut(t, c)
+}
+
+func cardOptions(ix *session.Interaction) []string {
+	var opts []string
+	for _, o := range ix.Options {
+		opts = append(opts, o.Value)
+	}
+	return opts
+}
+
+// TestApprovalAlwaysAllowExactCommand: "always allow" on one command saves
+// that command, not its program, so other uses of the program still ask.
+func TestApprovalAlwaysAllowExactCommand(t *testing.T) {
+	r := newApprovalRig(t, startedByYou)
+	c := parkRequest(t, r.d, r.sid, "r1", shellPermission("git status"))
+	if got := r.answer(t, c, api.RespondParams{RequestID: "r1", OptionValue: optAllowAlways}); got.Behavior != "allow" {
+		t.Fatalf("answer = %+v", got)
+	}
+	def, err := pagent.LoadDefinition(r.a.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(def.Approvals) != 1 || def.Approvals[0].Target != "git status" {
+		t.Fatalf("approvals = %+v", def.Approvals)
+	}
+	if got := r.decideNow(t, shellPermission("git status")); got.Behavior != "allow" {
+		t.Errorf("same command = %+v", got)
+	}
+	c = parkRequest(t, r.d, r.sid, "r2", shellPermission("git push --force"))
+	if ix := head(r.d, r.sid); ix == nil || ix.RequestID != "r2" {
+		t.Fatalf("git push --force not asked: %+v", ix)
+	}
+	c.cancel()
+	waitOut(t, c)
+}
+
+// TestApprovalAlwaysAllowNeedsNarrowRule: a chain has no rule that covers
+// only it, so the card has no "always allow" and that answer allows once.
+func TestApprovalAlwaysAllowNeedsNarrowRule(t *testing.T) {
+	r := newApprovalRig(t, startedByYou)
+	c := parkRequest(t, r.d, r.sid, "r1", shellPermission("cd x && npm test"))
+	if opts := cardOptions(head(r.d, r.sid)); slices.Contains(opts, optAllowAlways) || len(opts) != 4 {
+		t.Errorf("options = %v", opts)
+	}
+	if got := r.answer(t, c, api.RespondParams{RequestID: "r1", OptionValue: optAllowAlways}); got.Behavior != "allow" {
+		t.Fatalf("answer = %+v", got)
+	}
+	def, err := pagent.LoadDefinition(r.a.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(def.Approvals) != 0 {
+		t.Errorf("approvals = %+v", def.Approvals)
+	}
+}
+
+func headlessAskRaw(r *approvalRig, tool, input string) session.Session {
+	s, _ := r.d.reg.ApplyHook(registry.HookUpdate{Agent: "opencode", AgentSessionID: "oc1", Status: session.StatusAwaitingInput,
+		Interaction: &session.Interaction{Kind: session.InteractionPermission, ToolName: tool, ToolInput: input, Options: []session.DecisionOption{
+			{Label: "Allow", Value: "allow"}, {Label: "Deny", Value: "deny", Reject: true},
+		}}})
+	r.d.approvalTrack(context.Background(), registry.Event{Type: registry.EventUpdated, Session: s})
+	r.d.approvals.deciding.Wait()
+	return s
+}
+
+func headlessClear(r *approvalRig) {
+	s, _ := r.d.reg.ApplyHook(registry.HookUpdate{Agent: "opencode", AgentSessionID: "oc1", Status: session.StatusWorking, ReplaceInteraction: true})
+	r.d.approvalTrack(context.Background(), registry.Event{Type: registry.EventUpdated, Session: s})
+}
+
+func openCards(d *Node) int {
+	d.approvals.mu.Lock()
+	defer d.approvals.mu.Unlock()
+	return len(d.approvals.cards)
+}
+
+// TestApprovalOpaqueUnattendedAsks: Argus can't see what an OpenCode
+// permission without input does, so a rule for the tool doesn't let
+// unattended work run it; the user is asked.
+func TestApprovalOpaqueUnattendedAsks(t *testing.T) {
+	r, fr, s := headlessRig(t, "routine")
+	r.rules(t, policy.Rule{Tool: "bash", Decision: policy.OutcomeAllow})
+	s = headlessAskRaw(r, "bash", "")
+	select {
+	case p := <-fr.got:
+		t.Fatalf("answered without asking: %+v", p)
+	default:
+	}
+	if shown := r.d.withCaps(s); shown.Interaction == nil || slices.Contains(cardOptions(shown.Interaction), optAllowAlways) || openCards(r.d) != 1 {
+		t.Fatalf("card = %+v", shown.Interaction)
+	}
+	// Attended work keeps the rule.
+	r2, fr2, _ := headlessRig(t, startedByYou)
+	r2.rules(t, policy.Rule{Tool: "bash", Decision: policy.OutcomeAllow})
+	headlessAskRaw(r2, "bash", "")
+	if p := recv(t, fr2.got); p.Behavior != "allow" {
+		t.Errorf("attended = %+v", p)
+	}
+}
+
+// TestApprovalExpiredKeyReused: a new OpenCode request identical to an
+// expired one gets a card that can be answered.
+func TestApprovalExpiredKeyReused(t *testing.T) {
+	r, fr, _ := headlessRig(t, "routine")
+	r.d.pagentCfg.Approvals.UnattendedExpiry = 30 * time.Millisecond
+	r.rules(t, policy.Rule{Tool: "bash", Decision: policy.OutcomeAsk})
+	s := headlessAskRaw(r, "bash", "")
+	if p := recv(t, fr.got); p.Behavior != "deny" || p.Reason != reasonNoAnswer {
+		t.Fatalf("expired = %+v", p)
+	}
+	headlessClear(r)
+	r.d.pagentCfg.Approvals.UnattendedExpiry = time.Hour
+	s = headlessAskRaw(r, "bash", "")
+	if err := respond(t, r.d, api.RespondParams{SessionID: s.ID, OptionValue: optAllowOnce}); err != nil {
+		t.Fatalf("answer new card: %v", err)
+	}
+	if p := recv(t, fr.got); p.Behavior != "allow" {
+		t.Errorf("answer = %+v", p)
+	}
+}
+
+// TestApprovalTrackDoesNotWaitForHook: the registry event loop is not held
+// while a slow policy hook decides.
+func TestApprovalTrackDoesNotWaitForHook(t *testing.T) {
+	r, fr, s := headlessRig(t, "routine")
+	dir := t.TempDir()
+	script := filepath.Join(dir, "hook.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat >/dev/null\nsleep 1\nprintf '%s' '{\"decision\":\"deny\",\"reason\":\"slow\"}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r.d.pagentCfg.Approvals.Hook = config.ApprovalHook{Command: script, Mode: config.HookFailOpen}
+	in, _ := json.Marshal(map[string]string{"command": "ls -la"})
+	s, _ = r.d.reg.ApplyHook(registry.HookUpdate{Agent: "opencode", AgentSessionID: "oc1", Status: session.StatusAwaitingInput,
+		Interaction: &session.Interaction{Kind: session.InteractionPermission, ToolName: "bash", ToolInput: string(in), Options: []session.DecisionOption{
+			{Label: "Allow", Value: "allow"}, {Label: "Deny", Value: "deny", Reject: true},
+		}}})
+	start := time.Now()
+	r.d.approvalTrack(context.Background(), registry.Event{Type: registry.EventUpdated, Session: s})
+	if el := time.Since(start); el > 500*time.Millisecond {
+		t.Errorf("approvalTrack took %s", el)
+	}
+	if p := recv(t, fr.got); p.Behavior != "deny" || p.Reason != "slow" {
+		t.Errorf("answer = %+v", p)
+	}
+}
+
+func TestDraftSendShellRunsInWorkdir(t *testing.T) {
+	r := newApprovalRig(t, "routine")
+	work := t.TempDir()
+	id := r.insertDraft(t, map[string]any{"tool": "exec_command", "target": "pwd", "input": map[string]string{"cmd": "pwd", "workdir": work}})
+	if _, err := callPAgent[struct{}](t, r.d.handlePAgentDraftSend, api.PAgentDraftParams{ThreadID: r.th, EventID: id}); err != nil {
+		t.Fatal(err)
+	}
+	ev := r.waitEvent(t, evDraftSent)
+	var p struct {
+		Output string `json:"output"`
+		Dir    string `json:"dir"`
+	}
+	_ = json.Unmarshal(ev.Payload, &p)
+	want, _ := filepath.EvalSymlinks(work)
+	got, _ := filepath.EvalSymlinks(strings.TrimSpace(p.Output))
+	if got != want || p.Dir != work {
+		t.Errorf("sent = %s", ev.Payload)
+	}
 }
