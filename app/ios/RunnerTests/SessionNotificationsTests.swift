@@ -18,6 +18,20 @@ final class SessionNotificationsTests: XCTestCase {
     XCTAssertNil(compositeSessionId(from: ["session_id": ""]))
   }
 
+  func testTapTargetOpensAgentThread() {
+    XCTAssertEqual(
+      tapTarget(from: ["pagent_thread_id": "t1", "pagent_id": "a1", "node_id": "n1"]),
+      "pagent_thread:n1:t1")
+    XCTAssertEqual(tapTarget(from: ["pagent_thread_id": "t1"]), "pagent_thread:t1")
+  }
+
+  func testTapTargetFallsBackToSession() {
+    XCTAssertEqual(tapTarget(from: ["session_id": "s1", "node_id": "n1"]), "n1:s1")
+    XCTAssertEqual(
+      tapTarget(from: ["session_id": "s1", "node_id": "n1", "pagent_thread_id": ""]), "n1:s1")
+    XCTAssertNil(tapTarget(from: ["pagent_id": "a1", "node_id": "n1"]))
+  }
+
   func testDeliveredIdentifiersMatchByComposite() {
     let delivered: [(identifier: String, userInfo: [AnyHashable: Any])] = [
       (identifier: "a", userInfo: ["session_id": "s1", "node_id": "n1"]),

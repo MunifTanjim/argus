@@ -7,6 +7,8 @@ import UserNotifications
   private var channel: FlutterMethodChannel?
   private var pendingToken: String?
   private var tokenResult: FlutterResult?
+  // What a tap that cold-launched the app opens: a session id, or an agent
+  // thread marked by threadTapPrefix.
   private var launchSessionId: String?
   // The session whose detail view is on screen, if any. A foreground push for it is
   // not presented (see willPresent), matching Android's suppressForActive.
@@ -110,11 +112,11 @@ import UserNotifications
     withCompletionHandler completionHandler: @escaping () -> Void
   ) {
     let info = response.notification.request.content.userInfo
-    if let sessionId = compositeSessionId(from: info) {
+    if let target = tapTarget(from: info) {
       if channel == nil {
-        launchSessionId = sessionId
+        launchSessionId = target
       } else {
-        channel?.invokeMethod("onTap", arguments: sessionId)
+        channel?.invokeMethod("onTap", arguments: target)
       }
     }
     completionHandler()

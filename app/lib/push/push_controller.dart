@@ -418,13 +418,8 @@ class PushController {
     _registerIfPossible();
   }
 
-  void _emitTap(String tap) {
-    if (tap.startsWith(threadTapPrefix)) {
-      _onThreadTap?.call(tap.substring(threadTapPrefix.length));
-    } else {
-      _onSessionTap?.call(tap);
-    }
-  }
+  void _emitTap(String tap) =>
+      routeTap(tap, onSession: _onSessionTap, onThread: _onThreadTap);
 
   Future<bool> _registerIfPossible() async {
     final client = _client;
@@ -481,6 +476,20 @@ class PushController {
     if (client != null && deviceId != null) {
       await _serializePushOp(() => setPauseOnGateway(client, deviceId, _pausedUntil));
     }
+  }
+}
+
+/// Routes a value of the tap stream (local notifications and the APNs channel):
+/// a [threadTapPrefix]-marked agent thread, else a session id.
+void routeTap(
+  String tap, {
+  void Function(String sessionId)? onSession,
+  void Function(String threadId)? onThread,
+}) {
+  if (tap.startsWith(threadTapPrefix)) {
+    onThread?.call(tap.substring(threadTapPrefix.length));
+  } else {
+    onSession?.call(tap);
   }
 }
 

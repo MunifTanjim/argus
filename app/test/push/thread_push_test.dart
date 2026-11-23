@@ -1,3 +1,4 @@
+import 'package:argus/push/notifications.dart' show threadTapPrefix;
 import 'package:argus/push/push_controller.dart';
 import 'package:argus/push/push_message.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -46,5 +47,15 @@ void main() {
       onSession: (_) => fail('no session'),
       onThread: (_) => fail('no thread'),
     );
+  });
+
+  test('a native tap marked as a thread opens the thread', () {
+    // The iOS tap handler sends `pagent_thread:<node>:<thread>` for an agent push.
+    final sessions = <String>[];
+    final threads = <String>[];
+    routeTap('${threadTapPrefix}A:t1', onSession: sessions.add, onThread: threads.add);
+    routeTap('A:s1', onSession: sessions.add, onThread: threads.add);
+    expect(threads, ['A:t1']);
+    expect(sessions, ['A:s1']);
   });
 }
