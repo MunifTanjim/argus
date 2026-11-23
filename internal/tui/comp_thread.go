@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -21,8 +20,8 @@ type threadComp struct {
 	tr       transcriptComp
 	sessions []api.PAgentTimelineSession
 	loaded   bool
-	readPos  int64 // the last read position sent
 	reply    chatPrompt
+	undo     string // the commit that awaits an undo confirmation
 }
 
 // threadTimelineMsg is one load of a thread's timeline.
@@ -78,7 +77,8 @@ func (m model) sendThreadCmd(agentID, threadID, text string) tea.Cmd {
 func (m model) undoMemoryCmd(agentID, threadID, commit string) tea.Cmd {
 	client := m.client
 	return func() tea.Msg {
-		err := client.Call(api.MethodPAgentMemoryUndo, api.PAgentMemoryUndoParams{AgentID: agentID, Commit: commit}, &api.PAgentMemoryUndoResult{})
+		p := api.PAgentMemoryUndoParams{AgentID: agentID, Commit: commit, ThreadID: threadID}
+		err := client.Call(api.MethodPAgentMemoryUndo, p, &api.PAgentMemoryUndoResult{})
 		return threadActionMsg{threadID: threadID, verb: "undo", err: err}
 	}
 }
@@ -95,6 +95,22 @@ func (m model) offerCmd(threadID, offerID string, start bool) tea.Cmd {
 		err := client.Call(api.MethodPAgentOfferDismiss, p, nil)
 		return threadActionMsg{threadID: threadID, verb: "dismiss offer", err: err}
 	}
+}
+
+// markTopThreadReadCmd marks the thread on top of the main stack read up to
+// its last activity, when the node reports it unread. A thread under another
+// view is not marked: the user is not looking at it.
+func (m model) markTopThreadReadCmd() tea.Cmd {
+	t, ok := m.main.top().(threadComp)
+	if !ok {
+		return nil
+	}
+	for _, info := range m.pagentThreads[t.agentID] {
+		if info.ID == t.threadID && info.Unread {
+			return m.markThreadReadCmd(t.threadID, info.LastActiveAt.UnixNano())
+		}
+	}
+	return nil
 }
 
 // reloadThreadViewsCmd reloads every open thread's timeline.
@@ -119,7 +135,11 @@ func (m model) updateThreadView(msg tea.Msg, threadID string) (tea.Model, tea.Cm
 			break
 		}
 	}
-	return m, tea.Batch(cmd, m.apply(c))
+	applied := m.apply(c)
+	if _, ok := msg.(threadTimelineMsg); ok {
+		cmd = tea.Batch(cmd, m.markTopThreadReadCmd())
+	}
+	return m, tea.Batch(cmd, applied)
 }
 
 // undoCommit is the commit of a memory or routine change that an argus entry
@@ -135,6 +155,42 @@ func undoCommit(e transcript.Entry) string {
 	return p.Commit
 }
 
+// undoneCommit reports whether an entry records the undo of commit.
+func undoneCommit(es []transcript.Entry, commit string) bool {
+	for _, e := range es {
+		if e.Event == nil || e.Event.Kind != "memory.undone" {
+			continue
+		}
+		var p struct {
+			Commit string `json:"commit"`
+		}
+		if json.Unmarshal(e.Event.Payload, &p) == nil && p.Commit != "" &&
+			(strings.HasPrefix(p.Commit, commit) || strings.HasPrefix(commit, p.Commit)) {
+			return true
+		}
+	}
+	return false
+}
+
+// openUndo is the commit of a change an entry reports that is not undone yet,
+// or "".
+func openUndo(es []transcript.Entry, e transcript.Entry) string {
+	if c := undoCommit(e); c != "" && !undoneCommit(es, c) {
+		return c
+	}
+	return ""
+}
+
+// undoAt is the commit of the open change under the cursor, or "".
+func (t threadComp) undoAt(v tview) string {
+	r, ok := v.cursorRow()
+	if !ok || r.kind != entryRow {
+		return ""
+	}
+	es := t.tr.transcript.entries
+	return openUndo(es, es[r.entry])
+}
+
 func (t threadComp) section() string {
 	if t.tr.visualActive() {
 		return "visual"
@@ -142,7 +198,7 @@ func (t threadComp) section() string {
 	return "thread"
 }
 
-func (t threadComp) raw(c *ctx) bool             { return t.reply.on() || t.tr.raw(c) }
+func (t threadComp) raw(c *ctx) bool             { return t.reply.on() || t.undo != "" || t.tr.raw(c) }
 func (t threadComp) spins(*ctx) bool             { return false }
 func (t threadComp) fullScreen(*ctx) fullLevel   { return notFull }
 func (t threadComp) close(*ctx) tea.Cmd          { return nil }
@@ -172,12 +228,18 @@ func (t threadComp) commands(c *ctx) []binding {
 	return sectionLists["thread"].own
 }
 
-func (t threadComp) footer(*ctx) []binding {
-	return []binding{transcriptKeys.PromptNext, transcriptKeys.Collapse, sessionKeys.FocusPrompt, threadKeys.OpenSession,
-		memoryKeys.Undo, transcriptKeys.Back}
+func (t threadComp) footer(c *ctx) []binding {
+	b := []binding{transcriptKeys.PromptNext, transcriptKeys.Collapse, sessionKeys.FocusPrompt, threadKeys.OpenSession}
+	if t.undoAt(t.bind(c)) != "" {
+		b = append(b, memoryKeys.Undo)
+	}
+	return append(b, transcriptKeys.Back)
 }
 
 func (t threadComp) footerPrompt(*ctx) string {
+	if t.undo != "" {
+		return asstStyle.Render("undo change " + shortHash(t.undo) + "? y/n")
+	}
 	if t.reply.on() {
 		return t.reply.view("reply")
 	}
@@ -200,15 +262,20 @@ func (t threadComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 		t.sessions, t.loaded = msg.res.Sessions, true
 		a, _ := c.m.pagent(t.agentID)
 		t.tr.sourceAt = timelineSource(a.NodeID, msg.res.Sessions)
-		if pos := lastEntryTime(msg.res.Entries); pos > t.readPos {
-			t.readPos = pos
-			return t, c.m.markThreadReadCmd(t.threadID, pos)
-		}
 	case threadActionMsg:
 		if msg.err != nil {
 			c.setFlash(msg.verb + ": " + msg.err.Error())
+		} else if msg.verb == "undo" {
+			c.setFlash("undone")
 		}
 		return t, c.m.loadTimelineCmd(t.threadID)
+	case tea.PasteMsg:
+		if t.reply.on() {
+			var cmd tea.Cmd
+			t.reply, cmd = t.reply.paste(msg)
+			return t, cmd
+		}
+		return t, t.bind(c).updateMsg(msg)
 	default:
 		return t, t.bind(c).updateMsg(msg)
 	}
@@ -237,17 +304,15 @@ func timelineSource(nodeID string, ss []api.PAgentTimelineSession) func(string) 
 	}
 }
 
-func lastEntryTime(es []transcript.Entry) int64 {
-	for i := len(es) - 1; i >= 0; i-- {
-		if ts, err := time.Parse(time.RFC3339Nano, es[i].Timestamp); err == nil {
-			return ts.UnixNano()
-		}
-	}
-	return 0
-}
-
 func (t threadComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
 	m := c.m
+	if commit := t.undo; commit != "" {
+		t.undo = ""
+		if msg.String() == "y" {
+			return t, m.undoMemoryCmd(t.agentID, t.threadID, commit), true
+		}
+		return t, nil, true
+	}
 	if t.reply.on() {
 		var cmd tea.Cmd
 		var text string
@@ -294,11 +359,15 @@ func (t threadComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, 
 		if ok && r.kind == entryRow {
 			commit = undoCommit(t.tr.transcript.entries[r.entry])
 		}
-		if commit == "" {
+		switch {
+		case commit == "":
 			c.setFlash("not a change to undo")
-			return t, nil, true
+		case undoneCommit(t.tr.transcript.entries, commit):
+			c.setFlash("change already undone")
+		default:
+			t.undo = commit
 		}
-		return t, m.undoMemoryCmd(t.agentID, t.threadID, commit), true
+		return t, nil, true
 	case m.matches(msg, offerKeys.Start, offerKeys.Dismiss) && t.draftAt(v) != 0:
 		return t, m.draftCmd(t.threadID, t.draftAt(v), m.matches(msg, offerKeys.Start)), true
 	case m.matches(msg, offerKeys.Start, offerKeys.Dismiss):

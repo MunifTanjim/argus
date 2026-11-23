@@ -289,6 +289,34 @@ func (m model) pasteDock(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// pasteFocused gives a paste to the focused sidebar tab or main component
+// while its prompt is on.
+func (m model) pasteFocused(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	c := &ctx{m: &m}
+	var cmd tea.Cmd
+	switch m.focused {
+	case leftSidebar:
+		if cur := m.left.current(); cur.raw(c) {
+			var comp component
+			comp, cmd = cur.update(c, msg)
+			m.left = m.left.store(comp)
+		}
+	case rightSidebar:
+		if cur := m.right.current(); cur.raw(c) {
+			var comp component
+			comp, cmd = cur.update(c, msg)
+			m.right = m.right.store(comp)
+		}
+	case mainPane:
+		if top := m.main.top(); top != nil && top.raw(c) {
+			var comp component
+			comp, cmd = top.update(c, msg)
+			m.main = m.main.replaceTop(comp)
+		}
+	}
+	return m, tea.Batch(cmd, m.apply(c))
+}
+
 func (m *model) sizeIdleReply() { m.dock.sizeIdleReply(&ctx{m: m}) }
 
 func (d dockComp) follow(c *ctx, id string) dockComp {

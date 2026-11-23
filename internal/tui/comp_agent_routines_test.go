@@ -113,12 +113,13 @@ func TestThreadRoutineEventsUseNodeTextAndUndo(t *testing.T) {
 	if strings.Contains(out, "Routine brief missed 3 runs  u undo") {
 		t.Error("a missed run offers undo")
 	}
-	m, cmd := upd(m, keyMsg("u")) // the cursor is on the last entry: routine.changed
+	m, _ = upd(m, keyMsg("u")) // the cursor is on the last entry: routine.changed
+	_, cmd := upd(m, keyMsg("y"))
 	if cmd == nil {
 		t.Fatal("u on a routine change undoes it")
 	}
 	cmd()
-	if p, _ := pagentParams[api.PAgentMemoryUndoParams](cl, api.MethodPAgentMemoryUndo); p != (api.PAgentMemoryUndoParams{AgentID: "n1:u", Commit: "r123"}) {
+	if p, _ := pagentParams[api.PAgentMemoryUndoParams](cl, api.MethodPAgentMemoryUndo); p != (api.PAgentMemoryUndoParams{AgentID: "n1:u", Commit: "r123", ThreadID: "n1:t1"}) {
 		t.Fatalf("undo params = %+v", p)
 	}
 }
@@ -154,5 +155,31 @@ func TestAgentMemoryReviewShowsAgentProposals(t *testing.T) {
 	cmd()
 	if p, _ := pagentParams[api.PAgentMemoryDecideParams](cl, api.MethodPAgentMemoryDecide); p != (api.PAgentMemoryDecideParams{ProposalID: "n1:p7", Accept: true}) {
 		t.Fatalf("decide = %+v", p)
+	}
+}
+
+func TestAgentViewCursorFollowsRow(t *testing.T) {
+	cl := routinesClient()
+	m := loadedAgentView(t, cl)
+	m = typeKeys(m, "j") // on migrate-billing's thread (t2)
+	// t2 finishes a turn and moves to the top; a new thread arrives.
+	ts := agentViewThreads()
+	cl.threads["n1:u"] = []api.PAgentThreadInfo{{ID: "n1:t3", AgentID: "n1:u", Kind: "chat", Title: "new"}, ts[1], ts[0]}
+	m, _ = upd(m, m.loadAgentViewCmd("n1:u")())
+	m, _ = upd(m, keyMsg("enter"))
+	if th, ok := m.main.top().(threadComp); !ok || th.threadID != "n1:t2" {
+		t.Fatalf("enter opened %+v, want n1:t2", m.main.top())
+	}
+	m, _ = upd(m, keyMsg("esc"))
+
+	// On a routine, a new thread does not move R to another routine.
+	m = typeKeys(m, "jj") // from t2 past t1 to migrate-billing
+	cl.threads["n1:u"] = append([]api.PAgentThreadInfo{{ID: "n1:t4", AgentID: "n1:u", Kind: "chat"}}, cl.threads["n1:u"]...)
+	m, _ = upd(m, m.loadAgentViewCmd("n1:u")())
+	cl.calls, cl.params = nil, nil
+	m, cmd := upd(m, keyMsg("R"))
+	cmd()
+	if got := routineCalls(cl); len(got) != 1 || got[0] != api.MethodPAgentRoutineRun+" migrate-billing" {
+		t.Fatalf("R ran %v", got)
 	}
 }

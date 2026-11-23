@@ -36,11 +36,17 @@ func draftOpen(es []transcript.Entry, id int64) bool {
 // draftHint is the keys of an open draft entry, or "".
 func (m tview) draftHint(e transcript.Entry) string {
 	id := draftEventID(e)
-	if id == 0 || !draftOpen(m.transcript.entries, id) {
+	if id == 0 || !draftOpen(m.transcript.entries, id) || !threadHasStartDismiss() {
 		return ""
 	}
 	return "  " + StyleDim.Render(m.c.m.keyTextOn("thread", offerKeys.Start)+" send · "+
 		m.c.m.keyTextOn("thread", offerKeys.Dismiss)+" discard")
+}
+
+// threadHasStartDismiss reports whether the thread view maps the start and
+// dismiss keys, so an offer or draft can show them.
+func threadHasStartDismiss() bool {
+	return screenHas("thread", offerKeys.Start.name) && screenHas("thread", offerKeys.Dismiss.name)
 }
 
 // draftAt is the open draft under the cursor, or 0.

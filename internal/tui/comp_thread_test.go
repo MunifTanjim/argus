@@ -83,32 +83,50 @@ func TestThreadViewKeepsCursorOnRefresh(t *testing.T) {
 func TestThreadViewMarksRead(t *testing.T) {
 	cl := threadClient()
 	m := openedThread(t, cl)
-	var got []api.PAgentMarkReadParams
-	collect := func() {
-		got = nil
+	markReads := func() []api.PAgentMarkReadParams {
+		var got []api.PAgentMarkReadParams
 		for i, call := range cl.calls {
 			if call == api.MethodPAgentThreadMarkRead {
 				got = append(got, cl.params[i].(api.PAgentMarkReadParams))
 			}
 		}
+		return got
 	}
-	// openedThread fed the load through upd, which ran no commands: run it here.
-	th := m.main.top().(threadComp)
-	th.readPos = 0
-	c := &ctx{m: &m}
-	_, cmd := th.update(c, m.loadTimelineCmd("n1:t1")())
+	// The thread's last activity (a turn's end) comes after its last entry:
+	// marking at the entry would leave it unread.
+	active := threadT0.Add(4*time.Minute + 123)
+	m.pagentThreads["n1:u"][0].LastActiveAt = active
+	m2, cmd := m.Update(m.loadTimelineCmd("n1:t1")())
+	m = m2.(model)
 	if cmd == nil {
-		t.Fatal("a shown timeline marks the thread read")
+		t.Fatal("a shown unread thread is marked read")
 	}
-	cmd()
-	collect()
-	want := threadT0.Add(3 * time.Minute).UnixNano()
-	if len(got) != 1 || got[0] != (api.PAgentMarkReadParams{ThreadID: "n1:t1", Position: want}) {
-		t.Fatalf("markRead = %+v, want position %d", got, want)
+	runCmd(cmd)
+	want := api.PAgentMarkReadParams{ThreadID: "n1:t1", Position: active.UnixNano()}
+	if got := markReads(); len(got) != 1 || got[0] != want {
+		t.Fatalf("markRead = %+v, want %+v", got, want)
 	}
-	th.readPos = want
-	if _, cmd := th.update(c, m.loadTimelineCmd("n1:t1")()); cmd != nil {
-		t.Error("an unchanged timeline marks it read again")
+
+	// A read thread is not marked again.
+	cl.calls, cl.params = nil, nil
+	m.pagentThreads["n1:u"][0].Unread = false
+	m2, cmd = m.Update(m.loadTimelineCmd("n1:t1")())
+	m = m2.(model)
+	runCmd(cmd)
+	if got := markReads(); len(got) != 0 {
+		t.Errorf("a read thread was marked again: %+v", got)
+	}
+
+	// A thread under another view is not marked when its activity changes.
+	m.main = m.main.push(agentComp{agentID: "n1:u"})
+	threads := agentViewThreads()
+	threads[0].LastActiveAt = active.Add(time.Minute)
+	m2, cmd = m.Update(pagentsMsg{names: map[string]string{}, agents: m.pagents,
+		threads: map[string][]api.PAgentThreadInfo{"n1:u": threads}})
+	m = m2.(model)
+	runCmd(cmd)
+	if got := markReads(); len(got) != 0 {
+		t.Errorf("a covered thread was marked read: %+v", got)
 	}
 }
 
@@ -121,22 +139,48 @@ func TestThreadViewUndoMemoryEvent(t *testing.T) {
 	}
 	m = typeKeys(m, "k")
 	m, cmd = upd(m, keyMsg("u"))
+	if cmd != nil || !m.main.top().raw(&ctx{m: &m}) {
+		t.Fatal("u on the memory event asks to confirm")
+	}
+	if m, cmd = upd(m, keyMsg("n")); cmd != nil || m.main.top().raw(&ctx{m: &m}) {
+		t.Fatal("n cancels the undo")
+	}
+	m, _ = upd(m, keyMsg("u"))
+	m, cmd = upd(m, keyMsg("y"))
 	if cmd == nil {
-		t.Fatal("u on the memory event undoes it")
+		t.Fatal("y undoes")
 	}
 	cl.undoErr = errors.New("conflicts with a later change")
 	m, _ = upd(m, cmd())
-	var p api.PAgentMemoryUndoParams
-	for i, call := range cl.calls {
-		if call == api.MethodPAgentMemoryUndo {
-			p = cl.params[i].(api.PAgentMemoryUndoParams)
-		}
-	}
-	if p != (api.PAgentMemoryUndoParams{AgentID: "n1:u", Commit: "abc123"}) {
-		t.Fatalf("undo params = %+v", p)
+	p, n := pagentParams[api.PAgentMemoryUndoParams](cl, api.MethodPAgentMemoryUndo)
+	if n != 1 || p != (api.PAgentMemoryUndoParams{AgentID: "n1:u", Commit: "abc123", ThreadID: "n1:t1"}) {
+		t.Fatalf("undo params = %+v (%d calls)", p, n)
 	}
 	if !strings.Contains(m.flash, "conflicts with a later change") {
 		t.Errorf("flash = %q", m.flash)
+	}
+	m, _ = upd(m, threadActionMsg{threadID: "n1:t1", verb: "undo"})
+	if m.flash != "undone" {
+		t.Errorf("flash after an undo = %q", m.flash)
+	}
+}
+
+func TestThreadViewHidesUndoneChange(t *testing.T) {
+	cl := threadClient()
+	cl.timeline.Entries = append(cl.timeline.Entries, transcript.Entry{ID: "ev:8", Kind: transcript.EntryArgus, Label: "memory.undone",
+		Detail: "Undid a change", Timestamp: threadT0.Add(4 * time.Minute).Format(time.RFC3339Nano),
+		Event: &transcript.ArgusEvent{ID: 8, Kind: "memory.undone", Payload: json.RawMessage(`{"commit":"abc123","revert":"def456"}`)}})
+	m := openedThread(t, cl)
+	if out := ansi.Strip(m.View().Content); strings.Contains(out, "u undo") {
+		t.Errorf("an undone change still offers undo:\n%s", out)
+	}
+	m = typeKeys(m, "kk")
+	if id := threadCursorID(m); id != "ev:7" {
+		t.Fatalf("cursor on %q", id)
+	}
+	m, cmd := upd(m, keyMsg("u"))
+	if cmd != nil || m.flash != "change already undone" || m.main.top().raw(&ctx{m: &m}) {
+		t.Fatalf("u on an undone change: flash %q", m.flash)
 	}
 }
 

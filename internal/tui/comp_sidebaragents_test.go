@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -200,5 +201,31 @@ func TestLoadPAgentsKeepsAgentsAndThreads(t *testing.T) {
 	m, _ = upd(m, m.loadPAgentsCmd()())
 	if len(m.pagents) != 0 || len(m.pagentNames) != 0 {
 		t.Fatalf("an older node lists no agents: %v", m.pagents)
+	}
+}
+
+func TestAgentPromptsTakePaste(t *testing.T) {
+	m := agentsTestModel()
+	m = typeKeys(m, "/")
+	m, _ = upd(m, tea.PasteMsg{Content: "wor"})
+	m = pressKeys(m, keyMsg("enter"))
+	if ids := m.left.agents.ids(&ctx{m: &m}); len(ids) != 1 || ids[0] != "n1:w" {
+		t.Fatalf("pasted filter ids = %v", ids)
+	}
+
+	cl := threadClient()
+	m = loadedAgentView(t, cl)
+	m = typeKeys(m, "n")
+	m, _ = upd(m, tea.PasteMsg{Content: "pasted chat"})
+	if v := m.baseComp().(agentComp).chat.input.Value(); v != "pasted chat" {
+		t.Fatalf("new chat prompt = %q", v)
+	}
+	m = pressKeys(m, keyMsg("esc"))
+
+	m = openedThread(t, cl)
+	m = pressKeys(m, keyMsg("tab"))
+	m, _ = upd(m, tea.PasteMsg{Content: "pasted reply"})
+	if v := m.main.top().(threadComp).reply.input.Value(); v != "pasted reply" {
+		t.Fatalf("thread reply prompt = %q", v)
 	}
 }

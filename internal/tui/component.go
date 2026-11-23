@@ -253,7 +253,7 @@ func (m *model) apply(c *ctx) tea.Cmd {
 		case actOpen:
 			m.main = m.main.push(a.comp)
 		case actBack:
-			cmds = append(cmds, m.popMain(c))
+			cmds = append(cmds, m.popMain(c), m.markTopThreadReadCmd())
 		case actReplaceBase:
 			m.underOverlays(func() {
 				if old := m.main.top(); old != nil {

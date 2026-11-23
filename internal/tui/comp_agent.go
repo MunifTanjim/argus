@@ -19,11 +19,15 @@ import (
 // memory. The agent and its threads are read from the model each time.
 type agentComp struct {
 	agentID string
-	cursor  int
-	loaded  bool
-	err     error
-	memory  *agentMemoryUsage // nil: the node has no memory to show
-	chat    chatPrompt
+	// sel is the selected row's key (see rowKeys), so the selection follows
+	// its thread, routine or setting when the rows reorder; cursor is its
+	// index, kept for when sel leaves the list.
+	sel    string
+	cursor int
+	loaded bool
+	err    error
+	memory *agentMemoryUsage // nil: the node has no memory to show
+	chat   chatPrompt
 	// routines are the agent's routines; the cursor runs over the threads,
 	// then these.
 	routines []api.PAgentRoutineInfo
@@ -109,6 +113,9 @@ func (m model) loadAgentViewCmd(id string) tea.Cmd {
 		var rl api.PAgentRoutineListResult
 		if err := client.Call(api.MethodPAgentRoutineList, api.PAgentRef{AgentID: id}, &rl); err == nil {
 			msg.routines = rl.Routines
+			if msg.routines == nil {
+				msg.routines = []api.PAgentRoutineInfo{}
+			}
 		} else if !api.IsMethodNotFound(err) && msg.err == nil {
 			msg.err = err
 		}
@@ -187,7 +194,7 @@ func (m model) updateAgentView(msg tea.Msg, agentID string) (tea.Model, tea.Cmd)
 	} else {
 		cmd = agentReply(c, msg)
 	}
-	return m, tea.Batch(cmd, m.apply(c))
+	return m, tea.Batch(cmd, m.apply(c), m.markTopThreadReadCmd())
 }
 
 func (m model) agentViewAt(id string) int {
@@ -279,11 +286,44 @@ func (a agentComp) footer(c *ctx) []binding {
 	return []binding{listKeys.Open, agentKeys.NewChat, agentKeys.Memory, listKeys.Back, listKeys.Refresh}
 }
 
-// items is how many rows the cursor runs over: the threads, then the routines.
 // items is how many rows the cursor runs over: the threads, the routines,
 // then the settings.
 func (a agentComp) items(c *ctx) int {
 	return len(a.threads(c)) + len(a.routines) + len(a.settingRows(c))
+}
+
+// rowKeys names each row the cursor runs over, in order.
+func (a agentComp) rowKeys(c *ctx) []string {
+	keys := make([]string, 0, a.items(c))
+	for _, t := range a.threads(c) {
+		keys = append(keys, "thread:"+t.ID)
+	}
+	for _, r := range a.routines {
+		keys = append(keys, "routine:"+r.Slug)
+	}
+	for _, s := range a.settingRows(c) {
+		keys = append(keys, "setting:"+s.key)
+	}
+	return keys
+}
+
+// at is the selected row's index: sel's row, else the last index clamped.
+func (a agentComp) at(c *ctx) int {
+	keys := a.rowKeys(c)
+	if i := slices.Index(keys, a.sel); i >= 0 {
+		return i
+	}
+	return max(0, min(a.cursor, len(keys)-1))
+}
+
+// moveTo selects row i.
+func (a agentComp) moveTo(c *ctx, i int) agentComp {
+	keys := a.rowKeys(c)
+	a.cursor, a.sel = i, ""
+	if i >= 0 && i < len(keys) {
+		a.sel = keys[i]
+	}
+	return a
 }
 
 // settingRows are the settings shown; none when the node does not say them.
@@ -295,7 +335,7 @@ func (a agentComp) settingRows(c *ctx) []agentSettingSpec {
 }
 
 func (a agentComp) selectedSetting(c *ctx) (agentSettingSpec, bool) {
-	i := min(a.cursor, cursorBottom(a.items(c))) - len(a.threads(c)) - len(a.routines)
+	i := a.at(c) - len(a.threads(c)) - len(a.routines)
 	rows := a.settingRows(c)
 	if i < 0 || i >= len(rows) {
 		return agentSettingSpec{}, false
@@ -304,7 +344,7 @@ func (a agentComp) selectedSetting(c *ctx) (agentSettingSpec, bool) {
 }
 
 func (a agentComp) selectedRoutine(c *ctx) (api.PAgentRoutineInfo, bool) {
-	i := min(a.cursor, cursorBottom(a.items(c))) - len(a.threads(c))
+	i := a.at(c) - len(a.threads(c))
 	if i < 0 || i >= len(a.routines) {
 		return api.PAgentRoutineInfo{}, false
 	}
@@ -325,6 +365,10 @@ func (a agentComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 	case agentSentMsg, agentPrimaryMsg, agentRoutineMsg, agentSetMsg:
 		cmd := agentReply(c, msg)
 		return a, tea.Batch(cmd, c.m.loadAgentViewCmd(a.agentID))
+	case tea.PasteMsg:
+		var cmd tea.Cmd
+		a.chat, cmd = a.chat.paste(msg)
+		return a, cmd
 	}
 	return a, nil
 }
@@ -342,30 +386,30 @@ func (a agentComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, b
 	}
 	threads := a.threads(c)
 	n := a.items(c)
-	a.cursor = min(a.cursor, cursorBottom(n))
+	cur := a.at(c)
 	offline := a.info(c).Status == pagentUnreachable
 	routine, onRoutine := a.selectedRoutine(c)
 	switch {
 	case m.matches(msg, k.Up):
-		a.cursor = cursorUp(a.cursor)
+		a = a.moveTo(c, cursorUp(cur))
 	case m.matches(msg, k.Down):
-		a.cursor = cursorDown(a.cursor, n)
+		a = a.moveTo(c, cursorDown(cur, n))
 	case m.matches(msg, k.Top):
-		a.cursor = 0
+		a = a.moveTo(c, 0)
 	case m.matches(msg, k.Bottom):
-		a.cursor = cursorBottom(n)
+		a = a.moveTo(c, cursorBottom(n))
 	case m.matches(msg, k.HalfUp):
-		a.cursor = cursorBy(a.cursor, -a.pageStep(c), n)
+		a = a.moveTo(c, cursorBy(cur, -a.pageStep(c), n))
 	case m.matches(msg, k.HalfDown):
-		a.cursor = cursorBy(a.cursor, a.pageStep(c), n)
+		a = a.moveTo(c, cursorBy(cur, a.pageStep(c), n))
 	case m.matches(msg, k.Open):
-		if a.cursor < len(threads) {
-			return a, openThread(c, threads[a.cursor]), true
+		if cur < len(threads) {
+			return a, openThread(c, threads[cur]), true
 		}
 	case m.matches(msg, agentKeys.NewChat, agentKeys.Memory, agentKeys.MakePrimary, agentKeys.UnsetPrimary,
 		routineKeys.Run, routineKeys.Pause, routineKeys.Resume, routineKeys.TogglePause) && offline:
 		c.setFlash(agentOffline)
-	case m.matches(msg, settingKeys()...) && offline:
+	case m.matches(msg, agentKeys.CycleSetting) && offline, m.matches(msg, settingKeys()...) && offline:
 		c.setFlash(agentOffline)
 	case m.matches(msg, agentKeys.CycleSetting):
 		spec, ok := a.selectedSetting(c)
@@ -424,16 +468,16 @@ func (a agentComp) click(c *ctx, t hitTarget, focused bool) (component, tea.Cmd)
 	threads := a.threads(c)
 	switch {
 	case t.index >= a.items(c):
-	case focused && t.index == a.cursor && t.index < len(threads):
+	case focused && t.index == a.at(c) && t.index < len(threads):
 		return a, openThread(c, threads[t.index])
 	default:
-		a.cursor = t.index
+		a = a.moveTo(c, t.index)
 	}
 	return a, nil
 }
 
 func (a agentComp) wheel(c *ctx, d int) (component, tea.Cmd) {
-	a.cursor = cursorBy(a.cursor, d, a.items(c))
+	a = a.moveTo(c, cursorBy(a.at(c), d, a.items(c)))
 	return a, nil
 }
 
@@ -459,7 +503,7 @@ func (a agentComp) view(c *ctx, w, h int) string {
 	cardW := min(w, maxCardWidth)
 	ag := a.info(c)
 	threads := a.threads(c)
-	cursor := min(a.cursor, cursorBottom(a.items(c)))
+	cursor := a.at(c)
 	focused := m.focused == mainPane && len(m.popups) == 0
 	l := itemLines{key: "agent-view"}
 	l.text(StyleSecondaryBold.Render("Threads"))
@@ -476,14 +520,16 @@ func (a agentComp) view(c *ctx, w, h int) string {
 	for i, t := range threads {
 		l.add(i, m.threadRow(t, i == cursor && focused, cardW))
 	}
-	l.text("")
-	l.text(StyleSecondaryBold.Render("Routines"))
-	if len(a.routines) == 0 {
-		l.text(dimStyle.Render("no routines"))
-	}
-	for i, r := range a.routines {
-		at := len(threads) + i
-		l.add(at, routineRow(r, at == cursor && focused, cardW))
+	if a.routines != nil || !a.loaded {
+		l.text("")
+		l.text(StyleSecondaryBold.Render("Routines"))
+		if len(a.routines) == 0 {
+			l.text(dimStyle.Render("no routines"))
+		}
+		for i, r := range a.routines {
+			at := len(threads) + i
+			l.add(at, routineRow(r, at == cursor && focused, cardW))
+		}
 	}
 	if u := a.usage; u != nil {
 		l.text("")
@@ -660,6 +706,16 @@ func (p chatPrompt) handleKey(msg tea.KeyPressMsg) (chatPrompt, tea.Cmd, string)
 	var cmd tea.Cmd
 	p.input, cmd = p.input.Update(msg)
 	return p, cmd, ""
+}
+
+// paste inserts pasted text while the prompt is on.
+func (p chatPrompt) paste(msg tea.PasteMsg) (chatPrompt, tea.Cmd) {
+	if !p.on() {
+		return p, nil
+	}
+	var cmd tea.Cmd
+	p.input, cmd = p.input.Update(msg)
+	return p, cmd
 }
 
 func (p chatPrompt) view(label string) string {

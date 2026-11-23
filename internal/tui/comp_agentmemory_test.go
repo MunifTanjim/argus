@@ -139,3 +139,18 @@ func agentMemoryModel() model {
 	m.main = m.main.push(comp)
 	return m
 }
+
+func TestAgentMemoryHistoryCursorFollowsCommit(t *testing.T) {
+	cl := memoryClient()
+	m := openedMemory(t, cl)
+	m = typeKeys(m, "gtj") // History, on "tidy"
+	// An undo adds a revert commit at the top.
+	cl.commits = append([]api.PAgentMemoryCommit{{Hash: "eeee3333ffff", Subject: "revert", When: time.Now()}}, cl.commits...)
+	m, _ = upd(m, m.loadAgentMemoryCmd("n1:u")())
+	m = typeKeys(m, "u")
+	m, cmd := upd(m, keyMsg("y"))
+	cmd()
+	if p, _ := pagentParams[api.PAgentMemoryUndoParams](cl, api.MethodPAgentMemoryUndo); p.Commit != "cccc2222dddd" {
+		t.Fatalf("undo went to %q, want the selected commit", p.Commit)
+	}
+}

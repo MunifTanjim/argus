@@ -130,6 +130,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSpawn(m.topSpawn(), msg)
 		case m.dockFocused():
 			return m.pasteDock(msg)
+		default:
+			return m.pasteFocused(msg)
 		}
 	case notificationMsg:
 		cmd := m.applyEvent(api.Notification(msg))
@@ -219,6 +221,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pagentNames = msg.names
 			m.pagents, m.pagentPrimary, m.pagentThreads = msg.agents, msg.primary, msg.threads
 			m.reorder()
+			return m, m.markTopThreadReadCmd()
 		}
 		return m, nil
 	case agentMemoryMsg:

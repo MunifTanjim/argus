@@ -33,7 +33,16 @@ func (s agentsSidebarComp) commands(*ctx) []binding   { return sectionLists[s.se
 func (s agentsSidebarComp) pageStep(c *ctx) int       { return c.m.baseComp().pageStep(c) }
 func (s agentsSidebarComp) layer() layer              { return baseLayer }
 
-func (s agentsSidebarComp) update(*ctx, tea.Msg) (component, tea.Cmd) { return s, nil }
+func (s agentsSidebarComp) update(_ *ctx, msg tea.Msg) (component, tea.Cmd) {
+	p, ok := msg.(tea.PasteMsg)
+	if !ok || !s.filter.on {
+		return s, nil
+	}
+	var cmd tea.Cmd
+	s.filter.input, cmd = s.filter.input.Update(p)
+	s.query = strings.TrimSpace(s.filter.input.Value())
+	return s, cmd
+}
 
 func (s agentsSidebarComp) spins(c *ctx) bool {
 	return slices.ContainsFunc(c.m.pagents, func(a api.PAgentInfo) bool { return a.Status == "working" })

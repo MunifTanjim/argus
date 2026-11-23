@@ -559,10 +559,10 @@ func (m tview) argusRow(e transcript.Entry, iw int) (string, []cardSpan) {
 	if text := cmp.Or(e.Detail, e.Label); text != "" {
 		head += "  " + StyleDim.Render(text)
 	}
-	if undoCommit(e) != "" && screenHas("thread", memoryKeys.Undo.name) {
+	if openUndo(m.transcript.entries, e) != "" && screenHas("thread", memoryKeys.Undo.name) {
 		head += "  " + StyleDim.Render(m.c.m.keyTextOn("thread", memoryKeys.Undo)+" undo")
 	}
-	if id := offerID(e); id != "" && offerOpen(m.transcript.entries, id) {
+	if id := offerID(e); id != "" && offerOpen(m.transcript.entries, id) && threadHasStartDismiss() {
 		head += "  " + StyleDim.Render(m.c.m.keyTextOn("thread", offerKeys.Start)+" start · "+
 			m.c.m.keyTextOn("thread", offerKeys.Dismiss)+" dismiss")
 	}

@@ -3,6 +3,7 @@ package tui
 import (
 	"cmp"
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -154,8 +155,12 @@ func shortHash(h string) string { return h[:min(len(h), 7)] }
 func (v agentMemoryComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 	switch msg := msg.(type) {
 	case agentMemoryMsg:
+		sel := v.selectedKey()
 		v.loaded, v.err = true, msg.err
 		v.show, v.commits, v.proposals = msg.show, msg.commits, msg.proposals
+		if i := v.keyIndex(sel); i >= 0 {
+			v.cursor = i // the selection follows its commit or proposal
+		}
 		v.cursor = min(v.cursor, cursorBottom(v.rows(c)))
 	case agentMemoryActionMsg:
 		if msg.err != nil {
@@ -168,6 +173,31 @@ func (v agentMemoryComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 	return v, nil
 }
 
+// selectedKey is the selected commit's hash or proposal's id; "" on Files.
+func (v agentMemoryComp) selectedKey() string {
+	switch {
+	case v.tab == agentMemoryHistory && v.cursor < len(v.commits):
+		return v.commits[v.cursor].Hash
+	case v.tab == agentMemoryReview && v.cursor < len(v.proposals):
+		return v.proposals[v.cursor].ID
+	}
+	return ""
+}
+
+// keyIndex is the row of the tab's commit or proposal key, or -1.
+func (v agentMemoryComp) keyIndex(key string) int {
+	if key == "" {
+		return -1
+	}
+	switch v.tab {
+	case agentMemoryHistory:
+		return slices.IndexFunc(v.commits, func(cm api.PAgentMemoryCommit) bool { return cm.Hash == key })
+	case agentMemoryReview:
+		return slices.IndexFunc(v.proposals, func(p api.PAgentMemoryProposal) bool { return p.ID == key })
+	}
+	return -1
+}
+
 // rows is how many rows the tab moves the cursor over.
 func (v agentMemoryComp) rows(c *ctx) int {
 	switch v.tab {
@@ -176,7 +206,7 @@ func (v agentMemoryComp) rows(c *ctx) int {
 	case agentMemoryReview:
 		return len(v.proposals)
 	}
-	return len(v.fileLines(maxCardWidth))
+	return len(v.fileLines(min(c.m.bodyWidth(), maxCardWidth)))
 }
 
 func (v agentMemoryComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bool) {
