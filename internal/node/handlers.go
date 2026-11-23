@@ -105,6 +105,7 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodBotSecretSet, d.handleBotSecretSet)
 	srv.Handle(api.MethodBotSecretList, d.handleBotSecretList)
 	srv.Handle(api.MethodBotSecretRm, d.handleBotSecretRm)
+	srv.Handle(api.MethodBotSecretGet, d.handleBotSecretGet)
 	srv.Handle(api.MethodBotMemoryShow, d.handleBotMemoryShow)
 	srv.Handle(api.MethodBotMemoryLog, d.handleBotMemoryLog)
 	srv.Handle(api.MethodBotMemoryUndo, d.handleBotMemoryUndo)

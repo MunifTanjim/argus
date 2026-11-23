@@ -3,16 +3,18 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/bot"
 	"github.com/MunifTanjim/argus/internal/bot/policy"
+	"github.com/MunifTanjim/argus/internal/procwalk"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -55,59 +57,101 @@ func TestSecretRPCs(t *testing.T) {
 	}
 }
 
-func TestSecretsInjectedIntoSpawnAndListedInInstructions(t *testing.T) {
+func TestSecretsListedInInstructionsNotInjected(t *testing.T) {
 	r := newThreadRig(t)
 	useSecretKey(t, r.d)
 	setSecret(t, r.d, r.bot.ID, "GH_TOKEN", "ghp_secretvalue")
-	var env []string
-	spawn := r.d.spawnFn
-	r.d.spawnFn = func(ctx context.Context, p api.SpawnParams, presetID string) (api.SpawnResult, error) {
-		env = secretEnvFrom(ctx)
-		return spawn(ctx, p, presetID)
-	}
 	if _, err := r.send(t, api.BotSendParams{Text: "hi"}); err != nil {
 		t.Fatal(err)
-	}
-	if len(env) != 1 || env[0] != "GH_TOKEN=ghp_secretvalue" {
-		t.Errorf("env = %v", env)
 	}
 	data, err := os.ReadFile(filepath.Join(r.bot.Dir, "CLAUDE.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "$GH_TOKEN: for GH_TOKEN") || strings.Contains(string(data), "ghp_secretvalue") {
+	if !strings.Contains(string(data), "- GH_TOKEN: for GH_TOKEN") || !strings.Contains(string(data), "argus secret get") || strings.Contains(string(data), "ghp_secretvalue") {
 		t.Errorf("instructions:\n%s", data)
+	}
+	for _, sp := range r.spawns {
+		if strings.Contains(fmt.Sprint(sp), "ghp_secretvalue") {
+			t.Errorf("secret in spawn: %+v", sp)
+		}
 	}
 }
 
-func TestWithSecretEnvWrapsCommand(t *testing.T) {
-	ctx := context.WithValue(context.Background(), secretEnvKey{}, []string{"A_KEY=it's a secret"})
-	command, args, cleanup, err := withSecretEnv(ctx, "sh", []string{"-c", `printf %s "$A_KEY"`})
+// secretCaller makes the claude session agentID a session of the rig's bot
+// thread, when linked, and returns the caller info of a command it runs.
+func secretCaller(t *testing.T, r *memRig, pane, agentID string, linked bool) api.CallerInfo {
+	t.Helper()
+	hookSession(r.d, pane, agentID)
+	s, _ := r.d.reg.FindByAgentSession("claude", agentID)
+	if linked {
+		if err := r.s.InsertThreadSession(context.Background(), bot.ThreadSession{ThreadID: r.th, SessionID: s.ID, CLI: "claude", AgentSessionID: agentID, StartedBy: "you"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.d.adapterList = adapters.All()
+	r.d.procTable = func(context.Context) (procwalk.Table, error) {
+		return procwalk.Table{
+			1:   {PID: 1, PPID: 0, Args: "/sbin/init"},
+			100: {PID: 100, PPID: 1, Args: "/usr/local/bin/claude"},
+			120: {PID: 120, PPID: 100, Args: "argus secret get"},
+		}, nil
+	}
+	return api.CallerInfo{PID: 120, Env: map[string]string{"CLAUDE_PID": "100", "CLAUDE_CODE_SESSION_ID": agentID}}
+}
+
+func TestSecretGet(t *testing.T) {
+	r := newMemRig(t, 0)
+	useSecretKey(t, r.d)
+	setSecret(t, r.d, r.a.ID, "GH_TOKEN", "ghp_secretvalue")
+	caller := secretCaller(t, r, "%1", "c1", true)
+	get := func(c api.CallerInfo, name string) (string, error) {
+		res, err := r.d.handleBotSecretGet(context.Background(), mustJSON(api.BotSecretGetParams{Caller: c, Name: name}))
+		if err != nil {
+			return "", err
+		}
+		return res.(api.BotSecretGetResult).Value, nil
+	}
+	if v, err := get(caller, "GH_TOKEN"); err != nil || v != "ghp_secretvalue" {
+		t.Fatalf("get = %q %v", v, err)
+	}
+	if _, err := get(caller, "NOPE"); err == nil || err.Error() != "no secret NOPE for this bot" {
+		t.Errorf("missing: %v", err)
+	}
+	rows, err := r.s.ListActivity(context.Background(), r.a.ID, false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cleanup()
-	for _, a := range args {
-		if strings.Contains(a, "secret") && !strings.HasPrefix(a, os.TempDir()) {
-			t.Fatalf("value on the command line: %q", args)
+	got := map[string]string{}
+	for _, row := range rows {
+		if strings.Contains(row.Target+row.Reason+row.Rule, "ghp_secretvalue") {
+			t.Errorf("value in activity: %+v", row)
+		}
+		if row.Tool == secretGetTool {
+			got[row.Target] = row.Decision
 		}
 	}
-	out, err := runCmd(command, args...)
-	if err != nil || out != "it's a secret" {
-		t.Fatalf("out = %q %v", out, err)
+	if got["GH_TOKEN"] != policy.OutcomeAllow || got["NOPE"] != policy.OutcomeDeny {
+		t.Errorf("activity = %v", got)
 	}
-	if _, err := os.Stat(args[2]); !os.IsNotExist(err) {
-		t.Errorf("assignment file left behind: %v", err)
+
+	other := secretCaller(t, r, "%2", "c2", false)
+	if _, err := get(other, "GH_TOKEN"); err == nil || err.Error() != "not a bot session" {
+		t.Errorf("non-bot session: %v", err)
 	}
-	c2, a2, _, _ := withSecretEnv(context.Background(), "claude", []string{"x"})
-	if c2 != "claude" || len(a2) != 1 {
-		t.Errorf("no secrets: %s %v", c2, a2)
+	if _, err := get(api.CallerInfo{PID: 1}, "GH_TOKEN"); err == nil {
+		t.Error("caller outside a session got a secret")
 	}
 }
 
-func runCmd(name string, args ...string) (string, error) {
-	out, err := exec.Command(name, args...).Output()
-	return string(out), err
+func TestSecretGetIsLocalOnly(t *testing.T) {
+	r := newMemRig(t, 0)
+	for name, dispatch := range map[string]api.DispatchFunc{"remote": r.d.remoteDispatch(), "peer": r.d.peerDispatch()} {
+		_, err := dispatch(context.Background(), api.MethodBotSecretGet, nil)
+		if rpcErr, ok := err.(*api.RPCError); !ok || rpcErr.Code != api.CodeMethodNotFound {
+			t.Errorf("%s: err = %v, want method not found", name, err)
+		}
+	}
 }
 
 func TestRequestSecretFlow(t *testing.T) {
@@ -136,7 +180,7 @@ func TestRequestSecretFlow(t *testing.T) {
 	if _, err := r.d.handleSessionRespond(ctx, mustJSON(api.RespondParams{SessionID: s.ID, RequestID: ix.RequestID, OptionValue: secretSave, SecretValue: "wx-12345"})); err != nil {
 		t.Fatal(err)
 	}
-	if len(sent) != 1 || strings.Contains(sent[0], "wx-12345") || !strings.Contains(sent[0], "$API_KEY") {
+	if len(sent) != 1 || strings.Contains(sent[0], "wx-12345") || !strings.Contains(sent[0], "argus secret get API_KEY") {
 		t.Fatalf("sent = %q", sent)
 	}
 	if got, _ = r.d.reg.Get(s.ID); got.Interaction != nil {

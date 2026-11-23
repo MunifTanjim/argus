@@ -55,10 +55,22 @@ const (
 	MethodBotSecretSet  = "bot.secret.set"  // request: BotSecretSetParams; result: nil
 	MethodBotSecretList = "bot.secret.list" // request: BotRef; result: BotSecretListResult
 	MethodBotSecretRm   = "bot.secret.rm"   // request: BotSecretRef; result: nil
+	// MethodBotSecretGet returns a secret of the bot whose session runs the
+	// caller; only the local socket serves it.
+	MethodBotSecretGet = "bot.secret.get" // request: BotSecretGetParams; result: BotSecretGetResult
 )
 
-// BotSecretSetParams stores Value under Name (an environment variable
-// name) for the bot's sessions.
+type BotSecretGetParams struct {
+	Caller CallerInfo `json:"caller"`
+	Name   string     `json:"name"`
+}
+
+type BotSecretGetResult struct {
+	Value string `json:"value"`
+}
+
+// BotSecretSetParams stores Value under Name (like GH_TOKEN) for the bot's
+// sessions.
 type BotSecretSetParams struct {
 	BotID       string `json:"bot_id"`
 	Name        string `json:"name"`

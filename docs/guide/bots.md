@@ -348,8 +348,14 @@ argus bot secret list scout
 argus bot secret rm scout GH_TOKEN
 ```
 
-`set` reads the value without showing it, or from standard input when it is piped in (all of it, without one trailing newline, so multi-line values such as keys stay whole); the value is never a command-line argument. Names of variables the shell, the system or Argus depend on, such as `PATH`, `HOME`, `LD_*` or `ARGUS_*`, can't be used. The bot's sessions get each secret as an environment variable, and the bot's instructions list the names and descriptions only. A bot can also ask you for a secret it needs; your answer is stored the same way, and the bot is told only the variable's name. A secret given that way reaches the bot's next session.
+`set` reads the value without showing it, or from standard input when it is piped in (all of it, without one trailing newline, so multi-line values such as keys stay whole); the value is never a command-line argument. A name is like `GH_TOKEN`; names of variables the shell, the system or Argus depend on, such as `PATH`, `HOME`, `LD_*` or `ARGUS_*`, can't be used. The bot's instructions list the names and descriptions only. A bot can also ask you for a secret it needs; your answer is stored the same way, and the bot is told only the name.
 
-The bot and the tools it runs can read these variables. Secrets keep values out of transcripts, memory and history; they do not hide them from the bot. Where a known secret value would appear in approval requests, drafts, activity or memory capture, Argus replaces it with the secret's name.
+A bot reads a secret when a command needs it:
 
-Secrets reach Claude Code and pi sessions. Codex and OpenCode sessions run in a shared background service and don't get them.
+```sh
+GH_TOKEN=$(argus secret get GH_TOKEN) gh issue list
+```
+
+`argus secret get` prints the value with no trailing newline. It works only in a command one of the bot's sessions runs, and returns only that bot's secrets; anywhere else it fails. A secret is available as soon as it is stored. This works in Claude Code, Codex, OpenCode and pi sessions, not in Antigravity sessions. Each read is recorded in the bot's activity by name.
+
+The bot and the tools it runs can read these values. Secrets keep values out of transcripts, memory and history; they do not hide them from the bot. Where a known secret value would appear in approval requests, drafts, activity or memory capture, Argus replaces it with the secret's name.

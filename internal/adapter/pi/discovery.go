@@ -315,7 +315,7 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd string, opts adapter.
 	id := newSessionID()
 	// The process outlives the request: a request's context ends with the
 	// client connection that sent it.
-	conn, err := spawnProc(withSpawnEnv(context.WithoutCancel(ctx), opts.Env), cwd, id, gate, opts.Model)
+	conn, err := spawnProc(context.WithoutCancel(ctx), cwd, id, gate, opts.Model)
 	if err != nil {
 		return "", err
 	}
