@@ -182,6 +182,7 @@ type Summary struct {
 	HasContext   bool    `json:"has_context,omitempty"`   // whether ContextPct is meaningful
 	ContextPct   float64 `json:"context_pct,omitempty"`   // 0..100, latest turn
 	Tokens       int     `json:"tokens,omitempty"`        // latest turn prompt-side token count
+	TotalTokens  int64   `json:"total_tokens,omitempty"`  // session total so far: every call's input (cached or not) + output; 0 = not reported
 	HasCost      bool    `json:"has_cost,omitempty"`      // whether CostUSD is meaningful
 	CostUSD      float64 `json:"cost_usd,omitempty"`      // session cost so far, as the agent reports it
 	Task         string  `json:"task,omitempty"`          // latest user prompt, first line

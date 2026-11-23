@@ -27,10 +27,13 @@ func summarize(path string) *session.Summary {
 	return s
 }
 
-// summarizeChunks counts a turn still in progress, and takes the task from the
-// last user chunk's first line. Returns nil when no field could be filled.
+// summarizeChunks counts a turn still in progress, sums every turn's tokens,
+// and takes the task from the last user chunk's first line. Returns nil when no field could be filled.
 func summarizeChunks(pchunks []parser.Chunk) *session.Summary {
 	s := &session.Summary{}
+	for _, pc := range pchunks {
+		s.TotalTokens += int64(pc.TotalTokens)
+	}
 	for i := len(pchunks) - 1; i >= 0; i-- {
 		pc := pchunks[i]
 		if s.LastActivity == "" && !pc.Timestamp.IsZero() {

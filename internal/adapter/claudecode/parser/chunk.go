@@ -99,6 +99,7 @@ type Chunk struct {
 	Cycles        []InferenceCycle // one per non-meta assistant entry; nil for non-AI chunks
 	Usage         Usage            // the last API call's usage: the current context
 	OutputTokens  int              // output tokens across the turn's API calls
+	TotalTokens   int              // input, cache and output tokens across the turn's API calls
 	StopReason    string
 	DurationMs    int64 // first to last message timestamp in chunk
 	Interrupted   bool  // the turn ended here by a user interrupt (fires no Stop hook)

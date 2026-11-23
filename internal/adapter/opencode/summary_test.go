@@ -14,7 +14,7 @@ import (
 func TestSummaryForBuildsCard(t *testing.T) {
 	s := ocSession{ID: "ses_1", Title: "Fix login\nsecond line"}
 	s.Model.ID = "glm-5.3-flash"
-	s.Tokens = ocTokens{Input: 100, Output: 20, Reasoning: 5}
+	s.Tokens = ocTokens{Input: 100, Output: 20, Reasoning: 5, Cache: ocTokenCache{Read: 1000, Write: 3}}
 	s.Time.Updated = 9
 	sum := summaryFor(s)
 	if sum == nil {
@@ -28,6 +28,9 @@ func TestSummaryForBuildsCard(t *testing.T) {
 	}
 	if sum.Tokens != 125 {
 		t.Fatalf("Tokens = %d, want 125", sum.Tokens)
+	}
+	if sum.TotalTokens != 1128 {
+		t.Fatalf("TotalTokens = %d, want 1128 (cache included)", sum.TotalTokens)
 	}
 	if sum.LastActivity == "" {
 		t.Fatal("LastActivity empty")

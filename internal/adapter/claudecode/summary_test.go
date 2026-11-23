@@ -40,6 +40,18 @@ func TestSummarizeChunks(t *testing.T) {
 	}
 }
 
+func TestSummarizeChunksSumsTotalTokens(t *testing.T) {
+	s := summarizeChunks([]parser.Chunk{
+		{Type: parser.UserChunk, UserText: "a"},
+		{Type: parser.AIChunk, Model: "claude-opus-4-8", TotalTokens: 1200},
+		{Type: parser.UserChunk, UserText: "b"},
+		{Type: parser.AIChunk, Model: "claude-opus-4-8", TotalTokens: 3400},
+	})
+	if s == nil || s.TotalTokens != 4600 {
+		t.Fatalf("summary = %+v, want TotalTokens 4600", s)
+	}
+}
+
 func TestSummarizeChunksEmpty(t *testing.T) {
 	if s := summarizeChunks(nil); s != nil {
 		t.Errorf("nil chunks should yield nil summary, got %+v", s)

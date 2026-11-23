@@ -234,9 +234,10 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 			break
 		}
 	}
-	// Output is spent per call, so it sums across the turn. The lines of one
-	// split message repeat that message's usage; count each message once.
-	var output int
+	// Output, and the total, are spent per call, so they sum across the turn.
+	// The lines of one split message repeat that message's usage; count each
+	// message once.
+	var output, total int
 	counted := map[string]bool{}
 	for _, m := range buf {
 		if m.IsMeta || (m.MessageID != "" && counted[m.MessageID]) {
@@ -244,6 +245,7 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 		}
 		counted[m.MessageID] = m.MessageID != ""
 		output += m.Usage.OutputTokens
+		total += m.Usage.TotalTokens()
 	}
 
 	return Chunk{
@@ -258,6 +260,7 @@ func mergeAIBuffer(buf []AIMsg) Chunk {
 		Cycles:        cycles,
 		Usage:         usage,
 		OutputTokens:  output,
+		TotalTokens:   total,
 		StopReason:    stop,
 		DurationMs:    dur,
 		Interrupted:   interrupted,

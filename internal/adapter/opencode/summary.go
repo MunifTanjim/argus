@@ -7,7 +7,7 @@ import (
 )
 
 // Mirror history lists (title, model, tokens, last activity) so live
-// cards carry the same info; nil when empty.
+// cards carry the same info, plus the session's total tokens; nil when empty.
 func summaryFor(s ocSession) *session.Summary {
 	task := strings.TrimSpace(firstLine(s.Title))
 	tokens := s.Tokens.Input + s.Tokens.Output + s.Tokens.Reasoning
@@ -18,6 +18,7 @@ func summaryFor(s ocSession) *session.Summary {
 	return &session.Summary{
 		ModelName:    s.Model.ID,
 		Tokens:       tokens,
+		TotalTokens:  s.Tokens.total(),
 		Task:         task,
 		LastActivity: last,
 	}

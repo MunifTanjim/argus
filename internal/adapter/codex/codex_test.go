@@ -12,7 +12,7 @@ func TestSummaryForResolvesModelName(t *testing.T) {
 	names := map[string]string{"gpt-5.5": "GPT-5.5"}
 
 	s := summaryFor("gpt-5.5", "high", "t", 5, names)
-	if s == nil || s.ModelName != "GPT-5.5" || s.ModelColor != modelBrandColor || s.Effort != "high" {
+	if s == nil || s.ModelName != "GPT-5.5" || s.ModelColor != modelBrandColor || s.Effort != "high" || s.TotalTokens != 5 {
 		t.Errorf("model slug not resolved to display name: %+v", s)
 	}
 	s = summaryFor("gpt-x", "", "", 0, names)

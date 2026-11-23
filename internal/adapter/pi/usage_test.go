@@ -120,3 +120,10 @@ func TestUsageKeptOnANullStatsReply(t *testing.T) {
 		t.Fatalf("summary = %+v, want the last usage kept", s.Summary)
 	}
 }
+
+func TestUsageReportsTotalTokens(t *testing.T) {
+	stats := fullStats(0.45, 84000, 42)
+	stats["tokens"] = map[string]any{"input": 1000, "output": 200, "cacheRead": 5000, "cacheWrite": 100, "total": 6300}
+	_, reg, _ := spawnWithStats(t, &fakePi{t: t, stats: stats})
+	waitSummary(t, reg, func(s session.Session) bool { return s.Summary.TotalTokens == 6300 && s.Summary.Tokens == 84000 })
+}

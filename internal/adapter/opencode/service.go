@@ -104,9 +104,15 @@ type ocProviderEntry struct {
 // ocTokens is a session's cumulative token usage. Cache tokens are excluded from
 // the history card count: they dwarf the worked tokens and misrepresent size.
 type ocTokens struct {
-	Input     int `json:"input"`
-	Output    int `json:"output"`
-	Reasoning int `json:"reasoning"`
+	Input     int          `json:"input"`
+	Output    int          `json:"output"`
+	Reasoning int          `json:"reasoning"`
+	Cache     ocTokenCache `json:"cache"`
+}
+
+// total is every token the session spent, cache included.
+func (t ocTokens) total() int64 {
+	return int64(t.Input + t.Output + t.Reasoning + t.Cache.Read + t.Cache.Write)
 }
 
 type ocMessage struct {

@@ -1445,3 +1445,22 @@ func TestBuildChunks_OutputTokensSumTheTurnOncePerMessage(t *testing.T) {
 		t.Errorf("Usage.InputTokens = %d, want the last call's 300", got)
 	}
 }
+
+func TestBuildChunks_TotalTokensSumEveryCallOncePerMessage(t *testing.T) {
+	t0 := time.Date(2026, 10, 8, 10, 0, 0, 0, time.UTC)
+	ua := parser.Usage{InputTokens: 10, OutputTokens: 40, CacheReadTokens: 1000, CacheCreationTokens: 50}
+	chunks := parser.BuildChunks([]parser.ClassifiedMsg{
+		parser.AIMsg{Timestamp: t0, MessageID: "msg_a", Usage: ua, StopReason: "tool_use",
+			Blocks: []parser.ContentBlock{{Type: "text", Text: "let me check"}}},
+		parser.AIMsg{Timestamp: t0, MessageID: "msg_a", Usage: ua, StopReason: "tool_use",
+			Blocks: []parser.ContentBlock{{Type: "tool_use", ToolID: "tu1", ToolName: "Bash"}}},
+		parser.AIMsg{Timestamp: t0.Add(time.Second), MessageID: "msg_b", Usage: parser.Usage{InputTokens: 5, OutputTokens: 7, CacheReadTokens: 1100},
+			StopReason: "end_turn", Blocks: []parser.ContentBlock{{Type: "text", Text: "done"}}},
+	})
+	if len(chunks) != 1 {
+		t.Fatalf("chunks = %d, want 1", len(chunks))
+	}
+	if got := chunks[0].TotalTokens; got != 1100+1112 {
+		t.Errorf("TotalTokens = %d, want %d (msg_a once + msg_b)", got, 1100+1112)
+	}
+}
