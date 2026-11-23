@@ -288,7 +288,7 @@ func (d *Node) captureExtract(ctx context.Context, a pagent.Agent, set pagent.Se
 	}
 	if _, err := d.pagentApplyMemory(ctx, a, th.ID, "capture", ops, res.Log); err != nil {
 		var rpc *api.RPCError
-		if errors.As(err, &rpc) {
+		if errors.As(err, &rpc) && rpc.Code != api.CodeInternalError {
 			// Retrying the same transcript cannot succeed; report and move on.
 			d.captureReport(ctx, th.ID, "capture: "+rpc.Message)
 			return nil

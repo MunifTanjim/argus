@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/adapter"
+	"github.com/MunifTanjim/argus/internal/agentgit"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/pagent"
 	"github.com/MunifTanjim/argus/internal/pagent/memory"
@@ -378,5 +379,47 @@ func TestCaptureResumedSessionContinues(t *testing.T) {
 	r.capture()
 	if len(r.ex.prompts) != 2 {
 		t.Fatalf("captured again: %d", len(r.ex.prompts))
+	}
+}
+
+func TestCaptureCommitFailureUndoneAndRetried(t *testing.T) {
+	r := newCaptureRig(t)
+	repo, err := agentgit.Open(context.Background(), r.agent.Dir, agentgit.ModeNested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := r.memoryFile(t, "memory/MEMORY.md")
+	hook := filepath.Join(repo.GitDir, "hooks", "pre-commit")
+	if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r.ad.set(uEntry("u1", "deploys?"), aEntry("a1", "via staging"))
+	r.ex.reply = `{"ops":[{"action":"add","file":"MEMORY.md","text":"Deploys go through staging"}],"log":"talked deploys"}`
+	r.capture()
+	if got := r.memoryFile(t, "memory/MEMORY.md"); got != before {
+		t.Fatalf("failed commit left MEMORY.md changed: %q", got)
+	}
+	if logs, _ := filepath.Glob(filepath.Join(r.agent.Dir, "memory", "log", "*.md")); len(logs) != 0 {
+		t.Fatalf("failed commit left a work log: %v", logs)
+	}
+	if c := r.cursor(t); c.EntryCount != 0 {
+		t.Fatalf("cursor moved past uncommitted entries: %+v", c)
+	}
+	// Once the commit can succeed, the same entries are captured.
+	if err := os.Remove(hook); err != nil {
+		t.Fatal(err)
+	}
+	r.d.captureMu.Lock()
+	r.d.captureErrAt = nil
+	r.d.captureMu.Unlock()
+	r.capture()
+	if got := r.memoryFile(t, "memory/MEMORY.md"); !strings.Contains(got, "Deploys go through staging") {
+		t.Fatalf("not retried: %q", got)
+	}
+	if c := r.cursor(t); c.EntryCount != 2 {
+		t.Fatalf("cursor = %+v", c)
 	}
 }

@@ -1,11 +1,13 @@
 package node
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -311,6 +313,65 @@ func writeFileMkdir(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
+// fileSnapshot holds the files under a path (a file or a directory) so a
+// change that fails to commit can be undone: left in place, it would be
+// committed later as the user's own edit.
+type fileSnapshot struct {
+	root  string
+	files map[string][]byte
+}
+
+func snapshotFiles(root string) (*fileSnapshot, error) {
+	s := &fileSnapshot{root: root, files: map[string][]byte{}}
+	err := filepath.WalkDir(root, func(p string, e fs.DirEntry, err error) error {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil || !e.Type().IsRegular() {
+			return err
+		}
+		data, err := os.ReadFile(p)
+		s.files[p] = data
+		return err
+	})
+	return s, err
+}
+
+// restore puts the files back as they were and removes files added since.
+func (s *fileSnapshot) restore() error {
+	var errs []error
+	_ = filepath.WalkDir(s.root, func(p string, e fs.DirEntry, err error) error {
+		if err == nil && e.Type().IsRegular() {
+			if _, ok := s.files[p]; !ok {
+				errs = append(errs, os.Remove(p))
+			}
+		}
+		return nil
+	})
+	for p, data := range s.files {
+		if cur, err := os.ReadFile(p); err == nil && bytes.Equal(cur, data) {
+			continue
+		}
+		errs = append(errs, writeFileMkdir(p, string(data)))
+	}
+	return errors.Join(errs...)
+}
+
+// undoWrite restores snap after a failed write or commit and returns err as
+// a retryable error: the same change can succeed once the cause is gone.
+func (d *Node) undoWrite(snap *fileSnapshot, err error) error {
+	if rerr := snap.restore(); rerr != nil {
+		d.log.Warn("pagent: undo memory write", "path", snap.root, "err", rerr)
+	}
+	return memoryWriteErr(err)
+}
+
+// memoryWriteErr marks a failure to write or commit memory as retryable,
+// unlike pagentErr's rejections.
+func memoryWriteErr(err error) error {
+	return &api.RPCError{Code: api.CodeInternalError, Message: err.Error()}
+}
+
 // applyOpsToFiles applies ops grouped by file under dir, in order of first
 // appearance, and writes the files that changed.
 func applyOpsToFiles(dir string, ops []memory.Op, today string) (applied []memory.Op, changed map[string]bool, errs []error, err error) {
@@ -476,26 +537,30 @@ func (d *Node) commitMemory(ctx context.Context, a pagent.Agent, set pagent.Sett
 			return res, pagentErr("%v", err)
 		}
 		memDir := filepath.Join(a.Dir, memoryDir)
+		snap, err := snapshotFiles(memDir)
+		if err != nil {
+			return res, memoryWriteErr(err)
+		}
 		applied, changed, errs, err := applyOpsToFiles(memDir, agentOps, today)
 		if err != nil {
-			return res, pagentErr("%v", err)
+			return res, d.undoWrite(snap, err)
 		}
 		res.applied, res.errs = append(res.applied, applied...), append(res.errs, errs...)
 		if changed[memoryFile] {
 			if archived, err = archiveOverBudget(memDir, set.CoreBudget); err != nil {
-				return res, pagentErr("%v", err)
+				return res, d.undoWrite(snap, err)
 			}
 		}
 		if logLine != "" {
 			if err := appendWorkLog(memDir, now, logLine); err != nil {
-				return res, pagentErr("%v", err)
+				return res, d.undoWrite(snap, err)
 			}
 			logged = true
 		}
 		if len(applied) > 0 || logged {
 			res.commit, err = repo.CommitPaths(ctx, d.memorySubject(ctx, source, threadID), memoryTrailers(a, source, threadID), []string{memoryDir}, true)
 			if err != nil {
-				return res, pagentErr("%v", err)
+				return res, d.undoWrite(snap, err)
 			}
 		}
 	}
@@ -558,16 +623,20 @@ func (d *Node) commitProfile(ctx context.Context, a pagent.Agent, threadID, sour
 	if err := d.commitHandEdits(ctx, repo, a, threadID, []string{profileFile}); err != nil {
 		return nil, nil, "", pagentErr("%v", err)
 	}
+	snap, err := snapshotFiles(filepath.Join(repo.Dir, profileFile))
+	if err != nil {
+		return nil, nil, "", memoryWriteErr(err)
+	}
 	applied, _, errs, err := applyOpsToFiles(repo.Dir, ops, today)
 	if err != nil {
-		return nil, nil, "", pagentErr("%v", err)
+		return nil, nil, "", d.undoWrite(snap, err)
 	}
 	if len(applied) == 0 {
 		return nil, errs, "", nil
 	}
 	hash, err := repo.CommitPaths(ctx, d.memorySubject(ctx, source, threadID), memoryTrailers(a, source, threadID), []string{profileFile}, true)
 	if err != nil {
-		return nil, nil, "", pagentErr("%v", err)
+		return nil, nil, "", d.undoWrite(snap, err)
 	}
 	return applied, errs, hash, nil
 }

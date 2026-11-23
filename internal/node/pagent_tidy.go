@@ -202,17 +202,21 @@ func (d *Node) pagentTidy(ctx context.Context, a pagent.Agent, force bool) error
 		d.setTidyIdleHead(a.ID, head)
 		return nil
 	}
-	if err := writeFileMkdir(filepath.Join(memDir, memoryFile), plan.Memory); err != nil {
+	snap, err := snapshotFiles(memDir)
+	if err != nil {
 		return err
+	}
+	if err := writeFileMkdir(filepath.Join(memDir, memoryFile), plan.Memory); err != nil {
+		return d.undoWrite(snap, err)
 	}
 	topicApplied, _, topicErrs, err := applyOpsToFiles(memDir, plan.Topics, today)
 	if err != nil {
-		return err
+		return d.undoWrite(snap, err)
 	}
 	errs := append(plan.Errs, topicErrs...)
 	hash, err := repo.CommitPaths(ctx, "memory: tidy", memoryTrailers(a, sourceTidy, ""), []string{memoryDir}, true)
 	if err != nil {
-		return err
+		return d.undoWrite(snap, err)
 	}
 	if len(errs) > 0 {
 		d.agentMemoryEvent(ctx, a, "", evMemoryError, map[string]string{"message": joinErrs(errs)})
