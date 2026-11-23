@@ -13,6 +13,7 @@ import '../state/push.dart';
 import '../state/sessions.dart';
 import '../state/terminal_prefs.dart';
 import '../state/terminals.dart';
+import 'adaptive_nav.dart';
 import 'history_screen.dart';
 import 'project_drawer.dart';
 import 'responsive.dart';
@@ -375,7 +376,7 @@ class _HomeBody extends ConsumerWidget {
           (_) => ref.read(homeTabProvider.notifier).state = HomeTab.sessions);
     }
     final index = !showTerminals && tab == HomeTab.terminals ? 0 : tab.index;
-    return Scaffold(
+    return AdaptiveNavScaffold(
       body: IndexedStack(
         index: index,
         children: [
@@ -384,23 +385,21 @@ class _HomeBody extends ConsumerWidget {
           if (showTerminals) const TerminalListScreen(),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: index,
-        onDestinationSelected: (i) {
-          ref.read(homeTabProvider.notifier).state = HomeTab.values[i];
-          if (HomeTab.values[i] == HomeTab.terminals) {
-            ref
-                .read(terminalsProvider.notifier)
-                .load(ref.read(gatewayProvider)?.client);
-          }
-        },
-        destinations: [
-          const NavigationDestination(icon: Icon(Icons.forum_outlined), label: 'Sessions'),
-          const NavigationDestination(icon: Icon(Icons.history), label: 'History'),
-          if (showTerminals)
-            const NavigationDestination(icon: Icon(Icons.terminal), label: 'Terminals'),
-        ],
-      ),
+      selectedIndex: index,
+      onSelected: (i) {
+        ref.read(homeTabProvider.notifier).state = HomeTab.values[i];
+        if (HomeTab.values[i] == HomeTab.terminals) {
+          ref
+              .read(terminalsProvider.notifier)
+              .load(ref.read(gatewayProvider)?.client);
+        }
+      },
+      destinations: [
+        const AdaptiveNavDestination(icon: Icon(Icons.forum_outlined), label: 'Sessions'),
+        const AdaptiveNavDestination(icon: Icon(Icons.history), label: 'History'),
+        if (showTerminals)
+          const AdaptiveNavDestination(icon: Icon(Icons.terminal), label: 'Terminals'),
+      ],
     );
   }
 }

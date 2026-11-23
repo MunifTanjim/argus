@@ -7,6 +7,7 @@ import '../state/changes.dart';
 import '../state/control.dart';
 import '../state/navigation.dart';
 import '../state/projects.dart';
+import 'adaptive_nav.dart';
 import 'project_actions.dart';
 import 'session_sections_list.dart';
 import 'shell_drawer.dart';
@@ -44,7 +45,7 @@ class WorkspaceScreen extends ConsumerWidget {
     final tab = !showTerminals && selected == WorkspaceTab.terminals
         ? WorkspaceTab.sessions
         : selected;
-    return Scaffold(
+    return AdaptiveNavScaffold(
       appBar: AppBar(
         leading: shellMenuButton(context),
         automaticallyImplyLeading: false,
@@ -124,35 +125,33 @@ class WorkspaceScreen extends ConsumerWidget {
         ),
         _ => null,
       },
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: tab.index,
-        onDestinationSelected: (i) {
-          ref.read(workspaceTabProvider(workspace.id).notifier).state =
-              WorkspaceTab.values[i];
-          if (WorkspaceTab.values[i] == WorkspaceTab.terminals) {
-            refreshTerminals(ref);
-          }
-        },
-        destinations: [
-          const NavigationDestination(
-            icon: Icon(Icons.forum_outlined),
-            label: 'Sessions',
+      selectedIndex: tab.index,
+      onSelected: (i) {
+        ref.read(workspaceTabProvider(workspace.id).notifier).state =
+            WorkspaceTab.values[i];
+        if (WorkspaceTab.values[i] == WorkspaceTab.terminals) {
+          refreshTerminals(ref);
+        }
+      },
+      destinations: [
+        const AdaptiveNavDestination(
+          icon: Icon(Icons.forum_outlined),
+          label: 'Sessions',
+        ),
+        const AdaptiveNavDestination(
+          icon: Icon(Icons.difference_outlined),
+          label: 'Changes',
+        ),
+        const AdaptiveNavDestination(
+          icon: Icon(Icons.folder_outlined),
+          label: 'Files',
+        ),
+        if (showTerminals)
+          const AdaptiveNavDestination(
+            icon: Icon(Icons.terminal),
+            label: 'Terminals',
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.difference_outlined),
-            label: 'Changes',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.folder_outlined),
-            label: 'Files',
-          ),
-          if (showTerminals)
-            const NavigationDestination(
-              icon: Icon(Icons.terminal),
-              label: 'Terminals',
-            ),
-        ],
-      ),
+      ],
     );
   }
 }
