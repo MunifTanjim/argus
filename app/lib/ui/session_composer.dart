@@ -377,7 +377,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   // On desktop Enter sends; Shift+Enter adds a new line, and the input
   // method keeps Enter while it is composing.
   KeyEventResult _sendKey(KeyEvent e) {
-    if (!isDesktop || e is! KeyDownEvent) return KeyEventResult.ignored;
+    if (!isDesktop || e is KeyUpEvent) return KeyEventResult.ignored;
     final k = e.logicalKey;
     if (k != LogicalKeyboardKey.enter && k != LogicalKeyboardKey.numpadEnter) {
       return KeyEventResult.ignored;
@@ -386,7 +386,8 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
         HardwareKeyboard.instance.isShiftPressed) {
       return KeyEventResult.ignored;
     }
-    if (_canSend) _send();
+    // A held key repeats: swallow it so no new line appears after the send.
+    if (e is KeyDownEvent && _canSend) _send();
     return KeyEventResult.handled;
   }
 

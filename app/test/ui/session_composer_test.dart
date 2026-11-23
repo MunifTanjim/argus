@@ -898,7 +898,7 @@ void main() {
     bool Function() watchUnhandledEnter() {
       var unhandled = false;
       KeyEventResult late(KeyEvent e) {
-        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.enter) {
+        if (e is! KeyUpEvent && e.logicalKey == LogicalKeyboardKey.enter) {
           unhandled = true;
         }
         return KeyEventResult.ignored;
@@ -923,6 +923,37 @@ void main() {
       await t.pumpAndSettle();
       expect(repo.inputs.single, ['n:%1', 'hi']);
       expect(_field(t), '');
+    });
+
+    testWidgets('holding Enter sends once and adds no new line', (t) async {
+      mac(t);
+      final repo = _Recording();
+      await _pump(t, _s(), repo);
+      await typeHi(t);
+      final unhandled = watchUnhandledEnter();
+      await t.sendKeyDownEvent(LogicalKeyboardKey.enter);
+      await t.sendKeyRepeatEvent(LogicalKeyboardKey.enter);
+      await t.sendKeyRepeatEvent(LogicalKeyboardKey.enter);
+      await t.sendKeyUpEvent(LogicalKeyboardKey.enter);
+      await t.pumpAndSettle();
+      expect(unhandled(), isFalse);
+      expect(repo.inputs.single, ['n:%1', 'hi']);
+    });
+
+    testWidgets('holding Shift+Enter keeps adding new lines', (t) async {
+      mac(t);
+      final repo = _Recording();
+      await _pump(t, _s(), repo);
+      await typeHi(t);
+      await t.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await t.sendKeyDownEvent(LogicalKeyboardKey.enter);
+      final unhandled = watchUnhandledEnter();
+      await t.sendKeyRepeatEvent(LogicalKeyboardKey.enter);
+      await t.sendKeyUpEvent(LogicalKeyboardKey.enter);
+      await t.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await t.pumpAndSettle();
+      expect(unhandled(), isTrue);
+      expect(repo.inputs, isEmpty);
     });
 
     testWidgets('numpad Enter sends the reply', (t) async {
