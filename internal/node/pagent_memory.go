@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -725,6 +726,33 @@ func (d *Node) handlePAgentMemoryLog(ctx context.Context, params json.RawMessage
 	return res, nil
 }
 
+// changedOutside returns a file that commit hash of the repository enclosing
+// dir changes outside dir, or "" when it changes only files within dir.
+func changedOutside(ctx context.Context, dir, hash string) (string, error) {
+	git := func(args ...string) (string, error) {
+		out, err := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).Output()
+		if err != nil {
+			return "", fmt.Errorf("git %s: %w", args[0], err)
+		}
+		return string(out), nil
+	}
+	prefix, err := git("rev-parse", "--show-prefix")
+	if err != nil {
+		return "", err
+	}
+	prefix = strings.TrimSpace(prefix)
+	names, err := git("diff-tree", "--no-commit-id", "--name-only", "-r", "-z", "--root", "--end-of-options", hash)
+	if err != nil {
+		return "", err
+	}
+	for _, name := range strings.Split(names, "\x00") {
+		if name != "" && !strings.HasPrefix(name, prefix) {
+			return name, nil
+		}
+	}
+	return "", nil
+}
+
 func (d *Node) handlePAgentMemoryUndo(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.PAgentMemoryUndoParams](params)
 	if err != nil {
@@ -770,6 +798,15 @@ func (d *Node) handlePAgentMemoryUndo(ctx context.Context, params json.RawMessag
 	}
 	if target == "" {
 		return nil, pagentErr("commit %s is not a memory change", p.Commit)
+	}
+	if repo.Outer {
+		outside, err := changedOutside(ctx, a.Dir, target)
+		if err != nil {
+			return nil, pagentErr("%v", err)
+		}
+		if outside != "" {
+			return nil, pagentErr("can't undo: commit %s also changes %s, outside the agent's directory", p.Commit, outside)
+		}
 	}
 	userPaths := paths
 	if !p.Profile {

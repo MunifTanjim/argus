@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -591,5 +592,60 @@ func TestImportGoesToReview(t *testing.T) {
 	r.setMode(t, "off")
 	if _, err := callPAgent[api.PAgentMemoryImportResult](t, r.d.handlePAgentMemoryImport, api.PAgentMemoryImportParams{AgentID: r.a.ID, Content: "x"}); err == nil {
 		t.Fatal("import with memory off succeeded")
+	}
+}
+
+func TestOuterUndoRefusesCommitBeyondAgent(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	d, s, root := pagentNode(t)
+	d.pagentCfg.Defaults.Git.Mode = agentgit.ModeOuter
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", root, "-c", "user.name=u", "-c", "user.email=u@x"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "--quiet")
+	info, err := callPAgent[api.PAgentInfo](t, d.handlePAgentCreate, api.PAgentCreateParams{Name: "scout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _, _ := s.AgentByID(context.Background(), info.ID)
+	if _, err := d.pagentApplyMemory(context.Background(), a, "", "capture", []memory.Op{{Action: "add", File: "MEMORY.md", Text: "fact one"}}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// The user commits code and memory together.
+	if err := os.WriteFile(filepath.Join(root, "app.go"), []byte("package app\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mem := filepath.Join(a.Dir, "memory", "MEMORY.md")
+	data, _ := os.ReadFile(mem)
+	if err := os.WriteFile(mem, append(data, "- hand fact\n"...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "-A")
+	git("commit", "--quiet", "-m", "wip")
+	mixed := git("rev-parse", "HEAD")
+
+	_, err = callPAgent[api.PAgentMemoryUndoResult](t, d.handlePAgentMemoryUndo, api.PAgentMemoryUndoParams{AgentID: a.ID, Commit: mixed})
+	if err == nil || !strings.Contains(err.Error(), "app.go") {
+		t.Fatalf("mixed undo: %v", err)
+	}
+	if git("rev-parse", "HEAD") != mixed {
+		t.Fatal("mixed undo committed")
+	}
+	if _, err := os.Stat(filepath.Join(root, "app.go")); err != nil {
+		t.Fatalf("user file touched: %v", err)
+	}
+	// A commit within the agent directory still undoes.
+	if _, err := d.pagentApplyMemory(context.Background(), a, "", "capture", []memory.Op{{Action: "add", File: "MEMORY.md", Text: "fact two"}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := callPAgent[api.PAgentMemoryUndoResult](t, d.handlePAgentMemoryUndo, api.PAgentMemoryUndoParams{AgentID: a.ID, Commit: git("rev-parse", "HEAD")}); err != nil {
+		t.Fatalf("agent undo: %v", err)
 	}
 }
