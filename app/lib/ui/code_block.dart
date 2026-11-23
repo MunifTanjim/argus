@@ -1,7 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/services.dart';
+import 'package:gpt_markdown/custom_widgets/link_button.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:re_highlight/languages/all.dart';
 import 'package:re_highlight/re_highlight.dart';
@@ -51,6 +53,26 @@ class _SelectableMarkdownState extends State<_SelectableMarkdown> {
   // anchors the wide-window menu of a left tap.
   Offset? _lastDown;
 
+  // gpt_markdown's default link widget handles only the primary button, so a
+  // right-click presses the link under the pointer; the menu then anchors at
+  // _lastDown, the right-click position.
+  void _pressLinkAt(BuildContext context, Offset global) {
+    void visit(Element el) {
+      final w = el.widget;
+      if (w is LinkButton) {
+        final box = el.renderObject;
+        if (box is RenderBox && box.attached) {
+          final local = box.globalToLocal(global);
+          if ((Offset.zero & box.size).contains(local)) w.onPressed?.call();
+        }
+        return;
+      }
+      el.visitChildren(visit);
+    }
+
+    (context as Element).visitChildren(visit);
+  }
+
   @override
   Widget build(BuildContext context) => SelectionArea(
         onSelectionChanged: (c) => _selected = c?.plainText,
@@ -76,19 +98,16 @@ class _SelectableMarkdownState extends State<_SelectableMarkdown> {
         ),
         child: Builder(
           builder: (context) => Listener(
-            onPointerDown: (e) => _lastDown = e.position,
+            onPointerDown: (e) {
+              _lastDown = e.position;
+              if (e.buttons == kSecondaryMouseButton) {
+                _pressLinkAt(context, e.position);
+              }
+            },
             child: GptMarkdown(
               widget.data,
               onLinkTap: (url, title) =>
                   showLinkActions(context, url, position: _lastDown),
-              linkBuilder: (context, span, url, style) => MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: GestureDetector(
-                  onSecondaryTapUp: (d) =>
-                      showLinkActions(context, url, position: d.globalPosition),
-                  child: Text.rich(span),
-                ),
-              ),
               tableBuilder: markdownTable,
               codeBuilder: (context, name, code, closed) =>
                   codeView(code, lang: name, selectable: false),

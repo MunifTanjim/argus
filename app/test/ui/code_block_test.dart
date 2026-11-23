@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gpt_markdown/custom_widgets/link_button.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/ui/code_block.dart';
@@ -189,6 +190,14 @@ void main() {
     expect(find.text('https://argus.muniftanjim.dev'), findsOneWidget);
     expect(find.text('Open link'), findsOneWidget);
     expect(find.text('Copy link'), findsOneWidget);
+  });
+
+  testWidgets('markdown links render through the package default LinkButton',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: appMarkdown('see [docs](https://argus.muniftanjim.dev)'))));
+    expect(find.byType(LinkButton), findsOneWidget);
   });
 
   testWidgets('Open link in the sheet calls openExternalUrl', (tester) async {
