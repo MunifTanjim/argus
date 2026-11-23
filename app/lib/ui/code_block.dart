@@ -79,13 +79,20 @@ Widget selectionContextMenu(
   if (isDesktop && _linkAt(areaContext, anchors.primaryAnchor) != null) {
     return const SizedBox.shrink();
   }
-  // A right-click anchors at the pointer; a selection toolbar floats above or
-  // below the selection, so aim between the two.
-  final second = anchors.secondaryAnchor;
-  final at = second == null
-      ? anchors.primaryAnchor
-      : Offset.lerp(anchors.primaryAnchor, second, 0.5)!;
-  final block = _widgetAt<_SelectableMarkdown>(areaContext, at);
+  // A right-click anchors at the pointer. A selection toolbar's anchors are the
+  // top and bottom of the selection: aim between them, then at the top and
+  // bottom edges (nudged inside) when the middle falls between blocks.
+  final first = anchors.primaryAnchor, second = anchors.secondaryAnchor;
+  final probes = second == null
+      ? [first]
+      : [
+          Offset.lerp(first, second, 0.5)!,
+          first + const Offset(0, 1),
+          second - const Offset(0, 1),
+        ];
+  final block = probes
+      .map((at) => _widgetAt<_SelectableMarkdown>(areaContext, at))
+      .firstWhere((b) => b != null, orElse: () => null);
   return AdaptiveTextSelectionToolbar.buttonItems(
     anchors: anchors,
     buttonItems: [

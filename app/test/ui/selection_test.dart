@@ -1,6 +1,7 @@
 import 'package:argus/models/entry.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/tool_detail.dart';
+import 'package:argus/ui/code_block.dart';
 import 'package:argus/ui/transcript_feed.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -113,7 +114,6 @@ void main() {
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.linux;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
       await tester.pumpWidget(_feed(const [_link]));
       await tester.pumpAndSettle();
       final g = await tester.startGesture(
@@ -178,6 +178,37 @@ void main() {
     await tester.tap(find.text('Copy Markdown'));
     await tester.pumpAndSettle();
     expect(clip, 'some **bold** words here');
+  });
+
+  testWidgets(
+      'a touch selection whose midpoint falls between blocks still offers Copy Markdown',
+      (tester) async {
+    captureClipboard(tester);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: appSelectionArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              appMarkdown('alpha **one**'),
+              const SizedBox(height: 300),
+              appMarkdown('beta **two**'),
+            ],
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.longPressAt(
+      tester.getTopLeft(find.textContaining('alpha')) + const Offset(5, 6),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Select all'));
+    await tester.pumpAndSettle();
+    expect(find.text('Copy Markdown'), findsOneWidget);
+    await tester.tap(find.text('Copy Markdown'));
+    await tester.pumpAndSettle();
+    expect(clip, 'alpha **one**');
   });
 
   testWidgets('a right-click on a markdown row offers Copy Markdown on desktop',
