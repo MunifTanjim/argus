@@ -35,8 +35,9 @@ func agentCmd(dial callerFor) *cobra.Command {
 		Long: `Create and talk to persistent agents.
 
 An agent is a directory with an agent.yaml, instructions and memory. Agents
-are registered by name; where two nodes have an agent with the same name, use
-<name>@<node-label>.`,
+are registered by name on a node. These commands work with the agents of the
+node this command talks to; manage agents on other nodes from those nodes, or
+from the TUI or app.`,
 		SilenceUsage: true,
 	}
 	cmd.AddCommand(
@@ -104,7 +105,7 @@ func agentCreate(dial callerFor) *cobra.Command {
 			f.StringVar(&p.Agent, "agent", "", "coding agent to run, for example claude")
 			f.StringVar(&p.Model, "model", "", "model")
 			f.StringVar(&p.From, "from", "", "copy agent.yaml, skills and routines from this agent")
-			f.StringVar(&p.NodeID, "node", "", "node to create the agent on")
+			f.StringVar(&p.NodeID, "node", "", "node to create the agent on; manage it from that node afterwards")
 		},
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
 			if len(args) > 0 {
@@ -130,7 +131,7 @@ func agentAdd(dial callerFor) *cobra.Command {
 			f := cmd.Flags()
 			f.StringVar(&p.Name, "name", "", "register under this name, rewriting agent.yaml")
 			f.BoolVar(&p.ImportInstructions, "import-instructions", false, "import an existing CLAUDE.md or AGENTS.md into the agent's instructions")
-			f.StringVar(&p.NodeID, "node", "", "node holding the directory")
+			f.StringVar(&p.NodeID, "node", "", "node holding the directory; manage the agent from that node afterwards")
 		},
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
 			p.Dir = args[0]

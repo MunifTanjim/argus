@@ -2,7 +2,7 @@
 
 An agent is a persistent assistant with its own directory. The directory holds `agent.yaml` (name, coding agent, model, instructions) and the agent's memory files. Every change to an agent's memory is kept in its history and can be undone. You can edit these files directly.
 
-Agents are registered by name on a node. Every command accepts `--json`. Where two nodes have an agent with the same name, refer to it as `<name>@<node-label>`.
+Agents are registered by name on a node. Every command accepts `--json`. The `argus agent` commands work with the agents of the node they talk to; manage agents on your other nodes from those nodes, or from the TUI or app.
 
 ## Creating and registering
 
@@ -16,7 +16,7 @@ argus agent add ~/agents/scout
 
 `add` registers an existing directory, for example a clone. It reads the name from `agent.yaml`. If the name is already taken on the node, pass `--name <new>`, which rewrites `agent.yaml`. If the directory already has a `CLAUDE.md` or `AGENTS.md`, `add` offers to import it into the agent's instructions. Without a terminal, pass `--import-instructions` to import it; the command fails otherwise and registers nothing.
 
-Both commands take `--node <node>` to create or register the agent on another node. `--dir` and the path are then paths on that node.
+Both commands take `--node <node>` to create or register the agent on another node. `--dir` and the path are then paths on that node, and later commands for the agent run on that node.
 
 ## Inspecting
 
@@ -48,6 +48,8 @@ Without a name the primary agent is used, else the only agent. If there are seve
 argus agent primary scout
 argus agent primary --unset
 ```
+
+There is one primary agent across your nodes. Setting one clears the others. If two nodes have a primary, for example because one was offline when you picked another, the one set most recently is kept and the other is cleared.
 
 ## Renaming and forgetting
 
@@ -217,7 +219,7 @@ With `brief: { enabled: true, at: "08:00" }`, the agent writes a short daily bri
 | `default` | yes | 3 | 1 day by default |
 | `high` | yes | 6 | 12 hours by default |
 
-An offer is something the agent proposes to do, shown in its chat with a short reason. Starting an offer sends its prompt to the agent as if you wrote it; dismissing it drops it. An offer never does anything by itself.
+An offer is something the agent proposes to do, with a short reason, posted to its latest chat. Starting an offer sends its prompt to the agent as if you wrote it; dismissing it drops it. An offer never does anything by itself.
 
 ### Settings and usage
 
@@ -261,17 +263,18 @@ Work you start by messaging the agent is attended. Routines, check-backs and oth
 
 - Attended work: Argus asks you, unless a rule decides. It warns when an action sends data out of this machine, can't be undone or changes security settings.
 - Unattended work: an action is denied unless an approval rule allows it. The agent is told to add a rule if it needs one.
-- Unattended work never sends anything out on its own. Such an action becomes a draft in the thread. **Send** runs a shell command again in the agent's directory and records its output. For any other tool, Send asks the agent to do it now, and that one action is then allowed without asking. **Discard** drops the draft.
+- Unattended work never sends anything out on its own. Such an action becomes a draft in the thread. Sending a shell draft runs the command again, in the working directory the request named or else the agent's directory, and records its output. Sending any other draft asks the agent to do it now, and that one action is then allowed without asking. Discarding a draft drops it.
+- When Argus can't see what an action does (some coding agents ask without sending the command or file), unattended work asks you instead of following rules.
 
 ### Answering
 
-A request shows the exact action, its warnings and who started the work. The answers are:
+A request includes the exact action, its warnings and who started the work. You can:
 
-- **Allow once**
-- **Allow in this thread**: the same tool and target are allowed until the thread's session ends.
-- **Always allow**: adds a rule for the tool and target to the agent's `agent.yaml` and commits it.
-- **Deny**: the agent gets your reason. The same action is denied again without asking until you next message the agent.
-- **Explain**: denies and asks the agent to explain the action in plain language, then ask again.
+- allow it once;
+- allow it in this thread: the same tool and target are allowed until the thread's session ends;
+- always allow it: adds a rule for this exact action (the shell command with its arguments, the file, the host or the MCP tool) to the agent's `agent.yaml` and commits it. This is not available when no rule would cover only this action, such as for a chain of shell commands or a command without arguments;
+- deny it: the agent gets your reason. The same action is denied again without asking until you next message the agent;
+- ask for an explanation: the request is denied and the agent is asked to explain the action in plain language, then ask again.
 
 A new message from you closes the requests still open in that thread. A request from unattended work is denied if you don't answer within 30 minutes (`agents.approvals.unattended-expiry`).
 
@@ -293,7 +296,7 @@ approvals:
 
 ### Policy hook
 
-`agents.approvals.hook` names a program (`command`) or an HTTPS address (`url`) that Argus asks about every agent action. A program reads the request on standard input and writes the reply on standard output; an address gets the request as a JSON POST. The request is:
+`agents.approvals.hook` names a program (`command`) or an HTTPS address (`url`; plain HTTP only to this machine) that Argus asks about every agent action. A program reads the request on standard input and writes the reply on standard output; an address gets the request as a JSON POST. The request is:
 
 ```json
 {"action": {"tool": "Bash", "target": "git", "class": ["outward"], "input": {"command": "git push"}},
@@ -327,8 +330,8 @@ argus agent secret list scout
 argus agent secret rm scout GH_TOKEN
 ```
 
-`set` reads the value without showing it, or from standard input when it is piped in; the value is never a command-line argument. The agent's sessions get each secret as an environment variable, and the agent's instructions list the names and descriptions only. An agent can also ask you for a secret it needs; your answer is stored the same way, and the agent is told only the variable's name. A secret given that way reaches the agent's next session.
+`set` reads the value without showing it, or from standard input when it is piped in (all of it, without one trailing newline, so multi-line values such as keys stay whole); the value is never a command-line argument. Names of variables the shell, the system or Argus depend on, such as `PATH`, `HOME`, `LD_*` or `ARGUS_*`, can't be used. The agent's sessions get each secret as an environment variable, and the agent's instructions list the names and descriptions only. An agent can also ask you for a secret it needs; your answer is stored the same way, and the agent is told only the variable's name. A secret given that way reaches the agent's next session.
 
-The agent and the tools it runs can read these variables. Secrets keep values out of transcripts, memory and history; they do not hide them from the agent. Where a known secret value would appear in approval requests, drafts, activity or memory capture, Argus shows `«NAME»` instead.
+The agent and the tools it runs can read these variables. Secrets keep values out of transcripts, memory and history; they do not hide them from the agent. Where a known secret value would appear in approval requests, drafts, activity or memory capture, Argus replaces it with the secret's name.
 
 Secrets reach Claude Code and pi sessions. Codex and OpenCode sessions run in a shared background service and don't get them.
