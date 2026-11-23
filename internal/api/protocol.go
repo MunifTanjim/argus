@@ -1577,17 +1577,27 @@ type BotAddResult struct {
 	FoundInstructions bool    `json:"found_instructions,omitempty"`
 }
 
+// BotListParams lists the node's bots, or with All the bots of this node
+// and every online peer node.
 type BotListParams struct {
 	IncludeArchived bool `json:"include_archived,omitempty"`
+	All             bool `json:"all,omitempty"`
 }
 
 // BotListResult's Primary is the node's primary bot id, or empty. Each node
 // has its own primary; a list merged across nodes leaves Primary empty and
-// marks each node's primary with BotInfo.Primary.
+// marks each node's primary with BotInfo.Primary. Unreachable names the peer
+// nodes an All list could not reach.
 type BotListResult struct {
-	Bots    []BotInfo `json:"bots"`
-	Primary string    `json:"primary,omitempty"`
+	Bots        []BotInfo `json:"bots"`
+	Primary     string    `json:"primary,omitempty"`
+	Unreachable []string  `json:"unreachable,omitempty"`
 }
+
+// BotNodeField is the request field, on any bot.* request, that names the
+// node (id or label) to run it on. The node that receives the request
+// forwards it to that node over its peer channel.
+const BotNodeField = "node"
 
 type BotRef struct {
 	BotID string `json:"bot_id"`

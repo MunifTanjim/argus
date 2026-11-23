@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"time"
 )
@@ -46,6 +47,18 @@ func (s *Server) Handle(method string, h HandlerFunc) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.handlers[method] = h
+}
+
+// Wrap replaces the handler of each registered method whose name starts with
+// prefix with wrap(method, handler).
+func (s *Server) Wrap(prefix string, wrap func(method string, h HandlerFunc) HandlerFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for m, h := range s.handlers {
+		if strings.HasPrefix(m, prefix) {
+			s.handlers[m] = wrap(m, h)
+		}
+	}
 }
 
 // OnConnect registers a hook invoked once per connection with a Notifier for

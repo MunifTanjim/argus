@@ -608,6 +608,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 
 	srv := api.NewServer()
 	d.registerHandlers(srv)
+	srv.Wrap("bot.", d.botRouted)
 	srv.OnConnect(d.streamRegistry)
 
 	d.server = srv

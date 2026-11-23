@@ -48,9 +48,11 @@ func validBotName(name string) bool {
 	return true
 }
 
+const errBotsDisabled = "bots disabled"
+
 func (d *Node) botStore() (*bot.Store, error) {
 	if d.bots == nil {
-		return nil, botErr("bots disabled")
+		return nil, botErr(errBotsDisabled)
 	}
 	return d.bots, nil
 }
@@ -397,13 +399,21 @@ func (d *Node) handleBotList(ctx context.Context, params json.RawMessage) (any, 
 	if err != nil {
 		return nil, err
 	}
+	// A peer's request is never fanned out again.
+	if _, onPeer := peerNodeFrom(ctx); p.All && !onPeer {
+		return d.botListAll(ctx, p)
+	}
+	return d.botListLocal(ctx, p)
+}
+
+func (d *Node) botListLocal(ctx context.Context, p api.BotListParams) (api.BotListResult, error) {
 	s, err := d.botStore()
 	if err != nil {
-		return nil, err
+		return api.BotListResult{}, err
 	}
 	bots, err := s.ListBots(ctx, p.IncludeArchived)
 	if err != nil {
-		return nil, botErr("%v", err)
+		return api.BotListResult{}, botErr("%v", err)
 	}
 	primary := d.primaryID(ctx, s)
 	res := api.BotListResult{Bots: make([]api.BotInfo, len(bots))}
