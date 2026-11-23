@@ -127,6 +127,11 @@ func TestProtectedWrites(t *testing.T) {
 		bash(`sed -i s/deny/allow/ agent.yaml`),
 		bash(`git config core.hooksPath /tmp/h`),
 		bash(`git config set core.fsmonitor x`),
+		file(".GIT/hooks/x"),
+		file("Agent.YAML"),
+		file("/home/u/.config/argus/APPROVALS.yaml"),
+		file(".Claude/Settings.json"),
+		bash(`echo x > .Git/hooks/post-commit`),
 	}
 	for _, a := range protected {
 		if !reflect.DeepEqual(a.Class, []string{ClassSecurity}) {

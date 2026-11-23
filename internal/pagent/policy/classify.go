@@ -319,15 +319,17 @@ func sensitivePath(p string) bool {
 // protectedPath reports whether writing p could change what the agent is
 // allowed to do: its agent.yaml, the node's approvals.yaml, anything under
 // .git (hooks and config run on Argus's commits) and Claude settings.
+// Names are compared case-insensitively, as filesystems may be.
 func protectedPath(p string) bool {
 	parts := strings.Split(cleanPath(p), "/")
 	for i, part := range parts {
-		if part == ".git" || part == ".claude" && i+1 < len(parts) && strings.HasPrefix(parts[i+1], "settings") {
+		if strings.EqualFold(part, ".git") || strings.EqualFold(part, ".claude") && i+1 < len(parts) &&
+			strings.HasPrefix(strings.ToLower(parts[i+1]), "settings") {
 			return true
 		}
 	}
 	base := parts[len(parts)-1]
-	return base == "agent.yaml" || base == "approvals.yaml"
+	return strings.EqualFold(base, "agent.yaml") || strings.EqualFold(base, "approvals.yaml")
 }
 
 // writesProtected reports whether a shell command writes a protected path:
