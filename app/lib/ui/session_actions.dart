@@ -5,6 +5,7 @@ import '../data/session_repository.dart';
 import '../models/session.dart';
 import '../state/control.dart';
 import '../state/projects_api.dart';
+import 'adaptive_sheet.dart';
 import 'project_actions.dart';
 import 'theme.dart';
 
@@ -108,27 +109,52 @@ List<Widget> sessionActionTiles(
   ];
 }
 
-/// Opens [s]'s actions in a bottom sheet.
-Future<void> showSessionActions(BuildContext context, Session s) {
+/// Opens [s]'s actions: rename, and kill when it can be killed. When its node
+/// is too old for them, a note to upgrade it instead.
+Future<void> showSessionActions(
+  BuildContext context,
+  Session s, {
+  Offset? position,
+}) async {
   final ax = ActionContext.of(context);
-  return showModalBottomSheet<void>(
-    context: context,
-    useRootNavigator: true,
-    builder: (ctx) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            title: Text(
-              s.displayTitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-          ...sessionActionTiles(ctx, ax, s),
-        ],
+  if (sessionOutdated(ax, s)) {
+    await showActionMenu<void>(
+      context,
+      title: s.displayTitle,
+      position: position,
+      items: [
+        ActionItem(
+          value: null,
+          label: 'Upgrade argus on ${s.nodeLabel ?? 'this node'}',
+          enabled: false,
+        ),
+      ],
+    );
+    return;
+  }
+  final action = await showActionMenu<String>(
+    context,
+    title: s.displayTitle,
+    position: position,
+    items: [
+      const ActionItem(
+        value: 'rename',
+        label: 'Rename',
+        icon: Icon(Icons.edit_outlined),
       ),
-    ),
+      if (s.canKill)
+        const ActionItem(
+          value: 'kill',
+          label: 'Kill',
+          icon: Icon(Icons.close),
+          danger: true,
+        ),
+    ],
   );
+  switch (action) {
+    case 'rename':
+      await renameSession(ax, s);
+    case 'kill':
+      await killSession(ax, s);
+  }
 }

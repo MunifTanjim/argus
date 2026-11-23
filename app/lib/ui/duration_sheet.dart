@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'adaptive_sheet.dart';
+
 Future<String?> pickUntil(
   BuildContext context, {
   required String indefiniteLabel,
@@ -12,24 +14,16 @@ Future<String?> pickUntil(
     ('8 hours', const Duration(hours: 8)),
     (indefiniteLabel, null),
   ];
-  return showModalBottomSheet<String>(
-    context: context,
-    builder: (ctx) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final (label, d) in options)
-            ListTile(
-              title: Text(label),
-              onTap: () => Navigator.pop(
-                ctx,
-                d == null
-                    ? indefinite
-                    : DateTime.now().toUtc().add(d).toIso8601String(),
-              ),
-            ),
-        ],
-      ),
-    ),
+  return showActionMenu<String>(
+    context,
+    items: [
+      for (final (label, d) in options)
+        ActionItem(
+          label: label,
+          value: d == null
+              ? indefinite
+              : DateTime.now().toUtc().add(d).toIso8601String(),
+        ),
+    ],
   );
 }

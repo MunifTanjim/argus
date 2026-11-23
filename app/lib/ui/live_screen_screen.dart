@@ -16,6 +16,7 @@ import '../state/terminal_prefs.dart';
 import '../state/terminals.dart';
 import '../transport/connection.dart';
 import '../util/sync_frames.dart';
+import 'adaptive_sheet.dart';
 import 'live_emulator.dart';
 
 
@@ -170,25 +171,18 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
 
   Future<void> _switchTerminal(List<NodeTerminal> siblings) async {
     final current = widget.terminal!;
-    final next = await showModalBottomSheet<NodeTerminal>(
-      context: context,
-      useRootNavigator: true,
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            for (final t in siblings)
-              ListTile(
-                leading: const Icon(Icons.terminal),
-                title: Text(t.title),
-                subtitle: Text(t.cwd),
-                selected: t.id == current.id,
-                trailing: t.id == current.id ? const Icon(Icons.check) : null,
-                onTap: () => Navigator.of(ctx).pop(t),
-              ),
-          ],
-        ),
-      ),
+    final next = await showActionMenu<NodeTerminal>(
+      context,
+      items: [
+        for (final t in siblings)
+          ActionItem(
+            value: t,
+            label: t.title,
+            icon: const Icon(Icons.terminal),
+            subtitle: t.cwd,
+            selected: t.id == current.id,
+          ),
+      ],
     );
     if (!mounted || next == null || next.id == current.id) return;
     unawaited(Navigator.of(context).pushReplacement(PageRouteBuilder(

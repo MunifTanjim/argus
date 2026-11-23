@@ -7,6 +7,7 @@ import 'package:re_highlight/languages/all.dart';
 import 'package:re_highlight/re_highlight.dart';
 import 'package:re_highlight/styles/all.dart';
 
+import 'adaptive_sheet.dart';
 import 'external_url.dart';
 import 'markdown_table.dart';
 import 'theme.dart';
@@ -502,40 +503,29 @@ Widget codeBarButton({
       onPressed: onTap,
     );
 
-/// Presents a bottom sheet offering to open [url] externally or copy it, so a
-/// tapped link isn't launched without confirmation.
-void showLinkActions(BuildContext context, String url) {
-  showModalBottomSheet<void>(
-    context: context,
-    useRootNavigator: true,
-    builder: (sheetCtx) {
-      ListTile action(IconData icon, String label, VoidCallback onTap) =>
-          ListTile(
-            leading: Icon(icon),
-            title: Text(label),
-            onTap: () {
-              Navigator.pop(sheetCtx);
-              onTap();
-            },
-          );
-      return SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text(url,
-                  style: const TextStyle(color: AppColors.dim, fontSize: 13),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis),
-            ),
-            action(Icons.open_in_new, 'Open link', () => openExternalUrl(url)),
-            action(Icons.copy, 'Copy link', () => copyToClipboard(context, url)),
-          ],
-        ),
-      );
-    },
+/// Offers to open [url] externally or copy it, so a tapped link isn't launched
+/// without confirmation.
+Future<void> showLinkActions(
+  BuildContext context,
+  String url, {
+  Offset? position,
+}) async {
+  final action = await showActionMenu<String>(
+    context,
+    title: url,
+    position: position,
+    items: const [
+      ActionItem(value: 'open', label: 'Open link', icon: Icon(Icons.open_in_new)),
+      ActionItem(value: 'copy', label: 'Copy link', icon: Icon(Icons.copy)),
+    ],
   );
+  if (!context.mounted) return;
+  switch (action) {
+    case 'open':
+      openExternalUrl(url);
+    case 'copy':
+      copyToClipboard(context, url);
+  }
 }
 
 /// Copies [text] to the clipboard and shows a brief confirmation snackbar when a

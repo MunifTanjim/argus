@@ -13,6 +13,7 @@ import 'nerd_icon.dart';
 import 'new_workspace_screen.dart';
 import 'setup_log_screen.dart';
 import 'spawn_dialog.dart';
+import 'adaptive_sheet.dart';
 import 'theme.dart';
 
 /// What an action needs after the sheet, drawer, or page that started it is
@@ -398,67 +399,50 @@ Future<void> runWorkspaceAction(
   }
 }
 
-Future<T?> _sheet<T>(
+Future<void> showProjectSheet(
   BuildContext context,
-  String title,
-  List<(T, String, Widget, bool)> items,
-) => showModalBottomSheet<T>(
-  context: context,
-  useRootNavigator: true,
-  builder: (ctx) => SafeArea(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        ListTile(
-          title: Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w600),
-          ),
-        ),
-        for (final (value, label, icon, danger) in items)
-          ListTile(
-            leading: IconTheme.merge(
-              data: IconThemeData(color: danger ? AppColors.error : null),
-              child: icon,
-            ),
-            title: Text(
-              label,
-              style: danger ? const TextStyle(color: AppColors.error) : null,
-            ),
-            onTap: () => Navigator.of(ctx).pop(value),
-          ),
-      ],
-    ),
-  ),
-);
-
-Future<void> showProjectSheet(BuildContext context, ProjectNode p) async {
+  ProjectNode p, {
+  Offset? position,
+}) async {
   final ax = ActionContext.of(context);
-  final a = await _sheet(context, p.name, [
-    for (final a in projectActionsFor(p))
-      (a, projectActionLabel(p, a), _projectIcon(a), false),
-  ]);
+  final a = await showActionMenu<ProjectAction>(
+    context,
+    title: p.name,
+    position: position,
+    items: [
+      for (final a in projectActionsFor(p))
+        ActionItem(
+          value: a,
+          label: projectActionLabel(p, a),
+          icon: _projectIcon(a),
+        ),
+    ],
+  );
   if (a != null) await runProjectAction(ax, p, a);
 }
 
 Future<void> showWorkspaceSheet(
   BuildContext context,
   ProjectNode p,
-  WorkspaceNode w,
-) async {
+  WorkspaceNode w, {
+  Offset? position,
+}) async {
   final actions = workspaceActionsFor(p, w);
   if (actions.isEmpty) return;
   final ax = ActionContext.of(context);
-  final a = await _sheet(context, '${p.name} · ${w.name}', [
-    for (final a in actions)
-      (
-        a,
-        workspaceActionLabel(a),
-        _workspaceIcon(a),
-        a == WorkspaceAction.forceRemove,
-      ),
-  ]);
+  final a = await showActionMenu<WorkspaceAction>(
+    context,
+    title: '${p.name} · ${w.name}',
+    position: position,
+    items: [
+      for (final a in actions)
+        ActionItem(
+          value: a,
+          label: workspaceActionLabel(a),
+          icon: _workspaceIcon(a),
+          danger: a == WorkspaceAction.forceRemove,
+        ),
+    ],
+  );
   if (a != null) await runWorkspaceAction(ax, p, w, a);
 }

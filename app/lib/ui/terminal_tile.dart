@@ -7,6 +7,7 @@ import '../state/gateway.dart';
 import '../state/projects_api.dart';
 import '../state/terminals.dart';
 import '../state/terminals_api.dart';
+import 'adaptive_sheet.dart';
 import 'live_screen_screen.dart';
 import 'project_actions.dart';
 import 'theme.dart';
@@ -43,34 +44,29 @@ class TerminalTile extends ConsumerWidget {
 
   final NodeTerminal terminal;
 
-  Future<void> _actions(BuildContext context, WidgetRef ref) async {
+  Future<void> _actions(
+    BuildContext context,
+    WidgetRef ref, {
+    Offset? position,
+  }) async {
     final t = terminal;
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      useRootNavigator: true,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: Text(t.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
-            ),
-            ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('Rename'),
-              onTap: () => Navigator.of(ctx).pop('rename'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.close, color: AppColors.error),
-              title: const Text('Kill', style: TextStyle(color: AppColors.error)),
-              onTap: () => Navigator.of(ctx).pop('kill'),
-            ),
-          ],
+    final action = await showActionMenu<String>(
+      context,
+      title: t.title,
+      position: position,
+      items: const [
+        ActionItem(
+          value: 'rename',
+          label: 'Rename',
+          icon: Icon(Icons.edit_outlined),
         ),
-      ),
+        ActionItem(
+          value: 'kill',
+          label: 'Kill',
+          icon: Icon(Icons.close),
+          danger: true,
+        ),
+      ],
     );
     if (!context.mounted || action == null) return;
     final api = ref.read(terminalsApiProvider);
