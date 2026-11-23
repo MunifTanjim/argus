@@ -7,7 +7,6 @@ import '../state/control.dart';
 import '../state/projects_api.dart';
 import 'adaptive_sheet.dart';
 import 'project_actions.dart';
-import 'theme.dart';
 
 /// Whether [s]'s node is too old for the app's session requests.
 bool sessionOutdated(ActionContext ax, Session s) =>
@@ -71,91 +70,75 @@ Future<bool> killSession(ActionContext ax, Session s) async {
   }
 }
 
+/// What a session action does when chosen.
+typedef SessionAction = Future<void> Function();
+
 /// The actions [s] offers: rename, and kill when it can be killed. When its
-/// node is too old for them, a note to upgrade it instead.
-List<Widget> sessionActionTiles(
-  BuildContext sheet,
+/// node is too old for them, a note to upgrade it instead. The long-press and
+/// right-click menu and the sidebar details panel both list these.
+List<ActionItem<SessionAction?>> sessionActionItems(
   ActionContext ax,
   Session s,
 ) {
   if (sessionOutdated(ax, s)) {
     return [
-      ListTile(
-        title: Text(
-          'Upgrade argus on ${s.nodeLabel ?? 'this node'}',
-          style: const TextStyle(color: AppColors.dim),
-        ),
+      ActionItem(
+        value: null,
+        label: 'Upgrade argus on ${s.nodeLabel ?? 'this node'}',
+        enabled: false,
+        muted: true,
       ),
     ];
   }
   return [
-    ListTile(
-      leading: const Icon(Icons.edit_outlined),
-      title: const Text('Rename'),
-      onTap: () {
-        Navigator.of(sheet).pop();
-        renameSession(ax, s);
-      },
+    ActionItem(
+      value: () => renameSession(ax, s),
+      label: 'Rename',
+      icon: const Icon(Icons.edit_outlined),
     ),
     if (s.canKill)
-      ListTile(
-        leading: const Icon(Icons.close, color: AppColors.error),
-        title: const Text('Kill', style: TextStyle(color: AppColors.error)),
-        onTap: () {
-          Navigator.of(sheet).pop();
-          killSession(ax, s);
-        },
+      ActionItem(
+        value: () => killSession(ax, s),
+        label: 'Kill',
+        icon: const Icon(Icons.close),
+        danger: true,
       ),
   ];
 }
 
-/// Opens [s]'s actions: rename, and kill when it can be killed. When its node
-/// is too old for them, a note to upgrade it instead.
+/// [sessionActionItems] as tiles for a panel opened as [sheet]; a tap closes
+/// the panel and runs the action.
+List<Widget> sessionActionTiles(
+  BuildContext sheet,
+  ActionContext ax,
+  Session s,
+) => [
+  for (final item in sessionActionItems(ax, s))
+    ListTile(
+      leading: actionItemIcon(item),
+      title: Text(item.label, style: actionItemLabelStyle(item)),
+      onTap: switch (item.value) {
+        null => null,
+        final run => () {
+          Navigator.of(sheet).pop();
+          run();
+        },
+      },
+    ),
+];
+
+/// Opens [s]'s [sessionActionItems] and runs the chosen one.
 Future<void> showSessionActions(
   BuildContext context,
   Session s, {
   Offset? position,
 }) async {
   final ax = ActionContext.of(context);
-  if (sessionOutdated(ax, s)) {
-    await showActionMenu<void>(
-      context,
-      title: s.displayTitle,
-      position: position,
-      items: [
-        ActionItem(
-          value: null,
-          label: 'Upgrade argus on ${s.nodeLabel ?? 'this node'}',
-          enabled: false,
-          muted: true,
-        ),
-      ],
-    );
-    return;
-  }
-  final action = await showActionMenu<String>(
+  final run = await showActionMenu<SessionAction?>(
     context,
     title: s.displayTitle,
     position: position,
-    items: [
-      const ActionItem(
-        value: 'rename',
-        label: 'Rename',
-        icon: Icon(Icons.edit_outlined),
-      ),
-      if (s.canKill)
-        const ActionItem(
-          value: 'kill',
-          label: 'Kill',
-          icon: Icon(Icons.close),
-          danger: true,
-        ),
-    ],
+    items: sessionActionItems(ax, s),
   );
-  switch (action) {
-    case 'rename':
-      await renameSession(ax, s);
-    case 'kill':
-      await killSession(ax, s);
-  }
+  await run?.call();
 }

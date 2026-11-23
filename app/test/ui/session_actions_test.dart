@@ -7,6 +7,8 @@ import 'package:argus/state/control.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/projects.dart';
 import 'package:argus/state/sessions.dart';
+import 'package:argus/ui/project_actions.dart';
+import 'package:argus/ui/session_actions.dart';
 import 'package:argus/ui/session_sections_list.dart';
 import 'package:argus/ui/theme.dart';
 import 'package:argus/ui/sidebar_sessions_list.dart';
@@ -95,7 +97,48 @@ Future<void> _renameTo(WidgetTester tester, String name) async {
   await tester.pumpAndSettle();
 }
 
+Future<ActionContext> _actionContext(
+  WidgetTester tester, {
+  Set<String> outdated = const {},
+}) async {
+  late ActionContext ax;
+  await tester.pumpWidget(ProviderScope(
+    overrides: [outdatedNodeIdsProvider.overrideWithValue(outdated)],
+    child: MaterialApp(
+      home: Scaffold(
+        body: Builder(builder: (context) {
+          ax = ActionContext.of(context);
+          return const SizedBox();
+        }),
+      ),
+    ),
+  ));
+  return ax;
+}
+
 void main() {
+  testWidgets('sessionActionItems lists rename and kill, kill as danger',
+      (tester) async {
+    final ax = await _actionContext(tester);
+    final items = sessionActionItems(ax, _s('A:s1'));
+    expect([for (final i in items) i.label], ['Rename', 'Kill']);
+    expect([for (final i in items) i.danger], [false, true]);
+    expect(items.every((i) => i.value != null), isTrue);
+    final vscode = sessionActionItems(ax, _s('A:s1', frontend: 'vscode'));
+    expect([for (final i in vscode) i.label], ['Rename']);
+  });
+
+  testWidgets('sessionActionItems offers only a muted upgrade note for an outdated node',
+      (tester) async {
+    final ax = await _actionContext(tester, outdated: const {'A'});
+    final items = sessionActionItems(ax, _s('A:s1'));
+    expect(items, hasLength(1));
+    expect(items.single.label, 'Upgrade argus on dev');
+    expect(items.single.value, isNull);
+    expect(items.single.enabled, isFalse);
+    expect(items.single.muted, isTrue);
+  });
+
   testWidgets('an outdated node shows a dim note that does not close the sheet',
       (tester) async {
     await _pumpList(tester, _Repo(), _s('A:s1'), outdated: const {'A'});

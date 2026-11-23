@@ -88,14 +88,16 @@ const _sidePanelWidth = 400.0;
 
 const _titleStyle = TextStyle(fontWeight: FontWeight.w600);
 
-Widget? _icon(ActionItem<Object?> item) => item.icon == null
+/// [item]'s icon, red for a danger item.
+Widget? actionItemIcon(ActionItem<Object?> item) => item.icon == null
     ? null
     : IconTheme.merge(
         data: IconThemeData(color: item.danger ? AppColors.error : null),
         child: item.icon!,
       );
 
-TextStyle? _labelStyle(ActionItem<Object?> item) => item.danger
+/// [item]'s label style: red for a danger item, dim for a muted one.
+TextStyle? actionItemLabelStyle(ActionItem<Object?> item) => item.danger
     ? const TextStyle(color: AppColors.error)
     : item.muted
     ? const TextStyle(color: AppColors.dim)
@@ -127,8 +129,8 @@ Future<T?> _showSheet<T>(
             ),
           for (final item in items)
             ListTile(
-              leading: _icon(item),
-              title: Text(item.label, style: _labelStyle(item)),
+              leading: actionItemIcon(item),
+              title: Text(item.label, style: actionItemLabelStyle(item)),
               subtitle: item.subtitle == null ? null : Text(item.subtitle!),
               selected: item.selected,
               trailing: item.selected ? const Icon(Icons.check) : null,
@@ -185,7 +187,7 @@ Future<T?> _showPopup<T>(
           child: Row(
             children: [
               if (item.icon != null) ...[
-                _icon(item)!,
+                actionItemIcon(item)!,
                 const SizedBox(width: 12),
               ],
               Flexible(
@@ -193,7 +195,7 @@ Future<T?> _showPopup<T>(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(item.label, style: _labelStyle(item)),
+                    Text(item.label, style: actionItemLabelStyle(item)),
                     if (item.subtitle != null)
                       Text(
                         item.subtitle!,

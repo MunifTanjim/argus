@@ -5,7 +5,6 @@ import 'package:argus/models/project.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/models/terminal.dart';
 import 'package:argus/state/gateway.dart';
-import 'package:argus/state/left_sidebar.dart';
 import 'package:argus/state/projects.dart';
 import 'package:argus/state/sessions.dart';
 import 'package:argus/state/terminals.dart';
@@ -111,7 +110,7 @@ void main() {
     _desktop(tester);
     await _pump(tester, SessionSectionsList(sessions: [_s('A:s1')]));
     await _rightClick(tester, find.text('Old'));
-    expect(find.byType(PopupMenuItem<String>), findsWidgets);
+    expect(find.byType(PopupMenuItem<SessionAction?>), findsWidgets);
     expect(find.text('Rename'), findsOneWidget);
     expect(find.text('Kill'), findsOneWidget);
   });
@@ -190,7 +189,7 @@ void main() {
       );
       await gesture.up();
       await tester.pumpAndSettle();
-      final items = find.byType(PopupMenuItem<String>);
+      final items = find.byType(PopupMenuItem<SessionAction?>);
       expect(items, findsWidgets);
       for (final e in items.evaluate()) {
         final r = tester.getRect(find.byWidget(e.widget));
