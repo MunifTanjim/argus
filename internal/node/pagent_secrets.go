@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 
@@ -179,9 +180,44 @@ func (d *Node) handlePAgentSecretSet(ctx context.Context, params json.RawMessage
 	return struct{}{}, nil
 }
 
-func (d *Node) storeSecret(ctx context.Context, a pagent.Agent, name, description, value string) error {
+// reservedEnv are environment variables a secret can't replace: the shell,
+// the dynamic loader, the terminal and Argus itself depend on them.
+var reservedEnv = []string{
+	"PATH", "HOME", "USER", "LOGNAME", "SHELL", "PWD", "OLDPWD", "TERM", "TMPDIR", "TZ",
+	"LANG", "IFS", "ENV", "BASH_ENV", "CDPATH", "SHLVL", "PS1", "PS2", "PS4", "SSH_AUTH_SOCK",
+}
+
+var reservedEnvPrefixes = []string{"LC_", "LD_", "DYLD_", "XDG_", "TMUX", "ARGUS_"}
+
+// secretNameReserved reports whether name is an environment variable a secret
+// can't set.
+func secretNameReserved(name string) bool {
+	if slices.Contains(reservedEnv, name) {
+		return true
+	}
+	for _, p := range reservedEnvPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkSecretName refuses names that are not like GH_TOKEN or that are
+// reserved.
+func checkSecretName(name string) error {
 	if !pagent.ValidSecretName(name) {
 		return pagentErr("secret name %q must be like GH_TOKEN: capital letters, digits and _", name)
+	}
+	if secretNameReserved(name) {
+		return pagentErr("secret name %q is a reserved environment variable", name)
+	}
+	return nil
+}
+
+func (d *Node) storeSecret(ctx context.Context, a pagent.Agent, name, description, value string) error {
+	if err := checkSecretName(name); err != nil {
+		return err
 	}
 	if value == "" {
 		return pagentErr("secret value is empty")
@@ -262,8 +298,8 @@ func (d *Node) mcpRequestSecret(ctx context.Context, caller callerRef, p request
 		return nil, err
 	}
 	name := strings.TrimSpace(p.Name)
-	if !pagent.ValidSecretName(name) {
-		return nil, fmt.Errorf("name %q must be like GH_TOKEN: capital letters, digits and _", name)
+	if err := checkSecretName(name); err != nil {
+		return nil, err
 	}
 	if _, ok := d.reg.Get(caller.Local.ID); !ok {
 		return nil, fmt.Errorf("session not found")

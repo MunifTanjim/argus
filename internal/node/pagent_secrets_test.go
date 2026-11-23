@@ -205,3 +205,14 @@ func TestCaptureRedactsSecrets(t *testing.T) {
 		t.Fatalf("prompts = %v", r.ex.prompts)
 	}
 }
+
+func TestSecretReservedNames(t *testing.T) {
+	r := newMemRig(t, 0)
+	useSecretKey(t, r.d)
+	for _, name := range []string{"PATH", "HOME", "LD_PRELOAD", "ARGUS_SOCKET", "LC_ALL"} {
+		if _, err := callPAgent[struct{}](t, r.d.handlePAgentSecretSet, api.PAgentSecretSetParams{AgentID: r.a.ID, Name: name, Value: "x"}); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	setSecret(t, r.d, r.a.ID, "PATH_TOKEN", "value")
+}
