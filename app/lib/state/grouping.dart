@@ -94,10 +94,19 @@ List<NodeRef> nodesFromSessions(Iterable<Session> sessions) {
 }
 
 /// The dimension that groups the home sessions list.
-enum GroupBy { host, project, workspace, agent, status }
+enum GroupBy { host, project, workspace, agent, status, pagent }
 
 /// What leads a section's header; the UI maps it to an icon.
-enum SectionIcon { needsYou, host, project, folder, branch, agent, status }
+enum SectionIcon {
+  needsYou,
+  host,
+  project,
+  folder,
+  branch,
+  agent,
+  status,
+  pagent,
+}
 
 class SessionSection {
   final String title;
@@ -172,8 +181,8 @@ class _Group {
   return id == null || id.isEmpty ? null : lookupWorkspace(projects, id);
 }
 
-_Group _groupOf(
-    Session s, GroupBy by, List<ProjectNode> projects, bool multiNode) {
+_Group _groupOf(Session s, GroupBy by, List<ProjectNode> projects,
+    bool multiNode, Map<String, String> pagentNames) {
   switch (by) {
     case GroupBy.host:
       final h = _host(s);
@@ -207,6 +216,13 @@ _Group _groupOf(
       return s.agent.isEmpty
           ? _Group.other(SectionIcon.agent)
           : _Group(s.agent, agentLabel(s.agent), SectionIcon.agent);
+    case GroupBy.pagent:
+      if (s.pagentId.isEmpty) {
+        return _Group('', 'no agent', SectionIcon.pagent, rank: _rankOther);
+      }
+      final id = s.pagentCompositeId;
+      final name = pagentNames[id] ?? '';
+      return _Group(id, name.isEmpty ? s.pagentId : name, SectionIcon.pagent);
     case GroupBy.status:
       final i = _statusOrder.indexOf(s.status);
       return _Group(
@@ -222,6 +238,7 @@ List<SessionSection> buildSections(
   Iterable<Session> sessions, {
   GroupBy by = GroupBy.host,
   List<ProjectNode> projects = const [],
+  Map<String, String> pagentNames = const {},
 }) {
   final all = sessions.toList();
   final multiNode = nodesFromSessions(all).isNotEmpty;
@@ -238,7 +255,7 @@ List<SessionSection> buildSections(
   final groups = <String, _Group>{};
   for (final s in all) {
     if (s.status == SessionStatus.awaitingInput) continue;
-    final g = _groupOf(s, by, projects, multiNode);
+    final g = _groupOf(s, by, projects, multiNode, pagentNames);
     (groups[g.id] ??= g).sessions.add(s);
   }
   final sorted = groups.values.toList()..sort((a, b) => a.compareTo(b));

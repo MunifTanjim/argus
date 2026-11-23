@@ -307,4 +307,38 @@ void main() {
       expect(result.first.id, 'valid');
     });
   });
+
+  test('persistent agent groups by agent name, plain sessions last', () {
+    Session pa(String id, String node, String agent) =>
+        Session.fromJson(jsonDecode(jsonEncode({
+          'id': '$node:$id',
+          'agent': 'claude',
+          'status': 'working',
+          'source': 'hooked',
+          'tmux': {
+            'server': 'argus',
+            'pane_id': '%1',
+            'session_name': 's',
+            'window_index': 0,
+            'current_path': '/p',
+          },
+          'node_id': node,
+          'node_label': node,
+          if (agent.isNotEmpty) 'pagent_id': agent,
+          if (agent.isNotEmpty) 'pagent_thread_id': 't-$id',
+        })) as Map<String, dynamic>);
+    final s1 = pa('s1', 'a', 'x1');
+    expect(s1.pagentId, 'x1');
+    expect(s1.pagentCompositeId, 'a:x1');
+    expect(s1.pagentThreadCompositeId, 'a:t-s1');
+    final sections = buildSections(
+      [pa('s3', 'a', ''), s1, pa('s2', 'b', 'x1'), pa('s4', 'a', 'x2')],
+      by: GroupBy.pagent,
+      pagentNames: {'a:x1': 'scout', 'b:x1': 'beta', 'a:x2': 'alpha'},
+    );
+    expect(sections.map((s) => s.title), ['alpha', 'beta', 'scout', 'no agent']);
+    expect(sections.last.other, isTrue);
+    expect(sections[2].sessions.map((s) => s.id), ['a:s1']);
+    expect(sections.map((s) => s.icon).toSet(), {SectionIcon.pagent});
+  });
 }

@@ -269,6 +269,11 @@ class Session {
   final String? nodeLabel;
   final bool offline;
 
+  /// The persistent agent and thread the session runs for, node-local; empty
+  /// for a plain session.
+  final String pagentId;
+  final String pagentThreadId;
+
   /// Node-computed on emit: true for a real pane, or a paneless session whose
   /// agent can spawn a viewer here.
   final bool canOpenTerminal;
@@ -301,6 +306,8 @@ class Session {
     this.nodeId,
     this.nodeLabel,
     this.offline = false,
+    this.pagentId = '',
+    this.pagentThreadId = '',
     this.canOpenTerminal = false,
     this.canPrompt = false,
   });
@@ -339,9 +346,23 @@ class Session {
         nodeId: j['node_id'] as String?,
         nodeLabel: j['node_label'] as String?,
         offline: j['offline'] as bool? ?? false,
+        pagentId: j['pagent_id'] as String? ?? '',
+        pagentThreadId: j['pagent_thread_id'] as String? ?? '',
         canOpenTerminal: j['can_open_terminal'] as bool? ?? false,
         canPrompt: j['can_prompt'] as bool? ?? false,
       );
+
+  /// [pagentId] as pagent.list reports agent ids: composited with the node id,
+  /// which the session's own field is not. Empty for a plain session.
+  String get pagentCompositeId => pagentId.isEmpty || (nodeId ?? '').isEmpty
+      ? pagentId
+      : '$nodeId:$pagentId';
+
+  /// [pagentThreadId] composited with the node id, as thread lists report it.
+  String get pagentThreadCompositeId =>
+      pagentThreadId.isEmpty || (nodeId ?? '').isEmpty
+          ? pagentThreadId
+          : '$nodeId:$pagentThreadId';
 
   /// The label shown wherever a session needs a title: repo, else name, else id.
   String get displayTitle => (repo?.isNotEmpty ?? false)
