@@ -1,6 +1,5 @@
 import 'package:argus/models/changes.dart';
 import 'package:argus/models/entry.dart';
-import 'package:argus/models/enums.dart';
 import 'package:argus/models/project.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/models/workspace_files.dart';
@@ -24,8 +23,6 @@ import 'package:argus/ui/workspace_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import '../support/fake_gateway_client.dart';
 
 class _MemKv implements SecureKv {
   final m = <String, String>{};

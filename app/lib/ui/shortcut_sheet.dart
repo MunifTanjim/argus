@@ -10,7 +10,7 @@ Future<void> showShortcutSheet(BuildContext context) {
   return showDialog<void>(
     context: context,
     builder: (_) => const _ShortcutSheet(),
-  );
+  ).whenComplete(() => _sheetOpen = false);
 }
 
 class _ShortcutSheet extends StatefulWidget {
@@ -21,6 +21,7 @@ class _ShortcutSheet extends StatefulWidget {
 }
 
 class _ShortcutSheetState extends State<_ShortcutSheet> {
+  // Also reset here: a dialog torn down with its navigator never completes.
   @override
   void dispose() {
     _sheetOpen = false;

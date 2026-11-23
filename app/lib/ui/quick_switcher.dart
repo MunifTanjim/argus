@@ -15,7 +15,7 @@ sealed class SwitcherEntry {
   String get title;
   String get subtitle;
 
-  /// What the query is matched against, lowercase-insensitively.
+  /// What the query is matched against, case-insensitively.
   Iterable<String> get _haystack;
 }
 
@@ -97,7 +97,7 @@ Future<void> showQuickSwitcher(BuildContext context) {
   return showDialog<void>(
     context: context,
     builder: (_) => const _QuickSwitcher(),
-  );
+  ).whenComplete(() => _switcherOpen = false);
 }
 
 class _QuickSwitcher extends ConsumerStatefulWidget {
@@ -112,6 +112,7 @@ class _QuickSwitcherState extends ConsumerState<_QuickSwitcher> {
   int _selected = 0;
   final _rowKeys = <int, GlobalKey>{};
 
+  // Also reset here: a dialog torn down with its navigator never completes.
   @override
   void dispose() {
     _switcherOpen = false;
