@@ -355,6 +355,88 @@ void main() {
     expect(rows[1].hasFocus, isTrue);
   });
 
+  testWidgets('J and K at the ends of a list do not move focus into a text field',
+      (tester) async {
+    _platform(TargetPlatform.macOS);
+    final rows = [FocusNode(), FocusNode()];
+    for (final n in rows) {
+      addTearDown(n.dispose);
+    }
+    await _pump(
+      tester,
+      Column(children: [
+        const TextField(),
+        for (final (i, n) in rows.indexed)
+          TextButton(focusNode: n, onPressed: () {}, child: Text('row $i')),
+        const TextField(),
+      ]),
+    );
+    rows[1].requestFocus();
+    await tester.pump();
+    await _press(tester, LogicalKeyboardKey.keyJ, character: 'j');
+    expect(rows[1].hasFocus, isTrue);
+    expect(textInputHasFocus(), isFalse);
+
+    rows[0].requestFocus();
+    await tester.pump();
+    await _press(tester, LogicalKeyboardKey.keyK, character: 'k');
+    expect(rows[0].hasFocus, isTrue);
+    expect(textInputHasFocus(), isFalse);
+  });
+
+  testWidgets('J at the last row of a route does not leave it for a text field',
+      (tester) async {
+    _platform(TargetPlatform.macOS);
+    final row = FocusNode();
+    addTearDown(row.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: DesktopShortcuts(
+        onBack: () {},
+        onSpawn: () {},
+        onSettings: () {},
+        onQuickSwitcher: () {},
+        onShortcutSheet: () {},
+        child: Scaffold(
+          body: Column(children: [
+            Expanded(
+              child: Navigator(
+                onGenerateRoute: (s) => MaterialPageRoute(
+                  settings: s,
+                  builder: (_) => TextButton(
+                      focusNode: row, onPressed: () {}, child: const Text('row')),
+                ),
+              ),
+            ),
+            const TextField(),
+          ]),
+        ),
+      ),
+    ));
+    await tester.pump();
+    row.requestFocus();
+    await tester.pump();
+    await _press(tester, LogicalKeyboardKey.keyJ, character: 'j');
+    expect(textInputHasFocus(), isFalse);
+    expect(row.hasFocus, isTrue);
+  });
+
+  testWidgets('/ and Cmd+L pass the key on when no composer is mounted',
+      (tester) async {
+    _platform(TargetPlatform.macOS);
+    await _pump(tester, const Text('no session'));
+    expect(await _chord(tester, LogicalKeyboardKey.keyL), isFalse);
+    expect(await _press(tester, LogicalKeyboardKey.slash, character: '/'),
+        isFalse);
+
+    final detached = FocusNode();
+    addTearDown(detached.dispose);
+    activeComposerFocus.value = detached;
+    addTearDown(() => activeComposerFocus.value = null);
+    expect(await _chord(tester, LogicalKeyboardKey.keyL), isFalse);
+    expect(await _press(tester, LogicalKeyboardKey.slash, character: '/'),
+        isFalse);
+  });
+
   testWidgets('/ does not focus the composer of a session under another screen',
       (tester) async {
     final c = await _shell(tester);

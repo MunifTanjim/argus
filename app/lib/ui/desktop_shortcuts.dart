@@ -13,12 +13,51 @@ final ValueNotifier<FocusNode?> activeComposerFocus = ValueNotifier(null);
 /// dispose.
 final Set<FocusNode> liveTerminalFocusNodes = {};
 
-/// Whether the primary focus is inside an [EditableText].
-bool textInputHasFocus() {
-  final ctx = primaryFocus?.context;
+bool _isTextInput(FocusNode? node) {
+  final ctx = node?.context;
   if (ctx == null) return false;
   return ctx.widget is EditableText ||
       ctx.findAncestorWidgetOfExactType<EditableText>() != null;
+}
+
+/// Whether the primary focus is inside an [EditableText].
+bool textInputHasFocus() => _isTextInput(primaryFocus);
+
+/// Moves focus to the next or previous traversable widget, unless that is a
+/// text field: J and K at the end of a list stay on its last row. They also
+/// stay at the edge of a route instead of leaving it.
+void _moveFocusSkippingText({required bool forward}) {
+  final current = primaryFocus;
+  if (current == null) return;
+  // A route's scope hands the edge to its parent scope's own policy, which
+  // would skip the text field check below.
+  final scope = current.nearestScope;
+  final edge = scope?.traversalEdgeBehavior;
+  if (edge == TraversalEdgeBehavior.parentScope) {
+    scope!.traversalEdgeBehavior = TraversalEdgeBehavior.stop;
+  }
+  try {
+    _policyMove(current, forward: forward);
+  } finally {
+    if (edge != null) scope!.traversalEdgeBehavior = edge;
+  }
+}
+
+void _policyMove(FocusNode current, {required bool forward}) {
+  final policy = ReadingOrderTraversalPolicy(
+    requestFocusCallback:
+        (node, {alignmentPolicy, alignment, duration, curve}) {
+      if (_isTextInput(node)) return;
+      FocusTraversalPolicy.defaultTraversalRequestFocusCallback(
+        node,
+        alignmentPolicy: alignmentPolicy,
+        alignment: alignment,
+        duration: duration,
+        curve: curve,
+      );
+    },
+  );
+  forward ? policy.next(current) : policy.previous(current);
 }
 
 bool liveTerminalHasFocus() => liveTerminalFocusNodes.any((n) => n.hasFocus);
@@ -102,7 +141,11 @@ class _DesktopShortcutsState extends State<DesktopShortcuts> {
     return ctx != null && ModalRoute.of(ctx) is PopupRoute;
   }
 
-  void _focusComposer() => activeComposerFocus.value?.requestFocus();
+  // Null when no composer is mounted, so `/` and Mod+L pass the key on.
+  static VoidCallback? _focusComposer() {
+    final node = activeComposerFocus.value;
+    return (node?.context?.mounted ?? false) ? node!.requestFocus : null;
+  }
 
   static bool _modOnly() {
     final kb = HardwareKeyboard.instance;
@@ -116,7 +159,7 @@ class _DesktopShortcutsState extends State<DesktopShortcuts> {
     if (k == LogicalKeyboardKey.keyK) return w.onQuickSwitcher;
     if (k == LogicalKeyboardKey.keyN) return w.onSpawn;
     if (k == LogicalKeyboardKey.bracketLeft) return w.onBack;
-    if (k == LogicalKeyboardKey.keyL) return _focusComposer;
+    if (k == LogicalKeyboardKey.keyL) return _focusComposer();
     if (k == LogicalKeyboardKey.comma) return w.onSettings;
     final tab = _tabKeys.indexOf(k);
     if (tab >= 0) return () => selectVisibleTab(tab);
@@ -138,17 +181,15 @@ class _DesktopShortcutsState extends State<DesktopShortcuts> {
         (shift && k == LogicalKeyboardKey.slash);
     if (question) return _guardB ? widget.onShortcutSheet : null;
     if (shift || !_guardB) return null;
-    if (k == LogicalKeyboardKey.slash) {
-      return activeComposerFocus.value == null ? null : _focusComposer;
-    }
+    if (k == LogicalKeyboardKey.slash) return _focusComposer();
     if (k == LogicalKeyboardKey.escape) {
       return _popupOnTop() ? null : widget.onBack;
     }
     if (k == LogicalKeyboardKey.keyJ) {
-      return () => FocusScope.of(primaryFocus!.context!).nextFocus();
+      return () => _moveFocusSkippingText(forward: true);
     }
     if (k == LogicalKeyboardKey.keyK) {
-      return () => FocusScope.of(primaryFocus!.context!).previousFocus();
+      return () => _moveFocusSkippingText(forward: false);
     }
     return null;
   }
