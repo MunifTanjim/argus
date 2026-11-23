@@ -66,6 +66,7 @@ const (
 	ReasonRepeat     = "the user denied this earlier in this thread"
 	ReasonNever      = "this node does not allow unattended agent work to run actions"
 	ReasonUnattended = "not allowed for unattended work — add an approval rule to allow it"
+	ReasonProtected  = "changes the agent's approval rules, git hooks or settings — the user must approve it"
 )
 
 // Decide applies the approval order: floors, the node's execution policy, the
@@ -77,6 +78,9 @@ func Decide(a Action, in DecideInput) Decision {
 		started = a.StartedBy
 	}
 	unattended := started != StartedByYou
+	// Protected writes are never allowed by a hook, rule, grant or the
+	// execution policy.
+	protected := protectedWrite(a)
 	classes := a.Class
 	if len(classes) == 0 {
 		classes = Classify(a)
@@ -99,7 +103,11 @@ func Decide(a Action, in DecideInput) Decision {
 	// 3. Policy hook, in any mode but shadow.
 	if h := in.Hook; h != nil && h.Mode != HookShadow {
 		switch h.Decision {
-		case OutcomeAllow, OutcomeAsk, OutcomeDeny:
+		case OutcomeAllow:
+			if !protected {
+				return Decision{Outcome: h.Decision, By: ByHook, Reason: h.Reason}
+			}
+		case OutcomeAsk, OutcomeDeny:
 			return Decision{Outcome: h.Decision, By: ByHook, Reason: h.Reason}
 		}
 	}
@@ -110,7 +118,7 @@ func Decide(a Action, in DecideInput) Decision {
 	rank := map[string]int{OutcomeAllow: 1, OutcomeAsk: 2, OutcomeDeny: 3}
 	for _, rules := range [][]Rule{in.AgentRules, in.GlobalRules} {
 		for _, r := range rules {
-			if r.Validate() != nil || r.Expired(in.Now) || !r.matches(a, started) {
+			if r.Validate() != nil || r.Expired(in.Now) || protected && r.Decision == OutcomeAllow || !r.matches(a, started) {
 				continue
 			}
 			if rank[r.Decision] > rank[best] {
@@ -121,7 +129,7 @@ func Decide(a Action, in DecideInput) Decision {
 	if best == OutcomeDeny {
 		return Decision{Outcome: OutcomeDeny, By: ByRule, Rule: bestRule.String(), Reason: noteOr(bestRule, "denied by an approval rule")}
 	}
-	if _, ok := in.Grants[a.GrantKey()]; ok {
+	if _, ok := in.Grants[a.GrantKey()]; ok && !protected {
 		return Decision{Outcome: OutcomeAllow, By: ByGrant, Reason: "allowed for this thread"}
 	}
 	if best != "" {
@@ -129,6 +137,12 @@ func Decide(a Action, in DecideInput) Decision {
 	}
 
 	// 5. Defaults.
+	if protected {
+		if unattended {
+			return Decision{Outcome: OutcomeDeny, By: ByDefault, Reason: ReasonProtected}
+		}
+		return Decision{Outcome: OutcomeAsk, By: ByDefault, Reason: ReasonProtected}
+	}
 	classed := len(classes) > 0
 	switch {
 	case in.Execution == ExecutionAllow && (unattended || !classed):

@@ -24,12 +24,16 @@ func Classify(a Action) []string {
 	switch kindOf(a.Tool) {
 	case kindShell:
 		for _, c := range shellCommands(a.Input) {
+			if c.opaque {
+				outward = true
+				continue
+			}
 			o, i, s := classifyCommand(c)
-			outward, irreversible, security = outward || o, irreversible || i, security || s
+			outward, irreversible, security = outward || o, irreversible || i, security || s || writesProtected(c)
 		}
 	case kindFile:
 		for _, p := range filePaths(a.Tool, a.Input) {
-			if sensitivePath(p) {
+			if sensitivePath(p) || protectedPath(p) {
 				security = true
 			}
 		}
@@ -308,6 +312,90 @@ func sensitivePath(p string) bool {
 			return false
 		}
 		return true
+	}
+	return false
+}
+
+// protectedPath reports whether writing p could change what the agent is
+// allowed to do: its agent.yaml, the node's approvals.yaml, anything under
+// .git (hooks and config run on Argus's commits) and Claude settings.
+func protectedPath(p string) bool {
+	parts := strings.Split(cleanPath(p), "/")
+	for i, part := range parts {
+		if part == ".git" || part == ".claude" && i+1 < len(parts) && strings.HasPrefix(parts[i+1], "settings") {
+			return true
+		}
+	}
+	base := parts[len(parts)-1]
+	return base == "agent.yaml" || base == "approvals.yaml"
+}
+
+// writesProtected reports whether a shell command writes a protected path:
+// through a redirection, tee, cp/mv/ln/install, sed -i, rm, chmod, or by
+// setting the repository's git config.
+func writesProtected(c command) bool {
+	for i, a := range c.args {
+		op := strings.TrimLeft(a, "0123456789&")
+		if !strings.HasPrefix(op, ">") {
+			continue
+		}
+		target := strings.TrimLeft(op, ">|")
+		if target == "" && i+1 < len(c.args) {
+			target = c.args[i+1]
+		}
+		if target != "" && protectedPath(target) {
+			return true
+		}
+	}
+	anyProtected := func(ws []string) bool { return slices.ContainsFunc(ws, protectedPath) }
+	switch c.prog {
+	case "tee", "rm", "unlink", "chmod", "truncate":
+		return anyProtected(positional(c.args, nil))
+	case "sed":
+		return (hasShort(c.args, 'i') || hasLong(c.args, "--in-place")) && anyProtected(positional(c.args, nil))
+	case "cp", "mv", "ln", "install":
+		pos := positional(c.args, map[string]bool{"-t": true, "--target-directory": true})
+		for i, a := range c.args {
+			if (a == "-t" || a == "--target-directory") && i+1 < len(c.args) && protectedPath(c.args[i+1]) {
+				return true
+			}
+			if v, ok := strings.CutPrefix(a, "--target-directory="); ok && protectedPath(v) {
+				return true
+			}
+		}
+		return len(pos) > 0 && protectedPath(pos[len(pos)-1])
+	case "git":
+		pos := positional(c.args, gitOptsWithArg)
+		if len(pos) == 0 || pos[0] != "config" || hasLong(c.args, "--global", "--system") {
+			return false
+		}
+		rest := pos[1:]
+		if len(rest) > 0 && (rest[0] == "set" || rest[0] == "unset" || rest[0] == "edit") {
+			return true
+		}
+		return len(rest) >= 2 || hasShort(c.args, 'e') ||
+			hasLong(c.args, "--edit", "--add", "--unset", "--unset-all", "--replace-all", "--rename-section", "--remove-section")
+	}
+	return false
+}
+
+// cleanPath is p cleaned, with forward slashes.
+func cleanPath(p string) string {
+	return filepath.ToSlash(filepath.Clean(p))
+}
+
+// protectedWrite reports whether the action writes a protected path. No rule,
+// grant, hook or execution policy allows such an action without asking.
+func protectedWrite(a Action) bool {
+	switch kindOf(a.Tool) {
+	case kindShell:
+		return slices.ContainsFunc(shellCommands(a.Input), writesProtected)
+	case kindFile:
+		paths := filePaths(a.Tool, a.Input)
+		if len(paths) == 0 && a.Target != "" {
+			paths = []string{a.Target}
+		}
+		return slices.ContainsFunc(paths, protectedPath)
 	}
 	return false
 }

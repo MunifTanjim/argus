@@ -99,9 +99,10 @@ func glob(pattern, s string) bool {
 	return pi == len(p)
 }
 
-// matches reports whether the rule applies to the action. Shell chains are
-// matched by every program: an allow rule needs all of them to match, deny and
-// ask rules need one.
+// matches reports whether the rule applies to the action. Shell chains and
+// multi-file edits are matched by every program or path: an allow rule needs
+// all of them to match, deny and ask rules need one. An allow rule never
+// matches a shell line with a command the parser cannot read.
 func (r Rule) matches(a Action, startedBy string) bool {
 	if r.Tool != "" && !glob(r.Tool, a.Tool) {
 		return false
@@ -112,21 +113,58 @@ func (r Rule) matches(a Action, startedBy string) bool {
 	if len(r.StartedBy) > 0 && !slices.Contains(r.StartedBy, startedBy) {
 		return false
 	}
-	if r.Target == "" {
-		return true
-	}
-	if kindOf(a.Tool) == kindShell {
-		if cmds := shellCommands(a.Input); len(cmds) > 0 {
+	allow := r.Decision == OutcomeAllow
+	switch kindOf(a.Tool) {
+	case kindShell:
+		cmds := shellCommands(a.Input)
+		if allow && slices.ContainsFunc(cmds, func(c command) bool { return c.opaque }) {
+			return false
+		}
+		if r.Target == "" {
+			return true
+		}
+		if len(cmds) > 0 {
 			match := func(c command) bool {
 				return glob(r.Target, c.prog) || strings.Contains(r.Target, " ") && glob(r.Target, c.String())
 			}
-			if r.Decision == OutcomeAllow {
-				return slices.IndexFunc(cmds, func(c command) bool { return !match(c) }) < 0
-			}
-			return slices.IndexFunc(cmds, match) >= 0
+			return matchAll(cmds, match, allow)
 		}
+	case kindFile:
+		if r.Target == "" {
+			return true
+		}
+		paths := filePaths(a.Tool, a.Input)
+		if len(paths) == 0 {
+			paths = []string{a.Target}
+		}
+		return matchAll(paths, func(p string) bool { return pathMatches(r.Target, p) }, allow)
 	}
-	return glob(r.Target, a.Target)
+	return r.Target == "" || glob(r.Target, a.Target)
+}
+
+// matchAll reports whether every item matches when all is set, else whether
+// one does.
+func matchAll[T any](items []T, match func(T) bool, all bool) bool {
+	if all {
+		return !slices.ContainsFunc(items, func(x T) bool { return !match(x) })
+	}
+	return slices.ContainsFunc(items, match)
+}
+
+func climbs(p string) bool { return p == ".." || strings.HasPrefix(p, "../") }
+
+// pathMatches matches a file path against a target pattern after cleaning
+// both. A relative pattern never matches a path that climbs out of the
+// working directory with "..".
+func pathMatches(pattern, p string) bool {
+	if p == "" {
+		return false
+	}
+	cp, cpat := cleanPath(p), cleanPath(pattern)
+	if climbs(cp) && !climbs(cpat) && !strings.HasPrefix(cpat, "/") && !strings.HasPrefix(cpat, "~") {
+		return false
+	}
+	return glob(cpat, cp)
 }
 
 // DenyKey identifies the exact operation, for the thread's denied set.
@@ -148,6 +186,17 @@ func (a Action) GrantKey() string {
 		}
 		slices.Sort(progs)
 		target = strings.Join(progs, " ")
+	} else if kindOf(a.Tool) == kindFile {
+		var paths []string
+		for _, p := range filePaths(a.Tool, a.Input) {
+			if p = cleanPath(p); !slices.Contains(paths, p) {
+				paths = append(paths, p)
+			}
+		}
+		if len(paths) > 0 {
+			slices.Sort(paths)
+			target = strings.Join(paths, "\x00")
+		}
 	}
 	return a.Tool + "\x00" + target + "\x00" + strings.Join(a.Class, ",")
 }
