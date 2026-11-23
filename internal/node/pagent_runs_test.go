@@ -2,8 +2,8 @@ package node
 
 import (
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
