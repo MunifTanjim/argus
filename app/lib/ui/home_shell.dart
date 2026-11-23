@@ -17,6 +17,7 @@ import 'adaptive_nav.dart';
 import 'desktop_shortcuts.dart';
 import 'history_screen.dart';
 import 'project_drawer.dart';
+import 'quick_switcher.dart';
 import 'responsive.dart';
 import 'route_observer.dart';
 import 'session_detail_screen.dart';
@@ -281,7 +282,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
               Navigator.of(context, rootNavigator: true).push(spawnRoute()),
           onSettings: () => Navigator.of(context, rootNavigator: true).push(
               MaterialPageRoute(builder: (_) => const SettingsScreen())),
-          onQuickSwitcher: () {},
+          onQuickSwitcher: () => showQuickSwitcher(context),
           onShortcutSheet: () {},
           child: Scaffold(
             body: wide
