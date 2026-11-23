@@ -111,15 +111,20 @@ class TerminalTile extends ConsumerWidget {
     // A node older than the app's minimum may not understand our requests.
     final outdated = ref.watch(
         outdatedNodeIdsProvider.select((ids) => ids.contains(t.nodeId)));
-    return ListTile(
-      enabled: !outdated,
-      titleAlignment: ListTileTitleAlignment.titleHeight,
-      leading: const Icon(Icons.terminal),
-      title: Text(t.title),
-      subtitle: Text(t.cwd),
-      trailing: t.attached ? const Icon(Icons.visibility_outlined, size: 18) : null,
-      onTap: () => _open(context, t),
-      onLongPress: () => _actions(context, ref),
+    return GestureDetector(
+      onSecondaryTapUp: outdated
+          ? null
+          : (d) => _actions(context, ref, position: d.globalPosition),
+      child: ListTile(
+        enabled: !outdated,
+        titleAlignment: ListTileTitleAlignment.titleHeight,
+        leading: const Icon(Icons.terminal),
+        title: Text(t.title),
+        subtitle: Text(t.cwd),
+        trailing: t.attached ? const Icon(Icons.visibility_outlined, size: 18) : null,
+        onTap: () => _open(context, t),
+        onLongPress: () => _actions(context, ref),
+      ),
     );
   }
 }

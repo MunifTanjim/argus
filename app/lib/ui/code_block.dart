@@ -47,6 +47,10 @@ class _SelectableMarkdownState extends State<_SelectableMarkdown> {
   // Mutated without setState — read only when "Copy Markdown" fires.
   String? _selected;
 
+  // gpt_markdown's onLinkTap gives no rect, so the last pointer-down position
+  // anchors the wide-window menu of a left tap.
+  Offset? _lastDown;
+
   @override
   Widget build(BuildContext context) => SelectionArea(
         onSelectionChanged: (c) => _selected = c?.plainText,
@@ -71,12 +75,24 @@ class _SelectableMarkdownState extends State<_SelectableMarkdown> {
           ],
         ),
         child: Builder(
-          builder: (context) => GptMarkdown(
-            widget.data,
-            onLinkTap: (url, title) => showLinkActions(context, url),
-            tableBuilder: markdownTable,
-            codeBuilder: (context, name, code, closed) =>
-                codeView(code, lang: name, selectable: false),
+          builder: (context) => Listener(
+            onPointerDown: (e) => _lastDown = e.position,
+            child: GptMarkdown(
+              widget.data,
+              onLinkTap: (url, title) =>
+                  showLinkActions(context, url, position: _lastDown),
+              linkBuilder: (context, span, url, style) => MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  onSecondaryTapUp: (d) =>
+                      showLinkActions(context, url, position: d.globalPosition),
+                  child: Text.rich(span),
+                ),
+              ),
+              tableBuilder: markdownTable,
+              codeBuilder: (context, name, code, closed) =>
+                  codeView(code, lang: name, selectable: false),
+            ),
           ),
         ),
       );

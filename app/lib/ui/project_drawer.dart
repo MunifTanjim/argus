@@ -384,6 +384,10 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
             final p = lookupProject(projects, r.id);
             if (p != null) showProjectSheet(rowContext, p);
           },
+          onContextMenu: (rowContext, pos) {
+            final p = lookupProject(projects, r.id);
+            if (p != null) showProjectSheet(rowContext, p, position: pos);
+          },
           leading: r.hasKids
               ? Icon(
                   r.folded ? Icons.chevron_right : Icons.expand_more,
@@ -433,6 +437,12 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
           onLongPress: (rowContext) {
             final hit = lookupWorkspace(projects, r.id);
             if (hit != null) showWorkspaceSheet(rowContext, hit.$1, hit.$2);
+          },
+          onContextMenu: (rowContext, pos) {
+            final hit = lookupWorkspace(projects, r.id);
+            if (hit != null) {
+              showWorkspaceSheet(rowContext, hit.$1, hit.$2, position: pos);
+            }
           },
           leading: r.isMain
               ? const Icon(
@@ -487,6 +497,8 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
     required String title,
     required VoidCallback onTap,
     void Function(BuildContext rowContext)? onLongPress,
+    void Function(BuildContext rowContext, Offset globalPosition)?
+        onContextMenu,
     Widget? leading,
     TextStyle? titleStyle,
     List<Widget> titleSuffix = const [],
@@ -504,6 +516,9 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress == null ? null : () => onLongPress(rowContext),
+        onSecondaryTapUp: onContextMenu == null
+            ? null
+            : (d) => onContextMenu(rowContext, d.globalPosition),
         child: ConstrainedBox(
           constraints: BoxConstraints(minHeight: subtitle == null ? 40 : 52),
           child: Padding(

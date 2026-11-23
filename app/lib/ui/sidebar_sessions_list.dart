@@ -85,6 +85,7 @@ class SidebarSessionsList extends ConsumerWidget {
                   onOpen();
                 },
                 onLongPress: () => _showDetails(context, s),
+                onContextMenu: (_) => _showDetails(context, s),
               ),
           ],
         ],
@@ -186,6 +187,7 @@ class _SessionRow extends StatelessWidget {
     required this.selected,
     required this.onTap,
     required this.onLongPress,
+    required this.onContextMenu,
   });
 
   final Session session;
@@ -193,6 +195,7 @@ class _SessionRow extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
+  final void Function(Offset globalPosition) onContextMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -207,6 +210,7 @@ class _SessionRow extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           onLongPress: onLongPress,
+          onSecondaryTapUp: (d) => onContextMenu(d.globalPosition),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
             child: Row(

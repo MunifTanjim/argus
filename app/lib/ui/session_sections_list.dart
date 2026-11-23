@@ -34,7 +34,7 @@ class SessionSectionsList extends ConsumerWidget {
   /// The home list's grouping; workspace lists keep host.
   final GroupBy groupBy;
 
-  // A tap opens the session; a long press offers its actions.
+  // A tap opens the session; a long press or right-click offers its actions.
   Widget _buildCard(
     BuildContext context,
     Session s,
@@ -47,6 +47,8 @@ class SessionSectionsList extends ConsumerWidget {
       showAgent: multiAgent,
       onTap: () => Navigator.of(context).push(sessionDetailRoute(s)),
       onLongPress: () => showSessionActions(cardContext, s),
+      onContextMenu: (pos) =>
+          showSessionActions(cardContext, s, position: pos),
     ),
   );
 

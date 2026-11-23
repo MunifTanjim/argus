@@ -12,12 +12,16 @@ class SessionCard extends StatelessWidget {
       required this.session,
       this.onTap,
       this.onLongPress,
+      this.onContextMenu,
       this.showNode = false,
       this.showAgent = false});
 
   final Session session;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+
+  /// A right-click, with the pointer's global position.
+  final void Function(Offset globalPosition)? onContextMenu;
 
   /// Show the origin node on the card. Used in the cross-host "Needs you"
   /// section, where the per-node header is replaced and the node would
@@ -110,6 +114,9 @@ class SessionCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
           onTap: onTap,
           onLongPress: onLongPress,
+          onSecondaryTapUp: onContextMenu == null
+              ? null
+              : (d) => onContextMenu!(d.globalPosition),
           child: card,
         ),
       ),
