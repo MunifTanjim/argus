@@ -9,6 +9,7 @@ import 'pairing/gateway_store.dart';
 import 'pairing/legacy_migration.dart';
 import 'push/fcm_source.dart';
 import 'push/unifiedpush_background.dart';
+import 'state/bot_link_listener.dart';
 import 'state/gateway.dart';
 import 'state/profiles.dart';
 import 'state/push.dart';
@@ -111,6 +112,8 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
     ref.watch(gatewayProvider);
     // Materialize push: starts a backend, requests permission, wires tap routing.
     ref.watch(pushControllerProvider);
+    // Listen for argus://bot links the app is opened with.
+    ref.watch(botLinkListenerProvider);
     popToRootOnSignOut(ref, _navigatorKey);
 
     return MaterialApp(

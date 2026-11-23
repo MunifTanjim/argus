@@ -29,6 +29,15 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- argus://bot/<id> links open a bot; app_links handles them, so
+                 Flutter's own deep linking stays off. -->
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false" />
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="argus" android:host="bot" />
+            </intent-filter>
         </activity>
         <!-- Embedded UnifiedPush distributor: registers directly with FCM (Web
              Push + VAPID). Lets the app receive push without a separate distributor

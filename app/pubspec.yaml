@@ -68,6 +68,8 @@ dependencies:
   # Compares server/node versions against the app's minimums (state/compat.dart).
   pub_semver: ^2.2.0
   cbor: ^6.5.1
+  # Opens argus://bot links (state/bot_link_listener.dart).
+  app_links: ^7.2.2
 
 dev_dependencies:
   flutter_test:
