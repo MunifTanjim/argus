@@ -349,13 +349,43 @@ func TestEnsureExcludedAppends(t *testing.T) {
 func TestEnsureExcludedOuter(t *testing.T) {
 	outer := newRepo(t)
 	ctx := context.Background()
-	r, _ := Open(ctx, filepath.Join(outer, "agents", "a"), "outer")
-	if err := r.EnsureExcluded(ctx, []string{"agents/a/tmp/"}); err != nil {
+	dir := filepath.Join(outer, "agents", "a")
+	r, _ := Open(ctx, dir, "outer")
+	if err := r.EnsureExcluded(ctx, []string{"CLAUDE.md", "files/", ".claude/skills/"}); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(filepath.Join(r.GitDir, "info", "exclude"))
-	if err != nil || !strings.Contains(string(b), "agents/a/tmp/\n") {
+	if err != nil || !strings.Contains(string(b), "/agents/a/CLAUDE.md\n/agents/a/files/\n/agents/a/.claude/skills/\n") {
 		t.Fatalf("exclude = %q, %v", b, err)
+	}
+	for _, p := range []string{"agents/a/CLAUDE.md", "agents/a/files/x", "agents/a/.claude/skills/l/SKILL.md"} {
+		write(t, filepath.Join(outer, p), "x\n")
+		if _, err := exec.Command("git", "-C", outer, "check-ignore", "-q", p).Output(); err != nil {
+			t.Errorf("%s not ignored", p)
+		}
+	}
+	for _, p := range []string{"CLAUDE.md", "src/CLAUDE.md", "src/files/x", ".claude/skills/x/SKILL.md", "agents/a/src/CLAUDE.md"} {
+		write(t, filepath.Join(outer, p), "x\n")
+		if _, err := exec.Command("git", "-C", outer, "check-ignore", "-q", p).Output(); err == nil {
+			t.Errorf("%s ignored outside the agent dir", p)
+		}
+	}
+}
+
+func TestEnsureExcludedOuterEscapesGlob(t *testing.T) {
+	outer := newRepo(t)
+	ctx := context.Background()
+	r, _ := Open(ctx, filepath.Join(outer, "a[1]*"), "outer")
+	if err := r.EnsureExcluded(ctx, []string{"files/"}); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(outer, "a[1]*", "files", "x"), "x\n")
+	write(t, filepath.Join(outer, "a1b", "files", "x"), "x\n")
+	if _, err := exec.Command("git", "-C", outer, "check-ignore", "-q", "a[1]*/files/x").Output(); err != nil {
+		t.Error("agent files not ignored")
+	}
+	if _, err := exec.Command("git", "-C", outer, "check-ignore", "-q", "a1b/files/x").Output(); err == nil {
+		t.Error("glob in agent dir name matched another dir")
 	}
 }
 
@@ -420,5 +450,44 @@ func TestAddedLines(t *testing.T) {
 	}
 	if got, err := r.AddedLines(ctx, first); err != nil || strings.Join(got, "|") != "one|two" {
 		t.Fatalf("root AddedLines = %q, %v", got, err)
+	}
+}
+
+func TestRevertAmendIgnoresStagedFiles(t *testing.T) {
+	setupEnv(t)
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "a")
+	r, _ := Open(ctx, dir, "nested")
+	write(t, filepath.Join(dir, "a.md"), "a\n")
+	a, _ := r.CommitPaths(ctx, "a", nil, []string{"a.md"}, true)
+	// Stage a file between the revert and the trailer amend.
+	hook := filepath.Join(r.GitDir, "hooks", "post-commit")
+	write(t, hook, "#!/bin/sh\n[ -e staged.md ] && exit 0\necho s > staged.md\ngit add staged.md\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := r.Revert(ctx, a, []Trailer{{"Argus-Source", "you"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if files := run(t, dir, "show", "--name-only", "--format=", hash); files != "a.md" {
+		t.Fatalf("revert commit touched %q", files)
+	}
+	if staged := run(t, dir, "diff", "--cached", "--name-only"); staged != "staged.md" {
+		t.Fatalf("staged = %q, want staged.md", staged)
+	}
+}
+
+func TestOuterSigningWithoutKey(t *testing.T) {
+	outer := newRepo(t)
+	ctx := context.Background()
+	run(t, outer, "config", "commit.gpgsign", "true")
+	r, _ := Open(ctx, filepath.Join(outer, "agents", "a"), "outer")
+	write(t, filepath.Join(r.Dir, "memory.md"), "x\n")
+	if _, err := r.CommitPaths(ctx, "x", nil, []string{"memory.md"}, true); !errors.Is(err, ErrSigningKey) {
+		t.Fatalf("CommitPaths err = %v, want ErrSigningKey", err)
+	}
+	if _, err := r.Revert(ctx, "HEAD", nil); !errors.Is(err, ErrSigningKey) {
+		t.Fatalf("Revert err = %v, want ErrSigningKey", err)
 	}
 }

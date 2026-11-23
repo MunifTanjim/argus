@@ -114,6 +114,11 @@ func (r *Repo) commitPaths(ctx context.Context, subject string, trailers []Trail
 	if _, ok := runGit(ctx, r.Dir, append([]string{"--literal-pathspecs", "diff", "--cached", "--quiet", "--"}, paths...)...); ok {
 		return "", nil
 	}
+	if argus {
+		if err := r.checkSigning(ctx); err != nil {
+			return "", err
+		}
+	}
 	args := []string{"--literal-pathspecs"}
 	if argus {
 		args = append(args, argusIdentity...)
@@ -142,6 +147,26 @@ func (r *Repo) commitPaths(ctx context.Context, subject string, trailers []Trail
 		return "", err
 	}
 	return mustGit(ctx, r.Dir, "rev-parse", "HEAD")
+}
+
+// ErrSigningKey reports an outer repository that signs commits but names no
+// signing key, so Argus-identity commits there cannot be signed.
+var ErrSigningKey = errors.New("agentgit: commit.gpgsign is set but user.signingkey is not; Argus commits cannot be signed")
+
+// checkSigning fails early for Argus-identity commits that git would try to
+// sign with a key derived from the Argus identity.
+func (r *Repo) checkSigning(ctx context.Context) error {
+	if !r.Outer {
+		return nil
+	}
+	sign, _ := runGit(ctx, r.Dir, "config", "--type=bool", "commit.gpgsign")
+	if sign != "true" {
+		return nil
+	}
+	if key, _ := runGit(ctx, r.Dir, "config", "user.signingkey"); key != "" {
+		return nil
+	}
+	return ErrSigningKey
 }
 
 // busy reports whether a merge, rebase, cherry-pick, revert or bisect is in
@@ -191,6 +216,9 @@ func (r *Repo) Revert(ctx context.Context, hash string, trailers []Trailer) (str
 	if r.busy() {
 		return "", ErrBusy
 	}
+	if err := r.checkSigning(ctx); err != nil {
+		return "", err
+	}
 	args := append(append([]string{}, argusIdentity...), "revert", "--no-edit")
 	if !r.Outer {
 		args = append(args, "--no-gpg-sign")
@@ -206,7 +234,7 @@ func (r *Repo) Revert(ctx context.Context, hash string, trailers []Trailer) (str
 		return "", err
 	}
 	if len(trailers) > 0 {
-		amend := append(append([]string{}, argusIdentity...), "commit", "--quiet", "--amend", "--no-edit")
+		amend := append(append([]string{}, argusIdentity...), "commit", "--quiet", "--amend", "--only", "--no-edit")
 		if !r.Outer {
 			amend = append(amend, "--no-gpg-sign")
 		}
@@ -307,11 +335,22 @@ func (r *Repo) BlameSources(ctx context.Context, path string) (map[int]string, e
 }
 
 // EnsureExcluded appends patterns not already present to the repository's
-// ignore file, never replacing existing content.
+// ignore file, never replacing existing content. Patterns are relative to
+// Dir; in outer mode they are anchored to Dir so that they match nothing
+// else in the enclosing repository.
 func (r *Repo) EnsureExcluded(ctx context.Context, patterns []string) error {
 	file := filepath.Join(r.Dir, ".gitignore")
 	if r.Outer {
 		file = filepath.Join(r.GitDir, "info", "exclude")
+		prefix, err := mustGit(ctx, r.Dir, "rev-parse", "--show-prefix")
+		if err != nil {
+			return err
+		}
+		anchored := make([]string, len(patterns))
+		for i, p := range patterns {
+			anchored[i] = "/" + escapeIgnore(prefix) + strings.TrimPrefix(p, "/")
+		}
+		patterns = anchored
 	}
 	existing, err := os.ReadFile(file)
 	if err != nil && !os.IsNotExist(err) {
@@ -346,6 +385,18 @@ func (r *Repo) EnsureExcluded(ctx context.Context, patterns []string) error {
 	}
 	_, err = f.WriteString(add.String())
 	return err
+}
+
+// escapeIgnore escapes the characters that gitignore treats as glob syntax.
+func escapeIgnore(path string) string {
+	var b strings.Builder
+	for _, c := range path {
+		if strings.ContainsRune(`\*?[`, c) {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
 }
 
 func runGit(ctx context.Context, dir string, args ...string) (string, bool) {
