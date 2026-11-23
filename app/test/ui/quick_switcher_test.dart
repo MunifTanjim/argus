@@ -176,6 +176,48 @@ void main() {
     expect(c.read(pendingOpenSessionProvider), isNull);
   });
 
+  testWidgets('Down keeps the selected row inside the list', (tester) async {
+    await pumpSwitcher(tester, [
+      for (var i = 0; i < 20; i++) _s('s$i', repo: 'repo$i'),
+    ]);
+    final viewport = tester.getRect(find.byType(ListView));
+    for (var i = 0; i < 19; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      final row = tester.getRect(
+        find.byWidgetPredicate((w) => w is ListTile && w.selected),
+      );
+      expect(
+        row.top >= viewport.top && row.bottom <= viewport.bottom,
+        isTrue,
+        reason: 'row ${i + 1} at $row outside $viewport',
+      );
+    }
+  });
+
+  testWidgets('showQuickSwitcher while one is open does not stack another', (
+    tester,
+  ) async {
+    await pumpSwitcher(tester, [_s('s1')]);
+    final ctx = tester.element(find.byType(TextField));
+    showQuickSwitcher(ctx);
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
+  });
+
+  test('switcherEntries orders equal statusSince by id', () {
+    final t = DateTime(2026, 1, 1);
+    final es = switcherEntries(
+      [_s('b', since: t), _s('a', since: t)],
+      const [],
+      '',
+    );
+    expect(_titles(es), ['a', 'b']);
+  });
+
   testWidgets('Esc closes without opening', (tester) async {
     final c = await pumpSwitcher(tester, [_s('s1')]);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);

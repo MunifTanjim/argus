@@ -65,10 +65,15 @@ List<SwitcherEntry> switcherEntries(
   final live = sessions.where((s) => s.status != SessionStatus.dead).toList()
     ..sort((a, b) {
       final x = a.statusSince, y = b.statusSince;
-      if (x == null && y == null) return 0;
-      if (x == null) return 1;
-      if (y == null) return -1;
-      return y.compareTo(x);
+      if (x != null && y != null) {
+        final c = y.compareTo(x);
+        if (c != 0) return c;
+      } else if (x != null) {
+        return -1;
+      } else if (y != null) {
+        return 1;
+      }
+      return a.id.compareTo(b.id);
     });
   final all = <SwitcherEntry>[
     for (final s in live) SessionEntry(s),
@@ -84,8 +89,16 @@ List<SwitcherEntry> switcherEntries(
   ];
 }
 
-Future<void> showQuickSwitcher(BuildContext context) =>
-    showDialog<void>(context: context, builder: (_) => const _QuickSwitcher());
+bool _switcherOpen = false;
+
+Future<void> showQuickSwitcher(BuildContext context) {
+  if (_switcherOpen) return Future.value();
+  _switcherOpen = true;
+  return showDialog<void>(
+    context: context,
+    builder: (_) => const _QuickSwitcher(),
+  );
+}
 
 class _QuickSwitcher extends ConsumerStatefulWidget {
   const _QuickSwitcher();
@@ -97,6 +110,20 @@ class _QuickSwitcher extends ConsumerStatefulWidget {
 class _QuickSwitcherState extends ConsumerState<_QuickSwitcher> {
   String _query = '';
   int _selected = 0;
+  final _rowKeys = <int, GlobalKey>{};
+
+  @override
+  void dispose() {
+    _switcherOpen = false;
+    super.dispose();
+  }
+
+  void _reveal() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _rowKeys[_selected]?.currentContext;
+      if (ctx != null) Scrollable.ensureVisible(ctx);
+    });
+  }
 
   List<SwitcherEntry> _entries() => switcherEntries(
     ref.read(sessionsProvider).values,
@@ -108,6 +135,7 @@ class _QuickSwitcherState extends ConsumerState<_QuickSwitcher> {
     final n = _entries().length;
     if (n == 0) return;
     setState(() => _selected = (_selected + delta).clamp(0, n - 1));
+    _reveal();
   }
 
   void _open(SwitcherEntry e) {
@@ -189,6 +217,7 @@ class _QuickSwitcherState extends ConsumerState<_QuickSwitcher> {
                       itemBuilder: (_, i) {
                         final e = entries[i];
                         return ListTile(
+                          key: _rowKeys.putIfAbsent(i, GlobalKey.new),
                           dense: true,
                           selected: i == selected,
                           selectedTileColor: Theme.of(
