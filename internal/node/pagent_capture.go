@@ -138,13 +138,30 @@ func (d *Node) captureThread(ctx context.Context, a pagent.Agent, set pagent.Set
 	if err != nil {
 		return
 	}
-	for _, l := range links {
-		if l.StartedBy != startedByYou || l.TranscriptPath == "" {
+	// A resumed session writes on in its predecessor's transcript: the
+	// transcript is captured once, through its latest session, from the
+	// furthest any of its sessions got.
+	last := map[string]int{}
+	for i, l := range links {
+		if l.StartedBy == startedByYou && l.TranscriptPath != "" {
+			last[l.TranscriptPath] = i
+		}
+	}
+	for i, l := range links {
+		if l.StartedBy != startedByYou || l.TranscriptPath == "" || last[l.TranscriptPath] != i {
 			continue
 		}
 		cur, hasCur, err := d.pagents.CaptureCursor(ctx, th.ID, l.SessionID)
 		if err != nil || !d.captureDue(l, cur, hasCur, set) {
 			continue
+		}
+		for _, p := range links[:i] {
+			if p.TranscriptPath != l.TranscriptPath {
+				continue
+			}
+			if pc, ok, err := d.pagents.CaptureCursor(ctx, th.ID, p.SessionID); err == nil && ok && pc.EntryCount > cur.EntryCount {
+				cur.EntryCount, cur.LastEntryID = pc.EntryCount, pc.LastEntryID
+			}
 		}
 		if err := d.captureSession(ctx, a, set, th, l, cur); err != nil {
 			d.captureFailed(ctx, th.ID, err)

@@ -348,3 +348,35 @@ func TestCaptureRejectedOpsReportedOncePerHour(t *testing.T) {
 		t.Fatalf("memory.error events = %d", n)
 	}
 }
+
+func TestCaptureResumedSessionContinues(t *testing.T) {
+	r := newCaptureRig(t)
+	ctx := context.Background()
+	r.ad.set(uEntry("u1", "first"), aEntry("a1", "reply"))
+	r.capture()
+	if len(r.ex.prompts) != 1 {
+		t.Fatalf("first capture: %d", len(r.ex.prompts))
+	}
+	// The session is resumed: a new session writes on in the same transcript.
+	r.end(r.sess)
+	if err := r.store.EndThreadSession(ctx, r.sess, "ended"); err != nil {
+		t.Fatal(err)
+	}
+	sid := r.register("claude", "resumed")
+	if err := r.store.InsertThreadSession(ctx, pagent.ThreadSession{ThreadID: r.thread, SessionID: sid, CLI: "claude", AgentSessionID: "resumed", TranscriptPath: "/tmp/transcript.jsonl", StartedBy: "you"}); err != nil {
+		t.Fatal(err)
+	}
+	r.ad.set(uEntry("u1", "first"), aEntry("a1", "reply"), uEntry("u2", "second"))
+	r.setNow(3 * time.Minute)
+	r.capture()
+	if len(r.ex.prompts) != 2 {
+		t.Fatalf("extractions = %d: %v", len(r.ex.prompts), r.ex.prompts)
+	}
+	if last := r.ex.prompts[1]; strings.Contains(last, "User: first") || !strings.Contains(last, "User: second") {
+		t.Fatalf("recaptured old entries: %s", last)
+	}
+	r.capture()
+	if len(r.ex.prompts) != 2 {
+		t.Fatalf("captured again: %d", len(r.ex.prompts))
+	}
+}
