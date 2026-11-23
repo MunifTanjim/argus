@@ -22,6 +22,9 @@ func (f *fakeRoutineNode) call(method string, params, out any) error {
 		f.params = map[string]any{}
 	}
 	f.params[method] = params
+	if np, ok := params.(nodeParams); ok {
+		params = np.Params
+	}
 	next := time.Date(2026, 11, 23, 9, 0, 0, 0, time.UTC)
 	switch method {
 	case api.MethodBotList:

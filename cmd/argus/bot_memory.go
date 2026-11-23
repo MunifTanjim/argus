@@ -32,7 +32,7 @@ func botMemoryShow(dial callerFor) *cobra.Command {
 		"  argus bot memory show scout\n  argus bot memory show scout --profile", cobra.ExactArgs(1),
 		func(cmd *cobra.Command) { cmd.Flags().BoolVar(&profile, "profile", false, "show the shared profile") },
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, err := resolveBot(call, args[0])
+			a, call, err := botOn(cmd, call, args[0])
 			if err != nil {
 				return err
 			}
@@ -78,7 +78,7 @@ func botMemoryLog(dial callerFor) *cobra.Command {
 			f.BoolVar(&profile, "profile", false, "list the shared profile's changes")
 		},
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, err := resolveBot(call, args[0])
+			a, call, err := botOn(cmd, call, args[0])
 			if err != nil {
 				return err
 			}
@@ -110,7 +110,7 @@ func botMemoryUndo(dial callerFor) *cobra.Command {
 			cmd.Flags().BoolVar(&profile, "profile", false, "revert a change to the shared profile")
 		},
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, err := resolveBot(call, args[0])
+			a, call, err := botOn(cmd, call, args[0])
 			if err != nil {
 				return err
 			}
@@ -169,7 +169,7 @@ func botMemoryReview(dial callerFor) *cobra.Command {
 			if accept != "" && reject != "" {
 				return errors.New("give --accept or --reject, not both")
 			}
-			a, err := resolveBot(call, args[0])
+			a, call, err := botOn(cmd, call, args[0])
 			if err != nil {
 				return err
 			}
@@ -219,7 +219,7 @@ func botMemoryImport(dial callerFor) *cobra.Command {
 	return sessionSub(dial, "import <bot> <file|->", "Stage memory exported from another assistant for review",
 		"  argus bot memory import scout memories.txt\n  cat memories.txt | argus bot memory import scout -", cobra.ExactArgs(2), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, err := resolveBot(call, args[0])
+			a, call, err := botOn(cmd, call, args[0])
 			if err != nil {
 				return err
 			}

@@ -21,9 +21,13 @@ func routineCmd(dial callerFor) *cobra.Command {
 		Long: `Inspect and run bots' routines and goals.
 
 Routines live in files under a bot's routines/ folder; edit those to change
-them. A routine is named <bot>/<slug>, for example scout/inbox.`,
+them. A routine is named <bot>/<slug>, for example scout/inbox. These
+commands reach the bots of every connected node: name the bot as
+<bot>@<node>, as in scout@laptop/inbox, or pass --node, when the name is on
+more than one node.`,
 		SilenceUsage: true,
 	}
+	cmd.PersistentFlags().String("node", "", "node (id or label) of the bot")
 	cmd.AddCommand(
 		routineList(dial), routineShow(dial), routineRun(dial), routinePause(dial),
 		routineResume(dial), routineRuns(dial), routineHookSecret(dial),
@@ -31,14 +35,15 @@ them. A routine is named <bot>/<slug>, for example scout/inbox.`,
 	return cmd
 }
 
-// resolveRoutine splits "<bot>/<slug>" and resolves the bot.
-func resolveRoutine(call caller, ref string) (api.BotInfo, string, error) {
+// resolveRoutine splits "<bot>/<slug>" and resolves the bot, which may be
+// named <bot>@<node>, and returns a caller for the bot's node.
+func resolveRoutine(cmd *cobra.Command, call caller, ref string) (api.BotInfo, string, caller, error) {
 	i := strings.LastIndex(ref, "/")
 	if i <= 0 || i == len(ref)-1 {
-		return api.BotInfo{}, "", fmt.Errorf("name a routine as <bot>/<slug>, got %q", ref)
+		return api.BotInfo{}, "", nil, fmt.Errorf("name a routine as <bot>/<slug>, got %q", ref)
 	}
-	a, err := resolveBot(call, ref[:i])
-	return a, ref[i+1:], err
+	a, call, err := botOn(cmd, call, ref[:i])
+	return a, ref[i+1:], call, err
 }
 
 func whenText(t *time.Time) string {
@@ -72,35 +77,21 @@ func routineList(dial callerFor) *cobra.Command {
 	return sessionSub(dial, "list [bot]", "List routines",
 		"  argus routine list\n  argus routine list scout", cobra.MaximumNArgs(1), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			var bots []api.BotInfo
-			if len(args) == 1 {
-				a, err := resolveBot(call, args[0])
-				if err != nil {
-					return err
-				}
-				bots = []api.BotInfo{a}
-			} else {
-				var res api.BotListResult
-				if err := call(api.MethodBotList, api.BotListParams{}, &res); err != nil {
-					return err
-				}
-				for _, a := range res.Bots {
-					if a.Status != "unreachable" {
-						bots = append(bots, a)
-					}
-				}
+			bots, err := botsFor(cmd, call, args)
+			if err != nil {
+				return err
 			}
 			all := api.BotRoutineListResult{Routines: []api.BotRoutineInfo{}}
 			var rows [][]string
 			for _, a := range bots {
 				var res api.BotRoutineListResult
-				if err := call(api.MethodBotRoutineList, api.BotRef{BotID: a.ID}, &res); err != nil {
+				if err := onNode(call, a.NodeID)(api.MethodBotRoutineList, api.BotRef{BotID: a.ID}, &res); err != nil {
 					return fmt.Errorf("%s: %w", a.Name, err)
 				}
 				all.Routines = append(all.Routines, res.Routines...)
 				for _, r := range res.Routines {
 					rows = append(rows, []string{
-						a.Name + "/" + r.Slug, routineState(r), strings.Join(r.Starts, "; "), whenText(r.NextDue), r.LastResult,
+						a.Name + "/" + r.Slug, botNodeLabel(a), routineState(r), strings.Join(r.Starts, "; "), whenText(r.NextDue), r.LastResult,
 						usedText(float64(r.Used.Sessions), float64(r.Budget.Sessions), false),
 						usedText(r.Used.Cost, r.Budget.Cost, true),
 					})
@@ -109,13 +100,13 @@ func routineList(dial callerFor) *cobra.Command {
 			if asJSON {
 				return printJSON(all)
 			}
-			printTable([]string{"ROUTINE", "STATE", "STARTS", "NEXT", "LAST", "SESSIONS", "COST"}, rows)
+			printTable([]string{"ROUTINE", "NODE", "STATE", "STARTS", "NEXT", "LAST", "SESSIONS", "COST"}, rows)
 			return nil
 		})
 }
 
-func findRoutine(call caller, ref string) (api.BotInfo, api.BotRoutineInfo, error) {
-	a, slug, err := resolveRoutine(call, ref)
+func findRoutine(cmd *cobra.Command, call caller, ref string) (api.BotInfo, api.BotRoutineInfo, error) {
+	a, slug, call, err := resolveRoutine(cmd, call, ref)
 	if err != nil {
 		return a, api.BotRoutineInfo{}, err
 	}
@@ -151,7 +142,7 @@ func routineShow(dial callerFor) *cobra.Command {
 	return sessionSub(dial, "show <bot>/<slug>", "Show a routine",
 		"  argus routine show scout/inbox", cobra.ExactArgs(1), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			_, r, err := findRoutine(call, args[0])
+			_, r, err := findRoutine(cmd, call, args[0])
 			if err != nil {
 				return err
 			}
@@ -167,7 +158,7 @@ func routineRun(dial callerFor) *cobra.Command {
 	return sessionSub(dial, "run <bot>/<slug>", "Run a routine now, as a test run",
 		"  argus routine run scout/inbox", cobra.ExactArgs(1), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, slug, err := resolveRoutine(call, args[0])
+			a, slug, call, err := resolveRoutine(cmd, call, args[0])
 			if err != nil {
 				return err
 			}
@@ -187,7 +178,7 @@ func routineToggle(dial callerFor, use, short, method, done string) *cobra.Comma
 	return sessionSub(dial, use+" <bot>/<slug>", short,
 		"  argus routine "+use+" scout/inbox", cobra.ExactArgs(1), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, slug, err := resolveRoutine(call, args[0])
+			a, slug, call, err := resolveRoutine(cmd, call, args[0])
 			if err != nil {
 				return err
 			}
@@ -217,7 +208,7 @@ func routineRuns(dial callerFor) *cobra.Command {
 		"  argus routine runs scout/inbox --limit 5", cobra.ExactArgs(1),
 		func(cmd *cobra.Command) { cmd.Flags().IntVar(&limit, "limit", 20, "number of runs to list") },
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, slug, err := resolveRoutine(call, args[0])
+			a, slug, call, err := resolveRoutine(cmd, call, args[0])
 			if err != nil {
 				return err
 			}
@@ -250,7 +241,7 @@ func routineHookSecret(dial callerFor) *cobra.Command {
 	return sessionSub(dial, "hook-secret <bot>/<slug>", "Make a new webhook secret for a routine and print it",
 		"  argus routine hook-secret scout/alerts", cobra.ExactArgs(1), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, slug, err := resolveRoutine(call, args[0])
+			a, slug, call, err := resolveRoutine(cmd, call, args[0])
 			if err != nil {
 				return err
 			}

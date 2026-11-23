@@ -61,7 +61,7 @@ func botSecretSet(dial callerFor) *cobra.Command {
 			cmd.Flags().StringVar(&description, "description", "", "what the secret is for; the bot sees this")
 		},
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, err := resolveBot(call, args[0])
+			a, call, err := botOn(cmd, call, args[0])
 			if err != nil {
 				return err
 			}
@@ -87,7 +87,7 @@ func botSecretList(dial callerFor) *cobra.Command {
 	return sessionSub(dial, "list <bot>", "List a bot's secrets (names only)",
 		"  argus bot secret list scout", cobra.ExactArgs(1), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, err := resolveBot(call, args[0])
+			a, call, err := botOn(cmd, call, args[0])
 			if err != nil {
 				return err
 			}
@@ -111,7 +111,7 @@ func botSecretRm(dial callerFor) *cobra.Command {
 	return sessionSub(dial, "rm <bot> <NAME>", "Remove a secret",
 		"  argus bot secret rm scout GH_TOKEN", cobra.ExactArgs(2), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, err := resolveBot(call, args[0])
+			a, call, err := botOn(cmd, call, args[0])
 			if err != nil {
 				return err
 			}

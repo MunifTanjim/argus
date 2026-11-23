@@ -2,7 +2,7 @@
 
 A bot is a persistent assistant with its own directory. The directory holds `bot.yaml` (name, coding agent, model, instructions) and the bot's memory files. Every change to a bot's memory is kept in its history and can be undone. You can edit these files directly.
 
-Bots are registered by name on a node. Every command accepts `--json`. The `argus bot` commands work with the bots of the node they talk to; manage bots on your other nodes from those nodes, or from the TUI or app.
+Bots are registered by name on a node. Every command accepts `--json`. The `argus bot` and `argus routine` commands reach the bots of all your connected nodes: the node they talk to passes each command on to the bot's node. When a name is on more than one node, name the bot as `<name>@<node>`, or pass `--node <node>`; the node is its ID or label. A name that is on several nodes is refused until you say which.
 
 ## Creating and registering
 
@@ -16,7 +16,7 @@ argus bot add ~/bots/scout
 
 `add` registers an existing directory, for example a clone. It reads the name from `bot.yaml`. If the name is already taken on the node, pass `--name <new>`, which rewrites `bot.yaml`. If the directory already has a `CLAUDE.md` or `AGENTS.md`, `add` offers to import it into the bot's instructions. Without a terminal, pass `--import-instructions` to import it; the command fails otherwise and registers nothing.
 
-Both commands take `--node <node>` to create or register the bot on another node. `--dir` and the path are then paths on that node, and later commands for the bot run on that node.
+Both commands take `--node <node>` to create or register the bot on another node. `--dir` and the path are then paths on that node.
 
 ## Inspecting
 
@@ -27,7 +27,7 @@ argus bot show scout
 argus bot threads scout
 ```
 
-`list --all` includes forgotten bots. Each bot reports a status: `needs_you`, `waiting`, `working` or `idle`.
+`list` shows the bots of every connected node with the node each is on; `--node <node>` lists one node's bots. A node that does not answer is named in a warning, and its bots are left out. `list --all` includes forgotten bots. Each bot reports a status: `needs_you`, `waiting`, `working` or `idle`.
 
 ## Chatting
 
@@ -40,16 +40,17 @@ argus bot chat -m "hello"
 
 A message goes to the bot's latest chat thread, or starts one if there is none or `--new` is given. The command prints the thread ID and returns. With `--wait` it waits for the turn to end (up to ten minutes) and prints the reply; with `--json` the output has `thread_id`, `session_id` and `reply`. If the bot is waiting for you (a permission or question), the command returns what it has so far and says `bot is waiting for you` (`waiting: true` in JSON).
 
-Without a name the node's primary bot is used, else the only bot. If there are several and none is primary, the command asks for a name. Without a message, `chat` points you to the TUI.
+Without a name the primary bot of the node the command talks to is used, or of `--node <node>`, else that node's only bot. If there are several and none is primary, the command asks for a name. Without a message, `chat` points you to the TUI.
 
 ## Primary bot
 
 ```sh
 argus bot primary scout
 argus bot primary --unset
+argus bot primary --unset --node laptop
 ```
 
-Each node has one primary bot. Making a bot primary replaces its node's primary and leaves other nodes' primaries alone, so with several nodes you can have one primary on each.
+Each node has one primary bot. Making a bot primary replaces its node's primary and leaves other nodes' primaries alone, so with several nodes you can have one primary on each. `--unset` clears the primary of the node the command talks to, or of `--node <node>`.
 
 ## Renaming and forgetting
 
@@ -174,9 +175,10 @@ argus routine pause scout/billing
 argus routine resume scout/billing
 argus routine runs scout/billing --limit 5
 argus routine hook-secret scout/alerts
+argus routine run scout@laptop/billing
 ```
 
-`run` starts a test run now. `pause` stops a routine without editing its file; `resume` restarts it from now and skips the times it missed. A completed goal can't be resumed. A routine with `enabled: false` in its file is off until you edit the file.
+Without a bot, `list` shows the routines of every bot on every connected node. A bot whose name is on several nodes is named `<bot>@<node>/<slug>`, or pass `--node <node>`. `run` starts a test run now. `pause` stops a routine without editing its file; `resume` restarts it from now and skips the times it missed. A completed goal can't be resumed. A routine with `enabled: false` in its file is off until you edit the file.
 
 If the node was off when a routine was due, the routine runs once when the node comes back, if the missed time is less than 12 hours old. Routines pause when no client has connected for 7 days.
 

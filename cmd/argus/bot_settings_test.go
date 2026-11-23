@@ -20,6 +20,9 @@ func (f *fakeSettingsNode) call(method string, params, out any) error {
 		f.params = map[string]any{}
 	}
 	f.params[method] = params
+	if np, ok := params.(nodeParams); ok {
+		params = np.Params
+	}
 	switch method {
 	case api.MethodBotList:
 		*out.(*api.BotListResult) = api.BotListResult{Bots: f.bots}

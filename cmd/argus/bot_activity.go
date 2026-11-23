@@ -21,7 +21,7 @@ func botActivity(dial callerFor) *cobra.Command {
 			f.IntVar(&limit, "limit", 50, "number of decisions to list")
 		},
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, err := resolveBot(call, args[0])
+			a, call, err := botOn(cmd, call, args[0])
 			if err != nil {
 				return err
 			}

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -35,11 +36,12 @@ func botCmd(dial callerFor) *cobra.Command {
 		Long: `Create and talk to bots.
 
 A bot is a directory with a bot.yaml, instructions and memory. Bots
-are registered by name on a node. These commands work with the bots of the
-node this command talks to; manage bots on other nodes from those nodes, or
-from the TUI or app.`,
+are registered by name on a node. These commands reach the bots of every
+connected node: name a bot as <name>@<node>, or pass --node, when the name
+is on more than one node.`,
 		SilenceUsage: true,
 	}
+	cmd.PersistentFlags().String("node", "", "node (id or label) of the bot")
 	cmd.AddCommand(
 		botCreate(dial), botAdd(dial), botList(dial), botShow(dial),
 		botRename(dial), botForget(dial), botPrimary(dial), botChat(dial), botThreads(dial), botMemory(dial),
@@ -56,11 +58,76 @@ func botNodeLabel(a api.BotInfo) string {
 	return a.NodeID
 }
 
-// resolveBot finds the registered bot that ref names: "<name>" or
-// "<name>@<node>".
-func resolveBot(call caller, ref string) (api.BotInfo, error) {
+// nodeParams are request params addressed to a node. The node the CLI talks
+// to forwards them there.
+type nodeParams struct {
+	Node   string
+	Params any
+}
+
+func (p nodeParams) MarshalJSON() ([]byte, error) {
+	fields := map[string]json.RawMessage{}
+	if p.Params != nil {
+		raw, err := json.Marshal(p.Params)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return nil, err
+		}
+	}
+	node, err := json.Marshal(p.Node)
+	if err != nil {
+		return nil, err
+	}
+	fields[api.BotNodeField] = node
+	return json.Marshal(fields)
+}
+
+// onNode returns a caller whose requests run on node; an empty node is the
+// node the CLI talks to.
+func onNode(call caller, node string) caller {
+	if node == "" {
+		return call
+	}
+	return func(method string, params, out any) error {
+		return call(method, nodeParams{Node: node, Params: params}, out)
+	}
+}
+
+// nodeFlag returns the --node flag, or "".
+func nodeFlag(cmd *cobra.Command) string {
+	node, _ := cmd.Flags().GetString("node")
+	return node
+}
+
+// withNodeFlag applies --node to a bot name that names no node.
+func withNodeFlag(cmd *cobra.Command, ref string) (string, error) {
+	node := nodeFlag(cmd)
+	if node == "" {
+		return ref, nil
+	}
+	if _, n, ok := strings.Cut(ref, "@"); ok {
+		if n != node {
+			return "", fmt.Errorf("%s names node %s, but --node is %s", ref, n, node)
+		}
+		return ref, nil
+	}
+	return ref + "@" + node, nil
+}
+
+// listBots lists the bots of node, or of every node when node is empty.
+func listBots(call caller, node string, archived bool) (api.BotListResult, error) {
 	var res api.BotListResult
-	if err := call(api.MethodBotList, api.BotListParams{}, &res); err != nil {
+	err := onNode(call, node)(api.MethodBotList, api.BotListParams{IncludeArchived: archived, All: node == ""}, &res)
+	return res, err
+}
+
+// resolveBot finds the registered bot that ref names, "<name>" or
+// "<name>@<node>", on any node.
+func resolveBot(call caller, ref string) (api.BotInfo, error) {
+	res, err := listBots(call, "", false)
+	if err != nil {
 		return api.BotInfo{}, err
 	}
 	name, node, hasNode := strings.Cut(ref, "@")
@@ -76,11 +143,55 @@ func resolveBot(call caller, ref string) (api.BotInfo, error) {
 	}
 	switch len(matches) {
 	case 0:
+		if len(res.Unreachable) > 0 {
+			return api.BotInfo{}, fmt.Errorf("unknown bot %q; unreachable nodes: %s", ref, strings.Join(res.Unreachable, ", "))
+		}
 		return api.BotInfo{}, fmt.Errorf("unknown bot %q", ref)
 	case 1:
 		return matches[0], nil
 	}
-	return api.BotInfo{}, fmt.Errorf("bot %q is on several nodes; use %s@<node-label>", name, name)
+	nodes := make([]string, len(matches))
+	for i, a := range matches {
+		nodes[i] = botNodeLabel(a)
+	}
+	return api.BotInfo{}, fmt.Errorf("bot %q is on several nodes (%s); use %s@<node> or --node", name, strings.Join(nodes, ", "), name)
+}
+
+// botsFor returns the bot args names, else the bots of --node, else of every
+// node, leaving out bots of unreachable nodes.
+func botsFor(cmd *cobra.Command, call caller, args []string) ([]api.BotInfo, error) {
+	if len(args) == 1 {
+		a, _, err := botOn(cmd, call, args[0])
+		return []api.BotInfo{a}, err
+	}
+	res, err := listBots(call, nodeFlag(cmd), false)
+	if err != nil {
+		return nil, err
+	}
+	if len(res.Unreachable) > 0 {
+		warn("unreachable nodes, their bots are not listed: " + strings.Join(res.Unreachable, ", "))
+	}
+	var bots []api.BotInfo
+	for _, a := range res.Bots {
+		if a.Status != "unreachable" {
+			bots = append(bots, a)
+		}
+	}
+	return bots, nil
+}
+
+// botOn resolves the bot ref names, applying --node, and returns a caller
+// whose requests run on the bot's node.
+func botOn(cmd *cobra.Command, call caller, ref string) (api.BotInfo, caller, error) {
+	ref, err := withNodeFlag(cmd, ref)
+	if err != nil {
+		return api.BotInfo{}, nil, err
+	}
+	a, err := resolveBot(call, ref)
+	if err != nil {
+		return a, nil, err
+	}
+	return a, onNode(call, a.NodeID), nil
 }
 
 func botFields(a api.BotInfo) [][2]string {
@@ -105,7 +216,7 @@ func botCreate(dial callerFor) *cobra.Command {
 			f.StringVar(&p.Agent, "agent", "", "coding agent to run, for example claude")
 			f.StringVar(&p.Model, "model", "", "model")
 			f.StringVar(&p.From, "from", "", "copy bot.yaml, skills and routines from this bot")
-			f.StringVar(&p.NodeID, "node", "", "node to create the bot on; manage it from that node afterwards")
+			f.StringVar(&p.NodeID, "node", "", "node (id or label) to create the bot on")
 		},
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
 			if len(args) > 0 {
@@ -131,7 +242,7 @@ func botAdd(dial callerFor) *cobra.Command {
 			f := cmd.Flags()
 			f.StringVar(&p.Name, "name", "", "register under this name, rewriting bot.yaml")
 			f.BoolVar(&p.ImportInstructions, "import-instructions", false, "import an existing CLAUDE.md or AGENTS.md into the bot's instructions")
-			f.StringVar(&p.NodeID, "node", "", "node holding the directory; manage the bot from that node afterwards")
+			f.StringVar(&p.NodeID, "node", "", "node (id or label) holding the directory")
 		},
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
 			p.Dir = args[0]
@@ -179,16 +290,19 @@ func botConfirm(prompt string) bool {
 
 func botList(dial callerFor) *cobra.Command {
 	var all bool
-	return sessionSub(dial, "list", "List bots",
-		"  argus bot list", cobra.NoArgs,
+	return sessionSub(dial, "list", "List the bots of every node",
+		"  argus bot list\n  argus bot list --node laptop", cobra.NoArgs,
 		func(cmd *cobra.Command) { cmd.Flags().BoolVar(&all, "all", false, "include forgotten bots") },
 		func(cmd *cobra.Command, call caller, _ []string, asJSON bool) error {
-			var res api.BotListResult
-			if err := call(api.MethodBotList, api.BotListParams{IncludeArchived: all}, &res); err != nil {
+			res, err := listBots(call, nodeFlag(cmd), all)
+			if err != nil {
 				return err
 			}
 			if asJSON {
 				return printJSON(res)
+			}
+			if len(res.Unreachable) > 0 {
+				warn("unreachable nodes, their bots are not listed: " + strings.Join(res.Unreachable, ", "))
 			}
 			rows := make([][]string, 0, len(res.Bots))
 			for _, a := range res.Bots {
@@ -211,7 +325,7 @@ func botShow(dial callerFor) *cobra.Command {
 	return sessionSub(dial, "show <name>", "Show a bot",
 		"  argus bot show scout", cobra.ExactArgs(1), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, err := resolveBot(call, args[0])
+			a, call, err := botOn(cmd, call, args[0])
 			if err != nil {
 				return err
 			}
@@ -231,7 +345,7 @@ func botRename(dial callerFor) *cobra.Command {
 	return sessionSub(dial, "rename <name> <new>", "Rename a bot",
 		"  argus bot rename scout scout2", cobra.ExactArgs(2), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, err := resolveBot(call, args[0])
+			a, call, err := botOn(cmd, call, args[0])
 			if err != nil {
 				return err
 			}
@@ -255,7 +369,7 @@ func botForget(dial callerFor) *cobra.Command {
 			cmd.Flags().BoolVar(&purge, "purge", false, "also delete the bot's threads and records")
 		},
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, err := resolveBot(call, args[0])
+			a, call, err := botOn(cmd, call, args[0])
 			if err != nil {
 				return err
 			}
@@ -272,21 +386,25 @@ func botForget(dial callerFor) *cobra.Command {
 
 func botPrimary(dial callerFor) *cobra.Command {
 	var unset bool
-	return sessionSub(dial, "primary [name]", "Set or clear the node's primary bot",
-		"  argus bot primary scout\n  argus bot primary --unset", cobra.MaximumNArgs(1),
-		func(cmd *cobra.Command) { cmd.Flags().BoolVar(&unset, "unset", false, "clear the primary bot") },
+	return sessionSub(dial, "primary [name]", "Set or clear a node's primary bot",
+		"  argus bot primary scout\n  argus bot primary --unset --node laptop", cobra.MaximumNArgs(1),
+		func(cmd *cobra.Command) {
+			cmd.Flags().BoolVar(&unset, "unset", false, "clear the primary bot of --node, or of this node")
+		},
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
 			if unset == (len(args) == 1) {
 				return errors.New("give a bot name or --unset")
 			}
 			var p api.BotPrimaryParams
 			name := ""
-			if !unset {
-				a, err := resolveBot(call, args[0])
+			if unset {
+				call = onNode(call, nodeFlag(cmd))
+			} else {
+				a, botCall, err := botOn(cmd, call, args[0])
 				if err != nil {
 					return err
 				}
-				p.BotID, name = a.ID, a.Name
+				p.BotID, name, call = a.ID, a.Name, botCall
 			}
 			if err := call(api.MethodBotSetPrimary, p, nil); err != nil {
 				return err
@@ -303,28 +421,30 @@ func botPrimary(dial callerFor) *cobra.Command {
 		})
 }
 
-// chatTarget picks the bot for chat: the named one, else the node's primary,
-// else the only one.
-func chatTarget(call caller, name string) (api.BotInfo, error) {
+// chatTarget picks the bot for chat and returns a caller for its node: the
+// named one, else the primary of --node or this node, else that node's only
+// bot.
+func chatTarget(cmd *cobra.Command, call caller, name string) (api.BotInfo, caller, error) {
 	if name != "" {
-		return resolveBot(call, name)
+		return botOn(cmd, call, name)
 	}
+	call = onNode(call, nodeFlag(cmd))
 	var res api.BotListResult
 	if err := call(api.MethodBotList, api.BotListParams{}, &res); err != nil {
-		return api.BotInfo{}, err
+		return api.BotInfo{}, nil, err
 	}
 	for _, a := range res.Bots {
 		if res.Primary != "" && a.ID == res.Primary {
-			return a, nil
+			return a, call, nil
 		}
 	}
 	switch len(res.Bots) {
 	case 0:
-		return api.BotInfo{}, errors.New("no bots; create one with: argus bot create")
+		return api.BotInfo{}, nil, errors.New("no bots; create one with: argus bot create")
 	case 1:
-		return res.Bots[0], nil
+		return res.Bots[0], call, nil
 	}
-	return api.BotInfo{}, errors.New("several bots; name one")
+	return api.BotInfo{}, nil, errors.New("several bots; name one")
 }
 
 type botChatResult struct {
@@ -359,7 +479,7 @@ func botChat(dial callerFor) *cobra.Command {
 				}
 				message = args[1]
 			}
-			a, err := chatTarget(call, name)
+			a, call, err := chatTarget(cmd, call, name)
 			if err != nil {
 				return err
 			}
@@ -519,7 +639,7 @@ func botThreads(dial callerFor) *cobra.Command {
 	return sessionSub(dial, "threads <name>", "List a bot's threads",
 		"  argus bot threads scout", cobra.ExactArgs(1), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, err := resolveBot(call, args[0])
+			a, call, err := botOn(cmd, call, args[0])
 			if err != nil {
 				return err
 			}

@@ -13,14 +13,15 @@ import (
 )
 
 type fakeBotNode struct {
-	bots      []api.BotInfo
-	primary   string
-	add       api.BotAddResult
-	threads   []api.BotThreadsResult // served in order, last repeats
-	timeline  api.BotTimeline
-	calls     []string
-	params    map[string][]any
-	timelines []api.BotTimeline // served in order, last repeats; overrides timeline
+	bots        []api.BotInfo
+	primary     string
+	unreachable []string
+	add         api.BotAddResult
+	threads     []api.BotThreadsResult // served in order, last repeats
+	timeline    api.BotTimeline
+	calls       []string
+	params      map[string][]any
+	timelines   []api.BotTimeline // served in order, last repeats; overrides timeline
 }
 
 func (f *fakeBotNode) call(method string, params, out any) error {
@@ -31,7 +32,7 @@ func (f *fakeBotNode) call(method string, params, out any) error {
 	f.params[method] = append(f.params[method], params)
 	switch method {
 	case api.MethodBotList:
-		*out.(*api.BotListResult) = api.BotListResult{Bots: f.bots, Primary: f.primary}
+		*out.(*api.BotListResult) = api.BotListResult{Bots: f.bots, Primary: f.primary, Unreachable: f.unreachable}
 	case api.MethodBotCreate:
 		*out.(*api.BotInfo) = api.BotInfo{ID: "a1", Name: "scout", Dir: "/bots/scout", Status: "idle"}
 	case api.MethodBotAdd:
@@ -269,13 +270,13 @@ func TestBotNameResolution(t *testing.T) {
 		{ID: "a2", Name: "scout", NodeID: "n2", NodeLabel: "server"},
 	}}
 	_, errOut, err := execBot(t, f, "show", "scout")
-	if err == nil || !strings.Contains(errOut, "use scout@<node-label>") {
+	if err == nil || !strings.Contains(errOut, "on several nodes (laptop, server); use scout@<node> or --node") {
 		t.Fatalf("err = %v, stderr = %q", err, errOut)
 	}
 	if _, _, err := execBot(t, f, "show", "scout@server"); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.params[api.MethodBotShow][0].(api.BotRef); got.BotID != "a2" {
+	if got := f.params[api.MethodBotShow][0].(nodeParams); got.Node != "n2" || got.Params.(api.BotRef).BotID != "a2" {
 		t.Fatalf("show = %+v", got)
 	}
 	_, errOut, _ = execBot(t, f, "show", "nobody")

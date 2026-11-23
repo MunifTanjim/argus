@@ -29,41 +29,27 @@ func botUsage(dial callerFor) *cobra.Command {
 				}
 				from = time.Now().Add(-d)
 			}
-			var bots []api.BotInfo
-			if len(args) == 1 {
-				a, err := resolveBot(call, args[0])
-				if err != nil {
-					return err
-				}
-				bots = []api.BotInfo{a}
-			} else {
-				var res api.BotListResult
-				if err := call(api.MethodBotList, api.BotListParams{}, &res); err != nil {
-					return err
-				}
-				for _, a := range res.Bots {
-					if a.Status != "unreachable" {
-						bots = append(bots, a)
-					}
-				}
+			bots, err := botsFor(cmd, call, args)
+			if err != nil {
+				return err
 			}
 			var all []api.BotUsageResult
 			var rows [][]string
 			for _, a := range bots {
 				var res api.BotUsageResult
-				if err := call(api.MethodBotUsage, api.BotUsageParams{BotID: a.ID, Since: from}, &res); err != nil {
+				if err := onNode(call, a.NodeID)(api.MethodBotUsage, api.BotUsageParams{BotID: a.ID, Since: from}, &res); err != nil {
 					return fmt.Errorf("%s: %w", a.Name, err)
 				}
 				all = append(all, res)
 				for _, r := range append(res.Rows, res.Total) {
-					rows = append(rows, []string{a.Name, r.StartedBy, strconv.FormatInt(r.Sessions, 10),
+					rows = append(rows, []string{a.Name, botNodeLabel(a), r.StartedBy, strconv.FormatInt(r.Sessions, 10),
 						"$" + strconv.FormatFloat(r.Cost, 'f', 2, 64), strconv.FormatInt(r.Tokens, 10)})
 				}
 			}
 			if asJSON {
 				return printJSON(map[string]any{"usage": all})
 			}
-			printTable([]string{"BOT", "STARTED BY", "SESSIONS", "COST", "TOKENS"}, rows)
+			printTable([]string{"BOT", "NODE", "STARTED BY", "SESSIONS", "COST", "TOKENS"}, rows)
 			return nil
 		})
 }
@@ -77,7 +63,7 @@ func botSet(dial callerFor) *cobra.Command {
   argus bot set scout brief.enabled true
   argus bot set scout notify ""        # back to the default`, cobra.ExactArgs(3), nil,
 		func(cmd *cobra.Command, call caller, args []string, asJSON bool) error {
-			a, err := resolveBot(call, args[0])
+			a, call, err := botOn(cmd, call, args[0])
 			if err != nil {
 				return err
 			}
