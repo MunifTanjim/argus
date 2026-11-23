@@ -16,22 +16,32 @@ PAgentThread? latestChatThread(Iterable<PAgentThread> threads) {
   return best;
 }
 
+/// The gateway-qualified id of the agent [id] names: the id itself, or a
+/// node-local id (an agent's own `argus agent` output) that one agent has.
+/// Null when no agent, or more than one, matches.
+String? resolveAgentLinkId(PAgentsState state, String id) {
+  if (state.agents.any((a) => a.id == id)) return id;
+  final local = state.agents.where((a) => a.id.endsWith(':$id')).toList();
+  return local.length == 1 ? local.single.id : null;
+}
+
 /// Opens [link]: the agent's latest chat thread with the composer prefilled,
 /// or the agent screen with a new chat prefilled when it has none.
 void openAgentLink(BuildContext context, PAgentsState state, AgentLink link) {
   final nav = Navigator.of(context, rootNavigator: true);
-  if (!state.agents.any((a) => a.id == link.agentId)) {
+  final agentId = resolveAgentLinkId(state, link.agentId);
+  if (agentId == null) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(const SnackBar(content: Text('agent not found')));
     return;
   }
-  final thread = latestChatThread(state.threads[link.agentId] ?? const []);
+  final thread = latestChatThread(state.threads[agentId] ?? const []);
   nav.push(
     thread == null
-        ? agentRoute(link.agentId, chatText: link.text)
+        ? agentRoute(agentId, chatText: link.text)
         : threadRoute(
-            agentId: link.agentId,
+            agentId: agentId,
             threadId: thread.id,
             title: thread.title,
             initialText: link.text,

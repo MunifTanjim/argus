@@ -120,4 +120,19 @@ void main() {
     expect(find.text('agent not found'), findsOneWidget);
     expect(find.byType(AgentScreen), findsNothing);
   });
+
+  testWidgets('a node-local agent id opens that agent', (tester) async {
+    await pump(tester, [], const AgentLink('a1', text: 'status?'));
+    expect(find.byType(AgentScreen), findsOneWidget);
+  });
+
+  test('a local id names an agent only when one agent has it', () {
+    const state = PAgentsState(
+      agents: [PAgent(id: 'A:a1'), PAgent(id: 'B:a1'), PAgent(id: 'B:b2')],
+    );
+    expect(resolveAgentLinkId(state, 'A:a1'), 'A:a1');
+    expect(resolveAgentLinkId(state, 'b2'), 'B:b2');
+    expect(resolveAgentLinkId(state, 'a1'), isNull);
+    expect(resolveAgentLinkId(state, 'zz'), isNull);
+  });
 }
