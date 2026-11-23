@@ -127,6 +127,7 @@ Future<void> showSessionActions(
           value: null,
           label: 'Upgrade argus on ${s.nodeLabel ?? 'this node'}',
           enabled: false,
+          muted: true,
         ),
       ],
     );

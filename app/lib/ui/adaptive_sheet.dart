@@ -13,6 +13,7 @@ class ActionItem<T> {
     this.danger = false,
     this.enabled = true,
     this.selected = false,
+    this.muted = false,
   });
 
   final T value;
@@ -22,19 +23,25 @@ class ActionItem<T> {
   final bool danger;
   final bool enabled;
   final bool selected;
+
+  /// Draws the label in the dim colour, for a note rather than an action.
+  final bool muted;
 }
 
 /// Shows [items] and returns the chosen value, or null when dismissed. Below
 /// the wide desktop threshold this is a bottom sheet; at it, a popup menu
-/// anchored at [position], or below [context]'s render box when that is null.
+/// anchored at [position], or below [context]'s render box when that is null,
+/// so pass the context of the row or button that opened it. [sheetHeader]
+/// replaces the title in the bottom sheet.
 Future<T?> showActionMenu<T>(
   BuildContext context, {
   String? title,
   required List<ActionItem<T>> items,
   Offset? position,
+  Widget? sheetHeader,
 }) => useDesktopLayout(context)
     ? _showPopup(context, title, items, position)
-    : _showSheet(context, title, items);
+    : _showSheet(context, title, sheetHeader, items);
 
 const _titleStyle = TextStyle(fontWeight: FontWeight.w600);
 
@@ -45,12 +52,16 @@ Widget? _icon(ActionItem<Object?> item) => item.icon == null
         child: item.icon!,
       );
 
-TextStyle? _labelStyle(ActionItem<Object?> item) =>
-    item.danger ? const TextStyle(color: AppColors.error) : null;
+TextStyle? _labelStyle(ActionItem<Object?> item) => item.danger
+    ? const TextStyle(color: AppColors.error)
+    : item.muted
+    ? const TextStyle(color: AppColors.dim)
+    : null;
 
 Future<T?> _showSheet<T>(
   BuildContext context,
   String? title,
+  Widget? header,
   List<ActionItem<T>> items,
 ) => showModalBottomSheet<T>(
   context: context,
@@ -60,7 +71,9 @@ Future<T?> _showSheet<T>(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (title != null)
+          if (header != null)
+            header
+          else if (title != null)
             ListTile(
               title: Text(
                 title,

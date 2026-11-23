@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/ui/code_block.dart';
+import 'package:argus/ui/theme.dart';
 
 void main() {
   test('extractMarkdown anchors a prose line, restoring its markers', () {
@@ -229,5 +230,25 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(copied, ['https://argus.muniftanjim.dev']);
+  });
+
+  testWidgets('the link sheet keeps its dim two-line URL header', (
+    tester,
+  ) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (context) => TextButton(
+          onPressed: () => showLinkActions(context, 'http://x.test/a'),
+          child: const Text('open'),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    final url = tester.widget<Text>(find.text('http://x.test/a'));
+    expect(url.maxLines, 2);
+    expect(url.style?.color, AppColors.dim);
+    expect(url.style?.fontSize, 13);
+    expect(url.style?.fontWeight, isNull);
   });
 }

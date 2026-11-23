@@ -380,9 +380,9 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
       case TreeRowKind.project:
         return _row(
           onTap: () => ref.read(treeViewProvider.notifier).toggleFold(r.id),
-          onLongPress: () {
+          onLongPress: (rowContext) {
             final p = lookupProject(projects, r.id);
-            if (p != null) showProjectSheet(context, p);
+            if (p != null) showProjectSheet(rowContext, p);
           },
           leading: r.hasKids
               ? Icon(
@@ -430,9 +430,9 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
           indent: _col,
           selected: scope == r.id,
           onTap: () => _select(r.id),
-          onLongPress: () {
+          onLongPress: (rowContext) {
             final hit = lookupWorkspace(projects, r.id);
-            if (hit != null) showWorkspaceSheet(context, hit.$1, hit.$2);
+            if (hit != null) showWorkspaceSheet(rowContext, hit.$1, hit.$2);
           },
           leading: r.isMain
               ? const Icon(
@@ -486,7 +486,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
   Widget _row({
     required String title,
     required VoidCallback onTap,
-    VoidCallback? onLongPress,
+    void Function(BuildContext rowContext)? onLongPress,
     Widget? leading,
     TextStyle? titleStyle,
     List<Widget> titleSuffix = const [],
@@ -496,13 +496,14 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
     double indent = 0,
   }) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-    child: Material(
+    child: Builder(
+      builder: (rowContext) => Material(
       color: selected ? AppColors.border : Colors.transparent,
       borderRadius: BorderRadius.circular(8),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        onLongPress: onLongPress,
+        onLongPress: onLongPress == null ? null : () => onLongPress(rowContext),
         child: ConstrainedBox(
           constraints: BoxConstraints(minHeight: subtitle == null ? 40 : 52),
           child: Padding(
@@ -555,6 +556,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
           ),
         ),
       ),
+    ),
     ),
   );
 }

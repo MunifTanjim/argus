@@ -169,10 +169,13 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
   void _send(List<int> bytes) =>
       _direct ? _batcher.add(bytes) : _attach?.send(bytes);
 
-  Future<void> _switchTerminal(List<NodeTerminal> siblings) async {
+  Future<void> _switchTerminal(
+    BuildContext anchor,
+    List<NodeTerminal> siblings,
+  ) async {
     final current = widget.terminal!;
     final next = await showActionMenu<NodeTerminal>(
-      context,
+      anchor,
       items: [
         for (final t in siblings)
           ActionItem(
@@ -220,10 +223,12 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
         title: Text(title),
         actions: [
           if (siblings.length > 1)
-            IconButton(
-              icon: const Icon(Icons.swap_horiz),
-              tooltip: 'Switch terminal',
-              onPressed: () => _switchTerminal(siblings),
+            Builder(
+              builder: (buttonContext) => IconButton(
+                icon: const Icon(Icons.swap_horiz),
+                tooltip: 'Switch terminal',
+                onPressed: () => _switchTerminal(buttonContext, siblings),
+              ),
             ),
         ],
       ),

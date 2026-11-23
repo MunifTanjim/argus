@@ -8,7 +8,9 @@ import 'package:argus/state/gateway.dart';
 import 'package:argus/state/projects.dart';
 import 'package:argus/state/sessions.dart';
 import 'package:argus/ui/session_sections_list.dart';
+import 'package:argus/ui/theme.dart';
 import 'package:argus/ui/sidebar_sessions_list.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -94,6 +96,33 @@ Future<void> _renameTo(WidgetTester tester, String name) async {
 }
 
 void main() {
+  testWidgets('an outdated node shows a dim note that does not close the sheet',
+      (tester) async {
+    await _pumpList(tester, _Repo(), _s('A:s1'), outdated: const {'A'});
+    await tester.longPress(find.text('Old'));
+    await tester.pumpAndSettle();
+    final note = find.text('Upgrade argus on dev');
+    expect(tester.widget<Text>(note).style?.color, AppColors.dim);
+    expect(find.text('Rename'), findsNothing);
+    await tester.tap(note);
+    await tester.pumpAndSettle();
+    expect(note, findsOneWidget);
+  });
+
+  testWidgets('on a wide macOS window the menu opens at the pressed card',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await _pumpList(tester, _Repo(), _s('A:s1'));
+    final card = tester.getRect(find.text('Old'));
+    await tester.longPress(find.text('Old'));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(find.text('Rename')).top, lessThan(card.bottom + 120));
+  });
+
   testWidgets('a long press on a session card renames it', (tester) async {
     final repo = _Repo();
     await _pumpList(tester, repo, _s('A:s1'));

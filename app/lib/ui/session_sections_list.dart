@@ -40,12 +40,14 @@ class SessionSectionsList extends ConsumerWidget {
     Session s,
     SessionSection section,
     bool multiAgent,
-  ) => SessionCard(
-    session: s,
-    showNode: section.showNode,
-    showAgent: multiAgent,
-    onTap: () => Navigator.of(context).push(sessionDetailRoute(s)),
-    onLongPress: () => showSessionActions(context, s),
+  ) => Builder(
+    builder: (cardContext) => SessionCard(
+      session: s,
+      showNode: section.showNode,
+      showAgent: multiAgent,
+      onTap: () => Navigator.of(context).push(sessionDetailRoute(s)),
+      onLongPress: () => showSessionActions(cardContext, s),
+    ),
   );
 
   @override

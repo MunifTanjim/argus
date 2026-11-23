@@ -34,17 +34,20 @@ Future<_Result> _open(
   final r = _Result();
   await tester.pumpWidget(
     MaterialApp(
-      home: Builder(
-        builder: (context) => TextButton(
-          onPressed: () async {
-            r.value = await showActionMenu<String>(
-              context,
-              title: title,
-              items: _items,
-            );
-            r.done = true;
-          },
-          child: const Text('open'),
+      home: Align(
+        alignment: Alignment.topLeft,
+        child: Builder(
+          builder: (context) => TextButton(
+            onPressed: () async {
+              r.value = await showActionMenu<String>(
+                context,
+                title: title,
+                items: _items,
+              );
+              r.done = true;
+            },
+            child: const Text('open'),
+          ),
         ),
       ),
     ),
@@ -122,5 +125,39 @@ void main() {
     await tester.tap(title);
     await tester.pumpAndSettle();
     expect(r.done, isFalse);
+  });
+
+  testWidgets('the wide popup opens next to a small button', (tester) async {
+    await _open(tester, TargetPlatform.macOS);
+    final button = tester.getRect(find.text('open'));
+    final first = tester.getRect(find.text('Title'));
+    expect(first.top, lessThan(button.bottom + 40));
+    expect(first.left, lessThan(button.right + 40));
+  });
+
+  testWidgets('a sheet header replaces the title in the sheet only', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => showActionMenu<String>(
+              context,
+              title: 'T',
+              sheetHeader: const Text('HEADER'),
+              items: _items,
+            ),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(find.text('HEADER'), findsOneWidget);
+    expect(find.text('T'), findsNothing);
   });
 }

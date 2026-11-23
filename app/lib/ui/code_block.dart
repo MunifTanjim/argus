@@ -513,6 +513,15 @@ Future<void> showLinkActions(
   final action = await showActionMenu<String>(
     context,
     title: url,
+    sheetHeader: Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Text(
+        url,
+        style: const TextStyle(color: AppColors.dim, fontSize: 13),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+    ),
     position: position,
     items: const [
       ActionItem(value: 'open', label: 'Open link', icon: Icon(Icons.open_in_new)),

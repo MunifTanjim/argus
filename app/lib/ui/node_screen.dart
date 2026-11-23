@@ -78,11 +78,11 @@ class _NodeScreenState extends ConsumerState<NodeScreen> {
     }
   }
 
-  Future<void> _onToggle(bool on) async {
+  Future<void> _onToggle(BuildContext anchor, bool on) async {
     var until = '';
     if (on) {
       final picked = await pickUntil(
-        context,
+        anchor,
         indefiniteLabel: 'Until I turn it off',
         indefinite: wakelockIndefinite,
       );
@@ -164,15 +164,19 @@ class _NodeScreenState extends ConsumerState<NodeScreen> {
                       version: version,
                     ),
                     if (wakelock)
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        value: info.wakelock.on,
-                        title: const Text('Keep awake'),
-                        subtitle: Text(
-                          _awakeLabel(info.wakelock),
-                          style: const TextStyle(color: AppColors.dim, fontSize: 11),
+                      Builder(
+                        builder: (tileContext) => SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          value: info.wakelock.on,
+                          title: const Text('Keep awake'),
+                          subtitle: Text(
+                            _awakeLabel(info.wakelock),
+                            style: const TextStyle(color: AppColors.dim, fontSize: 11),
+                          ),
+                          onChanged: _setting
+                              ? null
+                              : (on) => _onToggle(tileContext, on),
                         ),
-                        onChanged: _setting ? null : _onToggle,
                       ),
                   ],
                 ),

@@ -226,15 +226,17 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
   List<Widget> _pauseBody() {
     final paused = _pausedUntil != null;
     return [
-      SwitchListTile(
-        contentPadding: EdgeInsets.zero,
-        value: paused,
-        title: const Text('Pause notifications'),
-        subtitle: Text(
-          paused ? _pauseStatusLabel() : 'This device receives push notifications.',
-          style: const TextStyle(color: AppColors.dim, fontSize: 11),
+      Builder(
+        builder: (tileContext) => SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: paused,
+          title: const Text('Pause notifications'),
+          subtitle: Text(
+            paused ? _pauseStatusLabel() : 'This device receives push notifications.',
+            style: const TextStyle(color: AppColors.dim, fontSize: 11),
+          ),
+          onChanged: (on) => _onPauseToggle(tileContext, on),
         ),
-        onChanged: _onPauseToggle,
       ),
     ];
   }
@@ -250,13 +252,13 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
     return 'Paused until $hh:$mm.';
   }
 
-  Future<void> _onPauseToggle(bool on) async {
+  Future<void> _onPauseToggle(BuildContext anchor, bool on) async {
     if (!on) {
       await _applyPause(null);
       return;
     }
     final choice = await pickUntil(
-      context,
+      anchor,
       indefiniteLabel: 'Until I turn it back on',
       indefinite: pauseIndefinite,
     );
