@@ -730,8 +730,7 @@ class E2EClient implements GatewayClient {
       case 'bot.list':
         return _fanoutBots(params);
       case 'bot.setPrimary' when (stringField(params, 'bot_id') ?? '').isEmpty:
-        await _unsetBotPrimary(null);
-        return null;
+        return _routeByNode(method, params);
       case 'transcript.unsubscribe':
         final sub = stringField(params, 'sub_id');
         try {
@@ -896,8 +895,9 @@ class E2EClient implements GatewayClient {
 
   /// Merges every node's bots with composite ids, ordered by node id. Bots
   /// last seen on a node with no channel, or that failed to answer, are
-  /// included as unreachable until the node answers again or is gone. At most
-  /// one bot is primary: the first flagged one in node order.
+  /// included as unreachable until the node answers again or is gone. Each
+  /// node has its own primary; bots keep the primary flag their node set, and
+  /// the merged list has no single `primary`.
   Future<Map<String, dynamic>> _fanoutBots(Object? params) async {
     final nodeIds = (await _settledNodeIds())..sort();
     final results = await Future.wait(
@@ -905,25 +905,19 @@ class E2EClient implements GatewayClient {
         final epoch = _botEpoch[nodeId] ?? 0;
         try {
           final r = await _callNodeDecoded(nodeId, 'bot.list', params);
-          final m = r is Map ? r : const {};
-          final list = m['bots'];
-          final primary = m['primary'];
+          final list = r is Map ? r['bots'] : null;
           return (
             bots: [
               if (list is List)
                 for (final a in list)
                   if (a is Map<String, dynamic>) _botOrigin(a, nodeId),
             ],
-            primary: primary is String && primary.isNotEmpty
-                ? compositeId(nodeId, primary)
-                : '',
             ok: true,
             epoch: epoch,
           );
         } catch (_) {
           return (
             bots: const <Map<String, dynamic>>[],
-            primary: '',
             ok: false,
             epoch: epoch,
           );
@@ -932,7 +926,6 @@ class E2EClient implements GatewayClient {
     );
 
     final byNode = <String, List<Map<String, dynamic>>>{};
-    final primaryOf = <String, String>{};
     for (var i = 0; i < nodeIds.length; i++) {
       final nodeId = nodeIds[i];
       final r = results[i];
@@ -943,7 +936,6 @@ class E2EClient implements GatewayClient {
           _byNodeId.containsKey(nodeId)) {
         _botCache[nodeId] = r.bots;
         byNode[nodeId] = r.bots;
-        primaryOf[nodeId] = r.primary;
         continue;
       }
       byNode[nodeId] = _unreachableBots(_botCache[nodeId] ?? const []);
@@ -953,48 +945,9 @@ class E2EClient implements GatewayClient {
     }
 
     final ordered = byNode.keys.toList()..sort();
-    final merged = <Map<String, dynamic>>[];
-    var primary = '';
-    for (final id in ordered) {
-      for (final a in byNode[id]!) {
-        if (a['primary'] == true) {
-          if (primary.isEmpty) {
-            primary = a['id'] as String;
-          } else {
-            merged.add({...a, 'primary': false});
-            continue;
-          }
-        }
-        merged.add(a);
-      }
-    }
-    if (primary.isEmpty) {
-      for (final id in ordered) {
-        final p = primaryOf[id] ?? '';
-        if (p.isNotEmpty) {
-          primary = p;
-          break;
-        }
-      }
-    }
-    return {'bots': merged, if (primary.isNotEmpty) 'primary': primary};
-  }
-
-  /// Clears the primary on every connected node except [skip]. Every node is
-  /// tried; the first error surfaces afterwards.
-  Future<void> _unsetBotPrimary(String? skip) async {
-    final nodeIds = (await _settledNodeIds()).where((id) => id != skip);
-    Object? first;
-    await Future.wait(
-      nodeIds.map((nodeId) async {
-        try {
-          await _callNodeDecoded(nodeId, 'bot.setPrimary', {});
-        } catch (e) {
-          first ??= e;
-        }
-      }),
-    );
-    if (first != null) throw first!;
+    return {
+      'bots': [for (final id in ordered) ...byNode[id]!],
+    };
   }
 
   (String, Map<String, dynamic>) _splitIdField(
@@ -1036,9 +989,6 @@ class E2EClient implements GatewayClient {
     }
     final res = await _callNodeDecoded(nodeId, method, local);
     switch (method) {
-      case 'bot.setPrimary':
-        await _unsetBotPrimary(nodeId);
-        return res;
       case 'bot.show' || 'bot.rename':
         return res is Map<String, dynamic> ? _botOrigin(res, nodeId) : res;
       case 'bot.thread.send' when res is Map<String, dynamic>:

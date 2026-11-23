@@ -24,9 +24,8 @@ void main() {
         },
         'bot.list' => {
           'bots': [
-            {'id': 'A:a1'},
+            {'id': 'A:a1', 'primary': true},
           ],
-          'primary': 'A:a1',
         },
         'bot.thread.send' => {'thread_id': 'A:t1', 'session_id': 'A:s1'},
         'bot.thread.list' => {
@@ -81,8 +80,8 @@ void main() {
 
     final list = await api.list();
     _last(client, 'bot.list', {});
-    expect(list.primary, 'A:a1');
     expect(list.bots.single.id, 'A:a1');
+    expect(list.bots.single.primary, true);
     await api.list(includeArchived: true);
     _last(client, 'bot.list', {'include_archived': true});
 
@@ -104,7 +103,9 @@ void main() {
     _last(client, 'bot.forget', {'bot_id': 'A:a1', 'purge': true});
     await api.setPrimary('A:a1');
     _last(client, 'bot.setPrimary', {'bot_id': 'A:a1'});
-    await api.setPrimary(null);
+    await api.unsetPrimary('B');
+    _last(client, 'bot.setPrimary', {'node_id': 'B'});
+    await api.unsetPrimary('');
     _last(client, 'bot.setPrimary', <String, dynamic>{});
 
     final sent = await api.send('A:a1', 'hi', threadId: 'A:t1');
@@ -167,9 +168,8 @@ void main() {
       return {
         'bots': [
           {'id': 'A:a1', 'name': 'x', 'status': 'unreachable'},
-          {'id': 'B:a1', 'name': 'y'},
+          {'id': 'B:a1', 'name': 'y', 'primary': true},
         ],
-        'primary': 'B:a1',
       };
     });
     final c = ProviderContainer();
@@ -180,7 +180,7 @@ void main() {
     expect(s.loaded, true);
     expect(s.bots.length, 2);
     expect(s.bots.first.unreachable, true);
-    expect(s.primaryBot?.id, 'B:a1');
+    expect(s.bots.last.primary, true);
 
     fail = true;
     await n.load(client);

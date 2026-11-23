@@ -31,10 +31,11 @@ Future<(ProviderContainer, FakeGatewayClient)> _pump(
               'name': 'scout',
               'status': status,
               'agent': 'claude',
+              'node_id': 'A',
               'node_label': 'mbp',
+              'primary': primaryId == 'A:a1',
             },
           ],
-          if (primaryId.isNotEmpty) 'primary': primaryId,
         };
       case 'bot.thread.list':
         return {
@@ -132,15 +133,17 @@ void main() {
       client.calls.firstWhere((x) => x.$1 == 'bot.setPrimary').$2,
       {'bot_id': 'A:a1'},
     );
-    expect(c.read(botsProvider).primary, 'A:a1');
+    expect(c.read(botsProvider).bots.single.primary, true);
     expect(find.text('Claude · home: mbp · primary'), findsOneWidget);
 
     await tester.tap(find.byType(PopupMenuButton<String>));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Unset primary'));
     await tester.pumpAndSettle();
-    expect(client.calls.where((x) => x.$1 == 'bot.setPrimary').last.$2, <String, dynamic>{});
-    expect(c.read(botsProvider).primary, '');
+    expect(client.calls.where((x) => x.$1 == 'bot.setPrimary').last.$2, {
+      'node_id': 'A',
+    });
+    expect(c.read(botsProvider).bots.single.primary, false);
   });
 
   testWidgets('an unreachable bot disables its actions', (tester) async {

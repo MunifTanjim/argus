@@ -73,9 +73,13 @@ class BotsApi {
     {'bot_id': botId, if (purge) 'purge': true},
   );
 
-  /// A null [botId] unsets the primary on every node.
-  Future<void> setPrimary(String? botId) =>
-      _call('bot.setPrimary', {if (botId != null) 'bot_id': botId});
+  /// Makes [botId] its node's primary bot.
+  Future<void> setPrimary(String botId) =>
+      _call('bot.setPrimary', {'bot_id': botId});
+
+  /// Unsets the primary bot of [nodeId].
+  Future<void> unsetPrimary(String nodeId) =>
+      _call('bot.setPrimary', {if (nodeId.isNotEmpty) 'node_id': nodeId});
 
   Future<BotSendResult> send(
     String botId,
@@ -329,7 +333,6 @@ final botRoutinesProvider = FutureProvider.autoDispose
 class BotsState {
   const BotsState({
     this.bots = const [],
-    this.primary = '',
     this.threads = const {},
     this.loaded = false,
     this.error,
@@ -338,11 +341,8 @@ class BotsState {
   final List<Bot> bots;
   // Each reachable bot's threads; a bot not listed has none loaded yet.
   final Map<String, List<BotThread>> threads;
-  final String primary; // the primary bot's composite id, or empty
   final bool loaded;
   final String? error; // the last load failed; bots are the last good list
-
-  bool isPrimary(Bot a) => a.primary || (a.id.isNotEmpty && a.id == primary);
 
   /// The bot id and thread with the gateway-qualified id [threadId].
   (String, BotThread)? findThread(String threadId) {
@@ -356,13 +356,6 @@ class BotsState {
 
   bool unread(String botId) =>
       (threads[botId] ?? const []).any((t) => t.unread);
-
-  Bot? get primaryBot {
-    for (final a in bots) {
-      if (a.id == primary) return a;
-    }
-    return null;
-  }
 }
 
 /// The merged bots of every connected node. A failed load keeps the last
@@ -404,7 +397,6 @@ class BotsNotifier extends Notifier<BotsState> {
       if (gen != _generation) return;
       state = BotsState(
         bots: res.bots,
-        primary: res.primary,
         threads: threads,
         loaded: true,
       );
@@ -412,7 +404,6 @@ class BotsNotifier extends Notifier<BotsState> {
       if (gen != _generation) return;
       state = BotsState(
         bots: state.bots,
-        primary: state.primary,
         threads: state.threads,
         loaded: state.loaded,
         error: '$e',

@@ -69,20 +69,11 @@ void main() {
     expect(bots[0]['node_id'], 'A');
     expect(bots[0]['node_label'], 'A-box');
     expect(bots[0]['primary'], true);
-    expect(bots[1]['primary'], false, reason: 'only the first primary wins');
-    expect(res['primary'], 'A:a1');
-    await f.client.close();
-  });
-
-  test('primary falls back to a node-reported primary', () async {
-    final f = await _connect(
-      _bots([]),
-      _bots([
-        {'id': 'a1', 'status': 'idle'},
-      ], 'a1'),
-    );
-    final res = await f.client.call('bot.list', {}) as Map;
-    expect(res['primary'], 'B:a1');
+    expect(bots[1]['primary'], true, reason: 'each node keeps its primary');
+    expect(bots[2]['primary'], isNot(true));
+    expect(res.containsKey('primary'), false);
+    expect(f.a.requests.where((r) => r.method == 'bot.setPrimary'), isEmpty);
+    expect(f.b.requests.where((r) => r.method == 'bot.setPrimary'), isEmpty);
     await f.client.close();
   });
 
@@ -112,7 +103,7 @@ void main() {
       'A:a1:idle',
       'B:b1:unreachable',
     ]);
-    expect(res['primary'], 'B:b1');
+    expect(bots[1]['primary'], true);
 
     f.lnk.pushNotification('node.event', {
       'type': 'removed',
@@ -186,23 +177,25 @@ void main() {
     await f.client.close();
   });
 
-  test('setPrimary routes to the bot node and unsets the others', () async {
+  test('setPrimary routes to the bot node only', () async {
     final f = await _connect((m, p) => _json(null), (m, p) => _json(null));
     await f.client.call('bot.setPrimary', {'bot_id': 'B:a2'});
     final bReq = f.b.requests.where((r) => r.method == 'bot.setPrimary');
-    final aReq = f.a.requests.where((r) => r.method == 'bot.setPrimary');
     expect(_params(bReq.single.params), {'bot_id': 'a2'});
-    expect(_params(aReq.single.params), isEmpty);
+    expect(f.a.requests.where((r) => r.method == 'bot.setPrimary'), isEmpty);
+    await f.client.close();
+  });
 
-    await f.client.call('bot.setPrimary', {});
-    expect(
-      f.a.requests.where((r) => r.method == 'bot.setPrimary').length,
-      2,
+  test('unsetting the primary names its node', () async {
+    final f = await _connect((m, p) => _json(null), (m, p) => _json(null));
+    await expectLater(
+      f.client.call('bot.setPrimary', {}),
+      throwsA(isA<RpcError>()),
     );
-    expect(
-      f.b.requests.where((r) => r.method == 'bot.setPrimary').length,
-      2,
-    );
+    await f.client.call('bot.setPrimary', {'node_id': 'A'});
+    final aReq = f.a.requests.where((r) => r.method == 'bot.setPrimary');
+    expect(_params(aReq.single.params), {'node_id': 'A'});
+    expect(f.b.requests.where((r) => r.method == 'bot.setPrimary'), isEmpty);
     await f.client.close();
   });
 

@@ -72,11 +72,10 @@ class Bot {
   );
 }
 
-/// The merged bot list; [primary] is the primary bot's composite id.
+/// The merged bot list. Each node has its own primary, marked on its bot.
 class BotList {
-  const BotList({this.bots = const [], this.primary = ''});
+  const BotList({this.bots = const []});
   final List<Bot> bots;
-  final String primary;
 
   factory BotList.fromJson(Object? res) {
     final m = res is Map ? res.cast<String, dynamic>() : const <String, dynamic>{};
@@ -85,7 +84,6 @@ class BotList {
         for (final a in (m['bots'] as List?) ?? const [])
           if (a is Map<String, dynamic>) Bot.fromJson(a),
       ],
-      primary: m['primary'] as String? ?? '',
     );
   }
 }

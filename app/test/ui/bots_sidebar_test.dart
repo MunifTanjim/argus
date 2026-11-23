@@ -1,3 +1,4 @@
+import 'package:argus/models/bot.dart';
 import 'package:argus/pairing/gateway_store.dart';
 import 'package:argus/state/bot_sections.dart';
 import 'package:argus/state/gateway.dart';
@@ -32,10 +33,9 @@ final _bots = {
     {'id': 'A:n1', 'name': 'needs-one', 'status': 'needs_you'},
     {'id': 'A:t1', 'name': 'waiting-one', 'status': 'waiting'},
     {'id': 'B:x1', 'name': 'offline-one', 'status': 'unreachable'},
-    {'id': 'A:p1', 'name': 'primary-one', 'status': 'working'},
+    {'id': 'A:p1', 'name': 'primary-one', 'status': 'working', 'primary': true},
     {'id': 'A:gone', 'name': 'archived-one', 'status': 'idle', 'archived': true},
   ],
-  'primary': 'A:p1',
 };
 
 
@@ -82,6 +82,20 @@ void main() {
       buildBotSections(c.read(botsProvider), 'mbp').single.bots.single.name,
       'idle-one',
     );
+  });
+
+  test('each node keeps its primary, ordered by node', () {
+    const s = BotsState(
+      bots: [
+        Bot(id: 'A:p', name: 'alpha', nodeLabel: 'zeta', primary: true),
+        Bot(id: 'B:p', name: 'beta', nodeLabel: 'mbp', primary: true),
+        Bot(id: 'B:q', name: 'gamma', nodeLabel: 'mbp'),
+      ],
+    );
+    final groups = buildBotSections(s, '');
+    expect(groups.first.section, BotSection.primary);
+    expect(groups.first.bots.map((a) => a.id), ['B:p', 'A:p']);
+    expect(botPlace(s, groups.first.bots.first), 'mbp');
   });
 
   testWidgets('the Bots tab lists bots by section and filters', (tester) async {

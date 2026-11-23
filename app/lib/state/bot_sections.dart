@@ -17,7 +17,7 @@ enum BotSection {
 }
 
 BotSection botSectionOf(BotsState s, Bot a) {
-  if (s.isPrimary(a)) return BotSection.primary;
+  if (a.primary) return BotSection.primary;
   return switch (a.status) {
     'unreachable' => BotSection.unreachable,
     'needs_you' => BotSection.needsYou,
@@ -48,6 +48,7 @@ bool botMatches(BotsState s, Bot a, String query) {
 typedef BotGroup = ({BotSection section, List<Bot> bots});
 
 /// The shown bots by section, by name in each; empty sections are left out.
+/// Each node has its own primary, so the primaries are ordered by node first.
 List<BotGroup> buildBotSections(BotsState s, String query) {
   final q = query.trim();
   final by = <BotSection, List<Bot>>{};
@@ -62,6 +63,12 @@ List<BotGroup> buildBotSections(BotsState s, String query) {
           section: sec,
           bots: list
             ..sort((a, b) {
+              if (sec == BotSection.primary) {
+                final n = a.nodeLabel.toLowerCase().compareTo(
+                  b.nodeLabel.toLowerCase(),
+                );
+                if (n != 0) return n;
+              }
               final c = a.name.toLowerCase().compareTo(b.name.toLowerCase());
               return c != 0 ? c : a.id.compareTo(b.id);
             }),

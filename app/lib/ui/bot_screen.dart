@@ -130,7 +130,8 @@ class _BotScreenState extends ConsumerState<BotScreen> {
   Future<void> _setPrimary(Bot a, bool primary) async {
     if (!_reachable(a)) return;
     try {
-      await ref.read(botsApiProvider).setPrimary(primary ? a.id : null);
+      final api = ref.read(botsApiProvider);
+      await (primary ? api.setPrimary(a.id) : api.unsetPrimary(a.nodeId));
     } catch (e) {
       if (mounted) _say('primary: ${actionError(e)}');
     }
@@ -149,7 +150,7 @@ class _BotScreenState extends ConsumerState<BotScreen> {
         ),
       );
     }
-    final primary = state.isPrimary(bot);
+    final primary = bot.primary;
     final threads = state.threads[bot.id];
     final usage = ref.watch(botMemoryUsageProvider(bot.id)).value;
     final label = agentLabel(bot.agent).isNotEmpty
