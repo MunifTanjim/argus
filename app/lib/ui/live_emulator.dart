@@ -11,6 +11,7 @@ import '../state/terminal_prefs.dart';
 import '../state/touch_drag_filter.dart';
 import '../util/utf8_stream.dart';
 import 'ansi_palette.dart';
+import 'desktop_shortcuts.dart';
 import 'patched_terminal.dart';
 
 // Bundled so terminal glyphs match a desktop terminal regardless of device fonts.
@@ -122,6 +123,7 @@ abstract class LiveEmulator {
 
 class _XtermEmulator implements LiveEmulator {
   _XtermEmulator({required this.direct, required this.sink}) {
+    liveTerminalFocusNodes.add(_focusNode);
     _terminal.onResize = (w, h, pw, ph) => sink.resize(w, h);
     // TerminalView turns a vertical drag over the alt screen (tmux) into wheel
     // ticks, and taps into button presses. Send each as an SGR report straight
@@ -144,6 +146,7 @@ class _XtermEmulator implements LiveEmulator {
   final bool direct;
   final LiveSink sink;
   final Terminal _terminal = PatchedTerminal(maxLines: 4000);
+  final _focusNode = FocusNode();
   // Reassembles UTF-8 codepoints split across output chunks.
   Utf8StreamDecoder _decoder = Utf8StreamDecoder();
 
@@ -169,6 +172,7 @@ class _XtermEmulator implements LiveEmulator {
   @override
   Widget view(double fontSize) => TerminalView(
         _terminal,
+        focusNode: _focusNode,
         theme: _terminalTheme,
         textStyle: TerminalStyle(
           fontSize: fontSize,
@@ -184,7 +188,10 @@ class _XtermEmulator implements LiveEmulator {
       );
 
   @override
-  void dispose() {}
+  void dispose() {
+    liveTerminalFocusNodes.remove(_focusNode);
+    _focusNode.dispose();
+  }
 }
 
 const _ghosttyKeys = <String, gt.Key>{
@@ -205,6 +212,7 @@ const _ghosttyKeys = <String, gt.Key>{
 
 class _GhosttyEmulator implements LiveEmulator {
   _GhosttyEmulator({required this.direct, required this.sink}) {
+    liveTerminalFocusNodes.add(_focusNode);
     _controller.onOutput = _onOutput;
     _controller.onResize = (cols, rows) {
       _cols = cols;
@@ -301,6 +309,7 @@ class _GhosttyEmulator implements LiveEmulator {
   @override
   void dispose() {
     _controller.dispose();
+    liveTerminalFocusNodes.remove(_focusNode);
     _focusNode.dispose();
   }
 }

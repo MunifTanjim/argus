@@ -14,13 +14,16 @@ import '../state/sessions.dart';
 import '../state/terminal_prefs.dart';
 import '../state/terminals.dart';
 import 'adaptive_nav.dart';
+import 'desktop_shortcuts.dart';
 import 'history_screen.dart';
 import 'project_drawer.dart';
 import 'responsive.dart';
 import 'route_observer.dart';
 import 'session_detail_screen.dart';
 import 'session_list_screen.dart';
+import 'settings_screen.dart';
 import 'shell_drawer.dart';
+import 'spawn_dialog.dart';
 import 'terminal_list_screen.dart';
 import 'workspace_screen.dart';
 
@@ -272,21 +275,30 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       child: ShellDrawerScope(
         openDrawer: wide ? null : () => _drawerKey.currentState?.open(),
         closeDrawer: wide ? null : () => _drawerKey.currentState?.close(),
-        child: Scaffold(
-          body: wide
-              ? Row(
-                  children: [
-                    const SizedBox(width: kSidePanelWidth, child: ProjectDrawer()),
-                    const VerticalDivider(width: 1),
-                    Expanded(child: main),
-                  ],
-                )
-              : ModalShellDrawer(
-                  key: _drawerKey,
-                  width: min(screenWidth - 56, kDrawerMaxWidth),
-                  drawer: const ProjectDrawer(),
-                  child: main,
-                ),
+        child: DesktopShortcuts(
+          onBack: _back,
+          onSpawn: () =>
+              Navigator.of(context, rootNavigator: true).push(spawnRoute()),
+          onSettings: () => Navigator.of(context, rootNavigator: true).push(
+              MaterialPageRoute(builder: (_) => const SettingsScreen())),
+          onQuickSwitcher: () {},
+          onShortcutSheet: () {},
+          child: Scaffold(
+            body: wide
+                ? Row(
+                    children: [
+                      const SizedBox(width: kSidePanelWidth, child: ProjectDrawer()),
+                      const VerticalDivider(width: 1),
+                      Expanded(child: main),
+                    ],
+                  )
+                : ModalShellDrawer(
+                    key: _drawerKey,
+                    width: min(screenWidth - 56, kDrawerMaxWidth),
+                    drawer: const ProjectDrawer(),
+                    child: main,
+                  ),
+          ),
         ),
       ),
     );

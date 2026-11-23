@@ -15,6 +15,7 @@ import '../state/grouping.dart';
 import '../state/prompt_drafts.dart';
 import '../state/respond_view_model.dart';
 import '../util/platform.dart';
+import 'desktop_shortcuts.dart';
 import 'interaction_panel.dart';
 import 'prompt_completion.dart';
 import 'running_shells_sheet.dart';
@@ -203,6 +204,15 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     _syncTick();
   }
 
+  // Shortcuts focus the composer of the session on top.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (ModalRoute.of(context)?.isCurrent ?? true) {
+      activeComposerFocus.value = _focus;
+    }
+  }
+
   @override
   void didUpdateWidget(SessionComposer old) {
     super.didUpdateWidget(old);
@@ -239,6 +249,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     _vm.sendInput.removeListener(_refresh);
     _vm.dispose();
     _text.dispose();
+    if (activeComposerFocus.value == _focus) activeComposerFocus.value = null;
     _focus.dispose();
     super.dispose();
   }
