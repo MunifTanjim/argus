@@ -105,6 +105,7 @@ class EntryRow extends StatelessWidget {
     this.expanded = false,
     this.onToggle,
     this.onUndoMemory,
+    this.canUndoMemory,
     this.offerActions,
     this.draftActions,
   });
@@ -117,6 +118,9 @@ class EntryRow extends StatelessWidget {
   /// Offers an undo on an argus entry that reports a memory change; null
   /// leaves the entry without one.
   final void Function(String commit)? onUndoMemory;
+
+  /// Whether the change is still open to undo; null is always.
+  final bool Function(String commit)? canUndoMemory;
 
   /// Offers Start and Dismiss on an agent's open offers; null leaves offers
   /// as plain text.
@@ -180,6 +184,7 @@ class EntryRow extends StatelessWidget {
         return _ArgusEventRow(
           entry: e,
           onUndo: onUndoMemory,
+          canUndo: canUndoMemory,
           offers: offerActions,
           drafts: draftActions,
         );
@@ -691,11 +696,13 @@ class _ArgusEventRow extends StatelessWidget {
   const _ArgusEventRow({
     required this.entry,
     this.onUndo,
+    this.canUndo,
     this.offers,
     this.drafts,
   });
   final Entry entry;
   final void Function(String commit)? onUndo;
+  final bool Function(String commit)? canUndo;
   final OfferActions? offers;
   final DraftActions? drafts;
 
@@ -734,7 +741,9 @@ class _ArgusEventRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-              if (commit.isNotEmpty && onUndo != null)
+              if (commit.isNotEmpty &&
+                  onUndo != null &&
+                  (canUndo?.call(commit) ?? true))
                 TextButton(
                   onPressed: () => onUndo!(commit),
                   style: TextButton.styleFrom(

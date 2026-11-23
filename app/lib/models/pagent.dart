@@ -102,6 +102,7 @@ class PAgentThread {
     this.status = 'active',
     this.unread = false,
     required this.lastActiveAt,
+    this.lastActiveNanos = 0,
     this.sessionId = '',
     this.sessionStatus = '',
   });
@@ -114,6 +115,10 @@ class PAgentThread {
   final String status;
   final bool unread;
   final DateTime lastActiveAt;
+
+  /// [lastActiveAt] in Unix nanoseconds, the unit of the read position, kept
+  /// whole: [DateTime] drops the digits below a microsecond.
+  final int lastActiveNanos;
   final String sessionId;
   final String sessionStatus;
 
@@ -126,6 +131,7 @@ class PAgentThread {
     status: j['status'] as String? ?? 'active',
     unread: j['unread'] as bool? ?? false,
     lastActiveAt: _time(j['last_active_at']),
+    lastActiveNanos: timestampNanos(j['last_active_at'] as String?),
     sessionId: j['session_id'] as String? ?? '',
     sessionStatus: j['session_status'] as String? ?? '',
   );
@@ -370,6 +376,22 @@ String undoCommit(Entry e) {
   final p = e.event?.payload;
   return p is Map ? (p['commit'] as String? ?? '') : '';
 }
+
+/// The commits a timeline shows as undone.
+Set<String> undoneCommits(Iterable<Entry> entries) {
+  final out = <String>{};
+  for (final e in entries) {
+    if (e.kind != EntryKind.argus || e.event?.kind != 'memory.undone') continue;
+    final p = e.event?.payload;
+    final c = p is Map ? p['commit'] : null;
+    if (c is String && c.isNotEmpty) out.add(c);
+  }
+  return out;
+}
+
+/// Whether [commit] (a hash or a prefix of one) is in [undone].
+bool commitUndone(Set<String> undone, String commit) =>
+    undone.any((c) => c.startsWith(commit) || commit.startsWith(c));
 
 /// A timestamp as Unix nanoseconds, the unit of a thread's read position; 0
 /// when it does not parse.

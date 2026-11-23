@@ -204,6 +204,55 @@ void main() {
     });
   });
 
+  testWidgets('marks an unread thread read at its last activity', (tester) async {
+    final client = await _pump(
+      tester,
+      extra: (m, p) => m == 'pagent.thread.list'
+          ? {
+              'threads': [
+                {
+                  'id': 'A:t1',
+                  'agent_id': 'A:a1',
+                  'unread': true,
+                  'last_active_at': '2026-11-22T10:00:09.123456789Z',
+                },
+              ],
+            }
+          : null,
+    );
+    final reads = client.calls.where((c) => c.$1 == 'pagent.thread.markRead');
+    expect(reads.map((c) => c.$2), [
+      {
+        'thread_id': 'A:t1',
+        'position':
+            DateTime.utc(2026, 11, 22, 10, 0, 9).millisecondsSinceEpoch * 1000000 + 123456789,
+      },
+    ]);
+  });
+
+  testWidgets('an undone change offers no undo', (tester) async {
+    await _pump(
+      tester,
+      extra: (m, p) {
+        if (m != 'pagent.thread.timeline') return null;
+        final tl = _timeline();
+        (tl['entries'] as List).add({
+          'id': 'e9',
+          'kind': 'argus',
+          'timestamp': '2026-11-22T10:00:07Z',
+          'detail': 'Undid a change',
+          'event': {
+            'id': 9,
+            'kind': 'memory.undone',
+            'payload': {'commit': 'abc123', 'revert': 'fff'},
+          },
+        });
+        return tl;
+      },
+    );
+    expect(find.text('Undo'), findsOneWidget); // the routine change only
+  });
+
   testWidgets('undo calls pagent.memory.undo with the commit and reloads', (tester) async {
     final client = await _pump(tester);
     final loads = client.calls.where((c) => c.$1 == 'pagent.thread.timeline').length;
@@ -211,7 +260,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       client.calls.firstWhere((c) => c.$1 == 'pagent.memory.undo').$2,
-      {'agent_id': 'A:a1', 'commit': 'abc123'},
+      {'agent_id': 'A:a1', 'commit': 'abc123', 'thread_id': 'A:t1'},
     );
     expect(
       client.calls.where((c) => c.$1 == 'pagent.thread.timeline').length,
@@ -225,7 +274,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       client.calls.firstWhere((c) => c.$1 == 'pagent.memory.undo').$2,
-      {'agent_id': 'A:a1', 'commit': 'def456'},
+      {'agent_id': 'A:a1', 'commit': 'def456', 'thread_id': 'A:t1'},
     );
   });
 

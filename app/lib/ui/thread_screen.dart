@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -104,16 +106,36 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
         _timeline = tl;
         _error = null;
       });
-      final pos = lastEntryNanos(tl.entries);
-      if (pos > _readPos) {
-        _readPos = pos;
-        try {
-          await api.markRead(widget.threadId, position: pos);
-        } catch (_) {}
-      }
+      await _markRead();
     } catch (e) {
       if (mounted) setState(() => _error = e);
     }
+  }
+
+  PAgentThread? get _thread {
+    final threads = ref.read(pagentsProvider).threads[widget.agentId];
+    for (final t in threads ?? const <PAgentThread>[]) {
+      if (t.id == widget.threadId) return t;
+    }
+    return null;
+  }
+
+  /// Marks the thread read up to its last activity (a turn ends after its last
+  /// entry) while the node reports it unread and this screen is on top.
+  Future<void> _markRead() async {
+    final tl = _timeline;
+    if (!mounted || tl == null) return;
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
+    final t = _thread;
+    if (t != null && !t.unread) return;
+    final pos = math.max(t?.lastActiveNanos ?? 0, lastEntryNanos(tl.entries));
+    if (pos <= _readPos) return;
+    _readPos = pos;
+    try {
+      await ref
+          .read(pagentsApiProvider)
+          .markRead(widget.threadId, position: pos);
+    } catch (_) {}
   }
 
   void _say(String text) => ScaffoldMessenger.of(context)
@@ -149,7 +171,9 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
 
   Future<void> _undo(String commit) async {
     try {
-      await ref.read(pagentsApiProvider).memoryUndo(widget.agentId, commit);
+      await ref
+          .read(pagentsApiProvider)
+          .memoryUndo(widget.agentId, commit, threadId: widget.threadId);
     } catch (e) {
       if (mounted) _say('undo: ${actionError(e)}');
     }
@@ -198,6 +222,10 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
   Widget build(BuildContext context) {
     // A change on any node (a new event, a finished turn) reloads the timeline.
     ref.listen(pagentsProvider.select((s) => s.agents), (_, _) => _load());
+    ref.listen(
+      pagentsProvider.select((s) => s.threads[widget.agentId]),
+      (_, _) => _markRead(),
+    );
     final agent = _agent;
     final tl = _timeline;
     final title = widget.title.isEmpty ? 'untitled' : widget.title;
@@ -212,12 +240,14 @@ class _ThreadScreenState extends ConsumerState<ThreadScreen> {
       final nodeId = agent?.nodeId ?? '';
       final decided = decidedOffers(tl.entries);
       final draftsDone = decidedDrafts(tl.entries);
+      final undone = undoneCommits(tl.entries);
       body = TranscriptFeed(
         detailRef: const ToolDetailRef(),
         detailRefOf: (e) => timelineDetailRef(nodeId, tl.sessions, e.id),
         entries: tl.entries,
         emptyText: 'Empty thread.',
         onUndoMemory: _undo,
+        canUndoMemory: (c) => !commitUndone(undone, c),
         draftActions: DraftActions(
           isOpen: (id) => !draftsDone.contains(id),
           onSend: (id) => _draft(id, true),

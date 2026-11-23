@@ -137,11 +137,13 @@ class PAgentsApi {
     String agentId,
     String commit, {
     bool profile = false,
+    String threadId = '',
   }) async {
     final res = await _map('pagent.memory.undo', {
       'agent_id': agentId,
       'commit': commit,
       if (profile) 'profile': true,
+      if (threadId.isNotEmpty) 'thread_id': threadId,
     });
     return res['commit'] as String? ?? '';
   }

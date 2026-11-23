@@ -132,6 +132,7 @@ class TranscriptFeed extends ConsumerStatefulWidget {
     this.emptyText = 'No transcript yet.',
     this.stickToBottom = true,
     this.onUndoMemory,
+    this.canUndoMemory,
     this.detailRefOf,
     this.offerActions,
     this.draftActions,
@@ -155,6 +156,9 @@ class TranscriptFeed extends ConsumerStatefulWidget {
 
   /// Offers an undo on memory-change events (agent threads only).
   final void Function(String commit)? onUndoMemory;
+
+  /// Whether a change is still open to undo; null is always.
+  final bool Function(String commit)? canUndoMemory;
 
   @override
   ConsumerState<TranscriptFeed> createState() => TranscriptFeedState();
@@ -350,6 +354,7 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
               detailRef: widget.detailRefOf?.call(entry) ?? widget.detailRef,
               entry: entry,
               onUndoMemory: widget.onUndoMemory,
+              canUndoMemory: widget.canUndoMemory,
               offerActions: widget.offerActions,
               draftActions: widget.draftActions,
               expanded: _expanded.contains(entry.id),
