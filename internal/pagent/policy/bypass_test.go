@@ -132,6 +132,13 @@ func TestProtectedWrites(t *testing.T) {
 		file("/home/u/.config/argus/APPROVALS.yaml"),
 		file(".Claude/Settings.json"),
 		bash(`echo x > .Git/hooks/post-commit`),
+		bash(`cd .git/hooks && echo x > post-commit`),
+		bash(`cd .git; cp /tmp/evil hooks/pre-commit`),
+		bash(`pushd .GIT && tee config < /tmp/c`),
+		bash(`ln -s /tmp/evil .git/hooks/pre-commit`),
+		bash(`ln -s .git/hooks hooks`),
+		bash(`ln agent.yaml copy.yaml`),
+		bash(`mv agent.yaml /tmp/gone`),
 	}
 	for _, a := range protected {
 		if !reflect.DeepEqual(a.Class, []string{ClassSecurity}) {
@@ -154,7 +161,9 @@ func TestProtectedWrites(t *testing.T) {
 	i.AgentRules = []Rule{{Target: "agent.yaml", Decision: OutcomeDeny}}
 	check(t, "deny rule still applies", Decide(file("agent.yaml"), i), OutcomeDeny, ByRule)
 
-	for _, a := range []Action{file("notes/agent.md"), file(".claude/skills/x/SKILL.md"), bash("cat agent.yaml"), bash("git status > out.txt")} {
+	for _, a := range []Action{file("notes/agent.md"), file(".claude/skills/x/SKILL.md"), bash("cat agent.yaml"), bash("git status > out.txt"),
+		bash("cd .git && git log 2>&1 | head"), bash("cd .git && cat config > /tmp/c"), bash("ln -s notes/a.md b.md"),
+		bash("echo x > out.txt; cd .git")} {
 		if protectedWrite(a) {
 			t.Errorf("%s: protected", a.Input)
 		}

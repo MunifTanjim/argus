@@ -23,14 +23,16 @@ func Classify(a Action) []string {
 	var outward, irreversible, security bool
 	switch kindOf(a.Tool) {
 	case kindShell:
-		for _, c := range shellCommands(a.Input) {
+		cmds := shellCommands(a.Input)
+		for _, c := range cmds {
 			if c.opaque {
 				outward = true
 				continue
 			}
 			o, i, s := classifyCommand(c)
-			outward, irreversible, security = outward || o, irreversible || i, security || s || writesProtected(c)
+			outward, irreversible, security = outward || o, irreversible || i, security || s
 		}
+		security = security || shellWritesProtected(cmds)
 	case kindFile:
 		for _, p := range filePaths(a.Tool, a.Input) {
 			if sensitivePath(p) || protectedPath(p) {
@@ -332,10 +334,37 @@ func protectedPath(p string) bool {
 	return strings.EqualFold(base, "agent.yaml") || strings.EqualFold(base, "approvals.yaml")
 }
 
-// writesProtected reports whether a shell command writes a protected path:
-// through a redirection, tee, cp/mv/ln/install, sed -i, rm, chmod, or by
-// setting the repository's git config.
-func writesProtected(c command) bool {
+// shellWritesProtected reports whether the commands of a shell line write a
+// protected path. After a cd or pushd into a protected directory, every later
+// write to a relative path counts as protected. Programs that write files
+// from their own code, such as `python -c`, are not detected.
+func shellWritesProtected(cmds []command) bool {
+	inProtected := false
+	inDir := func(p string) bool {
+		return protectedPath(p) || !filepath.IsAbs(p) && !homePath(p)
+	}
+	for _, c := range cmds {
+		if c.opaque {
+			continue
+		}
+		if c.prog == "cd" || c.prog == "pushd" {
+			if pos := positional(c.args, nil); len(pos) > 0 && protectedPath(pos[0]) {
+				inProtected = true
+			}
+			continue
+		}
+		if writesProtected(c, protectedPath) || inProtected && writesProtected(c, inDir) {
+			return true
+		}
+	}
+	return false
+}
+
+// writesProtected reports whether a shell command writes a path for which
+// isProtected is true: through a redirection, tee, cp/mv/ln/install, sed -i, rm,
+// chmod, or by setting the repository's git config. A link or move whose
+// source is protected counts too.
+func writesProtected(c command, isProtected func(string) bool) bool {
 	for i, a := range c.args {
 		op := strings.TrimLeft(a, "0123456789&")
 		if !strings.HasPrefix(op, ">") {
@@ -345,11 +374,11 @@ func writesProtected(c command) bool {
 		if target == "" && i+1 < len(c.args) {
 			target = c.args[i+1]
 		}
-		if target != "" && protectedPath(target) {
+		if target != "" && !strings.HasPrefix(target, "&") && isProtected(target) {
 			return true
 		}
 	}
-	anyProtected := func(ws []string) bool { return slices.ContainsFunc(ws, protectedPath) }
+	anyProtected := func(ws []string) bool { return slices.ContainsFunc(ws, isProtected) }
 	switch c.prog {
 	case "tee", "rm", "unlink", "chmod", "truncate":
 		return anyProtected(positional(c.args, nil))
@@ -357,15 +386,18 @@ func writesProtected(c command) bool {
 		return (hasShort(c.args, 'i') || hasLong(c.args, "--in-place")) && anyProtected(positional(c.args, nil))
 	case "cp", "mv", "ln", "install":
 		pos := positional(c.args, map[string]bool{"-t": true, "--target-directory": true})
+		if (c.prog == "ln" || c.prog == "mv") && anyProtected(pos) {
+			return true
+		}
 		for i, a := range c.args {
-			if (a == "-t" || a == "--target-directory") && i+1 < len(c.args) && protectedPath(c.args[i+1]) {
+			if (a == "-t" || a == "--target-directory") && i+1 < len(c.args) && isProtected(c.args[i+1]) {
 				return true
 			}
-			if v, ok := strings.CutPrefix(a, "--target-directory="); ok && protectedPath(v) {
+			if v, ok := strings.CutPrefix(a, "--target-directory="); ok && isProtected(v) {
 				return true
 			}
 		}
-		return len(pos) > 0 && protectedPath(pos[len(pos)-1])
+		return len(pos) > 0 && isProtected(pos[len(pos)-1])
 	case "git":
 		pos := positional(c.args, gitOptsWithArg)
 		if len(pos) == 0 || pos[0] != "config" || hasLong(c.args, "--global", "--system") {
@@ -391,7 +423,7 @@ func cleanPath(p string) string {
 func protectedWrite(a Action) bool {
 	switch kindOf(a.Tool) {
 	case kindShell:
-		return slices.ContainsFunc(shellCommands(a.Input), writesProtected)
+		return shellWritesProtected(shellCommands(a.Input))
 	case kindFile:
 		paths := filePaths(a.Tool, a.Input)
 		if len(paths) == 0 && a.Target != "" {
