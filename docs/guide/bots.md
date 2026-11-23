@@ -42,6 +42,8 @@ A message goes to the bot's latest chat thread, or starts one if there is none o
 
 Without a name the primary bot of the node the command talks to is used, or of `--node <node>`, else that node's only bot. If there are several and none is primary, the command asks for a name. Without a message, `chat` points you to the TUI.
 
+On a phone with the mobile app, a link of the form `argus://bot/<bot-id>?text=<message>` opens that bot's latest chat with the message filled in. It is never sent on its own.
+
 ## Working directories
 
 A bot's sessions run in its directory. `workdirs` in `bot.yaml` lists other directories the bot works in:
