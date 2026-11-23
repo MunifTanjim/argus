@@ -847,7 +847,8 @@ func (d *discoverer) listModels(ctx context.Context) ([]api.ModelInfo, error) {
 }
 
 // spawnSession starts a thread in cwd with the user's config.toml approval and
-// sandbox defaults. The starting client is subscribed to the new thread.
+// sandbox defaults, writable in opts.AddDirs too. The starting client is
+// subscribed to the new thread.
 func (d *discoverer) spawnSession(ctx context.Context, cwd string, opts adapter.SpawnOptions) (string, error) {
 	c, err := d.awaitConn(ctx)
 	if err != nil {
@@ -859,6 +860,10 @@ func (d *discoverer) spawnSession(ctx context.Context, cwd string, opts adapter.
 	params := map[string]any{"cwd": cwd}
 	if opts.Model != "" {
 		params["model"] = opts.Model
+	}
+	if len(opts.AddDirs) > 0 {
+		// The roots replace the thread's workspace roots, so they keep cwd.
+		params["runtimeWorkspaceRoots"] = append([]string{cwd}, opts.AddDirs...)
 	}
 	if err := c.call(ctx, "thread/start", params, &res); err != nil {
 		return "", err

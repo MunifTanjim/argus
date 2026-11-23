@@ -601,6 +601,26 @@ func TestSpawnSessionSendsModel(t *testing.T) {
 	}
 }
 
+func TestSpawnSessionSendsWorkspaceRoots(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	f := modelListDaemon(t)
+	d := newDiscoverer(registry.New(), nil)
+	d.sockPath = func() (string, error) { return f.sock, nil }
+	d.retry = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d.ctx = ctx
+	_ = d.ScanOnce(ctx)
+	f.waitConns(t, 1)
+
+	if _, err := d.spawnSession(ctx, "/w/n1", adapter.SpawnOptions{AddDirs: []string{"/w/a", "/w/b"}}); err != nil {
+		t.Fatal(err)
+	}
+	if m := f.expect(t, "thread/start"); string(m.Params) != `{"cwd":"/w/n1","runtimeWorkspaceRoots":["/w/n1","/w/a","/w/b"]}` {
+		t.Fatalf("thread/start params = %s", m.Params)
+	}
+}
+
 // downDiscoverer returns a discoverer whose pump is running against a missing
 // socket; storing a live socket path in the returned value brings the daemon up.
 func downDiscoverer(t *testing.T) (*discoverer, *atomic.Value, context.Context) {

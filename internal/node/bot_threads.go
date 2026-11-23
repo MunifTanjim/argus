@@ -355,7 +355,7 @@ func (d *Node) botEnsureSession(ctx context.Context, a bot.Bot, th bot.Thread, f
 	case !resumable(cli) || prev.AgentSessionID == "":
 		reason = "the previous session cannot be resumed"
 	default:
-		sid, err := d.resumeFn(ctx, cli, prev.AgentSessionID, a.Dir, "")
+		sid, err := d.resumeFn(d.withBotWorkdirs(ctx, a), cli, prev.AgentSessionID, a.Dir, "")
 		starting := errors.Is(err, errResumeStarting)
 		if err == nil || (starting && sid != "") {
 			if err := s.InsertThreadSession(ctx, bot.ThreadSession{
@@ -428,7 +428,7 @@ func (d *Node) botSpawn(ctx context.Context, a bot.Bot, th bot.Thread, set bot.S
 	if ps, ok := ad.(adapter.SessionIDPresetter); ok && ps.PresetsSessionID() {
 		presetID = uuid.NewString()
 	}
-	spawned, err := d.spawnFn(ctx, api.SpawnParams{Agent: cli, Cwd: a.Dir, Model: set.Model, Prompt: prompt}, presetID)
+	spawned, err := d.spawnFn(d.withBotWorkdirs(ctx, a), api.SpawnParams{Agent: cli, Cwd: a.Dir, Model: set.Model, Prompt: prompt}, presetID)
 	d.noteSpawn(ctx, a, err)
 	if err != nil {
 		return "", err

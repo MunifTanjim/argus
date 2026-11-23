@@ -42,6 +42,16 @@ A message goes to the bot's latest chat thread, or starts one if there is none o
 
 Without a name the primary bot of the node the command talks to is used, or of `--node <node>`, else that node's only bot. If there are several and none is primary, the command asks for a name. Without a message, `chat` points you to the TUI.
 
+## Working directories
+
+A bot's sessions run in its directory. `workdirs` in `bot.yaml` lists other directories the bot works in:
+
+```yaml
+workdirs: [~/code/api, ~/notes]
+```
+
+A path may start with `~`; a relative path is inside the bot's directory. The bot's instructions name these directories. Claude Code sessions also get access to each one that exists, and so do new Codex sessions, which may write in them. OpenCode, pi and Antigravity sessions only see them named in the instructions.
+
 ## Primary bot
 
 ```sh

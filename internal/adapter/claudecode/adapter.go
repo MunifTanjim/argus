@@ -83,6 +83,16 @@ func (ccAdapter) ListModels(context.Context) ([]api.ModelInfo, error) {
 	}, nil
 }
 
+// AddDirArgs uses the --add-dir=DIR form: --add-dir takes several values,
+// and a separate value would let it swallow a trailing prompt.
+func (ccAdapter) AddDirArgs(dirs []string) []string {
+	args := make([]string, len(dirs))
+	for i, dir := range dirs {
+		args[i] = "--add-dir=" + dir
+	}
+	return args
+}
+
 func (ccAdapter) ResumeCommand(agentSessionID string) (string, []string, bool) {
 	return "claude", []string{"--resume", agentSessionID}, true
 }

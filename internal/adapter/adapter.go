@@ -216,6 +216,16 @@ type SpawnOptions struct {
 	Prompt    string
 	Model     string // a ModelLister id
 	SessionID string // agent session id to start under; used only by a SessionIDPresetter
+	// AddDirs are absolute directories the session may work in besides its
+	// working directory, for a Spawner that can grant them.
+	AddDirs []string
+}
+
+// DirAdder is an adapter whose CLI can be given directories to work in
+// besides its working directory. AddDirArgs returns the arguments granting
+// dirs; they go before the launch command's other arguments.
+type DirAdder interface {
+	AddDirArgs(dirs []string) []string
 }
 
 // SessionIDPresetter is an adapter whose SpawnCommand starts the session under

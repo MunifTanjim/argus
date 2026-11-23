@@ -524,7 +524,7 @@ func (d *Node) spawn(ctx context.Context, p api.SpawnParams, presetID string) (a
 	// session over its service API and register it under the canonical agent-keyed
 	// id. This path needs no tmux, so it runs ahead of the pane-spawn tmux guard.
 	if sp, ok := a.(adapter.Spawner); ok {
-		id, err := sp.SpawnSession(ctx, p.Cwd, adapter.SpawnOptions{Prompt: p.Prompt, Model: p.Model})
+		id, err := sp.SpawnSession(ctx, p.Cwd, adapter.SpawnOptions{Prompt: p.Prompt, Model: p.Model, AddDirs: workdirsFrom(ctx)})
 		if err != nil {
 			return api.SpawnResult{}, &api.RPCError{
 				Code:    api.CodeInvalidRequest,
@@ -540,6 +540,9 @@ func (d *Node) spawn(ctx context.Context, p api.SpawnParams, presetID string) (a
 		}
 	}
 	command, args := d.resolveSpawnCommand(p, presetID)
+	if p.Command == "" {
+		args = addDirArgs(ctx, a, args)
+	}
 	// Fail loudly rather than opening a tmux pane that dies "command not found".
 	if _, err := exec.LookPath(command); err != nil {
 		return api.SpawnResult{}, &api.RPCError{
@@ -756,10 +759,12 @@ func (d *Node) resumeAdopt(ctx context.Context, agent, agentSessionID, cwd, exis
 		return id, errResumeStarting
 	}
 
-	name, args, ok := d.adapterFor(agent).ResumeCommand(agentSessionID)
+	ad := d.adapterFor(agent)
+	name, args, ok := ad.ResumeCommand(agentSessionID)
 	if !ok {
 		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: "terminal not supported for agent " + agent}
 	}
+	args = addDirArgs(ctx, ad, args)
 	if _, err := exec.LookPath(name); err != nil {
 		return "", &api.RPCError{Code: api.CodeInvalidRequest, Message: fmt.Sprintf("cannot open terminal: %q is not installed on node %s", name, d.label)}
 	}

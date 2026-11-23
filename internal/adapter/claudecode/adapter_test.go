@@ -43,3 +43,13 @@ func TestListModelsClaudeAliases(t *testing.T) {
 		t.Fatalf("got %v, %v", got, err)
 	}
 }
+
+func TestAddDirArgs(t *testing.T) {
+	var a adapter.DirAdder = &ccAdapter{}
+	if got := a.AddDirArgs([]string{"/w/a", "/w/b c"}); !slices.Equal(got, []string{"--add-dir=/w/a", "--add-dir=/w/b c"}) {
+		t.Errorf("args = %q", got)
+	}
+	if got := a.AddDirArgs(nil); len(got) != 0 {
+		t.Errorf("no dirs: %q", got)
+	}
+}
