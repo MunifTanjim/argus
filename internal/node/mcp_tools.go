@@ -292,7 +292,7 @@ func mcpTools() []mcpTool {
 		{
 			Tool: mcphttp.Tool{
 				Name:        "request_secret",
-				Description: "Ask the user for a secret you need, such as an API token. name is what to store it under (like GH_TOKEN); description says what it is for. The value goes to the user's secret store, never to you: the call returns at once, end your turn, and you get a message naming the secret once it is stored. Read it in a command with `argus secret get NAME`.",
+				Description: "Ask the user for a secret you need, such as an API token. name is the environment variable to store it under (like GH_TOKEN); description says what it is for. The value goes to the user's secret store, never to you: the call returns at once, end your turn, and you get a message naming the variable once it is stored. New sessions have it in their environment.",
 			},
 			props: []mcpProp{required("name", "string"), required("description", "string")}, needsCaller: true,
 			run: withArgs(func(ctx context.Context, d *Node, caller callerRef, p requestSecretParams) (any, error) {

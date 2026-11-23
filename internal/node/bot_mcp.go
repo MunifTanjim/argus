@@ -9,6 +9,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/bot"
 	"github.com/MunifTanjim/argus/internal/bot/memory"
+	"github.com/MunifTanjim/argus/internal/botgit"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -142,7 +143,7 @@ func (d *Node) applyInstructionsProposal(ctx context.Context, a bot.Bot, pr bot.
 		return "", botErr("looks like a secret (%s); not saved", rule)
 	}
 	defer lockMemory(a.ID)()
-	repo, err := d.openBotRepo(ctx, a)
+	repo, err := botgit.Open(ctx, a.Dir, d.botGitMode())
 	if err != nil {
 		return "", botErr("%v", err)
 	}

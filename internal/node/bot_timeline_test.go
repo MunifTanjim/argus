@@ -174,6 +174,7 @@ func TestEventTextReadsPayloads(t *testing.T) {
 		{evRoutineError, `{"routine":"brief","message":"bad schedule"}`, "Routine brief error: bad schedule"},
 		{evRoutineMissed, `{"routine":"brief","count":3}`, "Routine brief missed 3 runs"},
 		{evRoutineSkipped, `{"routine":"brief","reason":"overlap"}`, "Routine brief skipped a run: overlap"},
+		{evTokenBudgetUnavailable, `{"routine":"billing","cli":"antigravity"}`, "Routine billing: token budget unavailable for antigravity"},
 		{evRoutineStale, `{"routine":"brief","due":"2026-11-22T10:00:00Z"}`, "Routine brief is overdue since 2026-11-22 10:00 UTC"},
 		{evRoutinePaused, `{"reason":"away","routines":["a","b"]}`, "Paused a, b: away"},
 		{evRoutinePaused, `{"reason":"failures","routines":["a"],"message":"3 runs in a row failed"}`, "Paused a: failures: 3 runs in a row failed"},

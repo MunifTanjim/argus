@@ -524,7 +524,7 @@ func (d *Node) spawn(ctx context.Context, p api.SpawnParams, presetID string) (a
 	// session over its service API and register it under the canonical agent-keyed
 	// id. This path needs no tmux, so it runs ahead of the pane-spawn tmux guard.
 	if sp, ok := a.(adapter.Spawner); ok {
-		id, err := sp.SpawnSession(ctx, p.Cwd, adapter.SpawnOptions{Prompt: p.Prompt, Model: p.Model})
+		id, err := sp.SpawnSession(ctx, p.Cwd, adapter.SpawnOptions{Prompt: p.Prompt, Model: p.Model, Env: secretEnvFrom(ctx)})
 		if err != nil {
 			return api.SpawnResult{}, &api.RPCError{
 				Code:    api.CodeInvalidRequest,
@@ -632,8 +632,14 @@ func (d *Node) launchPane(ctx context.Context, sessionName, command string, args
 	} else {
 		sessionName = spawn.AvoidReserved(ctx, c, sessionName)
 	}
-	paneID, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: sessionName, Cwd: cwd, Command: command, Args: args, Env: spawnEnv(command)})
+	env := spawnEnv(command)
+	command, args, cleanup, err := withSecretEnv(ctx, command, args)
 	if err != nil {
+		return "", err
+	}
+	paneID, err := c.NewSession(ctx, tmux.NewSessionOpts{Name: sessionName, Cwd: cwd, Command: command, Args: args, Env: env})
+	if err != nil {
+		cleanup()
 		return "", err
 	}
 	go d.scan(context.Background())

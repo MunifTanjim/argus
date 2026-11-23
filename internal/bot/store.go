@@ -170,7 +170,7 @@ func (s *Store) PurgeBot(ctx context.Context, id string) error {
 	for _, del := range []func(context.Context, string) error{
 		q.DeleteBotEvents, q.DeleteBotCursors, q.DeleteBotSessions,
 		q.DeleteBotProposals, q.DeleteBotRoutineRuns, q.DeleteBotRoutineStates,
-		q.DeleteBotWebhookSecrets, q.DeleteBotActivity, q.DeleteBotSecrets, q.DeleteBotTrust, q.DeleteBotThreads, q.DeleteBot,
+		q.DeleteBotWebhookSecrets, q.DeleteBotActivity, q.DeleteBotSecrets, q.DeleteBotThreads, q.DeleteBot,
 	} {
 		if err := del(ctx, id); err != nil {
 			return fmt.Errorf("bot: purge: %w", err)

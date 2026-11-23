@@ -353,3 +353,38 @@ func TestFinishRunIsOneWrite(t *testing.T) {
 		t.Fatalf("no state: %v %v", ok, err)
 	}
 }
+
+func TestAddRunUsage(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newStore(t)
+	if err := s.UpsertRoutineState(ctx, RoutineState{BotID: "ag1", Slug: "r", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	run, _, _ := s.ClaimOccurrence(ctx, "ag1", "r", time.Unix(1, 0), "routine", false)
+	res := RunResult{Result: "progress", Cost: 0.25, Tokens: 7}
+	if _, _, err := s.FinishRun(ctx, "ag1", "r", run.ID, res, "", &RunOutcome{Result: "progress", Sessions: 1, Cost: 0.25, Tokens: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddRunUsage(ctx, "ag1", "r", run.ID, 0.5, 100, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := s.RoutineRun(ctx, run.ID); got.Cost != 0.75 || got.Tokens != 107 {
+		t.Fatalf("run: %+v", got)
+	}
+	if sts, _ := s.RoutineStates(ctx, "ag1"); sts[0].CostUsed != 0.75 || sts[0].TokensUsed != 107 {
+		t.Fatalf("state: %+v", sts)
+	}
+	// Without toState only the run changes.
+	if err := s.AddRunUsage(ctx, "ag1", "r", run.ID, 0, 3, false); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := s.RoutineRun(ctx, run.ID); got.Tokens != 110 {
+		t.Fatalf("run: %+v", got)
+	}
+	if sts, _ := s.RoutineStates(ctx, "ag1"); sts[0].TokensUsed != 107 {
+		t.Fatalf("state changed: %+v", sts)
+	}
+	if err := s.AddRunUsage(ctx, "ag1", "r", "missing", 0, 1, true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing run: %v", err)
+	}
+}

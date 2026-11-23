@@ -88,9 +88,9 @@ func RenderInstructions(in InstructionInput) string {
 	}
 	b.WriteString("\n" + guidance + "\n")
 	if len(in.Secrets) > 0 {
-		b.WriteString("\n## Secrets\n\nThe user gave you these secrets. Read one where a command needs it with `argus secret get NAME`, for example `GH_TOKEN=$(argus secret get GH_TOKEN) gh issue list`. Never print, store or send a value anywhere it was not meant for.\n\n")
+		b.WriteString("\n## Secrets\n\nThese environment variables hold secrets the user gave you. Use them by name; never print, store or send their values anywhere they were not meant for.\n\n")
 		for _, sec := range in.Secrets {
-			line := "- " + sec.Name
+			line := "- $" + sec.Name
 			if d := strings.TrimSpace(sec.Description); d != "" {
 				line += ": " + d
 			}

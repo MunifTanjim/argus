@@ -85,7 +85,6 @@ var botAddressed = map[string]bool{
 
 	api.MethodBotUsage: true,
 	api.MethodBotSet:   true,
-	api.MethodBotTrust: true,
 }
 
 // botThreadAddressed methods route by a composite thread_id.

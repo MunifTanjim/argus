@@ -11,7 +11,7 @@ func TestRenderListsSecretNamesOnly(t *testing.T) {
 		{Name: "GH_TOKEN", Description: "GitHub token for issues", Value: "ghp_never_shown"},
 		{Name: "PLAIN"},
 	}})
-	for _, want := range []string{"## Secrets", "argus secret get NAME", "- GH_TOKEN: GitHub token for issues", "- PLAIN\n"} {
+	for _, want := range []string{"## Secrets", "- $GH_TOKEN: GitHub token for issues", "- $PLAIN\n"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}

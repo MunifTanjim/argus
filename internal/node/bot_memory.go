@@ -530,12 +530,12 @@ func (d *Node) commitMemory(ctx context.Context, a bot.Bot, set bot.Settings, th
 
 	if len(botOps) > 0 || logLine != "" {
 		defer lockMemory(a.ID)()
-		repo, err := d.openBotRepo(ctx, a)
+		repo, err := botgit.Open(ctx, a.Dir, d.botGitMode())
 		if err != nil {
 			return res, botErr("%v", err)
 		}
 		if err := d.commitHandEdits(ctx, repo, a, threadID, []string{memoryDir, bot.DefinitionFile}); err != nil {
-			return res, handEditErr(err)
+			return res, botErr("%v", err)
 		}
 		memDir := filepath.Join(a.Dir, memoryDir)
 		snap, err := snapshotFiles(memDir)
@@ -587,7 +587,7 @@ func (d *Node) commitMemory(ctx context.Context, a bot.Bot, set bot.Settings, th
 
 // profileRepo opens the shared profile repository, creating it with an empty
 // PROFILE.md on first use.
-func (d *Node) profileRepo(ctx context.Context, a bot.Bot) (*botgit.Repo, error) {
+func (d *Node) profileRepo(ctx context.Context) (*botgit.Repo, error) {
 	dir := d.botCfg.ProfileDir
 	if dir == "" {
 		return nil, botErr("no profile directory is configured")
@@ -607,7 +607,6 @@ func (d *Node) profileRepo(ctx context.Context, a bot.Bot) (*botgit.Repo, error)
 	if err != nil {
 		return nil, botErr("%v", err)
 	}
-	d.guardProfileRepo(ctx, a, repo)
 	if created {
 		if _, err := repo.CommitPaths(ctx, "profile: create", []botgit.Trailer{{Key: "Argus-Source", Value: "you"}}, []string{profileFile}, true); err != nil {
 			return nil, botErr("%v", err)
@@ -618,12 +617,12 @@ func (d *Node) profileRepo(ctx context.Context, a bot.Bot) (*botgit.Repo, error)
 
 func (d *Node) commitProfile(ctx context.Context, a bot.Bot, threadID, source string, ops []memory.Op, today string) ([]memory.Op, []error, string, error) {
 	defer lockMemory(profileLockKey)()
-	repo, err := d.profileRepo(ctx, a)
+	repo, err := d.profileRepo(ctx)
 	if err != nil {
 		return nil, nil, "", err
 	}
 	if err := d.commitHandEdits(ctx, repo, a, threadID, []string{profileFile}); err != nil {
-		return nil, nil, "", handEditErr(err)
+		return nil, nil, "", botErr("%v", err)
 	}
 	snap, err := snapshotFiles(filepath.Join(repo.Dir, profileFile))
 	if err != nil {
@@ -686,10 +685,10 @@ func (d *Node) handleBotMemoryShow(ctx context.Context, params json.RawMessage) 
 // memoryRepo opens the repository and the paths a memory log or undo covers.
 func (d *Node) memoryRepo(ctx context.Context, a bot.Bot, profile bool) (*botgit.Repo, []string, error) {
 	if profile {
-		repo, err := d.profileRepo(ctx, a)
+		repo, err := d.profileRepo(ctx)
 		return repo, []string{profileFile}, err
 	}
-	repo, err := d.openBotRepo(ctx, a)
+	repo, err := botgit.Open(ctx, a.Dir, d.botGitMode())
 	if err != nil {
 		return nil, nil, botErr("%v", err)
 	}

@@ -23,8 +23,7 @@ const secretKeySize = 32
 
 var secretNameRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
 
-// ValidSecretName reports whether name is like GH_TOKEN: it could name an
-// environment variable.
+// ValidSecretName reports whether name can be an environment variable name.
 func ValidSecretName(name string) bool { return secretNameRe.MatchString(name) }
 
 // SecretBox encrypts secret values with the node's key.

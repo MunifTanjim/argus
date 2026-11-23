@@ -5,20 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"sync"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/bot"
-	"github.com/MunifTanjim/argus/internal/bot/policy"
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
 const (
-	secretGetTool       = "secret get"
-	decidedSecretStore  = "secret store"
 	secretKeyFile       = "bot-secrets.key"
 	secretRequestPrefix = "secret:"
 	secretSave          = "save"
@@ -105,6 +103,64 @@ func (d *Node) redactJSON(ctx context.Context, botID string, raw json.RawMessage
 	return q
 }
 
+type secretEnvKey struct{}
+
+// withBotSecrets carries the bot's secrets as environment assignments to
+// the session a spawn or resume starts.
+func (d *Node) withBotSecrets(ctx context.Context, botID string) context.Context {
+	secrets := d.botSecrets(ctx, botID)
+	if len(secrets) == 0 {
+		return ctx
+	}
+	env := make([]string, len(secrets))
+	for i, s := range secrets {
+		env[i] = s.Name + "=" + s.Value
+	}
+	return context.WithValue(ctx, secretEnvKey{}, env)
+}
+
+func secretEnvFrom(ctx context.Context) []string {
+	env, _ := ctx.Value(secretEnvKey{}).([]string)
+	return env
+}
+
+// secretEnvScript loads the assignment file "$0", removes it and runs the
+// command. The values stay off command lines and out of the terminal
+// multiplexer's environment.
+const secretEnvScript = `. "$0"; rm -f "$0"; exec "$@"`
+
+// withSecretEnv wraps a pane command so it starts with the secrets ctx carries.
+// cleanup removes the assignment file when the pane did not start.
+func withSecretEnv(ctx context.Context, command string, args []string) (string, []string, func(), error) {
+	env := secretEnvFrom(ctx)
+	if len(env) == 0 {
+		return command, args, func() {}, nil
+	}
+	f, err := os.CreateTemp("", "argus-env-*")
+	if err != nil {
+		return "", nil, nil, err
+	}
+	var b strings.Builder
+	for _, kv := range env {
+		name, value, _ := strings.Cut(kv, "=")
+		b.WriteString("export " + name + "=" + shellSingleQuote(value) + "\n")
+	}
+	_, werr := f.WriteString(b.String())
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		os.Remove(f.Name())
+		return "", nil, nil, werr
+	}
+	wrapped := append([]string{"-c", secretEnvScript, f.Name(), command}, args...)
+	return "sh", wrapped, func() { os.Remove(f.Name()) }, nil
+}
+
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 func (d *Node) handleBotSecretSet(ctx context.Context, params json.RawMessage) (any, error) {
 	p, err := api.Decode[api.BotSecretSetParams](params)
 	if err != nil {
@@ -124,7 +180,7 @@ func (d *Node) handleBotSecretSet(ctx context.Context, params json.RawMessage) (
 	return struct{}{}, nil
 }
 
-// reservedEnv are environment variables a secret can't be named: the shell,
+// reservedEnv are environment variables a secret can't replace: the shell,
 // the dynamic loader, the terminal and Argus itself depend on them.
 var reservedEnv = []string{
 	"PATH", "HOME", "USER", "LOGNAME", "SHELL", "PWD", "OLDPWD", "TERM", "TMPDIR", "TZ",
@@ -235,7 +291,7 @@ type requestSecretParams struct {
 func isSecretRequest(requestID string) bool { return strings.HasPrefix(requestID, secretRequestPrefix) }
 
 // mcpRequestSecret asks the user for a secret value. The value goes to the
-// node's secret store; the bot only hears its name.
+// node's secret store; the bot only hears its variable name.
 func (d *Node) mcpRequestSecret(ctx context.Context, caller callerRef, p requestSecretParams) (any, error) {
 	a, th, err := d.botCaller(ctx, caller)
 	if err != nil {
@@ -264,7 +320,7 @@ func (d *Node) mcpRequestSecret(ctx context.Context, caller callerRef, p request
 }
 
 // respondSecret stores the value of a secret interaction and tells the bot
-// the name only.
+// the variable name only.
 func (d *Node) respondSecret(ctx context.Context, s session.Session, rid string, p api.RespondParams) error {
 	ix, ok := d.reg.Decision(s.ID, rid)
 	if !ok {
@@ -285,7 +341,7 @@ func (d *Node) respondSecret(ctx context.Context, s session.Session, rid string,
 		if err := d.storeSecret(ctx, a, name, ix.Message, p.SecretValue); err != nil {
 			return err
 		}
-		msg = "Stored as " + name + "; read it with `argus secret get " + name + "`."
+		msg = "Stored as $" + name + "; new sessions have it in their environment."
 	}
 	d.reg.DropDecision(s.ID, rid)
 	if cur, found := d.reg.Get(s.ID); found {
@@ -294,41 +350,4 @@ func (d *Node) respondSecret(ctx context.Context, s session.Session, rid string,
 		}
 	}
 	return nil
-}
-
-// errNotBotSession is what secret get answers a caller that is not a bot's
-// session.
-var errNotBotSession = errors.New("not a bot session")
-
-// handleBotSecretGet returns one secret of the bot whose session ran the
-// caller. Only the local socket serves it: the caller is found by its process.
-func (d *Node) handleBotSecretGet(ctx context.Context, params json.RawMessage) (any, error) {
-	p, err := api.Decode[api.BotSecretGetParams](params)
-	if err != nil {
-		return nil, err
-	}
-	caller, err := d.callerFrom(ctx, p.Caller)
-	if err != nil {
-		return nil, err
-	}
-	if caller.Local == nil {
-		return nil, errNotBotSession
-	}
-	tagged := *caller.Local
-	tagged.BotID, tagged.BotThreadID = d.botTag(tagged)
-	a, th, err := d.botCaller(ctx, callerRef{Local: &tagged})
-	if err != nil {
-		return nil, errNotBotSession
-	}
-	sc := approvalScope{bot: a, thread: th, sessionID: tagged.ID, cli: tagged.Agent}
-	action := policy.Action{Tool: secretGetTool, Target: p.Name}
-	for _, sec := range d.botSecrets(ctx, a.ID) {
-		if sec.Name == p.Name {
-			d.recordActivity(ctx, sc, action, policy.OutcomeAllow, decidedSecretStore, "", "", "")
-			return api.BotSecretGetResult{Value: sec.Value}, nil
-		}
-	}
-	reason := fmt.Sprintf("no secret %s for this bot", p.Name)
-	d.recordActivity(ctx, sc, action, policy.OutcomeDeny, decidedSecretStore, "", reason, "")
-	return nil, errors.New(reason)
 }

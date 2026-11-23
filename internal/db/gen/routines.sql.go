@@ -65,6 +65,50 @@ func (q *Queries) ActiveBotRoutineRuns(ctx context.Context, arg ActiveBotRoutine
 	return items, nil
 }
 
+const addBotRoutineRunUsage = `-- name: AddBotRoutineRunUsage :execrows
+UPDATE bot_routine_run SET cost = cost + ?1, tokens = tokens + ?2
+WHERE id = ?3
+`
+
+type AddBotRoutineRunUsageParams struct {
+	Cost   float64
+	Tokens int64
+	ID     string
+}
+
+func (q *Queries) AddBotRoutineRunUsage(ctx context.Context, arg AddBotRoutineRunUsageParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, addBotRoutineRunUsage, arg.Cost, arg.Tokens, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const addBotRoutineUsage = `-- name: AddBotRoutineUsage :exec
+UPDATE bot_routine_state
+SET cost_used = cost_used + ?1, tokens_used = tokens_used + ?2, updated_at = ?3
+WHERE bot_id = ?4 AND slug = ?5
+`
+
+type AddBotRoutineUsageParams struct {
+	Cost      float64
+	Tokens    int64
+	UpdatedAt int64
+	BotID     string
+	Slug      string
+}
+
+func (q *Queries) AddBotRoutineUsage(ctx context.Context, arg AddBotRoutineUsageParams) error {
+	_, err := q.db.ExecContext(ctx, addBotRoutineUsage,
+		arg.Cost,
+		arg.Tokens,
+		arg.UpdatedAt,
+		arg.BotID,
+		arg.Slug,
+	)
+	return err
+}
+
 const advanceBotRoutineNextDue = `-- name: AdvanceBotRoutineNextDue :exec
 UPDATE bot_routine_state SET next_due_at = ?, updated_at = ? WHERE bot_id = ? AND slug = ?
 `

@@ -15,6 +15,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/bot"
 	"github.com/MunifTanjim/argus/internal/bot/memory"
 	"github.com/MunifTanjim/argus/internal/bot/routine"
+	"github.com/MunifTanjim/argus/internal/botgit"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -86,6 +87,13 @@ type runCtl struct {
 	sessionID string
 	reported  bool
 	summary   *session.Summary
+	// recorded is the usage saved with the run's result: usage reported after
+	// it is added once the session stops.
+	recorded struct {
+		ok     bool
+		cost   float64
+		tokens int64
+	}
 	// nextCheckIn is the run's requested wait until a self-paced routine runs again.
 	nextCheckIn time.Duration
 }
@@ -173,8 +181,10 @@ func (d *Node) routineState(ctx context.Context, botID, slug string) (bot.Routin
 	return bot.RoutineState{}, false
 }
 
-// overBudget reports whether any budget dimension of r is used up.
-func overBudget(b routine.Budget, st bot.RoutineState) bool {
+// overBudget reports whether any budget dimension of r is used up. A token
+// limit counts only when cli reports its tokens.
+func overBudget(b routine.Budget, st bot.RoutineState, cli string) bool {
+	b = enforcedBudget(b, cli)
 	return (b.Sessions > 0 && st.SessionsUsed >= int64(b.Sessions)) ||
 		(b.Cost > 0 && st.CostUsed >= b.Cost) ||
 		(b.Tokens > 0 && st.TokensUsed >= b.Tokens)
@@ -183,7 +193,7 @@ func overBudget(b routine.Budget, st bot.RoutineState) bool {
 func (d *Node) executeRun(ctx context.Context, c *runCtl) {
 	a, r := c.bot, c.r
 	defer d.removeOneShot(ctx, c)
-	if st, ok := d.routineState(ctx, a.ID, r.Slug); ok && overBudget(r.Budget, st) {
+	if st, ok := d.routineState(ctx, a.ID, r.Slug); ok && overBudget(r.Budget, st, d.botSettings(a).Agent) {
 		d.skipRun(ctx, c, reasonBudget)
 		d.pauseRoutine(ctx, a, r.Slug, pausedBudget, "")
 		return
@@ -258,6 +268,7 @@ func (d *Node) spawnRun(ctx context.Context, c *runCtl) (bool, error) {
 		return false, errors.New(msg)
 	}
 	d.botHealthResolved(a, healthCLIMissing)
+	d.tokenBudgetNotice(ctx, a, r, set.Agent)
 	if err := d.botMakeRoom(ctx, a, set.MaxConcurrentSessions, true); err != nil {
 		return false, nil
 	}
@@ -364,6 +375,7 @@ func (d *Node) watchRun(ctx context.Context, c *runCtl) {
 			reportedAt = time.Now()
 		case <-c.ended:
 			if !reportedAt.IsZero() {
+				d.settleRunUsage(ctx, c)
 				return
 			}
 			c.mu.Lock()
@@ -387,6 +399,8 @@ func (d *Node) watchRun(ctx context.Context, c *runCtl) {
 			d.killRunSession(ctx, c)
 			if reportedAt.IsZero() {
 				d.failRun(ctx, c, fmt.Sprintf("run timed out after %s", set.Limits.Limits.RunTimeout), true)
+			} else {
+				d.settleRunUsage(ctx, c)
 			}
 			return
 		case <-lease.C:
@@ -409,6 +423,7 @@ func (d *Node) watchRun(ctx context.Context, c *runCtl) {
 			}
 			if !reportedAt.IsZero() {
 				if _, idle := idleSince(s); idle || time.Since(reportedAt) >= runReportGrace {
+					d.settleRunUsage(ctx, c)
 					d.killRunSession(ctx, c)
 					return
 				}
@@ -431,7 +446,8 @@ func (d *Node) killRunSession(ctx context.Context, c *runCtl) {
 	}
 }
 
-// usage is the run session's cost and tokens as its adapter last reported.
+// usage is the run session's cost and total tokens as its adapter last
+// reported.
 func (c *runCtl) usage() (float64, int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -442,7 +458,7 @@ func (c *runCtl) usage() (float64, int64) {
 	if c.summary.HasCost {
 		cost = c.summary.CostUSD
 	}
-	return cost, int64(c.summary.Tokens)
+	return cost, c.summary.TotalTokens
 }
 
 func (d *Node) refreshUsage(c *runCtl) {
@@ -452,6 +468,42 @@ func (d *Node) refreshUsage(c *runCtl) {
 		c.mu.Lock()
 		c.summary = &sum
 		c.mu.Unlock()
+	}
+}
+
+// recordUsage notes the usage saved with the run's result.
+func (c *runCtl) recordUsage(cost float64, tokens int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.recorded.ok, c.recorded.cost, c.recorded.tokens = true, cost, tokens
+}
+
+// settleRunUsage adds what the session spent after it reported, such as the
+// rest of its last turn, to the run and its routine's budget use, and pauses
+// the routine when that used up its budget.
+func (d *Node) settleRunUsage(ctx context.Context, c *runCtl) {
+	d.refreshUsage(c)
+	cost, tokens := c.usage()
+	c.mu.Lock()
+	rec := c.recorded
+	dc, dt := max(cost-rec.cost, 0), max(tokens-rec.tokens, 0)
+	if rec.ok {
+		c.recorded.cost, c.recorded.tokens = rec.cost+dc, rec.tokens+dt
+	}
+	c.mu.Unlock()
+	if !rec.ok || (dc == 0 && dt == 0) {
+		return
+	}
+	ctx = context.WithoutCancel(ctx)
+	if err := d.bots.AddRunUsage(ctx, c.bot.ID, c.r.Slug, c.run.ID, dc, dt, c.handoff == nil); err != nil {
+		d.log.Warn("bot: add run usage", "run", c.run.ID, "err", err)
+		return
+	}
+	if c.handoff != nil {
+		return
+	}
+	if st, ok := d.routineState(ctx, c.bot.ID, c.r.Slug); ok && st.Enabled && overBudget(c.r.Budget, st, d.botSettings(c.bot).Agent) {
+		d.pauseRoutine(ctx, c.bot, c.r.Slug, pausedBudget, "")
 	}
 }
 
@@ -498,6 +550,7 @@ func (d *Node) finishRun(ctx context.Context, c *runCtl, res bot.RunResult) {
 		d.log.Warn("bot: finish run", "run", run.ID, "err", err)
 		return
 	}
+	c.recordUsage(res.Cost, res.Tokens)
 	if err := d.writeRunLogs(ctx, c, res); err != nil {
 		d.log.Warn("bot: write run log", "run", run.ID, "err", err)
 		d.botNotice(ctx, a, evRoutineError, map[string]string{"routine": r.Slug, "message": "could not write the run log: " + err.Error()})
@@ -513,7 +566,7 @@ func (d *Node) finishRun(ctx context.Context, c *runCtl, res bot.RunResult) {
 	switch {
 	case complete:
 		d.pauseRoutine(ctx, a, r.Slug, pausedCompleted, "")
-	case hasState && overBudget(r.Budget, st):
+	case hasState && overBudget(r.Budget, st, d.botSettings(a).Agent):
 		d.pauseRoutine(ctx, a, r.Slug, pausedBudget, "")
 	}
 
@@ -575,7 +628,7 @@ func (d *Node) failRun(ctx context.Context, c *runCtl, msg string, spawned bool)
 	switch {
 	case max > 0 && st.ConsecutiveFailures >= max:
 		d.pauseRoutine(ctx, a, r.Slug, pausedFailures, fmt.Sprintf("%d runs in a row failed; last: %s", st.ConsecutiveFailures, msg))
-	case overBudget(r.Budget, st):
+	case overBudget(r.Budget, st, d.botSettings(a).Agent):
 		d.pauseRoutine(ctx, a, r.Slug, pausedBudget, "")
 	}
 }
@@ -649,7 +702,7 @@ func (d *Node) writeRunLogs(ctx context.Context, c *runCtl, res bot.RunResult) e
 	ctx = context.WithoutCancel(ctx)
 
 	defer lockMemory(a.ID)()
-	repo, err := d.openBotRepo(ctx, a)
+	repo, err := botgit.Open(ctx, a.Dir, d.botGitMode())
 	if err != nil {
 		return err
 	}

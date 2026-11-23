@@ -14,6 +14,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/bot"
+	"github.com/MunifTanjim/argus/internal/botgit"
 	"github.com/MunifTanjim/argus/internal/config"
 )
 
@@ -149,7 +150,7 @@ func (d *Node) handleBotUsage(ctx context.Context, params json.RawMessage) (any,
 				if sess.Summary.HasCost {
 					r.Cost += sess.Summary.CostUSD
 				}
-				r.Tokens += int64(sess.Summary.Tokens)
+				r.Tokens += sess.Summary.TotalTokens
 			}
 		}
 	}
@@ -235,7 +236,7 @@ func (d *Node) handleBotSet(ctx context.Context, params json.RawMessage) (any, e
 	}
 	key, value := strings.TrimSpace(p.Key), strings.TrimSpace(p.Value)
 	defer lockMemory(a.ID)()
-	repo, err := d.openBotRepo(ctx, a)
+	repo, err := botgit.Open(ctx, a.Dir, d.botGitMode())
 	if err != nil {
 		return nil, botErr("%v", err)
 	}

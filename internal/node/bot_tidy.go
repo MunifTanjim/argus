@@ -123,7 +123,7 @@ func (d *Node) botTidy(ctx context.Context, a bot.Bot, force bool) error {
 		return nil
 	}
 	defer lockMemory(a.ID)()
-	repo, err := d.openBotRepo(ctx, a)
+	repo, err := botgit.Open(ctx, a.Dir, d.botGitMode())
 	if err != nil {
 		return err
 	}

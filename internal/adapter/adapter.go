@@ -216,6 +216,9 @@ type SpawnOptions struct {
 	Prompt    string
 	Model     string // a ModelLister id
 	SessionID string // agent session id to start under; used only by a SessionIDPresetter
+	// Env holds extra environment assignments ("NAME=value") for the session,
+	// for adapters that start a process per session.
+	Env []string
 }
 
 // SessionIDPresetter is an adapter whose SpawnCommand starts the session under

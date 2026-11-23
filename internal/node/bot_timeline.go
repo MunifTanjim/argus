@@ -241,6 +241,8 @@ func eventText(ev bot.Event) string {
 			return routine + " missed 1 run"
 		}
 		return fmt.Sprintf("%s missed %d runs", routine, int(n))
+	case evTokenBudgetUnavailable:
+		return with(routine, "token budget unavailable for "+cmp.Or(str("cli"), "its CLI"))
 	case evRoutineSkipped:
 		return with(routine+" skipped a run", str("reason"))
 	case evRoutineStale:

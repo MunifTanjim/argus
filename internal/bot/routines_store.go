@@ -372,6 +372,28 @@ func (s *Store) RecordRunOutcome(ctx context.Context, botID, slug string, o RunO
 	return stateFrom(r), nil
 }
 
+// AddRunUsage adds usage reported after a run finished to the run and, with
+// toState, to its routine's budget use.
+func (s *Store) AddRunUsage(ctx context.Context, botID, slug, id string, cost float64, tokens int64, toState bool) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("bot: add run usage: %w", err)
+	}
+	defer tx.Rollback()
+	q := s.q.WithTx(tx)
+	if err := affected(q.AddBotRoutineRunUsage(ctx, gen.AddBotRoutineRunUsageParams{Cost: cost, Tokens: tokens, ID: id})); err != nil {
+		return err
+	}
+	if toState {
+		if err := q.AddBotRoutineUsage(ctx, gen.AddBotRoutineUsageParams{
+			Cost: cost, Tokens: tokens, UpdatedAt: s.now().UnixNano(), BotID: botID, Slug: slug,
+		}); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // SetCheckBackAt sets when the routine's next self-paced check-back is due.
 func (s *Store) SetCheckBackAt(ctx context.Context, botID, slug string, t time.Time) error {
 	return s.q.SetBotRoutineCheckBack(ctx, gen.SetBotRoutineCheckBackParams{

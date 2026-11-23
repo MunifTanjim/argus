@@ -289,6 +289,8 @@ func (d *Node) finishHandoffRun(ctx context.Context, c *runCtl, res bot.RunResul
 	res.Cost, res.Tokens = c.usage()
 	if _, _, err := d.bots.FinishRun(ctx, c.bot.ID, c.r.Slug, c.run.ID, res, "", nil); err != nil {
 		d.log.Warn("bot: finish run", "run", c.run.ID, "err", err)
+	} else {
+		c.recordUsage(res.Cost, res.Tokens)
 	}
 	text := res.Summary
 	if text == "" {

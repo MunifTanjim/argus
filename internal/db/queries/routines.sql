@@ -111,6 +111,15 @@ SET last_run_at = sqlc.arg(last_run_at), last_result = sqlc.arg(last_result),
 WHERE bot_id = sqlc.arg(bot_id) AND slug = sqlc.arg(slug)
 RETURNING *;
 
+-- name: AddBotRoutineRunUsage :execrows
+UPDATE bot_routine_run SET cost = cost + sqlc.arg(cost), tokens = tokens + sqlc.arg(tokens)
+WHERE id = sqlc.arg(id);
+
+-- name: AddBotRoutineUsage :exec
+UPDATE bot_routine_state
+SET cost_used = cost_used + sqlc.arg(cost), tokens_used = tokens_used + sqlc.arg(tokens), updated_at = sqlc.arg(updated_at)
+WHERE bot_id = sqlc.arg(bot_id) AND slug = sqlc.arg(slug);
+
 -- name: SetBotRoutineCheckBack :exec
 UPDATE bot_routine_state SET check_back_at = sqlc.arg(check_back_at), updated_at = sqlc.arg(updated_at)
 WHERE bot_id = sqlc.arg(bot_id) AND slug = sqlc.arg(slug);

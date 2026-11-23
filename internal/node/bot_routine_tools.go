@@ -18,6 +18,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/bot"
 	"github.com/MunifTanjim/argus/internal/bot/memory"
 	"github.com/MunifTanjim/argus/internal/bot/routine"
+	"github.com/MunifTanjim/argus/internal/botgit"
 )
 
 const (
@@ -148,7 +149,7 @@ func (d *Node) removeCheckBack(ctx context.Context, a bot.Bot, th, slug string) 
 func (d *Node) commitRoutineFile(ctx context.Context, a bot.Bot, threadID, source, subject, rel string, change func() error) (string, error) {
 	ctx = context.WithoutCancel(ctx)
 	defer lockMemory(a.ID)()
-	repo, err := d.openBotRepo(ctx, a)
+	repo, err := botgit.Open(ctx, a.Dir, d.botGitMode())
 	if err != nil {
 		return "", err
 	}
