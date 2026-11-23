@@ -1,5 +1,6 @@
 // app/lib/ui/profiles_screen.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../pairing/pairing_uri.dart';
@@ -9,6 +10,7 @@ import '../pairing/scan_screen.dart';
 import '../state/gateway.dart';
 import '../state/profiles.dart';
 import '../util/id.dart';
+import '../util/platform.dart';
 import 'key_library_screen.dart';
 import 'responsive.dart';
 import 'theme.dart';
@@ -152,11 +154,25 @@ class ProfilesScreen extends ConsumerWidget {
   }
 
   Future<void> _scan(BuildContext context, WidgetRef ref) async {
-    final c = await Navigator.of(context).push<GatewayCredentials>(
-        MaterialPageRoute(builder: (_) => const ScanScreen()));
+    final c = supportsQrScan
+        ? await Navigator.of(context).push<GatewayCredentials>(
+            MaterialPageRoute(builder: (_) => const ScanScreen()))
+        : await _pastePairingLink(context);
     if (c == null || !context.mounted) return;
     await _edit(context, ref, draftFromCredentials(newId(), c));
   }
+}
+
+/// Reads an argus://pair link from the clipboard, for platforms without a
+/// camera scanner. `argus pair` prints the link under its QR code.
+Future<GatewayCredentials?> _pastePairingLink(BuildContext context) async {
+  final data = await Clipboard.getData(Clipboard.kTextPlain);
+  final c = parsePairingUri(data?.text ?? '');
+  if (c == null && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Clipboard has no argus pairing link')));
+  }
+  return c;
 }
 
 class _LandingHeader extends StatelessWidget {
@@ -288,8 +304,9 @@ class _AddScanButtons extends StatelessWidget {
         OutlinedButton.icon(
           key: const Key('profiles-scan'),
           onPressed: onScan,
-          icon: const Icon(Icons.qr_code_scanner),
-          label: const Text('Scan QR code'),
+          icon: Icon(
+              supportsQrScan ? Icons.qr_code_scanner : Icons.content_paste),
+          label: Text(supportsQrScan ? 'Scan QR code' : 'Paste pairing link'),
         ),
       ],
     );

@@ -1,7 +1,9 @@
 // app/test/ui/profiles_screen_test.dart
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/pairing/gateway_store.dart';
@@ -232,5 +234,48 @@ void main() {
     container.read(connectionTestResultsProvider.notifier).set('p1', true);
     await tester.pump();
     expect(dot(), const Color(0xFF8ec07c)); // AppColors.accent green
+  });
+
+  group('without a QR scanner (Linux)', () {
+    void clipboard(WidgetTester tester, String? text) {
+      tester.binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.getData') {
+          return text == null ? null : {'text': text};
+        }
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null));
+    }
+
+    testWidgets('pastes a pairing link into the editor', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      clipboard(tester, 'argus://pair?url=wss%3A%2F%2Fgw.example&token=tok');
+      await _pump(tester,
+          profiles: ProfileStore(MemKv()), keys: KeyLibraryStore(MemKv()));
+
+      expect(find.text('Paste pairing link'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('profiles-scan')));
+      await tester.pumpAndSettle();
+
+      final url = tester.widget<TextField>(find.byKey(const Key('url')));
+      expect(url.controller!.text, 'wss://gw.example');
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    testWidgets('reports a clipboard without a pairing link', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      clipboard(tester, 'not a link');
+      await _pump(tester,
+          profiles: ProfileStore(MemKv()), keys: KeyLibraryStore(MemKv()));
+
+      await tester.tap(find.byKey(const Key('profiles-scan')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Clipboard has no argus pairing link'), findsOneWidget);
+      expect(find.byKey(const Key('url')), findsNothing);
+      debugDefaultTargetPlatformOverride = null;
+    });
   });
 }

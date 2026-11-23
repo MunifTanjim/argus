@@ -6,6 +6,7 @@ import '../state/control.dart';
 import '../state/gateway.dart';
 import '../state/grouping.dart';
 import '../transport/ssh_gateway.dart';
+import '../util/platform.dart';
 import 'about_screen.dart';
 import 'appearance_screen.dart';
 import 'device_identity_screen.dart';
@@ -68,18 +69,21 @@ class SettingsScreen extends ConsumerWidget {
                               builder: (_) => const TerminalSettingsScreen()),
                         ),
                       ),
-                      const SizedBox(height: 24),
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.notifications_outlined),
-                        title: const Text('Push Notifications'),
-                        subtitle: const Text('Delivery method and preferences'),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (_) => const PushSettingsScreen()),
+                      if (supportsPush) ...[
+                        const SizedBox(height: 24),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.notifications_outlined),
+                          title: const Text('Push Notifications'),
+                          subtitle:
+                              const Text('Delivery method and preferences'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => const PushSettingsScreen()),
+                          ),
                         ),
-                      ),
+                      ],
                       const SizedBox(height: 24),
                       ListTile(
                         contentPadding: EdgeInsets.zero,

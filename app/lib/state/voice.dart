@@ -5,6 +5,7 @@ import 'package:stts/stts.dart';
 import '../data/dictation_engine.dart';
 import '../data/openrouter.dart';
 import '../pairing/gateway_store.dart';
+import '../util/platform.dart';
 
 /// Fast, cheap and widely available. The user can pick another in settings.
 const defaultTranscriptionModel = 'openai/whisper-large-v3-turbo';
@@ -16,6 +17,8 @@ enum VoiceProvider {
 
   const VoiceProvider(this.label);
   final String label;
+
+  bool get available => this != system || supportsSystemSpeech;
 
   static VoiceProvider parse(String? name) => values.firstWhere(
         (p) => p.name == name,
@@ -46,7 +49,7 @@ class VoicePrefs {
   bool get enabled => switch (provider) {
         VoiceProvider.off => false,
         VoiceProvider.openrouter => apiKey.isNotEmpty,
-        VoiceProvider.system => true,
+        VoiceProvider.system => supportsSystemSpeech,
       };
 
   VoicePrefs copyWith({

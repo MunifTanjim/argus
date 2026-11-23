@@ -288,7 +288,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
       });
       // Register this device's push target now the connection is up (re-runs on
       // every reconnect, refreshing the gateway's record).
-      push.attach(client);
+      push?.attach(client);
       // A real successful connect verifies the active profile → green dot.
       await markActiveConnected(profileStore, testResults);
     },
@@ -312,7 +312,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   ref.onDispose(() {
     equivPoll?.cancel();
     statesSub.cancel();
-    push.unregisterFromCurrentGateway();
+    push?.unregisterFromCurrentGateway();
     manager.stop();
     // Riverpod forbids modifying other providers inside onDispose. Defer the
     // resets to a microtask that runs after teardown; both providers are

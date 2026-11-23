@@ -88,7 +88,8 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
                 },
                 child: Column(
                   children: [
-                    for (final p in VoiceProvider.values)
+                    for (final p
+                        in VoiceProvider.values.where((p) => p.available))
                       RadioListTile<VoiceProvider>(
                         key: Key('voice-provider-${p.name}'),
                         contentPadding: EdgeInsets.zero,

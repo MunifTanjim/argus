@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
 import '../push/push_controller.dart';
+import '../util/platform.dart';
 
 /// A session a deep-link wants to open: a tapped notification opens it in the
 /// scope on screen at that time, a resume ([inHome]) always in Home.
@@ -17,8 +18,10 @@ class PendingOpen {
 final pendingOpenSessionProvider = StateProvider<PendingOpen?>((ref) => null);
 
 /// The single PushController for the app. Materialized at startup; it sets the
-/// pending session on a notification tap so the UI can deep-link.
-final pushControllerProvider = Provider<PushController>((ref) {
+/// pending session on a notification tap so the UI can deep-link. Null where
+/// push is unsupported.
+final pushControllerProvider = Provider<PushController?>((ref) {
+  if (!supportsPush) return null;
   final controller = PushController(
     onSessionTap: (id) =>
         ref.read(pendingOpenSessionProvider.notifier).state = PendingOpen(id),

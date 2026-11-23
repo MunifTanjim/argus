@@ -33,7 +33,7 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
   StreamSubscription<String>? _failureSub;
   StreamSubscription<bool>? _regSub;
 
-  PushController get _controller => ref.read(pushControllerProvider);
+  PushController get _controller => ref.read(pushControllerProvider)!;
 
   bool get _showDistributorPicker => _activeProvider == 'unifiedpush';
 
