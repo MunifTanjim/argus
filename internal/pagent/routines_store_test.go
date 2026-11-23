@@ -107,10 +107,16 @@ func TestExpiredLeases(t *testing.T) {
 		t.Fatalf("renew finished: %v", err)
 	}
 	got, err := s.ExpiredLeases(ctx, base.Add(10*time.Minute))
-	if err != nil || len(got) != 1 || got[0].ID != stale.ID {
+	if err != nil || len(got) != 2 || got[0].ID != stale.ID || got[1].ID != withResult.ID || got[1].Result != "progress" {
 		t.Fatalf("expired: %+v %v", got, err)
 	}
+	if ok, _ := s.InterruptRun(ctx, withResult.ID, base.Add(10*time.Minute), "x"); ok {
+		t.Fatal("reported run interrupted")
+	}
 	if err := s.SetRunState(ctx, stale.ID, RunInterrupted, "node restart"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRunState(ctx, withResult.ID, RunDone, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.ExpiredLeases(ctx, base.Add(10*time.Minute)); len(got) != 0 {
@@ -312,5 +318,38 @@ func TestRecordRunOutcome(t *testing.T) {
 	st, _ = s.RecordRunOutcome(ctx, "ag1", "r", RunOutcome{Result: "progress", Sessions: 1, Cost: 0.25})
 	if st.ConsecutiveFailures != 0 || st.SessionsUsed != 3 || st.CostUsed != 0.75 || st.LastRunAt.IsZero() {
 		t.Fatalf("state: %+v", st)
+	}
+}
+
+func TestFinishRunIsOneWrite(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newStore(t)
+	if err := s.UpsertRoutineState(ctx, RoutineState{AgentID: "ag1", Slug: "r", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	run, _, _ := s.ClaimOccurrence(ctx, "ag1", "r", time.Unix(1, 0), "routine", false)
+	res := RunResult{Result: "progress", Summary: "s", Cost: 0.25, Tokens: 7}
+	st, ok, err := s.FinishRun(ctx, "ag1", "r", run.ID, res, "note", &RunOutcome{Result: "progress", Sessions: 1, Cost: 0.25, Tokens: 7})
+	if err != nil || !ok || st.SessionsUsed != 1 || st.LastResult != "progress" {
+		t.Fatalf("state: %+v %v %v", st, ok, err)
+	}
+	got, _, _ := s.RoutineRun(ctx, run.ID)
+	if got.State != RunDone || got.Result != "progress" || got.Error != "note" || got.EndedAt.IsZero() {
+		t.Fatalf("run: %+v", got)
+	}
+	// A run that already ended changes nothing.
+	if _, _, err := s.FinishRun(ctx, "ag1", "r", run.ID, RunResult{Result: "blocked"}, "", &RunOutcome{Sessions: 1}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second finish: %v", err)
+	}
+	if got, _, _ := s.RoutineRun(ctx, run.ID); got.Result != "progress" {
+		t.Fatalf("result overwritten: %+v", got)
+	}
+	if sts, _ := s.RoutineStates(ctx, "ag1"); sts[0].SessionsUsed != 1 {
+		t.Fatalf("counted twice: %+v", sts)
+	}
+	// Without routine state the run still finishes.
+	other, _, _ := s.ClaimOccurrence(ctx, "ag1", "gone", time.Unix(1, 0), "routine", false)
+	if _, ok, err := s.FinishRun(ctx, "ag1", "gone", other.ID, res, "", &RunOutcome{Sessions: 1}); err != nil || ok {
+		t.Fatalf("no state: %v %v", ok, err)
 	}
 }

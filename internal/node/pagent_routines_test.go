@@ -484,3 +484,35 @@ func TestExpiredLeaseOfOwnedRunNotInterrupted(t *testing.T) {
 		t.Fatal("renewed run interrupted")
 	}
 }
+
+func TestExpiredReportedRunFinishes(t *testing.T) {
+	r := newSchedRig(t)
+	ctx := context.Background()
+	r.write(t, "digest", "what: x\nstarts:\n  - every: 1d\n")
+	r.tick()
+	run, _, err := r.store.ClaimOccurrence(ctx, r.agent.ID, "digest", schedT0.Add(-time.Hour), "routine", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// report_run recorded the result, then the node stopped before the run ended.
+	if err := r.store.RecordResult(ctx, run.ID, pagent.RunResult{Result: "done", Summary: "s", Cost: 0.5}); err != nil {
+		t.Fatal(err)
+	}
+	r.at(10 * time.Minute)
+	r.tick()
+	got, _, _ := r.store.RoutineRun(ctx, run.ID)
+	if got.State != pagent.RunDone || got.Result != "progress" || got.Summary != "s" {
+		t.Fatalf("run: %+v", got)
+	}
+	st, _ := r.state(t, "digest")
+	if st.SessionsUsed != 1 || st.CostUsed != 0.5 || st.LastResult != "progress" {
+		t.Fatalf("outcome: %+v", st)
+	}
+	if active, _ := r.store.ActiveRuns(ctx, r.agent.ID, "digest"); len(active) != 0 {
+		t.Fatalf("still active: %+v", active)
+	}
+	r.tick()
+	if st2, _ := r.state(t, "digest"); st2.SessionsUsed != 1 {
+		t.Fatalf("counted twice: %+v", st2)
+	}
+}

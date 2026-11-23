@@ -283,11 +283,8 @@ func (d *Node) finishHandoffRun(ctx context.Context, c *runCtl, res pagent.RunRe
 	ctx = context.WithoutCancel(ctx)
 	d.refreshUsage(c)
 	res.Cost, res.Tokens = c.usage()
-	if err := d.pagents.RecordResult(ctx, c.run.ID, res); err != nil {
-		d.log.Warn("pagent: record run result", "run", c.run.ID, "err", err)
-	}
-	if err := d.pagents.SetRunState(ctx, c.run.ID, pagent.RunDone, ""); err != nil {
-		d.log.Warn("pagent: end run", "run", c.run.ID, "err", err)
+	if _, _, err := d.pagents.FinishRun(ctx, c.agent.ID, c.r.Slug, c.run.ID, res, "", nil); err != nil {
+		d.log.Warn("pagent: finish run", "run", c.run.ID, "err", err)
 	}
 	text := res.Summary
 	if text == "" {

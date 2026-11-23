@@ -146,7 +146,7 @@ func (q *Queries) DeletePAgentWebhookSecrets(ctx context.Context, agentID string
 
 const expiredPAgentRoutineRuns = `-- name: ExpiredPAgentRoutineRuns :many
 SELECT id, agent_id, slug, occurrence, started_by, test, state, lease_until, thread_id, result, summary, actions_done, actions_pending, unverified, sources, cost, tokens, started_at, ended_at, error, retry_of FROM pagent_routine_run
-WHERE state IN ('claimed', 'running') AND lease_until > 0 AND lease_until < ? AND result = ''
+WHERE state IN ('claimed', 'running') AND lease_until > 0 AND lease_until < ?
 ORDER BY started_at, id
 `
 

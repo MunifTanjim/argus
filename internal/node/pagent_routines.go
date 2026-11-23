@@ -95,6 +95,10 @@ func (d *Node) routineTick(ctx context.Context) {
 		if d.ownsRun(run.ID) {
 			continue
 		}
+		if run.Result != "" {
+			d.finishReported(ctx, run)
+			continue
+		}
 		if active[run.AgentID] {
 			byAgent[run.AgentID] = append(byAgent[run.AgentID], run)
 		} else {
@@ -127,6 +131,25 @@ func (d *Node) interruptRun(ctx context.Context, run pagent.RoutineRun) bool {
 		d.log.Warn("pagent: interrupt run", "run", run.ID, "err", err)
 	}
 	return ok
+}
+
+// finishReported ends a run that reported its result but whose node stopped
+// before it finished: done, with the reported result counted once. A done
+// result is kept as progress, since its verify never ran.
+func (d *Node) finishReported(ctx context.Context, run pagent.RoutineRun) {
+	res := run.RunResult
+	msg := "the node stopped before the run finished"
+	if res.Result == resultDone {
+		res.Result = resultProgress
+		msg += "; done was not verified"
+	}
+	var outcome *pagent.RunOutcome
+	if run.StartedBy != startedByHandoff {
+		outcome = &pagent.RunOutcome{Result: res.Result, Sessions: 1, Cost: res.Cost, Tokens: res.Tokens}
+	}
+	if _, _, err := d.pagents.FinishRun(ctx, run.AgentID, run.Slug, run.ID, res, msg, outcome); err != nil && !errors.Is(err, pagent.ErrNotFound) {
+		d.log.Warn("pagent: finish reported run", "run", run.ID, "err", err)
+	}
 }
 
 func defHash(data []byte) string {

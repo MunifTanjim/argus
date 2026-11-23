@@ -2,7 +2,9 @@ package pagent
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -249,7 +251,7 @@ func (s *Store) RenewLease(ctx context.Context, id string, leaseUntil time.Time)
 	return affected(s.q.RenewPAgentRoutineRunLease(ctx, gen.RenewPAgentRoutineRunLeaseParams{LeaseUntil: leaseUntil.UnixNano(), ID: id}))
 }
 
-// ExpiredLeases lists active runs whose lease ended before now and that have no recorded result.
+// ExpiredLeases lists active runs whose lease ended before now, with or without a recorded result.
 func (s *Store) ExpiredLeases(ctx context.Context, now time.Time) ([]RoutineRun, error) {
 	return runs(s.q.ExpiredPAgentRoutineRuns(ctx, now.UnixNano()))
 }
@@ -278,6 +280,44 @@ func (s *Store) RecordResult(ctx context.Context, id string, r RunResult) error 
 		ActionsPending: encodeList(r.ActionsPending), Unverified: encodeList(r.Unverified),
 		Sources: encodeList(r.Sources), Cost: r.Cost, Tokens: r.Tokens, ID: id,
 	}))
+}
+
+// FinishRun stores the run's result and marks it done with errMsg in one
+// transaction, so an active run never holds a result. With outcome set it
+// also records the outcome on the routine's state and returns that state; ok
+// is false when the routine has no state. ErrNotFound means the run is no
+// longer active and nothing changed.
+func (s *Store) FinishRun(ctx context.Context, agentID, slug, id string, r RunResult, errMsg string, outcome *RunOutcome) (st RoutineState, ok bool, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return st, false, fmt.Errorf("pagent: finish run: %w", err)
+	}
+	defer tx.Rollback()
+	q := s.q.WithTx(tx)
+	if err := affected(q.RecordPAgentRoutineRunResult(ctx, gen.RecordPAgentRoutineRunResultParams{
+		Result: r.Result, Summary: r.Summary, ActionsDone: encodeList(r.ActionsDone),
+		ActionsPending: encodeList(r.ActionsPending), Unverified: encodeList(r.Unverified),
+		Sources: encodeList(r.Sources), Cost: r.Cost, Tokens: r.Tokens, ID: id,
+	})); err != nil {
+		return st, false, err
+	}
+	now := s.now().UnixNano()
+	if err := affected(q.SetPAgentRoutineRunState(ctx, gen.SetPAgentRoutineRunStateParams{State: RunDone, Error: errMsg, EndedAt: now, ID: id})); err != nil {
+		return st, false, err
+	}
+	if outcome != nil {
+		row, err := q.RecordPAgentRoutineOutcome(ctx, gen.RecordPAgentRoutineOutcomeParams{
+			LastRunAt: now, LastResult: outcome.Result, Failed: b2i(outcome.Failed), Sessions: outcome.Sessions,
+			Cost: outcome.Cost, Tokens: outcome.Tokens, UpdatedAt: now, AgentID: agentID, Slug: slug,
+		})
+		switch {
+		case err == nil:
+			st, ok = stateFrom(row), true
+		case !errors.Is(err, sql.ErrNoRows):
+			return st, false, err
+		}
+	}
+	return st, ok, tx.Commit()
 }
 
 // RunsLastHour counts the agent's non-test runs started in the past hour, excluding skipped and missed ones.

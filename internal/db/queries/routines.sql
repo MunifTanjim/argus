@@ -55,7 +55,7 @@ UPDATE pagent_routine_run SET lease_until = ? WHERE id = ? AND state IN ('claime
 
 -- name: ExpiredPAgentRoutineRuns :many
 SELECT * FROM pagent_routine_run
-WHERE state IN ('claimed', 'running') AND lease_until > 0 AND lease_until < ? AND result = ''
+WHERE state IN ('claimed', 'running') AND lease_until > 0 AND lease_until < ?
 ORDER BY started_at, id;
 
 -- name: PAgentRoutineRunsSince :many

@@ -467,6 +467,10 @@ func (d *Node) finishRun(ctx context.Context, c *runCtl, res pagent.RunResult) {
 			res.Result = resultProgress
 		case r.Verify != "":
 			out, err := d.runVerify(ctx, a.Dir, r.Verify)
+			if ctx.Err() != nil {
+				// Shutting down: the run is interrupted and retried, not failed.
+				return
+			}
 			if err == nil {
 				complete = true
 			} else {
@@ -477,21 +481,19 @@ func (d *Node) finishRun(ctx context.Context, c *runCtl, res pagent.RunResult) {
 			complete = true
 		}
 	}
-	if err := d.pagents.RecordResult(ctx, run.ID, res); err != nil {
-		d.log.Warn("pagent: record run result", "run", run.ID, "err", err)
+	ctx = context.WithoutCancel(ctx)
+	// The result and the end of the run are one write: a stop in between
+	// would leave the run active with a result, which nothing reaps.
+	st, hasState, err := d.pagents.FinishRun(ctx, a.ID, r.Slug, run.ID, res, verifyErr, &pagent.RunOutcome{
+		Result: res.Result, Sessions: 1, Cost: res.Cost, Tokens: res.Tokens,
+	})
+	if err != nil {
+		d.log.Warn("pagent: finish run", "run", run.ID, "err", err)
+		return
 	}
 	if err := d.writeRunLogs(ctx, c, res); err != nil {
 		d.log.Warn("pagent: write run log", "run", run.ID, "err", err)
 		d.agentNotice(ctx, a, evRoutineError, map[string]string{"routine": r.Slug, "message": "could not write the run log: " + err.Error()})
-	}
-	if err := d.pagents.SetRunState(ctx, run.ID, pagent.RunDone, verifyErr); err != nil {
-		d.log.Warn("pagent: end run", "run", run.ID, "err", err)
-	}
-	st, err := d.pagents.RecordRunOutcome(ctx, a.ID, r.Slug, pagent.RunOutcome{
-		Result: res.Result, Sessions: 1, Cost: res.Cost, Tokens: res.Tokens,
-	})
-	if err != nil {
-		d.log.Warn("pagent: record run outcome", "run", run.ID, "err", err)
 	}
 
 	if selfPaced(r) {
@@ -504,7 +506,7 @@ func (d *Node) finishRun(ctx context.Context, c *runCtl, res pagent.RunResult) {
 	switch {
 	case complete:
 		d.pauseRoutine(ctx, a, r.Slug, pausedCompleted, "")
-	case err == nil && overBudget(r.Budget, st):
+	case hasState && overBudget(r.Budget, st):
 		d.pauseRoutine(ctx, a, r.Slug, pausedBudget, "")
 	}
 
