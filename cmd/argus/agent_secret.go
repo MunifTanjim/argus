@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -30,8 +29,8 @@ and history.`,
 	return cmd
 }
 
-// readSecretValue reads a value from the terminal without echo, or the first
-// line of standard input when it is not a terminal.
+// readSecretValue reads a value from the terminal without echo, or all of
+// standard input when it is not a terminal.
 var readSecretValue = func(name string) (string, error) {
 	fd := int(os.Stdin.Fd())
 	if term.IsTerminal(fd) {
@@ -40,11 +39,18 @@ var readSecretValue = func(name string) (string, error) {
 		shell.StdErrLn()
 		return string(v), err
 	}
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
+	return readPipedSecret(os.Stdin)
+}
+
+// readPipedSecret reads a piped value whole, so multi-line values (PEM keys,
+// JSON credentials) stay intact, and drops one trailing newline.
+func readPipedSecret(r io.Reader) (string, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
 		return "", err
 	}
-	return strings.TrimRight(line, "\r\n"), nil
+	v := strings.TrimSuffix(string(data), "\n")
+	return strings.TrimSuffix(v, "\r"), nil
 }
 
 func agentSecretSet(dial callerFor) *cobra.Command {

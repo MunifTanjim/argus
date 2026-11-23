@@ -55,3 +55,18 @@ func TestAgentSecretCommands(t *testing.T) {
 		t.Errorf("rm = %+v", rm)
 	}
 }
+
+func TestReadPipedSecretKeepsLines(t *testing.T) {
+	for in, want := range map[string]string{
+		"token\n":                     "token",
+		"token\r\n":                   "token",
+		"token":                       "token",
+		"-----BEGIN\nabc\n-----END\n": "-----BEGIN\nabc\n-----END",
+		"{\n  \"k\": 1\n}\n\n":        "{\n  \"k\": 1\n}\n",
+	} {
+		got, err := readPipedSecret(strings.NewReader(in))
+		if err != nil || got != want {
+			t.Errorf("%q = %q %v", in, got, err)
+		}
+	}
+}
