@@ -38,19 +38,21 @@ String safeFence(String body) {
 bool insideSelectionArea(BuildContext context) =>
     SelectionContainer.maybeOf(context) != null;
 
-/// The link button under [global] in the subtree of [root], if any.
-LinkButton? _linkAt(BuildContext root, Offset global) {
-  LinkButton? found;
+/// The first widget of type [T] under [global] in the subtree of [root], if any.
+T? _widgetAt<T extends Widget>(BuildContext root, Offset global) {
+  T? found;
   void visit(Element el) {
     if (found != null) return;
     final w = el.widget;
-    if (w is LinkButton) {
+    if (w is T) {
       final box = el.renderObject;
       if (box is RenderBox && box.attached) {
         final local = box.globalToLocal(global);
-        if ((Offset.zero & box.size).contains(local)) found = w;
+        if ((Offset.zero & box.size).contains(local)) {
+          found = w;
+          return;
+        }
       }
-      return;
     }
     el.visitChildren(visit);
   }
@@ -59,10 +61,15 @@ LinkButton? _linkAt(BuildContext root, Offset global) {
   return found;
 }
 
+LinkButton? _linkAt(BuildContext root, Offset global) =>
+    _widgetAt<LinkButton>(root, global);
+
 /// Context menu for the app's selection areas. On desktop a right-click on a
 /// markdown link opens the link actions, so no selection toolbar is shown over
-/// it. [areaContext] must be an ancestor of the area's content (the toolbar's
-/// own context is not). [extra] items follow the standard ones.
+/// it. Over an [appMarkdown] block (the right-click point, or the long-press
+/// selection on touch) it adds "Copy Markdown" for that block's source.
+/// [areaContext] must be an ancestor of the area's content (the toolbar's own
+/// context is not). [extra] items follow the standard ones.
 Widget selectionContextMenu(
   BuildContext areaContext,
   SelectableRegionState state, {
@@ -72,9 +79,28 @@ Widget selectionContextMenu(
   if (isDesktop && _linkAt(areaContext, anchors.primaryAnchor) != null) {
     return const SizedBox.shrink();
   }
+  // A right-click anchors at the pointer; a selection toolbar floats above or
+  // below the selection, so aim between the two.
+  final second = anchors.secondaryAnchor;
+  final at = second == null
+      ? anchors.primaryAnchor
+      : Offset.lerp(anchors.primaryAnchor, second, 0.5)!;
+  final block = _widgetAt<_SelectableMarkdown>(areaContext, at);
   return AdaptiveTextSelectionToolbar.buttonItems(
     anchors: anchors,
-    buttonItems: [...state.contextMenuButtonItems, ...extra],
+    buttonItems: [
+      ...state.contextMenuButtonItems,
+      if (block != null)
+        ContextMenuButtonItem(
+          label: 'Copy Markdown',
+          onPressed: () {
+            copyToClipboard(areaContext, block.data);
+            state.hideToolbar();
+            state.clearSelection();
+          },
+        ),
+      ...extra,
+    ],
   );
 }
 
@@ -422,7 +448,7 @@ class _CodeBlockState extends State<_CodeBlock> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _header(label),
+          SelectionContainer.disabled(child: _header(label)),
           Padding(
             padding: const EdgeInsets.all(10),
             child: widget.selectable && !insideSelectionArea(context)

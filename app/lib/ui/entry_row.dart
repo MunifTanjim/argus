@@ -340,13 +340,15 @@ class _Foldable extends StatelessWidget {
             style: _mono.copyWith(color: AppColors.text, fontSize: 12),
           ),
         if (long)
-          GestureDetector(
-            onTap: onToggle,
-            child: Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                expanded ? 'Show less' : 'Show more',
-                style: _mono.copyWith(color: AppColors.accent),
+          SelectionContainer.disabled(
+            child: GestureDetector(
+              onTap: onToggle,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  expanded ? 'Show less' : 'Show more',
+                  style: _mono.copyWith(color: AppColors.accent),
+                ),
               ),
             ),
           ),

@@ -70,6 +70,7 @@ void main() {
 
   testWidgets('a drag across two rows selects text', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
     String? copied;
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         SystemChannels.platform, (call) async {
@@ -105,13 +106,14 @@ void main() {
 
     expect(copied, contains('alpha first row'));
     expect(copied, contains('beta second row'));
-    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets(
     'a right-click on a link shows the link actions and no selection toolbar',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
       await tester.pumpWidget(_feed(const [_link]));
       await tester.pumpAndSettle();
       final g = await tester.startGesture(
@@ -123,13 +125,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Open link'), findsOneWidget);
       expect(find.byType(AdaptiveTextSelectionToolbar), findsNothing);
-      debugDefaultTargetPlatformOverride = null;
     },
   );
 
   testWidgets('a right-click on plain text still shows the selection toolbar',
       (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
     await tester.pumpWidget(_feed(const [_link]));
     await tester.pumpAndSettle();
     final g = await tester.startGesture(
@@ -141,6 +143,123 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(AdaptiveTextSelectionToolbar), findsOneWidget);
     expect(find.text('Open link'), findsNothing);
-    debugDefaultTargetPlatformOverride = null;
+  });
+
+  String? clip;
+  void captureClipboard(WidgetTester tester) {
+    clip = null;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        clip = (call.arguments as Map)['text'] as String;
+      }
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null));
+  }
+
+  const md = Entry(
+    id: 'm',
+    kind: EntryKind.text,
+    text: 'some **bold** words here',
+  );
+
+  testWidgets('a long-press on a markdown row offers Copy Markdown on touch',
+      (tester) async {
+    captureClipboard(tester);
+    await tester.pumpWidget(_feed(const [md]));
+    await tester.pumpAndSettle();
+    await tester.longPressAt(
+      tester.getTopLeft(find.textContaining('some')) + const Offset(5, 6),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Copy Markdown'), findsOneWidget);
+    await tester.tap(find.text('Copy Markdown'));
+    await tester.pumpAndSettle();
+    expect(clip, 'some **bold** words here');
+  });
+
+  testWidgets('a right-click on a markdown row offers Copy Markdown on desktop',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    captureClipboard(tester);
+    await tester.pumpWidget(_feed(const [md]));
+    await tester.pumpAndSettle();
+    final g = await tester.startGesture(
+      tester.getTopLeft(find.textContaining('some')) + const Offset(5, 6),
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(find.text('Copy Markdown'), findsOneWidget);
+    await tester.tap(find.text('Copy Markdown'));
+    await tester.pumpAndSettle();
+    expect(clip, 'some **bold** words here');
+  });
+
+  testWidgets('a drag across a code block copies the code, not its header',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    captureClipboard(tester);
+    await tester.pumpWidget(_feed(const [
+      Entry(
+        id: 'c',
+        kind: EntryKind.text,
+        text: 'before\n\n```dart\nprint(1);\n```\n\nafter text',
+      ),
+    ]));
+    await tester.pumpAndSettle();
+    final from = tester.getTopLeft(find.textContaining('before')) +
+        const Offset(1, 4);
+    final to = tester.getBottomRight(find.textContaining('after text')) -
+        const Offset(2, 3);
+    final g = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
+    await tester.pump();
+    for (var i = 1; i <= 10; i++) {
+      await g.moveTo(Offset.lerp(from, to, i / 10)!);
+      await tester.pump();
+    }
+    await g.up();
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+    expect(clip, contains('print(1);'));
+    expect(clip, isNot(contains('dart')));
+    expect(clip, isNot(contains('Copy')));
+  });
+
+  testWidgets('Show more is not part of a copied selection', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    captureClipboard(tester);
+    final long = List.generate(30, (i) => 'line $i').join('\n');
+    await tester.pumpWidget(_feed([
+      Entry(id: 'u', kind: EntryKind.user, text: long),
+    ]));
+    await tester.pumpAndSettle();
+    final from = tester.getTopLeft(find.textContaining('line 0')) +
+        const Offset(1, 4);
+    final to = tester.getBottomRight(find.text('Show more')) -
+        const Offset(1, 4);
+    final g = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
+    await tester.pump();
+    for (var i = 1; i <= 10; i++) {
+      await g.moveTo(Offset.lerp(from, to, i / 10)!);
+      await tester.pump();
+    }
+    await g.up();
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+    expect(clip, contains('line 0'));
+    expect(clip, isNot(contains('Show more')));
   });
 }
