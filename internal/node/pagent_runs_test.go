@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -542,5 +543,26 @@ func TestVerifyTimeoutKillsGroup(t *testing.T) {
 			t.Fatalf("child sleep %d still running", pid)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestFailedSpawnClosesRunThread(t *testing.T) {
+	r := newRunRig(t)
+	r.d.spawnFn = func(context.Context, api.SpawnParams, string) (api.SpawnResult, error) {
+		return api.SpawnResult{}, errors.New("spawn broke")
+	}
+	rt := r.routine(t, "inbox", "what: check inbox\nstarts:\n  - every: 1h\n")
+	run, _, err := r.store.ClaimOccurrence(context.Background(), r.a.ID, rt.Slug, time.Unix(1_700_000_000, 0), "routine", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.d.startRun(context.Background(), r.a, rt, run, "")
+	r.wait(t)
+	got := r.run(t, run.ID)
+	if got.State != pagent.RunFailed || got.ThreadID == "" {
+		t.Fatalf("run: %+v", got)
+	}
+	if th, _, _ := r.store.Thread(context.Background(), got.ThreadID); th.Status != pagent.ThreadClosed {
+		t.Fatalf("run thread left %s", th.Status)
 	}
 }

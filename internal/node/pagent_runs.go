@@ -198,6 +198,11 @@ func (d *Node) executeRun(ctx context.Context, c *runCtl) {
 		}
 		if err != nil {
 			d.failRun(ctx, c, err.Error(), false)
+			if th, _ := c.ids(); th != "" {
+				if err := d.pagents.CloseThread(context.WithoutCancel(ctx), th); err != nil {
+					d.log.Warn("pagent: close run thread", "thread", th, "err", err)
+				}
+			}
 			return
 		}
 		if ok {
@@ -370,6 +375,9 @@ func (d *Node) watchRun(ctx context.Context, c *runCtl) {
 				select {
 				case res := <-c.report:
 					d.finishRun(ctx, c, res)
+				case <-time.After(runReportGrace):
+					// Saving the report failed.
+					d.failRun(ctx, c, reasonNoReport, true)
 				case <-ctx.Done():
 				}
 				return
