@@ -46,7 +46,7 @@ is on more than one node.`,
 		botCreate(dial), botAdd(dial), botList(dial), botShow(dial),
 		botRename(dial), botForget(dial), botPrimary(dial), botChat(dial), botThreads(dial), botMemory(dial),
 		botUsage(dial), botSet(dial),
-		botActivity(dial), botSecret(dial),
+		botActivity(dial), botSecret(dial), botTrust(dial),
 	)
 	return cmd
 }

@@ -20,9 +20,8 @@ func botSecret(dial callerFor) *cobra.Command {
 		Short: "Manage a bot's secrets",
 		Long: `Manage a bot's secrets.
 
-A secret is given to the bot's sessions as an environment variable. The bot
-and the tools it runs can read it; it is kept out of the bot's files, memory
-and history.`,
+The bot's sessions read a secret with "argus secret get NAME"; no other
+caller can. It is kept out of the bot's files, memory and history.`,
 		SilenceUsage: true,
 	}
 	cmd.AddCommand(botSecretSet(dial), botSecretList(dial), botSecretRm(dial))

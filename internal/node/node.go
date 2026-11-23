@@ -415,11 +415,12 @@ func (d *Node) reevaluateTrustChannels() {
 	}
 }
 
-// remoteDispatch rejects lock.*, orch.* and server.stop (local-only) and dispatches the rest.
+// remoteDispatch rejects lock.*, orch.*, server.stop and bot.secret.get
+// (local-only) and dispatches the rest.
 func (d *Node) remoteDispatch() api.DispatchFunc {
 	full := d.server.DispatchFunc()
 	return func(ctx context.Context, method string, params json.RawMessage) (any, error) {
-		if strings.HasPrefix(method, "lock.") || strings.HasPrefix(method, "orch.") || method == api.MethodServerStop {
+		if strings.HasPrefix(method, "lock.") || strings.HasPrefix(method, "orch.") || method == api.MethodServerStop || method == api.MethodBotSecretGet {
 			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
 		}
 		return full(ctx, method, params)
@@ -427,11 +428,12 @@ func (d *Node) remoteDispatch() api.DispatchFunc {
 }
 
 // peerDispatch serves channels another node opened (chanState.opener set): it
-// is remoteDispatch plus orch.*. lock.* and server.stop stay local-only.
+// is remoteDispatch plus orch.*. lock.*, server.stop and bot.secret.get stay
+// local-only.
 func (d *Node) peerDispatch() api.DispatchFunc {
 	full := d.server.DispatchFunc()
 	return func(ctx context.Context, method string, params json.RawMessage) (any, error) {
-		if strings.HasPrefix(method, "lock.") || method == api.MethodServerStop {
+		if strings.HasPrefix(method, "lock.") || method == api.MethodServerStop || method == api.MethodBotSecretGet {
 			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
 		}
 		return full(ctx, method, params)

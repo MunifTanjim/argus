@@ -157,6 +157,12 @@ type BotThreadSession struct {
 	EndReason      string
 }
 
+type BotTrust struct {
+	Repo      string
+	Items     string
+	UpdatedAt int64
+}
+
 type BotWebhookSecret struct {
 	BotID      string
 	Slug       string

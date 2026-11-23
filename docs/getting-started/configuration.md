@@ -84,7 +84,7 @@ overrides the `bots.defaults` values.
 | `bots.defaults.timezone` | `auto` | The timezone of schedules and quiet hours. |
 | `bots.defaults.idle-close` | `30m` | How long an idle session stays open. |
 | `bots.defaults.max-concurrent-sessions` | `2` | Sessions a bot runs at once. |
-| `bots.defaults.git.mode` | `nested` | `nested` gives each bot its own repository. `outer` uses an enclosing repository when there is one. |
+| `bots.defaults.git.mode` | `nested` | `nested` gives each bot its own repository. `outer` uses an enclosing repository when there is one. Argus does not commit while that repository's hooks or config changed outside Argus; see [Bots](/guide/bots#protected-files). |
 | `bots.defaults.git.commit-files` | `false` | Whether the `files` directory is committed. |
 | `bots.defaults.memory.mode` | `auto` | `auto`, `review` or `off`. |
 | `bots.defaults.memory.core-budget` | `24KB` | Size limit of the core memory. |

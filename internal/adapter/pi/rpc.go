@@ -244,7 +244,7 @@ func spawnHosted(ctx context.Context, cwd, sessionID, extensionPath, model strin
 	args = append(args, modelArgs(model)...)
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = cwd
-	cmd.Env = append(append(cmd.Environ(), managedEnv()...), spawnEnvFrom(ctx)...)
+	cmd.Env = append(cmd.Environ(), managedEnv()...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("pi: start relay: %w", err)
@@ -349,19 +349,4 @@ func parseModelList(out []byte) []api.ModelInfo {
 		models = append(models, api.ModelInfo{ID: f[0] + "/" + f[1], Name: f[1] + " · " + f[0]})
 	}
 	return models
-}
-
-type spawnEnvKey struct{}
-
-// withSpawnEnv carries extra environment assignments to spawnHosted.
-func withSpawnEnv(ctx context.Context, env []string) context.Context {
-	if len(env) == 0 {
-		return ctx
-	}
-	return context.WithValue(ctx, spawnEnvKey{}, env)
-}
-
-func spawnEnvFrom(ctx context.Context) []string {
-	env, _ := ctx.Value(spawnEnvKey{}).([]string)
-	return env
 }

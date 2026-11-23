@@ -326,6 +326,22 @@ argus bot activity scout
 argus bot activity scout --unattended
 ```
 
+### Protected files
+
+Before Argus commits in a bot's repository, it checks that these files are as it last recorded them:
+
+- the repository's git hooks and git config (with `bots.defaults.git.mode: outer`, those of the enclosing repository);
+- the `approvals` in the bot's `bot.yaml` (other keys are not checked);
+- `approvals.yaml` in the profile directory, and the git hooks and config of the profile repository.
+
+Argus records them when you create or add the bot, and again when it changes them itself, such as when you always allow an action. A change made any other way stops Argus from committing for that bot: it does not run git, so no hook runs, and it sends a needs-you notice naming what changed. This includes your own edits made outside Argus, such as editing the approvals in `bot.yaml` or `approvals.yaml` by hand, or installing a git hook. Memory changes, run logs, settings and undo, which all commit, fail until you accept the change:
+
+```sh
+argus bot trust scout
+```
+
+This records the bot's files and the shared ones as they are now and lists the changes it accepted. A change to `approvals.yaml` or the profile repository is accepted for every bot at once. The check covers commits only: an edited rule applies to approval requests as soon as it is saved.
+
 ## Secrets
 
 A bot can have secrets, such as API tokens. They are kept on the node, encrypted, and never written to the bot's files, memory or history.
@@ -336,8 +352,14 @@ argus bot secret list scout
 argus bot secret rm scout GH_TOKEN
 ```
 
-`set` reads the value without showing it, or from standard input when it is piped in (all of it, without one trailing newline, so multi-line values such as keys stay whole); the value is never a command-line argument. Names of variables the shell, the system or Argus depend on, such as `PATH`, `HOME`, `LD_*` or `ARGUS_*`, can't be used. The bot's sessions get each secret as an environment variable, and the bot's instructions list the names and descriptions only. A bot can also ask you for a secret it needs; your answer is stored the same way, and the bot is told only the variable's name. A secret given that way reaches the bot's next session.
+`set` reads the value without showing it, or from standard input when it is piped in (all of it, without one trailing newline, so multi-line values such as keys stay whole); the value is never a command-line argument. A name is like `GH_TOKEN`; names of variables the shell, the system or Argus depend on, such as `PATH`, `HOME`, `LD_*` or `ARGUS_*`, can't be used. The bot's instructions list the names and descriptions only. A bot can also ask you for a secret it needs; your answer is stored the same way, and the bot is told only the name.
 
-The bot and the tools it runs can read these variables. Secrets keep values out of transcripts, memory and history; they do not hide them from the bot. Where a known secret value would appear in approval requests, drafts, activity or memory capture, Argus replaces it with the secret's name.
+A bot reads a secret when a command needs it:
 
-Secrets reach Claude Code and pi sessions. Codex and OpenCode sessions run in a shared background service and don't get them.
+```sh
+GH_TOKEN=$(argus secret get GH_TOKEN) gh issue list
+```
+
+`argus secret get` prints the value with no trailing newline. It works only in a command one of the bot's sessions runs, and returns only that bot's secrets; anywhere else it fails. A secret is available as soon as it is stored. This works in Claude Code, Codex, OpenCode and pi sessions, not in Antigravity sessions. Each read is recorded in the bot's activity by name.
+
+The bot and the tools it runs can read these values. Secrets keep values out of transcripts, memory and history; they do not hide them from the bot. Where a known secret value would appear in approval requests, drafts, activity or memory capture, Argus replaces it with the secret's name.

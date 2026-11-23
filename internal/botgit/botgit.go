@@ -37,6 +37,11 @@ type Repo struct {
 	Dir    string // bot directory
 	Outer  bool   // committing into an enclosing repository
 	GitDir string // .git directory of the repository in use
+	// Created reports that Open initialized the repository.
+	Created bool
+	// Guard, when set, runs before every commit or revert, before any git
+	// command; an error refuses the commit.
+	Guard func(context.Context) error
 }
 
 type Trailer struct{ Key, Value string }
@@ -68,12 +73,13 @@ func Open(ctx context.Context, dir string, mode string) (*Repo, error) {
 	}
 	root, inRepo := runGit(ctx, dir, "rev-parse", "--show-toplevel")
 	isRoot := inRepo && samePath(root, dir)
-	outer := false
+	outer, created := false, false
 	switch {
 	case mode == ModeNested && !isRoot, mode == ModeOuter && !inRepo:
 		if _, err := mustGit(ctx, dir, "init", "--quiet"); err != nil {
 			return nil, err
 		}
+		created = true
 	case mode == ModeOuter:
 		outer = true
 	}
@@ -81,7 +87,7 @@ func Open(ctx context.Context, dir string, mode string) (*Repo, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Repo{Dir: dir, Outer: outer, GitDir: filepath.Clean(gitDir)}, nil
+	return &Repo{Dir: dir, Outer: outer, GitDir: filepath.Clean(gitDir), Created: created}, nil
 }
 
 func samePath(a, b string) bool {
@@ -97,7 +103,17 @@ func samePath(a, b string) bool {
 // It returns "" when nothing changed.
 func (r *Repo) CommitPaths(ctx context.Context, subject string, trailers []Trailer, paths []string, argus bool) (string, error) {
 	defer lock(r.GitDir)()
+	if err := r.guard(ctx); err != nil {
+		return "", err
+	}
 	return r.commitPaths(ctx, subject, trailers, paths, argus)
+}
+
+func (r *Repo) guard(ctx context.Context) error {
+	if r.Guard == nil {
+		return nil
+	}
+	return r.Guard(ctx)
 }
 
 func (r *Repo) commitPaths(ctx context.Context, subject string, trailers []Trailer, paths []string, argus bool) (string, error) {
@@ -212,6 +228,9 @@ func (r *Repo) knownPaths(ctx context.Context, paths []string) []string {
 // the repository's configured identity when there is one.
 func (r *Repo) CommitUserEdits(ctx context.Context, paths []string, botName, botID string) (string, error) {
 	defer lock(r.GitDir)()
+	if err := r.guard(ctx); err != nil {
+		return "", err
+	}
 	name, _ := runGit(ctx, r.Dir, "config", "user.name")
 	email, _ := runGit(ctx, r.Dir, "config", "user.email")
 	return r.commitPaths(ctx, "manual edit", []Trailer{
@@ -225,6 +244,9 @@ func (r *Repo) CommitUserEdits(ctx context.Context, paths []string, botName, bot
 // A conflicting revert is aborted and reported as ErrConflict.
 func (r *Repo) Revert(ctx context.Context, hash string, trailers []Trailer) (string, error) {
 	defer lock(r.GitDir)()
+	if err := r.guard(ctx); err != nil {
+		return "", err
+	}
 	if r.busy() {
 		return "", ErrBusy
 	}
