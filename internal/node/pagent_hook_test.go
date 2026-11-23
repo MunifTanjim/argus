@@ -194,3 +194,19 @@ func TestApprovalHeadlessCardClearsWhenAnsweredInCLI(t *testing.T) {
 		t.Errorf("cards left = %d", n)
 	}
 }
+
+func TestHookURLAllowed(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"https://hooks.example.com/x": true,
+		"http://127.0.0.1:8080/x":     true,
+		"http://localhost/x":          true,
+		"http://[::1]:9/x":            true,
+		"http://hooks.example.com/x":  false,
+		"ftp://hooks.example.com/x":   false,
+		"https:///x":                  false,
+	} {
+		if got := hookURLAllowed(raw); got != want {
+			t.Errorf("%s = %v", raw, got)
+		}
+	}
+}

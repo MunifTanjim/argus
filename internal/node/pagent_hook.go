@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"strings"
 	"time"
@@ -147,8 +149,32 @@ func runHookCommand(ctx context.Context, command string, body []byte) ([]byte, e
 	return out.Bytes(), nil
 }
 
-func postHook(ctx context.Context, url string, body []byte) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+// hookURLAllowed reports whether the hook may be sent to raw: HTTPS, or plain
+// HTTP to this machine.
+func hookURLAllowed(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	switch u.Scheme {
+	case "https":
+		return u.Host != ""
+	case "http":
+		h := u.Hostname()
+		if h == "localhost" {
+			return true
+		}
+		ip := net.ParseIP(h)
+		return ip != nil && ip.IsLoopback()
+	}
+	return false
+}
+
+func postHook(ctx context.Context, rawURL string, body []byte) ([]byte, error) {
+	if !hookURLAllowed(rawURL) {
+		return nil, errors.New("url must be https (or http to this machine)")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
