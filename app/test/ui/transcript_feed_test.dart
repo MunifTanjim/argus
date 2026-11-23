@@ -29,11 +29,11 @@ void main() {
   testWidgets('desktop transcript has no framework scrollbar over PromptScrollbar',
       (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
     await tester.pumpWidget(_feed(_chunks(50)));
     await tester.pumpAndSettle();
     expect(find.byType(PromptScrollbar), findsOneWidget);
     expect(find.byType(Scrollbar), findsNothing);
-    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('renders chunks', (tester) async {

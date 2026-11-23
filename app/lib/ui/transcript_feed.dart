@@ -328,47 +328,47 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
         child: ScrollConfiguration(
           behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
           child: appSelectionArea(
-          child: SuperListView.builder(
-          controller: _sc,
-          listController: _lc,
-          padding: const EdgeInsets.all(12),
-          itemCount: rows.length,
-          itemBuilder: (_, i) => switch (rows[i]) {
-            EntryFeedRow(:final entry) => EntryRow(
-              key: ValueKey(entry.id),
-              detailRef: widget.detailRef,
-              entry: entry,
-              expanded: _expanded.contains(entry.id),
-              onToggle: () => setState(() {
-                if (!_expanded.remove(entry.id)) _expanded.add(entry.id);
-              }),
+            child: SuperListView.builder(
+              controller: _sc,
+              listController: _lc,
+              padding: const EdgeInsets.all(12),
+              itemCount: rows.length,
+              itemBuilder: (_, i) => switch (rows[i]) {
+                EntryFeedRow(:final entry) => EntryRow(
+                  key: ValueKey(entry.id),
+                  detailRef: widget.detailRef,
+                  entry: entry,
+                  expanded: _expanded.contains(entry.id),
+                  onToggle: () => setState(() {
+                    if (!_expanded.remove(entry.id)) _expanded.add(entry.id);
+                  }),
+                ),
+                RunSummaryFeedRow(:final key, :final thinking, :final tools) =>
+                  _runToggle(
+                    ValueKey('run:$key'),
+                    key,
+                    true,
+                    Icons.chevron_right,
+                    thinking,
+                    tools,
+                  ),
+                RunEdgeFeedRow(
+                  :final key,
+                  :final thinking,
+                  :final tools,
+                  :final top,
+                ) =>
+                  _runToggle(
+                    ValueKey('${top ? 'run-top' : 'run-bottom'}:$key'),
+                    key,
+                    false,
+                    top ? Icons.expand_more : Icons.expand_less,
+                    thinking,
+                    tools,
+                  ),
+              },
             ),
-            RunSummaryFeedRow(:final key, :final thinking, :final tools) =>
-              _runToggle(
-                ValueKey('run:$key'),
-                key,
-                true,
-                Icons.chevron_right,
-                thinking,
-                tools,
-              ),
-            RunEdgeFeedRow(
-              :final key,
-              :final thinking,
-              :final tools,
-              :final top,
-            ) =>
-              _runToggle(
-                ValueKey('${top ? 'run-top' : 'run-bottom'}:$key'),
-                key,
-                false,
-                top ? Icons.expand_more : Icons.expand_less,
-                thinking,
-                tools,
-              ),
-          },
-        ),
-        ),
+          ),
         ),
       ),
     );

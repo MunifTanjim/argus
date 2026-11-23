@@ -89,25 +89,25 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
           : SafeArea(
               top: false,
               child: CenteredBody(
-              child: appSelectionArea(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (_error != null)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Text(
-                          'Failed to load: $_error',
-                          style: const TextStyle(color: AppColors.dim),
-                        ),
-                      ),
-                    toolDetailBody(_item, agent: widget.detailRef.agent),
-                  ],
+                child: appSelectionArea(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (_error != null)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Text(
+                              'Failed to load: $_error',
+                              style: const TextStyle(color: AppColors.dim),
+                            ),
+                          ),
+                        toolDetailBody(_item, agent: widget.detailRef.agent),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-              ),
             ),
           ),
     );
