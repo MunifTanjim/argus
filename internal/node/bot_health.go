@@ -14,7 +14,6 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/bot"
-	"github.com/MunifTanjim/argus/internal/botgit"
 	"github.com/MunifTanjim/argus/internal/config"
 )
 
@@ -236,7 +235,7 @@ func (d *Node) handleBotSet(ctx context.Context, params json.RawMessage) (any, e
 	}
 	key, value := strings.TrimSpace(p.Key), strings.TrimSpace(p.Value)
 	defer lockMemory(a.ID)()
-	repo, err := botgit.Open(ctx, a.Dir, d.botGitMode())
+	repo, err := d.openBotRepo(ctx, a)
 	if err != nil {
 		return nil, botErr("%v", err)
 	}

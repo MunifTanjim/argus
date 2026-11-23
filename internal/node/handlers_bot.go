@@ -265,6 +265,7 @@ func (d *Node) registerBot(ctx context.Context, s *bot.Store, dir string, def *b
 	if err := s.InsertBot(ctx, bot.Bot{ID: def.ID, Name: def.Name, Dir: dir}); err != nil {
 		return botErr("%v", err)
 	}
+	d.trustRegistered(ctx, bot.Bot{ID: def.ID, Name: def.Name, Dir: dir})
 	d.adoptBotDir(ctx, dir)
 	return nil
 }
@@ -377,6 +378,7 @@ func (d *Node) handleBotAdd(ctx context.Context, params json.RawMessage) (any, e
 		if err := s.RestoreBot(ctx, def.ID); err != nil {
 			return nil, botErr("%v", err)
 		}
+		d.trustRegistered(ctx, bot.Bot{ID: def.ID, Name: def.Name, Dir: dir})
 		if existing.Name != def.Name {
 			if err := s.RenameBot(ctx, def.ID, def.Name); err != nil {
 				return nil, botErr("%v", err)
@@ -469,7 +471,7 @@ func (d *Node) handleBotRename(ctx context.Context, params json.RawMessage) (any
 		if err := def.Save(a.Dir); err != nil {
 			return nil, botErr("%v", err)
 		}
-		repo, err := botgit.Open(ctx, a.Dir, d.botGitMode())
+		repo, err := d.openBotRepo(ctx, a)
 		if err != nil {
 			return nil, botErr("%v", err)
 		}

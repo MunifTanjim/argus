@@ -121,6 +121,7 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodBotOfferDismiss, d.handleBotOfferDismiss)
 	srv.Handle(api.MethodBotUsage, d.handleBotUsage)
 	srv.Handle(api.MethodBotSet, d.handleBotSet)
+	srv.Handle(api.MethodBotTrust, d.handleBotTrust)
 	srv.Handle(api.MethodProjectSetHidden, d.handleProjectSetHidden)
 	srv.Handle(api.MethodProjectSetPinned, d.handleProjectSetPinned)
 	srv.Handle(api.MethodProjectForget, d.handleProjectForget)

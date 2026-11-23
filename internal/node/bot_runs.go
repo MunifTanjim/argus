@@ -15,7 +15,6 @@ import (
 	"github.com/MunifTanjim/argus/internal/bot"
 	"github.com/MunifTanjim/argus/internal/bot/memory"
 	"github.com/MunifTanjim/argus/internal/bot/routine"
-	"github.com/MunifTanjim/argus/internal/botgit"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -650,7 +649,7 @@ func (d *Node) writeRunLogs(ctx context.Context, c *runCtl, res bot.RunResult) e
 	ctx = context.WithoutCancel(ctx)
 
 	defer lockMemory(a.ID)()
-	repo, err := botgit.Open(ctx, a.Dir, d.botGitMode())
+	repo, err := d.openBotRepo(ctx, a)
 	if err != nil {
 		return err
 	}

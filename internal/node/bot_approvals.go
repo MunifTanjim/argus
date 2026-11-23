@@ -23,7 +23,6 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/bot"
 	"github.com/MunifTanjim/argus/internal/bot/policy"
-	"github.com/MunifTanjim/argus/internal/botgit"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 )
@@ -478,7 +477,7 @@ func (d *Node) alwaysAllow(ctx context.Context, c *approvalCard) (policy.Rule, e
 
 func (d *Node) saveAllowRule(ctx context.Context, a bot.Bot, th string, r policy.Rule) error {
 	defer lockMemory(a.ID)()
-	repo, err := botgit.Open(ctx, a.Dir, d.botGitMode())
+	repo, err := d.openBotRepo(ctx, a)
 	if err != nil {
 		return err
 	}
@@ -497,6 +496,9 @@ func (d *Node) saveAllowRule(ctx context.Context, a bot.Bot, th string, r policy
 	}
 	def.Approvals = append(def.Approvals, r)
 	if err := def.Save(a.Dir); err != nil {
+		return err
+	}
+	if err := d.acceptApprovalsEdit(ctx, a); err != nil {
 		return err
 	}
 	_, err = repo.CommitPaths(ctx, "approvals: always allow "+r.String(), memoryTrailers(a, startedByYou, th), []string{bot.DefinitionFile}, true)

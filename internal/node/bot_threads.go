@@ -850,7 +850,7 @@ func (d *Node) handleBotThreadMarkRead(ctx context.Context, params json.RawMessa
 func (d *Node) botPrepareShared(ctx context.Context, a bot.Bot, th bot.Thread, def *bot.Definition, cli string) {
 	if d.botCfg.ProfileDir != "" {
 		unlock := lockMemory(profileLockKey)
-		_, err := d.profileRepo(ctx)
+		_, err := d.profileRepo(ctx, a)
 		unlock()
 		if err != nil {
 			d.log.Warn("bot: profile repository", "err", err)

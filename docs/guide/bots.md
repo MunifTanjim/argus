@@ -322,6 +322,22 @@ argus bot activity scout
 argus bot activity scout --unattended
 ```
 
+### Protected files
+
+Before Argus commits in a bot's repository, it checks that these files are as it last recorded them:
+
+- the repository's git hooks and git config (with `bots.defaults.git.mode: outer`, those of the enclosing repository);
+- the `approvals` in the bot's `bot.yaml` (other keys are not checked);
+- `approvals.yaml` in the profile directory, and the git hooks and config of the profile repository.
+
+Argus records them when you create or add the bot, and again when it changes them itself, such as when you always allow an action. A change made any other way stops Argus from committing for that bot: it does not run git, so no hook runs, and it sends a needs-you notice naming what changed. This includes your own edits made outside Argus, such as editing the approvals in `bot.yaml` or `approvals.yaml` by hand, or installing a git hook. Memory changes, run logs, settings and undo, which all commit, fail until you accept the change:
+
+```sh
+argus bot trust scout
+```
+
+This records the bot's files and the shared ones as they are now and lists the changes it accepted. A change to `approvals.yaml` or the profile repository is accepted for every bot at once. The check covers commits only: an edited rule applies to approval requests as soon as it is saved.
+
 ## Secrets
 
 A bot can have secrets, such as API tokens. They are kept on the node, encrypted, and never written to the bot's files, memory or history.
