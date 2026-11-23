@@ -191,6 +191,7 @@ func (d *Node) handlePAgentThreadSend(ctx context.Context, params json.RawMessag
 		return nil, err
 	}
 	d.approvalUserMessage(th.ID)
+	d.chatChains.Delete(th.ID)
 	sid, sent, err := d.pagentEnsureSession(ctx, a, th, p.Text)
 	if err != nil {
 		return nil, err

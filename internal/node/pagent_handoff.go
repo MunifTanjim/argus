@@ -115,6 +115,10 @@ func (d *Node) mcpAskAgent(ctx context.Context, caller callerRef, p askAgentPara
 	} else if ok {
 		h.RootID, h.Depth = parent.RootID, parent.Depth+1
 		h.Ancestors = append(slices.Clone(parent.Ancestors), self)
+	} else if root, ok := d.chatChains.Load(th.ID); ok {
+		// An ask on a turn an answer started continues that chain, so its
+		// request cap holds; the user's next message starts a new one.
+		h.RootID = root.(string)
 	}
 
 	def, err := pagent.LoadDefinition(a.Dir)
@@ -348,6 +352,7 @@ func (d *Node) answerAsker(ctx context.Context, id, state, result, text string) 
 		kind, msg = evHandoffNoAnswer, fmt.Sprintf("No answer from %s: %s", h.ToName, text)
 	}
 	d.logEvent(ctx, h.FromThread, kind, payload, "")
+	d.chatChains.Store(h.FromThread, h.RootID)
 	go d.deliverToAsker(context.WithoutCancel(ctx), h, msg)
 }
 

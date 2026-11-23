@@ -149,6 +149,7 @@ type Node struct {
 	routineCtx      context.Context                   // the run context of runs started by RPC and webhooks; set by Run
 	routineWG       sync.WaitGroup                    // run goroutines
 	routinePayloads sync.Map                          // run id -> webhook body of a run not started yet
+	chatChains      sync.Map                          // chat thread id -> root of the hand-off chain whose answer it got since the user last wrote
 	notify          notifyState                       // held and delayed agent pushes
 	lookPath        func(name string) bool            // whether a CLI is on PATH; tests replace it
 

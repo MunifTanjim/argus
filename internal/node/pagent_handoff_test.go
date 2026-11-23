@@ -12,6 +12,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/db"
 	"github.com/MunifTanjim/argus/internal/orch"
 	"github.com/MunifTanjim/argus/internal/pagent"
+	"github.com/MunifTanjim/argus/internal/pagent/routine"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -307,5 +308,41 @@ func TestHandoffAnswerFromAnotherNode(t *testing.T) {
 	got := r.threadEvents(t, r.chat, evHandoffAnswered)
 	if len(got) != 1 || got[0]["text"] != "here" || got[0]["agent"] != "far" || got[0]["node"] != "nodeb" {
 		t.Fatalf("answer events = %v", got)
+	}
+}
+
+func TestChatAskAfterAnswerJoinsChain(t *testing.T) {
+	r := newAskRig(t)
+	saved := handoffStart
+	handoffStart = func(*Node, context.Context, pagent.Agent, routine.Routine, pagent.RoutineRun, pagent.Handoff) {}
+	t.Cleanup(func() { handoffStart = saved })
+	r.d.pagentCfg.Coordination.MaxRequestsPerRoot = 2
+	ctx := context.Background()
+	answerLast := func() string {
+		t.Helper()
+		asked := r.threadEvents(t, r.chat, evHandoffAsked)
+		id := asked[len(asked)-1]["handoff_id"].(string)
+		r.d.answerAsker(ctx, id, pagent.HandoffAnswered, "progress", "a date")
+		return id
+	}
+	if err := r.ask(t, r.chat, askResearcher); err != nil {
+		t.Fatal(err)
+	}
+	first := answerLast()
+	// Asking again on the turn the answer started stays in the first chain.
+	if err := r.ask(t, r.chat, askResearcher); err != nil {
+		t.Fatal(err)
+	}
+	second := answerLast()
+	if h, _, _ := r.store.Handoff(ctx, second); h.RootID != first {
+		t.Fatalf("follow-up root = %q, want %q", h.RootID, first)
+	}
+	if err := r.ask(t, r.chat, askResearcher); err == nil || !strings.Contains(err.Error(), "used its 2 requests") {
+		t.Fatalf("root cap: %v", err)
+	}
+	// The user's next message starts a new chain.
+	r.d.chatChains.Delete(r.chat)
+	if err := r.ask(t, r.chat, askResearcher); err != nil {
+		t.Fatalf("after user message: %v", err)
 	}
 }
