@@ -201,6 +201,8 @@ func eventText(ev pagent.Event) string {
 	switch ev.Kind {
 	case evMemoryChanged:
 		return "Memory: " + cmp.Or(str("summary"), "changed")
+	case evMemoryUndone:
+		return "Undid a change"
 	case evMemoryProposed:
 		ops, _ := m["ops"].([]any)
 		if len(ops) == 1 {

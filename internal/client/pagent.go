@@ -167,7 +167,7 @@ func (m *E2EClient) routeByPAgent(method string, raw json.RawMessage, out any) e
 	if err != nil {
 		return err
 	}
-	if method == api.MethodPAgentThreadSend {
+	if method == api.MethodPAgentThreadSend || method == api.MethodPAgentMemoryUndo {
 		if tid, _ := stringField(raw, "thread_id"); tid != "" {
 			tnode, tlocal, ok := session.SplitCompositeID(tid)
 			if !ok || tnode != nodeID {

@@ -1734,11 +1734,14 @@ type PAgentMemoryLogResult struct {
 }
 
 // PAgentMemoryUndoParams reverts Commit (a full hash or unique prefix) of the
-// agent's memory, or of the shared profile when Profile is set.
+// agent's memory, or of the shared profile when Profile is set. ThreadID, when
+// set, is the agent's thread the undo was asked from: it gets a memory.undone
+// event.
 type PAgentMemoryUndoParams struct {
-	AgentID string `json:"agent_id"`
-	Commit  string `json:"commit"`
-	Profile bool   `json:"profile,omitempty"`
+	AgentID  string `json:"agent_id"`
+	Commit   string `json:"commit"`
+	Profile  bool   `json:"profile,omitempty"`
+	ThreadID string `json:"thread_id,omitempty"`
 }
 
 type PAgentMemoryUndoResult struct {

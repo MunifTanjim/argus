@@ -163,6 +163,7 @@ func TestEventTextReadsPayloads(t *testing.T) {
 	}{
 		{evMemoryChanged, `{"summary":"added flat search","ops":[{}]}`, "Memory: added flat search"},
 		{evMemoryProposed, `{"ops":[{},{}]}`, "Memory: 2 changes to review"},
+		{evMemoryUndone, `{"commit":"abc","revert":"def"}`, "Undid a change"},
 		{"session.continued", `{"reason":"context full"}`, "Continued in a new session: context full"},
 		{evRoutineResult, `{"routine":"brief","result":"done","summary":"sent the brief","actions_done":["x"]}`, "Routine brief done: sent the brief"},
 		{evRoutineNeedsYou, `{"routine":"brief","summary":"login expired"}`, "Routine brief needs you: login expired"},

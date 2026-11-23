@@ -427,6 +427,21 @@ func TestUndoConflict(t *testing.T) {
 	}
 }
 
+func TestUndoFromThreadRecordsEvent(t *testing.T) {
+	r := newMemRig(t, 0)
+	r.apply(t, memory.Op{Action: "add", Text: "fact one"})
+	c := r.log(t, 1)[0].Hash
+	res, err := callPAgent[api.PAgentMemoryUndoResult](t, r.d.handlePAgentMemoryUndo,
+		api.PAgentMemoryUndoParams{AgentID: r.a.ID, Commit: c[:10], ThreadID: r.th})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evs := r.events(t, evMemoryUndone)
+	if len(evs) != 1 || evs[0]["commit"] != c || evs[0]["revert"] != res.Commit {
+		t.Fatalf("memory.undone events = %v", evs)
+	}
+}
+
 func TestUndoKeepsUserProvenance(t *testing.T) {
 	r := newMemRig(t, 0)
 	ctx := context.Background()

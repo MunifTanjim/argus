@@ -35,6 +35,7 @@ const (
 	evMemoryProposed = "memory.proposed"
 	evMemoryBlocked  = "memory.blocked"
 	evMemoryError    = "memory.error"
+	evMemoryUndone   = "memory.undone"
 )
 
 var topicFileRe = regexp.MustCompile(`^topics/[a-z0-9][a-z0-9_-]*\.md$`)
@@ -720,6 +721,11 @@ func (d *Node) handlePAgentMemoryUndo(ctx context.Context, params json.RawMessag
 		return nil, pagentErr("can't undo: the repository has an operation in progress")
 	case err != nil:
 		return nil, pagentErr("%v", err)
+	}
+	if p.ThreadID != "" {
+		if th, ok, err := s.Thread(ctx, p.ThreadID); err == nil && ok && th.AgentID == a.ID {
+			d.logEvent(ctx, th.ID, evMemoryUndone, map[string]string{"commit": target, "revert": hash}, "")
+		}
 	}
 	d.notifyConns(api.MethodPAgentChanged)
 	return api.PAgentMemoryUndoResult{Commit: hash}, nil

@@ -117,6 +117,7 @@ func TestPAgentMemoryRoutesByAgentAndProposal(t *testing.T) {
 	f, clientConn := newFakeGatewayNode(t, "n1")
 	defer f.peer.Close()
 	var gotAgent, gotProposal, gotImport string
+	var gotUndo api.PAgentMemoryUndoParams
 	f.handle = func(method string, params json.RawMessage) (json.RawMessage, *api.RPCError, *fakeNote) {
 		switch method {
 		case api.MethodPAgentMemoryProposals:
@@ -133,6 +134,10 @@ func TestPAgentMemoryRoutesByAgentAndProposal(t *testing.T) {
 			_ = json.Unmarshal(params, &p)
 			gotImport = p.AgentID
 			b, _ := json.Marshal(api.PAgentMemoryImportResult{Staged: 1})
+			return b, nil, nil
+		case api.MethodPAgentMemoryUndo:
+			_ = json.Unmarshal(params, &gotUndo)
+			b, _ := json.Marshal(api.PAgentMemoryUndoResult{Commit: "rev"})
 			return b, nil, nil
 		case api.MethodPAgentMemoryDecide:
 			var p api.PAgentMemoryDecideParams
@@ -177,6 +182,15 @@ func TestPAgentMemoryRoutesByAgentAndProposal(t *testing.T) {
 	}
 	if err := c.Call(api.MethodPAgentMemoryDecide, api.PAgentMemoryDecideParams{ProposalID: "mp1"}, nil); err == nil {
 		t.Error("unqualified proposal id accepted")
+	}
+	if err := c.Call(api.MethodPAgentMemoryUndo, api.PAgentMemoryUndoParams{AgentID: "n1:a1", Commit: "abc", ThreadID: "n1:t1"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if gotUndo != (api.PAgentMemoryUndoParams{AgentID: "a1", Commit: "abc", ThreadID: "t1"}) {
+		t.Errorf("node undo params %+v", gotUndo)
+	}
+	if err := c.Call(api.MethodPAgentMemoryUndo, api.PAgentMemoryUndoParams{AgentID: "n1:a1", Commit: "abc", ThreadID: "n2:t1"}, nil); err == nil {
+		t.Error("undo from another node's thread accepted")
 	}
 }
 
