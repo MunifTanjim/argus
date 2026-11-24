@@ -403,6 +403,24 @@ void main() {
     );
 
     testWidgets(
+      'the toolbar of a hidden IndexedStack child passes nothing through',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        Widget tab(IconData icon) => Scaffold(
+          appBar: ArgusAppBar(
+            actions: [IconButton(icon: Icon(icon), onPressed: () {})],
+          ),
+        );
+        await tester.pumpWidget(
+          _app(IndexedStack(children: [tab(Icons.add), tab(Icons.edit)])),
+        );
+        await _flushPassthrough(tester);
+        // Both toolbars put their button at the same place.
+        expect(_passthroughRects, hasLength(1));
+      },
+    );
+
+    testWidgets(
       'an interactive title keeps its state when its route is covered',
       (tester) async {
         _platform(TargetPlatform.macOS);
@@ -463,6 +481,40 @@ void main() {
         tester.state<NavigatorState>(find.byType(Navigator).first);
 
     testWidgets(
+      'a page in the nested navigator does not rebuild when a root route is pushed or popped',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        var builds = 0;
+        await tester.pumpWidget(
+          _app(
+            Scaffold(
+              body: Navigator(
+                onGenerateRoute: (_) => MaterialPageRoute<void>(
+                  builder: (_) {
+                    builds++;
+                    return const Scaffold(
+                      appBar: ArgusAppBar(title: Text('Inner')),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        );
+        await _flushPassthrough(tester);
+        final before = builds;
+        showDialog<void>(
+          context: rootNavigator(tester).context,
+          builder: (_) => const Text('dialog'),
+        );
+        await _flushPassthrough(tester);
+        rootNavigator(tester).pop();
+        await _flushPassthrough(tester);
+        expect(builds, before);
+      },
+    );
+
+    testWidgets(
       'after a root route over it pops, the inner bar\'s rects are current',
       (tester) async {
         _platform(TargetPlatform.macOS);
@@ -501,7 +553,12 @@ void main() {
         await _flushPassthrough(tester);
         expect(find.text('One'), findsOneWidget);
         expect(_passthroughRects.values.toSet(), {
-          const Rect.fromLTWH(0, 0, 800, kMacToolbarHeight),
+          const Rect.fromLTWH(
+            kTrafficLightsInset,
+            0,
+            800 - kTrafficLightsInset,
+            kMacToolbarHeight,
+          ),
         });
 
         await tester.tapAt(const Offset(400, 400));
@@ -524,7 +581,12 @@ void main() {
         );
         await _flushPassthrough(tester);
         expect(_passthroughRects.values.toSet(), {
-          const Rect.fromLTWH(0, 0, 800, kMacToolbarHeight),
+          const Rect.fromLTWH(
+            kTrafficLightsInset,
+            0,
+            800 - kTrafficLightsInset,
+            kMacToolbarHeight,
+          ),
         });
         rootNavigator(tester).pop();
         await _flushPassthrough(tester);

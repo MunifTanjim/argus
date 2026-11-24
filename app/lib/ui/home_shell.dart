@@ -30,7 +30,7 @@ import 'shortcut_sheet.dart';
 import 'spawn_dialog.dart';
 import 'terminal_list_screen.dart';
 import 'theme.dart';
-import 'window_strip.dart';
+import 'titlebar.dart';
 import 'workspace_screen.dart';
 
 const double kSidePanelWidth = 300;
@@ -51,7 +51,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   // builds a new one from its remembered session.
   _ScopeNavigator? _nav;
   bool _canPop = false;
-  SidebarStripController? _strip;
   Route<dynamic>? _route;
   // The menu bar stays live while a route (Settings, a dialog) covers the
   // shell: then Back closes that route, and the shell's items do nothing.
@@ -88,7 +87,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   @override
   void dispose() {
     shellMenuRegistry.unregister(_menuActions);
-    if (_route case final route?) _strip?.hide(route);
     super.dispose();
   }
 
@@ -311,11 +309,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // On macOS the window's sidebar material shows through the side panel. A
     // modal drawer slides over the content, so it stays opaque.
     final translucent = wide && defaultTargetPlatform == TargetPlatform.macOS;
-    _strip = WindowStrip.sidebarOf(context);
     _route = ModalRoute.of(context);
-    if (_route case final route?) {
-      _strip?.show(route, translucent ? kSidePanelWidth : 0);
-    }
 
     return PopScope(
       canPop: scope == null && homeTab == HomeTab.sessions && !_canPop,
@@ -341,14 +335,18 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                         child: ProjectDrawer(color: translucent ? kSidebarTint : null),
                       ),
                       const VerticalDivider(width: 1),
+                      // The traffic lights sit over the side panel.
                       Expanded(
-                        child: translucent
-                            ? ColoredBox(
-                                key: const ValueKey('shell-main'),
-                                color: AppColors.canvas,
-                                child: main,
-                              )
-                            : main,
+                        child: TitlebarInsets(
+                          left: 0,
+                          child: translucent
+                              ? ColoredBox(
+                                  key: const ValueKey('shell-main'),
+                                  color: AppColors.canvas,
+                                  child: main,
+                                )
+                              : main,
+                        ),
                       ),
                     ],
                   )

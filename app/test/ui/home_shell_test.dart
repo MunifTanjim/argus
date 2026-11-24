@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:macos_window_utils/macos_window_utils.dart';
+import 'package:macos_window_utils/widgets/macos_toolbar_passthrough.dart';
 import 'package:argus/core/result.dart';
 import 'package:argus/data/session_repository.dart';
 import 'package:argus/models/enums.dart';
@@ -38,7 +40,6 @@ import 'package:argus/ui/spawn_dialog.dart';
 import 'package:argus/ui/terminal_list_screen.dart';
 import 'package:argus/ui/theme.dart';
 import 'package:argus/ui/titlebar.dart';
-import 'package:argus/ui/window_strip.dart';
 import 'package:argus/ui/workspace_screen.dart';
 
 import '../support/fake_gateway_client.dart';
@@ -106,7 +107,7 @@ Future<ProviderContainer> _shell(
   WidgetTester tester, {
   double width = 400,
   SessionRepository? repo,
-  SidebarStripController? strip,
+  ValueListenable<bool>? fullScreen,
   bool menuBar = false,
 }) async {
   tester.view.physicalSize = Size(width, 900);
@@ -125,18 +126,23 @@ Future<ProviderContainer> _shell(
             builder: (context, child) => MacMenuBar(child: child!),
             home: const HomeShell(),
           )
-        : strip == null
+        : fullScreen == null
         ? const MaterialApp(home: HomeShell())
-        : MaterialApp(
-            navigatorObservers: [strip],
-            builder: (context, child) => TitlebarScope(
-                fullScreen: const AlwaysStoppedAnimation(false),
-                child: WindowStrip(controller: strip, child: child!)),
-            home: const HomeShell(),
-          ),
+        : _titlebarApp(fullScreen),
   ));
   await tester.pump();
   return c;
+}
+
+Widget _titlebarApp(ValueListenable<bool> fullScreen) {
+  final routes = TitlebarRouteObserver();
+  addTearDown(routes.dispose);
+  return MaterialApp(
+    navigatorObservers: [routes],
+    builder: (context, child) =>
+        TitlebarScope(fullScreen: fullScreen, routes: routes, child: child!),
+    home: const HomeShell(),
+  );
 }
 
 class _CountingTerminals extends TerminalsNotifier {
@@ -256,7 +262,37 @@ Finder get _detailInShell => find.descendant(
       matching: find.byType(SessionDetailScreen),
     );
 
+const _windowChannel = MethodChannel('macos_window_utils/window_manipulator');
+
+// What the native side was last told: the toolbar passthrough rect per id.
+final _passthroughRects = <String, Rect>{};
+
 void main() {
+  // Before any test: the package creates its init completer on first use, in
+  // the zone of that use.
+  setUpAll(() async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(_windowChannel, (call) async {
+      final args = call.arguments as Map?;
+      switch (call.method) {
+        case 'updateToolbarPassthroughView':
+          _passthroughRects[args!['id'] as String] = Rect.fromLTWH(
+            args['x'] as double,
+            args['y'] as double,
+            args['width'] as double,
+            args['height'] as double,
+          );
+        case 'removeToolbarPassthroughView':
+          _passthroughRects.remove(args!['id']);
+        case 'isWindowFullscreened':
+          return false;
+      }
+      return true;
+    });
+    await WindowManipulator.initialize();
+  });
+
   testWidgets('a session tap in the drawer opens it and closes the drawer', (tester) async {
     final c = await _shell(tester);
     c.read(sessionsProvider.notifier).replaceAll([_session('s1')]);
@@ -444,22 +480,220 @@ void main() {
       });
     }
 
-    testWidgets('macOS: the window strip is tinted over the side panel only',
-        (tester) async {
+  });
+
+  group('macOS toolbar layout', () {
+    ValueNotifier<bool> mac() {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
-      final strip = SidebarStripController();
-      addTearDown(strip.dispose);
-      await _shell(tester, width: 1000, strip: strip);
-      await tester.pump();
-      final tint = find.byKey(const ValueKey('window-strip-sidebar'));
-      expect(tester.getSize(tint), const Size(kSidePanelWidth, kMacTitleStripHeight));
-      expect(tester.widget<ColoredBox>(tint).color, kSidebarTint);
+      final fullScreen = ValueNotifier(false);
+      addTearDown(fullScreen.dispose);
+      return fullScreen;
+    }
 
-      tester.view.physicalSize = const Size(600, 900);
+    Finder barOf(Type screen) => find
+        .descendant(of: find.byType(screen), matching: find.byType(AppBar))
+        .first;
+    final panelHeader = find.descendant(
+      of: find.byType(ProjectDrawer),
+      matching: find.byType(TitlebarSpacer),
+    );
+    final menuButton =
+        find.ancestor(of: find.byIcon(Icons.menu), matching: find.byType(IconButton));
+
+    testWidgets(
+        'wide: the main area\'s toolbar starts at the main area\'s left edge (inset 0), and the side panel has a 52 px header area at the top',
+        (tester) async {
+      final c = await _shell(tester, width: 1000, fullScreen: mac());
+      // Home has its tab rail at the left of the main area.
+      final rail = find.byType(NavigationRail);
+      expect(tester.getTopLeft(rail).dx, kSidePanelWidth + 1);
+      expect(tester.getTopLeft(barOf(SessionListScreen)).dx,
+          tester.getTopRight(rail).dx + 1);
+      expect(tester.getRect(panelHeader),
+          const Rect.fromLTWH(0, 0, kSidePanelWidth, kMacToolbarHeight));
+
+      c.read(scopeProvider.notifier).state = 'A:w2';
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(barOf(WorkspaceScreen)).dx, kSidePanelWidth + 1);
+    });
+
+    testWidgets('wide: the home tab rail starts below the toolbar row', (tester) async {
+      await _shell(tester, width: 1000, fullScreen: mac());
+      final destination = find.descendant(
+          of: find.byType(NavigationRail), matching: find.byIcon(Icons.forum_outlined));
+      expect(tester.getTopLeft(destination).dy, greaterThanOrEqualTo(kMacToolbarHeight));
+    });
+
+    testWidgets('wide: a session pushed in the nested navigator has a toolbar with inset 0',
+        (tester) async {
+      final c = await _shell(tester, width: 1000, fullScreen: mac());
+      c.read(sessionsProvider.notifier).replaceAll([_session('s1')]);
+      c.read(pendingOpenSessionProvider.notifier).state = const PendingOpen('s1');
+      await _pumpRoute(tester);
+      expect(tester.getTopLeft(barOf(SessionDetailScreen)).dx, kSidePanelWidth + 1);
+    });
+
+    testWidgets('narrow: the main toolbar\'s first child starts at x >= 80', (tester) async {
+      await _shell(tester, fullScreen: mac());
+      expect(tester.getTopLeft(menuButton).dx, greaterThanOrEqualTo(kTrafficLightsInset));
+    });
+
+    testWidgets('Settings pushed on the root navigator: its toolbar content starts at x >= 80',
+        (tester) async {
+      await _shell(tester, width: 1000, fullScreen: mac());
+      await tester.tap(find.descendant(
+          of: find.byType(ProjectDrawer), matching: find.text('Settings')));
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(barOf(SettingsScreen)).dx,
+          greaterThanOrEqualTo(kTrafficLightsInset));
+    });
+
+    testWidgets('full screen: the narrow main toolbar starts at x = 0', (tester) async {
+      final fullScreen = mac();
+      await _shell(tester, fullScreen: fullScreen);
+      fullScreen.value = true;
       await tester.pump();
-      await tester.pump();
-      expect(tint, findsNothing);
+      expect(tester.getTopLeft(barOf(SessionListScreen)).dx, 0);
+    });
+
+    for (final wide in [true, false]) {
+      testWidgets(
+          '${wide ? 'wide' : 'narrow'}: the side panel header area is not covered by interactive widgets in its top 52 px',
+          (tester) async {
+        await _shell(tester, width: wide ? 1000 : 400, fullScreen: mac());
+        if (!wide) {
+          await tester.tap(find.byIcon(Icons.menu));
+          await tester.pumpAndSettle();
+        }
+        expect(tester.getRect(panelHeader).height, kMacToolbarHeight);
+        expect(tester.getTopLeft(panelHeader).dy, 0);
+        final interactive = find.descendant(
+          of: find.byType(ProjectDrawer),
+          matching: find.byWidgetPredicate((w) =>
+              w is InkResponse ||
+              w is IconButton ||
+              w is EditableText ||
+              w is PopupMenuButton),
+        );
+        expect(interactive, findsWidgets);
+        for (final e in interactive.evaluate()) {
+          final rect = tester.getRect(find.byElementPredicate((x) => x == e));
+          expect(rect.top, greaterThanOrEqualTo(kMacToolbarHeight), reason: '${e.widget}');
+        }
+      });
+    }
+
+    group('passthrough', () {
+      setUp(_passthroughRects.clear);
+
+      // Lets debounced passthrough updates (10 ms) and their post-frame
+      // resend run.
+      Future<void> flush(WidgetTester tester) async {
+        await tester.pumpAndSettle();
+        for (var i = 0; i < 3; i++) {
+          await tester.pump(const Duration(milliseconds: 20));
+          await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+        }
+        await tester.pump();
+      }
+
+      Set<Rect> visible(WidgetTester tester) => find
+          .byType(MacosToolbarPassthrough)
+          .evaluate()
+          .map((e) => tester.getRect(find.byElementPredicate((x) => x == e)))
+          .toSet();
+
+      testWidgets('narrow: after the drawer opens and after it closes, the native rects are current',
+          (tester) async {
+        await _shell(tester, fullScreen: mac());
+        await flush(tester);
+        expect(_passthroughRects.values.toSet(), visible(tester));
+        await tester.tap(find.byIcon(Icons.menu));
+        await flush(tester);
+        expect(_passthroughRects.values.toSet(), visible(tester));
+        await tester.tapAt(const Offset(390, 500));
+        await flush(tester);
+        expect(find.byType(ProjectDrawer), findsNothing);
+        expect(_passthroughRects.values.toSet(), visible(tester));
+      });
+
+      testWidgets('narrow: the drawer opening and closing under a dialog leaves the rects current',
+          (tester) async {
+        await _shell(tester, fullScreen: mac());
+        await flush(tester);
+        showDialog<void>(
+          context: tester.element(find.byType(HomeShell)),
+          builder: (_) => const Text('dialog'),
+        );
+        await flush(tester);
+        final drawer = tester.state<ModalShellDrawerState>(find.byType(ModalShellDrawer));
+        drawer.open();
+        await flush(tester);
+        final width = tester.getSize(find.byType(ProjectDrawer)).width;
+        expect(_passthroughRects.values, contains(Rect.fromLTWH(
+            kTrafficLightsInset, 0, width - kTrafficLightsInset, kMacToolbarHeight)));
+        expect(_passthroughRects.values.toSet(), visible(tester));
+        drawer.close();
+        await flush(tester);
+        expect(_passthroughRects.values.toSet(), visible(tester));
+      });
+
+      testWidgets('after full screen changes the inset, the native rects are current',
+          (tester) async {
+        final fullScreen = mac();
+        await _shell(tester, fullScreen: fullScreen);
+        await flush(tester);
+        fullScreen.value = true;
+        await flush(tester);
+        expect(_passthroughRects.values.toSet(), visible(tester));
+        fullScreen.value = false;
+        await flush(tester);
+        expect(_passthroughRects.values.toSet(), visible(tester));
+      });
+
+      testWidgets('after a layout switch, the native rects are current', (tester) async {
+        await _shell(tester, fullScreen: mac());
+        await flush(tester);
+        tester.view.physicalSize = const Size(1000, 900);
+        await flush(tester);
+        expect(_passthroughRects.values.toSet(), visible(tester));
+        tester.view.physicalSize = const Size(400, 900);
+        await flush(tester);
+        expect(_passthroughRects.values.toSet(), visible(tester));
+      });
+
+      testWidgets('wide: under a dialog, the side panel header passes through after the traffic lights',
+          (tester) async {
+        await _shell(tester, width: 1000, fullScreen: mac());
+        await flush(tester);
+        showDialog<void>(
+          context: tester.element(find.byType(HomeShell)),
+          builder: (_) => const Text('dialog'),
+        );
+        await flush(tester);
+        expect(_passthroughRects.values, contains(const Rect.fromLTWH(
+            kTrafficLightsInset, 0, kSidePanelWidth - kTrafficLightsInset, kMacToolbarHeight)));
+        // The main toolbar is after Home's tab rail, at inset 0.
+        final left = tester.getTopRight(find.byType(NavigationRail)).dx + 1;
+        expect(_passthroughRects.values,
+            contains(Rect.fromLTWH(left, 0, 1000 - left, kMacToolbarHeight)));
+      });
+
+      testWidgets('narrow: under a dialog, the open drawer\'s header passes through after the traffic lights',
+          (tester) async {
+        await _shell(tester, fullScreen: mac());
+        await tester.tap(find.byIcon(Icons.menu));
+        await flush(tester);
+        showDialog<void>(
+          context: tester.element(find.byType(HomeShell)),
+          builder: (_) => const Text('dialog'),
+        );
+        await flush(tester);
+        final drawer = tester.getSize(find.byType(ProjectDrawer)).width;
+        expect(_passthroughRects.values, contains(Rect.fromLTWH(
+            kTrafficLightsInset, 0, drawer - kTrafficLightsInset, kMacToolbarHeight)));
+      });
     });
   });
 

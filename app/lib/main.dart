@@ -22,7 +22,6 @@ import 'ui/sign_out.dart';
 import 'ui/theme.dart';
 import 'ui/titlebar.dart';
 import 'ui/unsupported_server_screen.dart';
-import 'ui/window_strip.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -78,7 +77,6 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
     with WidgetsBindingObserver {
   bool _loaded = false;
   final _navigatorKey = GlobalKey<NavigatorState>();
-  final _sidebarStrip = SidebarStripController();
   final _titlebarRoutes = TitlebarRouteObserver();
 
   @override
@@ -102,7 +100,6 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _sidebarStrip.dispose();
     _titlebarRoutes.dispose();
     super.dispose();
   }
@@ -134,12 +131,9 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
       // One menu bar for the whole app: HomeShell, when mounted, registers
       // the app items' actions.
       builder: (context, child) => MacMenuBar(
-        child: TitlebarScope(
-          routes: _titlebarRoutes,
-          child: WindowStrip(controller: _sidebarStrip, child: child!),
-        ),
+        child: TitlebarScope(routes: _titlebarRoutes, child: child!),
       ),
-      navigatorObservers: [appRouteObserver, _sidebarStrip, _titlebarRoutes],
+      navigatorObservers: [appRouteObserver, _titlebarRoutes],
       home: !_loaded
           ? const Scaffold(
               body: Column(

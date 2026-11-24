@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import 'titlebar.dart';
+
 /// Tells screens inside the home shell how to open and close the modal
 /// projects drawer. Both callbacks are null when the drawer is a fixed side
 /// panel.
@@ -122,6 +124,10 @@ class ModalShellDrawerState extends State<ModalShellDrawer>
         _historyEntry = null;
       case AnimationStatus.completed:
         break;
+    }
+    // The drawer's toolbar area slid without a layout change.
+    if (status.isCompleted || status.isDismissed) {
+      TitlebarScope.toolbarsMoved(context);
     }
   }
 

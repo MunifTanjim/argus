@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'responsive.dart';
+import 'titlebar.dart';
 
 class AdaptiveNavDestination {
   const AdaptiveNavDestination({required this.icon, required this.label});
@@ -63,24 +65,31 @@ class _AdaptiveNavScaffoldState extends State<AdaptiveNavScaffold> {
   @override
   Widget build(BuildContext context) {
     final wide = useDesktopLayout(context);
+    final rail = NavigationRail(
+      labelType: NavigationRailLabelType.all,
+      selectedIndex: widget.selectedIndex,
+      onDestinationSelected: widget.onSelected,
+      destinations: [
+        for (final d in widget.destinations)
+          NavigationRailDestination(icon: d.icon, label: Text(d.label)),
+      ],
+    );
+    // Without an app bar above it, the rail would reach into the macOS
+    // toolbar row, where clicks drag the window.
+    final underToolbar =
+        widget.appBar == null && defaultTargetPlatform == TargetPlatform.macOS;
     return Scaffold(
       appBar: widget.appBar,
       floatingActionButton: widget.floatingActionButton,
       body: wide
           ? Row(
               children: [
-                NavigationRail(
-                  labelType: NavigationRailLabelType.all,
-                  selectedIndex: widget.selectedIndex,
-                  onDestinationSelected: widget.onSelected,
-                  destinations: [
-                    for (final d in widget.destinations)
-                      NavigationRailDestination(
-                        icon: d.icon,
-                        label: Text(d.label),
-                      ),
-                  ],
-                ),
+                underToolbar
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: kMacToolbarHeight),
+                        child: rail,
+                      )
+                    : rail,
                 const VerticalDivider(width: 1),
                 Expanded(child: widget.body),
               ],

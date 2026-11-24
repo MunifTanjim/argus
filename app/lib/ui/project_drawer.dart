@@ -17,6 +17,7 @@ import 'shell_drawer.dart';
 import 'sidebar_sessions_list.dart';
 import 'spawn_dialog.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 
 const _amber = Color(0xFFd79921);
 const _green = Color(0xFF689d6a);
@@ -117,6 +118,8 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // The traffic lights sit here on macOS.
+            const TitlebarSpacer(),
             _header(view),
             _tabs(tab),
             _search(tab),

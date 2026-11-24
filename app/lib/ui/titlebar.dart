@@ -12,6 +12,9 @@ const double kMacToolbarHeight = 52;
 /// The space at the left of the toolbar row that the traffic lights take.
 const double kTrafficLightsInset = 80;
 
+/// A light tint over the macOS sidebar vibrancy, so text contrast stays.
+const Color kSidebarTint = Color(0x14000000);
+
 bool get _isMac => defaultTargetPlatform == TargetPlatform.macOS;
 
 /// The space a toolbar at this place must leave at its left for the traffic
@@ -48,11 +51,22 @@ class TitlebarScope extends StatefulWidget {
   final ValueListenable<bool>? fullScreen;
   final Widget child;
 
+  /// Tells the macOS toolbars to measure their passthrough again after they
+  /// moved without a route transition or a resize (e.g. in a drawer that
+  /// slid open).
+  static void toolbarsMoved(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<_TitlebarRoutes>()?.moved.notify();
+
   @override
   State<TitlebarScope> createState() => _TitlebarScopeState();
 }
 
+class _Moved extends ChangeNotifier {
+  void notify() => notifyListeners();
+}
+
 class _TitlebarScopeState extends State<TitlebarScope> {
+  final _moved = _Moved();
   _FullScreenDelegate? _delegate;
   NSWindowDelegateHandle? _handle;
 
@@ -75,13 +89,18 @@ class _TitlebarScopeState extends State<TitlebarScope> {
   void dispose() {
     _handle?.removeFromHandler();
     _delegate?.dispose();
+    _moved.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final fullScreen = _fullScreen;
-    final child = _TitlebarRoutes(routes: widget.routes, child: widget.child);
+    final child = _TitlebarRoutes(
+      routes: widget.routes,
+      moved: _moved,
+      child: widget.child,
+    );
     if (!_isMac || fullScreen == null) {
       return TitlebarInsets(left: 0, child: child);
     }
@@ -96,6 +115,7 @@ class _TitlebarScopeState extends State<TitlebarScope> {
 
 /// Notifies when the routes of the navigator it observes change.
 class TitlebarRouteObserver extends NavigatorObserver with ChangeNotifier {
+  final _routes = <Route<dynamic>>[];
   bool _scheduled = false;
   bool _disposed = false;
 
@@ -120,34 +140,63 @@ class TitlebarRouteObserver extends NavigatorObserver with ChangeNotifier {
     super.dispose();
   }
 
-  @override
-  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) =>
-      _changed();
+  /// The observed route whose page contains [context], found without a
+  /// dependency on that route.
+  ModalRoute<dynamic>? routeAround(BuildContext context) {
+    final pages = <BuildContext, ModalRoute<dynamic>>{
+      for (final route in _routes.whereType<ModalRoute<dynamic>>())
+        ?route.subtreeContext: route,
+    };
+    ModalRoute<dynamic>? found;
+    context.visitAncestorElements((element) {
+      found = pages[element];
+      return found == null;
+    });
+    return found;
+  }
 
   @override
-  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) =>
-      _changed();
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _routes.add(route);
+    _changed();
+  }
 
   @override
-  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) =>
-      _changed();
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _routes.remove(route);
+    _changed();
+  }
 
   @override
-  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) =>
-      _changed();
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _routes.remove(route);
+    _changed();
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    final i = oldRoute == null ? -1 : _routes.indexOf(oldRoute);
+    if (i >= 0 && newRoute != null) _routes[i] = newRoute;
+    _changed();
+  }
 }
 
 class _TitlebarRoutes extends InheritedWidget {
-  const _TitlebarRoutes({required this.routes, required super.child});
+  const _TitlebarRoutes({
+    required this.routes,
+    required this.moved,
+    required super.child,
+  });
 
   final TitlebarRouteObserver? routes;
+  final _Moved moved;
 
-  static TitlebarRouteObserver? of(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<_TitlebarRoutes>()?.routes;
+  static _TitlebarRoutes? of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_TitlebarRoutes>();
 
   @override
   bool updateShouldNotify(_TitlebarRoutes oldWidget) =>
-      routes != oldWidget.routes;
+      routes != oldWidget.routes || moved != oldWidget.moved;
 }
 
 class _FullScreenDelegate extends NSWindowDelegate
@@ -275,12 +324,14 @@ class ArgusAppBar extends StatelessWidget implements PreferredSizeWidget {
 }
 
 /// Manages the passthrough of a macOS toolbar row by the state of its route
-/// and the routes enclosing its navigator:
+/// and the route enclosing its navigator on the root navigator:
 /// - onstage with nothing over it: each interactive child passes through;
-/// - a popup or dialog over it: the whole row passes through, so that the
-///   barrier and menu items over the row receive clicks;
-/// - covered by an opaque route (offstage): nothing passes through, so the
-///   toolbar of the route above drags the window.
+/// - a popup or dialog over it: the row after [TitlebarInsets] passes
+///   through, so that the barrier and menu items over the row receive clicks
+///   and the traffic lights still work;
+/// - covered by an opaque route (offstage) or in a hidden [IndexedStack]
+///   child: nothing passes through, so the toolbar shown there drags the
+///   window.
 ///
 /// The rects are measured with the transitions' transforms, and a paint-only
 /// transition does not lay the toolbar out again, so they are re-sent when a
@@ -295,9 +346,9 @@ class _MacToolbar extends StatefulWidget {
 }
 
 class _MacToolbarState extends State<_MacToolbar> {
-  final _rowKey = GlobalKey();
   List<ModalRoute<dynamic>> _routes = const [];
   TitlebarRouteObserver? _observer;
+  _Moved? _moved;
   VoidCallback? _notify;
   bool? _wasRow;
 
@@ -305,12 +356,22 @@ class _MacToolbarState extends State<_MacToolbar> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _notify = MacosToolbarPassthroughScope.maybeNotifyChangesOf(context);
-    final observer = _TitlebarRoutes.of(context);
+    final scope = _TitlebarRoutes.of(context);
+    final observer = scope?.routes;
     if (observer != _observer) {
-      _observer?.removeListener(_rebuild);
-      _observer = observer?..addListener(_rebuild);
+      _observer?.removeListener(_onRoutes);
+      _observer = observer?..addListener(_onRoutes);
     }
-    final routes = _enclosingRoutes(context);
+    final moved = scope?.moved;
+    if (moved != _moved) {
+      _moved?.removeListener(_onMoved);
+      _moved = moved?..addListener(_onMoved);
+    }
+    _track();
+  }
+
+  void _track() {
+    final routes = _enclosingRoutes();
     if (listEquals(routes, _routes)) return;
     _unlisten();
     _routes = routes;
@@ -320,22 +381,25 @@ class _MacToolbarState extends State<_MacToolbar> {
     }
   }
 
-  // This route, then the route of each enclosing navigator.
-  static List<ModalRoute<dynamic>> _enclosingRoutes(BuildContext context) {
-    final routes = <ModalRoute<dynamic>>[];
-    var route = ModalRoute.of(context);
-    while (route != null) {
-      routes.add(route);
-      final outer = route.navigator?.context;
-      route = outer == null ? null : ModalRoute.of(outer);
+  // This route, then, in a nested navigator, the root route around it. The
+  // root route is looked up without a dependency: one on the nested
+  // navigator would rebuild all its pages on each root route change.
+  List<ModalRoute<dynamic>> _enclosingRoutes() {
+    final route = ModalRoute.of(context);
+    if (route == null) return const [];
+    final navigator = route.navigator;
+    final root = _observer;
+    if (navigator == null || root == null || navigator == root.navigator) {
+      return [route];
     }
-    return routes;
+    return [route, ?root.routeAround(navigator.context)];
   }
 
   @override
   void dispose() {
     _unlisten();
-    _observer?.removeListener(_rebuild);
+    _observer?.removeListener(_onRoutes);
+    _moved?.removeListener(_onMoved);
     super.dispose();
   }
 
@@ -348,6 +412,14 @@ class _MacToolbarState extends State<_MacToolbar> {
 
   void _rebuild() {
     if (mounted) setState(() {});
+  }
+
+  void _onMoved() => _notify?.call();
+
+  void _onRoutes() {
+    if (!mounted) return;
+    _track();
+    _rebuild();
   }
 
   // Pushed and shown.
@@ -363,18 +435,29 @@ class _MacToolbarState extends State<_MacToolbar> {
 
   @override
   Widget build(BuildContext context) {
-    final onstage = TickerMode.valuesOf(context).enabled;
+    final onstage =
+        TickerMode.valuesOf(context).enabled && Visibility.of(context);
     final row = onstage && _routes.any((r) => !r.isCurrent);
     if (row != _wasRow) {
       _wasRow = row;
       // The new passthrough views are measured after the frame.
       SchedulerBinding.instance.addPostFrameCallback((_) => _notify?.call());
     }
-    final bar = KeyedSubtree(
-      key: _rowKey,
-      child: _PassthroughButtons(enabled: onstage && !row, child: widget.child),
+    return Stack(
+      alignment: Alignment.topLeft,
+      children: [
+        _PassthroughButtons(enabled: onstage && !row, child: widget.child),
+        if (row)
+          Positioned(
+            left: TitlebarInsets.of(context),
+            top: 0,
+            right: 0,
+            bottom: 0,
+            // Empty, so Flutter hit tests go to the row under it.
+            child: const MacosToolbarPassthrough(child: SizedBox.expand()),
+          ),
+      ],
     );
-    return row ? MacosToolbarPassthrough(child: bar) : bar;
   }
 }
 
@@ -417,13 +500,18 @@ class _RoutePassthroughState extends State<_RoutePassthrough> {
   }
 }
 
-/// The top of a screen without an app bar: on macOS, a 52 px area of the
-/// toolbar row that drags the window natively; elsewhere nothing.
+/// The top of a screen or a side panel without an app bar: on macOS, a 52 px
+/// area of the toolbar row that drags the window natively, and passes clicks
+/// through under a popup like [ArgusAppBar]; elsewhere nothing.
 class TitlebarSpacer extends StatelessWidget {
   const TitlebarSpacer({super.key});
 
   @override
   Widget build(BuildContext context) => _isMac
-      ? const SizedBox(height: kMacToolbarHeight, width: double.infinity)
+      ? const MacosToolbarPassthroughScope(
+          child: _MacToolbar(
+            child: SizedBox(height: kMacToolbarHeight, width: double.infinity),
+          ),
+        )
       : const SizedBox.shrink();
 }

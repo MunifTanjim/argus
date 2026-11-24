@@ -7,8 +7,6 @@ import 'titlebar.dart';
 
 const double kMacTitleStripHeight = 28;
 const Color kWindowStripColor = AppColors.canvas;
-// A light tint over the macOS sidebar vibrancy, so text contrast stays.
-const Color kSidebarTint = Color(0x14000000);
 
 /// Tracks the root navigator's routes so the strip can match the translucent
 /// sidebar of the route that shows one, until an opaque route covers it.
