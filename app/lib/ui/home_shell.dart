@@ -53,10 +53,31 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   bool _canPop = false;
   SidebarStripController? _strip;
   Route<dynamic>? _route;
+  // The menu bar stays live while a route (Settings, a dialog) covers the
+  // shell: then Back closes that route, and the shell's items do nothing.
+  late final _menuActions = ShellMenuActions(
+    onBack: () => _covered
+        ? Navigator.of(context, rootNavigator: true).maybePop()
+        : _back(),
+    onSpawn: _uncovered(_spawn),
+    onSettings: _uncovered(_settings),
+    onQuickSwitcher: _uncovered(() => showQuickSwitcher(context)),
+    onShortcutSheet: _uncovered(() => showShortcutSheet(context)),
+    onSelectTab: (i) {
+      if (!_covered) selectVisibleTab(i);
+    },
+  );
+
+  bool get _covered => _route?.isCurrent == false;
+
+  VoidCallback _uncovered(VoidCallback action) => () {
+    if (!_covered) action();
+  };
 
   @override
   void initState() {
     super.initState();
+    shellMenuRegistry.register(_menuActions);
     // Load the terminal setting now: a live screen reads it once when it opens.
     ref.read(terminalPrefsProvider);
     // A tap can set the pending session before this mounts (cold launch from a
@@ -66,6 +87,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   @override
   void dispose() {
+    shellMenuRegistry.unregister(_menuActions);
     if (_route case final route?) _strip?.hide(route);
     super.dispose();
   }
@@ -303,47 +325,39 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       child: ShellDrawerScope(
         openDrawer: wide ? null : () => _drawerKey.currentState?.open(),
         closeDrawer: wide ? null : () => _drawerKey.currentState?.close(),
-        child: MacMenuBar(
+        child: DesktopShortcuts(
           onBack: _back,
           onSpawn: _spawn,
           onSettings: _settings,
           onQuickSwitcher: () => showQuickSwitcher(context),
           onShortcutSheet: () => showShortcutSheet(context),
-          onSelectTab: selectVisibleTab,
-          child: DesktopShortcuts(
-            onBack: _back,
-            onSpawn: _spawn,
-            onSettings: _settings,
-            onQuickSwitcher: () => showQuickSwitcher(context),
-            onShortcutSheet: () => showShortcutSheet(context),
-            child: Scaffold(
-              backgroundColor: translucent ? Colors.transparent : null,
-              body: wide
-                  ? Row(
-                      children: [
-                        SizedBox(
-                          width: kSidePanelWidth,
-                          child: ProjectDrawer(color: translucent ? kSidebarTint : null),
-                        ),
-                        const VerticalDivider(width: 1),
-                        Expanded(
-                          child: translucent
-                              ? ColoredBox(
-                                  key: const ValueKey('shell-main'),
-                                  color: AppColors.canvas,
-                                  child: main,
-                                )
-                              : main,
-                        ),
-                      ],
-                    )
-                  : ModalShellDrawer(
-                      key: _drawerKey,
-                      width: min(screenWidth - 56, kDrawerMaxWidth),
-                      drawer: const ProjectDrawer(),
-                      child: main,
-                    ),
-            ),
+          child: Scaffold(
+            backgroundColor: translucent ? Colors.transparent : null,
+            body: wide
+                ? Row(
+                    children: [
+                      SizedBox(
+                        width: kSidePanelWidth,
+                        child: ProjectDrawer(color: translucent ? kSidebarTint : null),
+                      ),
+                      const VerticalDivider(width: 1),
+                      Expanded(
+                        child: translucent
+                            ? ColoredBox(
+                                key: const ValueKey('shell-main'),
+                                color: AppColors.canvas,
+                                child: main,
+                              )
+                            : main,
+                      ),
+                    ],
+                  )
+                : ModalShellDrawer(
+                    key: _drawerKey,
+                    width: min(screenWidth - 56, kDrawerMaxWidth),
+                    drawer: const ProjectDrawer(),
+                    child: main,
+                  ),
           ),
         ),
       ),

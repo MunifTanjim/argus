@@ -14,6 +14,7 @@ import 'state/profiles.dart';
 import 'state/push.dart';
 import 'transport/connection.dart';
 import 'ui/home_shell.dart';
+import 'ui/mac_menu_bar.dart';
 import 'ui/profiles_screen.dart';
 import 'ui/route_observer.dart';
 import 'ui/sign_out.dart';
@@ -120,8 +121,11 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
       title: 'argus',
       navigatorKey: _navigatorKey,
       theme: buildArgusTheme(platform: defaultTargetPlatform),
-      builder: (context, child) =>
-          WindowStrip(controller: _sidebarStrip, child: child!),
+      // One menu bar for the whole app: HomeShell, when mounted, registers
+      // the app items' actions.
+      builder: (context, child) => MacMenuBar(
+        child: WindowStrip(controller: _sidebarStrip, child: child!),
+      ),
       navigatorObservers: [appRouteObserver, _sidebarStrip],
       home: !_loaded
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))

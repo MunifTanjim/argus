@@ -23,16 +23,28 @@ List<MethodCall> _menuChannel(WidgetTester tester) {
   return calls;
 }
 
-MacMenuBar _bar(List<String> log, {Widget child = const Text('body')}) =>
-    MacMenuBar(
+ShellMenuActions _actions(List<String> log) => ShellMenuActions(
       onBack: () => log.add('back'),
       onSpawn: () => log.add('spawn'),
       onSettings: () => log.add('settings'),
       onQuickSwitcher: () => log.add('quick'),
       onShortcutSheet: () => log.add('sheet'),
       onSelectTab: (i) => log.add('tab $i'),
-      child: child,
     );
+
+ShellMenuRegistry _registry() {
+  final registry = ShellMenuRegistry();
+  addTearDown(registry.dispose);
+  return registry;
+}
+
+// With [log], a shell is registered whose actions add to it.
+MacMenuBar _bar(List<String>? log,
+    {Widget child = const Text('body'), ShellMenuRegistry? registry}) {
+  registry ??= _registry();
+  if (log != null) registry.register(_actions(log));
+  return MacMenuBar(registry: registry, child: child);
+}
 
 Future<List<String>> _pump(WidgetTester tester, {Widget? child}) async {
   final log = <String>[];
@@ -41,6 +53,17 @@ Future<List<String>> _pump(WidgetTester tester, {Widget? child}) async {
   ));
   return log;
 }
+
+const _appItems = [
+  ('argus', 'Settings…'),
+  ('View', 'Quick Switcher'),
+  ('View', 'Sessions'),
+  ('View', 'History'),
+  ('View', 'Terminals'),
+  ('View', 'Keyboard Shortcuts'),
+  ('Session', 'New Session'),
+  ('Session', 'Back'),
+];
 
 List<PlatformMenuItem> _menus(WidgetTester tester) =>
     tester.widget<PlatformMenuBar>(find.byType(PlatformMenuBar)).menus;
@@ -88,6 +111,8 @@ void main() {
     expect(_provided(_menu(tester, 'argus')), [
       PlatformProvidedMenuItemType.about,
       PlatformProvidedMenuItemType.hide,
+      PlatformProvidedMenuItemType.hideOtherApplications,
+      PlatformProvidedMenuItemType.showAllApplications,
       PlatformProvidedMenuItemType.quit,
     ]);
     expect(_item(tester, 'argus', 'Settings…'), isNotNull);
@@ -108,6 +133,7 @@ void main() {
     expect(_provided(_menu(tester, 'Window')), [
       PlatformProvidedMenuItemType.minimizeWindow,
       PlatformProvidedMenuItemType.zoomWindow,
+      PlatformProvidedMenuItemType.toggleFullScreen,
     ]);
     expect(sent.where((c) => c.method == 'Menu.setMenus'), isNotEmpty);
   });
@@ -150,8 +176,9 @@ void main() {
     expect(log, ['settings', 'quick', 'sheet', 'back']);
   });
 
-  // An NSMenuItem key equivalent fires before Flutter sees the key, which
-  // would skip DesktopShortcuts' text field and terminal guards.
+  // Flutter handles a key first, and AppKit redispatches the keys it leaves
+  // unhandled to the main menu. An app item with a key equivalent would then
+  // fire whenever DesktopShortcuts' guards leave the key alone.
   testWidgets('no custom item has a key equivalent', (tester) async {
     _platform(TargetPlatform.macOS);
     _menuChannel(tester);
@@ -184,18 +211,76 @@ void main() {
         const TextSelection(baseOffset: 0, extentOffset: 5));
   });
 
-  testWidgets('a rebuild with new callbacks does not send the menus again',
+  testWidgets(
+      'rebuilds and a new shell do not send the menus again; the new shell is called',
       (tester) async {
     _platform(TargetPlatform.macOS);
     final sent = _menuChannel(tester);
-    final log = await _pump(tester);
+    final registry = _registry();
+    final first = _actions(<String>[]);
+    registry.register(first);
+    Future<void> pump() => tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: _bar(null, registry: registry))));
+    await pump();
     // PlatformMenuBar sends once more on its first update, whatever the items.
-    await _pump(tester);
+    await pump();
     final before = sent.length;
-    await _pump(tester);
+    await pump();
+    expect(sent.length, before);
+    final log = <String>[];
+    // As when a widget swap mounts a new shell before the old one is disposed.
+    registry.register(_actions(log));
+    registry.unregister(first);
+    await tester.pump();
+    await pump();
     expect(sent.length, before);
     _item(tester, 'Session', 'New Session').onSelected!();
-    expect(log, isEmpty, reason: 'the first callbacks are replaced');
+    expect(log, ['spawn']);
+  });
+
+  testWidgets(
+      'with no shell, the app items are disabled and the provided and Edit items stay',
+      (tester) async {
+    _platform(TargetPlatform.macOS);
+    _menuChannel(tester);
+    final registry = _registry();
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: _bar(null, registry: registry))));
+    expect(find.byType(PlatformMenuBar), findsOneWidget);
+    expect(_provided(_menu(tester, 'argus')),
+        contains(PlatformProvidedMenuItemType.quit));
+    for (final (menu, label) in _appItems) {
+      expect(_item(tester, menu, label).onSelected, isNull, reason: label);
+    }
+    for (final label in ['Cut', 'Copy', 'Paste', 'Select All']) {
+      expect(_item(tester, 'Edit', label).onSelected, isNotNull);
+    }
+
+    final log = <String>[];
+    final actions = _actions(log);
+    registry.register(actions);
+    await tester.pump();
+    for (final (menu, label) in _appItems) {
+      _item(tester, menu, label).onSelected!();
+    }
+    expect(log, [
+      'settings', 'quick', 'tab 0', 'tab 1', 'tab 2', 'sheet', 'spawn', 'back',
+    ]);
+
+    registry.unregister(actions);
+    await tester.pump();
+    expect(_item(tester, 'Session', 'Back').onSelected, isNull);
+  });
+
+  testWidgets('unregistering an old shell keeps the current one',
+      (tester) async {
+    final registry = _registry();
+    final old = _actions(<String>[]);
+    final current = _actions(<String>[]);
+    registry.register(old);
+    registry.register(current);
+    registry.unregister(old);
+    expect(registry.actions, same(current));
   });
 
   testWidgets(
@@ -212,7 +297,7 @@ void main() {
     liveTerminalFocusNodes.add(terminal);
     addTearDown(() => liveTerminalFocusNodes.remove(terminal));
     final log = <String>[];
-    // As in HomeShell: the menu bar around the shortcuts.
+    // As in the app: the menu bar around the shortcuts.
     await tester.pumpWidget(MaterialApp(
       home: _bar(
         log,

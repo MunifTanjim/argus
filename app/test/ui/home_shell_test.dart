@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/core/result.dart';
@@ -24,13 +25,16 @@ import 'package:argus/ui/history_screen.dart';
 import 'package:argus/ui/history_transcript_screen.dart';
 import 'package:argus/ui/home_shell.dart';
 import 'package:argus/ui/live_screen_screen.dart';
+import 'package:argus/ui/mac_menu_bar.dart';
 import 'package:argus/ui/project_drawer.dart';
 import 'package:argus/ui/resume_action.dart';
 import 'package:argus/ui/session_card.dart';
 import 'package:argus/ui/sidebar_sessions_list.dart';
 import 'package:argus/ui/session_detail_screen.dart';
 import 'package:argus/ui/session_list_screen.dart';
+import 'package:argus/ui/settings_screen.dart';
 import 'package:argus/ui/shell_drawer.dart';
+import 'package:argus/ui/spawn_dialog.dart';
 import 'package:argus/ui/terminal_list_screen.dart';
 import 'package:argus/ui/theme.dart';
 import 'package:argus/ui/window_strip.dart';
@@ -102,6 +106,7 @@ Future<ProviderContainer> _shell(
   double width = 400,
   SessionRepository? repo,
   SidebarStripController? strip,
+  bool menuBar = false,
 }) async {
   tester.view.physicalSize = Size(width, 900);
   tester.view.devicePixelRatio = 1;
@@ -114,7 +119,12 @@ Future<ProviderContainer> _shell(
   await c.read(projectsProvider.notifier).load(FakeGatewayClient((m, p) async => _tree()));
   await tester.pumpWidget(UncontrolledProviderScope(
     container: c,
-    child: strip == null
+    child: menuBar
+        ? MaterialApp(
+            builder: (context, child) => MacMenuBar(child: child!),
+            home: const HomeShell(),
+          )
+        : strip == null
         ? const MaterialApp(home: HomeShell())
         : MaterialApp(
             navigatorObservers: [strip],
@@ -170,6 +180,34 @@ Future<void> _back(WidgetTester tester) async {
 Future<void> _pumpRoute(WidgetTester tester) async {
   await tester.pump();
   await tester.pump(const Duration(seconds: 1));
+}
+
+// The test binding has no menu plugin.
+void _mockMenuChannel(WidgetTester tester) {
+  final messenger = tester.binding.defaultBinaryMessenger;
+  messenger.setMockMethodCallHandler(SystemChannels.menu, (_) async => null);
+  addTearDown(
+      () => messenger.setMockMethodCallHandler(SystemChannels.menu, null));
+}
+
+PlatformMenuItem _menuItem(WidgetTester tester, String label) {
+  Iterable<PlatformMenuItem> all(List<PlatformMenuItem> items) sync* {
+    for (final item in items) {
+      yield item;
+      if (item is PlatformMenu) yield* all(item.menus);
+      if (item is PlatformMenuItemGroup) yield* all(item.members);
+    }
+  }
+
+  final menus =
+      tester.widget<PlatformMenuBar>(find.byType(PlatformMenuBar)).menus;
+  return all(menus).singleWhere((i) =>
+      i is! PlatformMenu && i is! PlatformMenuItemGroup && i.label == label);
+}
+
+Future<void> _select(WidgetTester tester, String label) async {
+  _menuItem(tester, label).onSelected!();
+  await tester.pumpAndSettle();
 }
 
 Future<void> _holdOpenDrawer(WidgetTester tester) async {
@@ -420,6 +458,76 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(tint, findsNothing);
+    });
+  });
+
+  group('macOS menu bar', () {
+    void mac() {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    }
+
+    testWidgets('with Settings on top, Back pops it and the shell items do nothing',
+        (tester) async {
+      mac();
+      _mockMenuChannel(tester);
+      final c = await _shell(tester, width: 1000, menuBar: true);
+      c.read(scopeProvider.notifier).state = 'A:w2';
+      await tester.pumpAndSettle();
+
+      await _select(tester, 'Settings…');
+      expect(find.byType(SettingsScreen), findsOneWidget);
+      await _select(tester, 'Settings…');
+      expect(find.byType(SettingsScreen, skipOffstage: false), findsOneWidget);
+      await _select(tester, 'History');
+      await _select(tester, 'New Session');
+      expect(find.byType(SpawnDialog, skipOffstage: false), findsNothing);
+      await _select(tester, 'Back');
+      expect(find.byType(SettingsScreen, skipOffstage: false), findsNothing);
+      expect(c.read(scopeProvider), 'A:w2');
+
+      c.read(scopeProvider.notifier).state = null;
+      await tester.pumpAndSettle();
+      expect(c.read(homeTabProvider), HomeTab.sessions);
+      await _select(tester, 'History');
+      expect(c.read(homeTabProvider), HomeTab.history);
+    });
+
+    testWidgets('the menu bar outlives the shell; its app items follow it',
+        (tester) async {
+      mac();
+      _mockMenuChannel(tester);
+      tester.view.physicalSize = const Size(1000, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final c = ProviderContainer(overrides: [
+        gatewayProvider.overrideWithValue(null),
+      ]);
+      addTearDown(c.dispose);
+      await c
+          .read(projectsProvider.notifier)
+          .load(FakeGatewayClient((m, p) async => _tree()));
+      Future<void> pump(Widget home) async {
+        await tester.pumpWidget(UncontrolledProviderScope(
+          container: c,
+          child: MaterialApp(
+            builder: (context, child) => MacMenuBar(child: child!),
+            home: home,
+          ),
+        ));
+        await tester.pump();
+      }
+
+      await pump(const Text('signed out'));
+      expect(_menuItem(tester, 'Back').onSelected, isNull);
+      expect(_menuItem(tester, 'Settings…').onSelected, isNull);
+
+      await pump(const HomeShell());
+      await _select(tester, 'History');
+      expect(c.read(homeTabProvider), HomeTab.history);
+
+      await pump(const Text('signed out'));
+      expect(_menuItem(tester, 'Back').onSelected, isNull);
     });
   });
 
