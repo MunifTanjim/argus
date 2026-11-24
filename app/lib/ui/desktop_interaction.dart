@@ -11,6 +11,22 @@ import 'theme.dart';
 /// Below this panel width the option preview stacks under the options.
 const double _sidePreviewMinWidth = 600;
 
+/// The options of a permission or plan decision: the server's, or Allow/Deny
+/// when it sent none.
+List<DecisionOption> decisionOptions(Interaction ix) => ix.options.isNotEmpty
+    ? ix.options
+    : const [
+        DecisionOption(label: 'Allow', value: 'allow'),
+        DecisionOption(label: 'Deny', value: 'deny', reject: true),
+      ];
+
+/// The option that takes a free-text reason.
+DecisionOption decisionReject(Interaction ix) => ix.options.firstWhere(
+  (o) => o.reject,
+  orElse: () =>
+      const DecisionOption(label: 'Reject', value: 'deny', reject: true),
+);
+
 /// An agent's questions answered with the keyboard, as in the TUI: one question
 /// at a time, a highlight separate from the committed answer, and a Submit tab
 /// when there are several questions.
@@ -645,4 +661,217 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
         ),
       ),
   ];
+}
+
+/// A permission or plan decision picked with the keyboard: the options form a
+/// highlighted list, and the reject option opens a reason field.
+class DesktopDecision extends StatefulWidget {
+  const DesktopDecision({
+    super.key,
+    required this.session,
+    required this.interaction,
+    required this.kind,
+    required this.detail,
+    required this.busy,
+    required this.onRespond,
+  });
+
+  final Session session;
+  final Interaction interaction;
+
+  /// `permission` or `plan`.
+  final String kind;
+
+  /// The heading, message, tool detail and plan, built by [InteractionPanel].
+  final List<Widget> detail;
+  final bool busy;
+  final void Function(Map<String, dynamic> params) onRespond;
+
+  @override
+  State<DesktopDecision> createState() => _DesktopDecisionState();
+}
+
+class _DesktopDecisionState extends State<DesktopDecision> {
+  final _focus = FocusNode(debugLabel: 'DesktopDecision');
+  final _reasonFocus = FocusNode();
+  final _reason = TextEditingController();
+  int _highlight = 0;
+  bool _reasonOpen = false;
+
+  Interaction get _ix => widget.interaction;
+  List<DecisionOption> get _options => decisionOptions(_ix);
+
+  @override
+  void didUpdateWidget(DesktopDecision old) {
+    super.didUpdateWidget(old);
+    if (old.interaction.requestId != _ix.requestId || old.kind != widget.kind) {
+      _highlight = 0;
+      _reasonOpen = false;
+      _reason.clear();
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    _reasonFocus.dispose();
+    _reason.dispose();
+    super.dispose();
+  }
+
+  /// Applies [change], then moves focus to the reason field (or back to the
+  /// panel) once the frame that shows it is built.
+  void _update(VoidCallback change) {
+    final hadFocus = _focus.hasFocus;
+    setState(change);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !hadFocus) return;
+      final target = _reasonOpen ? _reasonFocus : _focus;
+      if (!target.hasPrimaryFocus) target.requestFocus();
+    });
+  }
+
+  void _select(int i) {
+    final o = _options[i];
+    if (o.reject) {
+      _update(() {
+        _highlight = i;
+        _reasonOpen = true;
+      });
+      return;
+    }
+    widget.onRespond(
+      optionRespond(
+        sessionId: widget.session.id,
+        kind: widget.kind,
+        value: o.value,
+        requestId: _ix.requestId,
+      ),
+    );
+  }
+
+  void _sendReject() => widget.onRespond(
+    optionRespond(
+      sessionId: widget.session.id,
+      kind: widget.kind,
+      value: decisionReject(_ix).value,
+      reason: _reason.text,
+      requestId: _ix.requestId,
+    ),
+  );
+
+  void _move(int d) => _update(
+    () => _highlight = (_highlight + d).clamp(0, _options.length - 1),
+  );
+
+  KeyEventResult _onKey(FocusNode _, KeyEvent e) {
+    if (e is KeyUpEvent || widget.busy) return KeyEventResult.ignored;
+    final kb = HardwareKeyboard.instance;
+    if (kb.isMetaPressed || kb.isControlPressed || kb.isAltPressed) {
+      return KeyEventResult.ignored;
+    }
+    final k = e.logicalKey;
+    final plain = !kb.isShiftPressed;
+
+    if (k == LogicalKeyboardKey.escape) {
+      if (!_reasonOpen) return KeyEventResult.ignored;
+      _update(() => _reasonOpen = false);
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.arrowUp) {
+      _move(-1);
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.arrowDown) {
+      _move(1);
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.numpadEnter) {
+      if (_reasonOpen) {
+        _sendReject();
+      } else {
+        _select(_highlight);
+      }
+      return KeyEventResult.handled;
+    }
+    // The reason field takes typed keys.
+    if (_reasonOpen) return KeyEventResult.ignored;
+    if (plain && k == LogicalKeyboardKey.keyK) {
+      _move(-1);
+      return KeyEventResult.handled;
+    }
+    if (plain && k == LogicalKeyboardKey.keyJ) {
+      _move(1);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  void _tap(int i) {
+    if (widget.busy) return;
+    _focus.requestFocus();
+    setState(() => _highlight = i);
+    _select(i);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final options = _options;
+    final reject = decisionReject(_ix);
+    return Focus(
+      focusNode: _focus,
+      autofocus: true,
+      onKeyEvent: _onKey,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ...widget.detail,
+          const SizedBox(height: 16),
+          if (_reasonOpen)
+            TextField(
+              controller: _reason,
+              focusNode: _reasonFocus,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: reject.placeholder.isNotEmpty
+                    ? reject.placeholder
+                    : 'Reason (optional)',
+                border: const OutlineInputBorder(),
+              ),
+            )
+          else
+            for (var i = 0; i < options.length; i++)
+              InkWell(
+                onTap: () => _tap(i),
+                borderRadius: BorderRadius.circular(4),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: i == _highlight ? AppColors.border : null,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    options[i].label,
+                    style: TextStyle(
+                      color: i == _highlight
+                          ? AppColors.text
+                          : AppColors.secondary,
+                      fontWeight: i == _highlight ? FontWeight.w700 : null,
+                    ),
+                  ),
+                ),
+              ),
+          if (widget.busy)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: LinearProgressIndicator(),
+            ),
+        ],
+      ),
+    );
+  }
 }

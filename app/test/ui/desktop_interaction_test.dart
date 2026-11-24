@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/state/respond_params.dart';
 import 'package:argus/ui/desktop_interaction.dart';
+import 'package:argus/ui/interaction_panel.dart';
 
 Session _session(Map<String, dynamic> interaction, {String agent = 'claude'}) =>
     Session.fromJson(
@@ -468,5 +469,189 @@ void main() {
     await tester.enterText(_field(), 'mine');
     await tester.pump();
     expect(find.text('✓ H1'), findsOneWidget);
+  });
+
+  group('DesktopDecision', () {
+    Map<String, dynamic> dix({
+      String kind = 'permission',
+      List<Map<String, dynamic>>? options,
+      String? plan,
+      String? toolInput,
+    }) => {
+      'kind': kind,
+      'request_id': 'd1',
+      'tool_name': 'Bash',
+      'message': 'Needs approval',
+      'tool_input': ?toolInput,
+      'plan': ?plan,
+      'options': ?options,
+    };
+
+    final threeOptions = [
+      {'label': 'Yes', 'value': 'allow'},
+      {'label': 'Yes, always', 'value': 'always'},
+      {
+        'label': 'No',
+        'value': 'deny',
+        'reject': true,
+        'placeholder': 'Tell why',
+      },
+    ];
+
+    Future<List<Map<String, dynamic>>> pumpDecision(
+      WidgetTester tester,
+      Map<String, dynamic> ix, {
+      String kind = 'permission',
+    }) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      tester.view.physicalSize = const Size(1200, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final sent = <Map<String, dynamic>>[];
+      final s = _session(ix);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: DesktopDecision(
+                session: s,
+                interaction: s.interaction!,
+                kind: kind,
+                detail: decisionDetail(s, s.interaction!, kind),
+                busy: false,
+                onRespond: sent.add,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return sent;
+    }
+
+    Finder reasonField() => find.descendant(
+      of: find.byType(DesktopDecision),
+      matching: find.byType(TextField),
+    );
+
+    testWidgets("down + Enter sends the second option's value", (tester) async {
+      final sent = await pumpDecision(tester, dix(options: threeOptions));
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      await _key(tester, LogicalKeyboardKey.enter);
+      expect(
+        sent.single,
+        optionRespond(
+          sessionId: 'mac:%1',
+          kind: 'permission',
+          value: 'always',
+          requestId: 'd1',
+        ),
+      );
+    });
+
+    testWidgets('the default Allow/Deny list applies when options are empty', (
+      tester,
+    ) async {
+      final sent = await pumpDecision(tester, dix());
+      expect(find.text('Allow'), findsOneWidget);
+      await _key(tester, LogicalKeyboardKey.keyJ);
+      await _key(tester, LogicalKeyboardKey.keyK);
+      await _key(tester, LogicalKeyboardKey.enter);
+      expect(sent.single['option_value'], 'allow');
+    });
+
+    testWidgets(
+      'Enter on the reject option opens the reason field; typed text + Enter sends reject with reason',
+      (tester) async {
+        final sent = await pumpDecision(tester, dix(options: threeOptions));
+        await _key(tester, LogicalKeyboardKey.arrowDown);
+        await _key(tester, LogicalKeyboardKey.arrowDown);
+        await _key(tester, LogicalKeyboardKey.enter);
+        expect(sent, isEmpty);
+        expect(reasonField(), findsOneWidget);
+        expect(find.text('Tell why'), findsOneWidget);
+        await tester.enterText(reasonField(), 'too risky');
+        await _key(tester, LogicalKeyboardKey.enter);
+        expect(
+          sent.single,
+          optionRespond(
+            sessionId: 'mac:%1',
+            kind: 'permission',
+            value: 'deny',
+            reason: 'too risky',
+            requestId: 'd1',
+          ),
+        );
+      },
+    );
+
+    testWidgets('Esc closes the reason field', (tester) async {
+      await pumpDecision(tester, dix());
+      expect(await tester.sendKeyEvent(LogicalKeyboardKey.escape), isFalse);
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      await _key(tester, LogicalKeyboardKey.enter);
+      expect(reasonField(), findsOneWidget);
+      expect(find.text('Reason (optional)'), findsOneWidget);
+      expect(await tester.sendKeyEvent(LogicalKeyboardKey.escape), isTrue);
+      await tester.pumpAndSettle();
+      expect(reasonField(), findsNothing);
+      expect(await tester.sendKeyEvent(LogicalKeyboardKey.escape), isFalse);
+    });
+
+    testWidgets('clicking an option sends it', (tester) async {
+      final sent = await pumpDecision(tester, dix(options: threeOptions));
+      await tester.tap(find.text('Yes, always'));
+      await tester.pumpAndSettle();
+      expect(sent.single['option_value'], 'always');
+    });
+
+    testWidgets('the plan text and tool detail still render above the list', (
+      tester,
+    ) async {
+      await pumpDecision(
+        tester,
+        dix(
+          kind: 'plan',
+          plan: 'Step one of the plan',
+          toolInput: '{"command":"ls -la"}',
+          options: threeOptions,
+        ),
+        kind: 'plan',
+      );
+      expect(find.text('Plan review'), findsOneWidget);
+      expect(find.text('Needs approval', findRichText: true), findsOneWidget);
+      expect(find.textContaining('ls -la', findRichText: true), findsWidgets);
+      final plan = find.text('Step one of the plan', findRichText: true);
+      expect(plan, findsOneWidget);
+      expect(
+        tester.getBottomLeft(plan).dy,
+        lessThan(tester.getTopLeft(find.text('Yes')).dy),
+      );
+    });
+
+    testWidgets('keys are ignored while busy', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final sent = <Map<String, dynamic>>[];
+      final s = _session(dix());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: DesktopDecision(
+              session: s,
+              interaction: s.interaction!,
+              kind: 'permission',
+              detail: const [],
+              busy: true,
+              onRespond: sent.add,
+            ),
+          ),
+        ),
+      );
+      await tester.pump(); // the busy progress bar never settles
+      expect(await tester.sendKeyEvent(LogicalKeyboardKey.enter), isFalse);
+      expect(sent, isEmpty);
+    });
   });
 }

@@ -11,6 +11,7 @@ import '../models/session.dart';
 import '../state/respond_params.dart';
 import '../state/respond_view_model.dart';
 import 'code_block.dart';
+import 'desktop_interaction.dart';
 import 'theme.dart';
 import 'tool_detail.dart';
 import 'tool_registry.dart';
@@ -113,55 +114,10 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
   /// choice opens a free-text field prompted by its placeholder. The client only
   /// echoes the chosen value back.
   List<Widget> _serverDecision(Interaction ix, String kind) {
-    final tool = ix.toolName ?? '';
-    final display = toolMeta(widget.session.agent, tool)?.display ?? '';
-    final toolLabel = display.isEmpty ? tool : display;
-    final heading = kind == 'plan'
-        ? 'Plan review'
-        : (tool.isEmpty
-            ? 'Permission requested'
-            : 'Permission requested · $toolLabel');
+    final detail = decisionDetail(widget.session, ix, kind);
 
-    final detail = <Widget>[
-      Text(heading,
-          style: const TextStyle(
-              color: AppColors.secondary, fontWeight: FontWeight.w700)),
-    ];
-    if ((ix.message ?? '').isNotEmpty) {
-      detail.add(const SizedBox(height: 8));
-      detail.add(appMarkdown(ix.message!));
-    }
-    // Reuse the transcript's per-tool renderers (Bash → "$ cmd", Edit → diff, …)
-    // so the prompt shows the same formatted detail as the TUI instead of raw
-    // JSON. A synthetic tool item is all toolDetailBody needs.
-    if ((ix.toolInput ?? '').isNotEmpty) {
-      detail.add(const SizedBox(height: 8));
-      detail.add(toolDetailBody(
-          Entry(
-            id: '',
-            kind: EntryKind.tool,
-            toolName: ix.toolName,
-            toolInput: ix.toolInput,
-          ),
-          agent: widget.session.agent));
-    }
-    if ((ix.plan ?? '').isNotEmpty) {
-      detail.add(const SizedBox(height: 8));
-      detail.add(appMarkdown(ix.plan!));
-    }
-
-    final reject = ix.options.firstWhere(
-      (o) => o.reject,
-      orElse: () =>
-          const DecisionOption(label: 'Reject', value: 'deny', reject: true),
-    );
-
-    final options = ix.options.isNotEmpty
-        ? ix.options
-        : const [
-            DecisionOption(label: 'Allow', value: 'allow'),
-            DecisionOption(label: 'Deny', value: 'deny', reject: true),
-          ];
+    final reject = decisionReject(ix);
+    final options = decisionOptions(ix);
 
     Widget optionButton(DecisionOption o, bool primary) {
       void onTap() {
@@ -469,6 +425,48 @@ Widget _scrollBody(List<Widget> children) => Flexible(
         ),
       ),
     );
+
+/// The heading, message, tool detail and plan shown above a permission or plan
+/// decision's options.
+List<Widget> decisionDetail(Session session, Interaction ix, String kind) {
+  final tool = ix.toolName ?? '';
+  final display = toolMeta(session.agent, tool)?.display ?? '';
+  final toolLabel = display.isEmpty ? tool : display;
+  final heading = kind == 'plan'
+      ? 'Plan review'
+      : (tool.isEmpty
+          ? 'Permission requested'
+          : 'Permission requested · $toolLabel');
+
+  final detail = <Widget>[
+    Text(heading,
+        style: const TextStyle(
+            color: AppColors.secondary, fontWeight: FontWeight.w700)),
+  ];
+  if ((ix.message ?? '').isNotEmpty) {
+    detail.add(const SizedBox(height: 8));
+    detail.add(appMarkdown(ix.message!));
+  }
+  // Reuse the transcript's per-tool renderers (Bash → "$ cmd", Edit → diff, …)
+  // so the prompt shows the same formatted detail as the TUI instead of raw
+  // JSON. A synthetic tool item is all toolDetailBody needs.
+  if ((ix.toolInput ?? '').isNotEmpty) {
+    detail.add(const SizedBox(height: 8));
+    detail.add(toolDetailBody(
+        Entry(
+          id: '',
+          kind: EntryKind.tool,
+          toolName: ix.toolName,
+          toolInput: ix.toolInput,
+        ),
+        agent: session.agent));
+  }
+  if ((ix.plan ?? '').isNotEmpty) {
+    detail.add(const SizedBox(height: 8));
+    detail.add(appMarkdown(ix.plan!));
+  }
+  return detail;
+}
 
 /// A scroll area fits any height, so its minimum intrinsic height is zero and
 /// the panel's is just its fixed parts.
