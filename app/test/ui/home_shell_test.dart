@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
@@ -21,6 +23,7 @@ import 'package:argus/state/grouping.dart';
 import 'package:argus/state/navigation.dart';
 import 'package:argus/state/projects.dart';
 import 'package:argus/state/push.dart';
+import 'package:argus/state/session_filter.dart';
 import 'package:argus/state/sessions.dart';
 import 'package:argus/state/terminals.dart';
 import 'package:argus/transport/connection.dart';
@@ -613,22 +616,39 @@ void main() {
           .map((e) => tester.getRect(find.byElementPredicate((x) => x == e)))
           .toSet();
 
-      for (final width in [1000.0, 500.0]) {
+      Finder tooltipOf(Type screen, String label) =>
+          find.descendant(of: tabsOf(screen), matching: find.byTooltip(label));
+
+      for (final wide in [true, false]) {
         for (final terminals in [false, true]) {
+          final labels = ['Sessions', 'History', if (terminals) 'Terminals'];
           testWidgets(
-              'macOS ${width.toInt()} px${terminals ? ' with terminals' : ''}: Home shows a segmented control with Sessions, History${terminals ? ', Terminals' : ''} in the toolbar row, and no NavigationRail and no NavigationBar',
+              'macOS ${wide ? '1200 px: full labels' : '500 px: icon-only segments with label tooltips'}${terminals ? ' with terminals' : ''}: Home shows a segmented control with ${labels.join(', ')} in the toolbar row, and no NavigationRail and no NavigationBar',
               (tester) async {
             await _shell(tester,
-                width: width,
+                width: wide ? 1200 : 500,
                 fullScreen: mac(),
                 nodes: [terminals ? home : noTerminals]);
             await tester.pump();
             expect(tabsOf(SessionListScreen), findsOneWidget);
-            expect(segment(SessionListScreen, 'Sessions'), findsOneWidget);
-            expect(segment(SessionListScreen, 'History'), findsOneWidget);
-            expect(segment(SessionListScreen, 'Terminals'),
-                terminals ? findsOneWidget : findsNothing);
+            for (final label in ['Sessions', 'History', 'Terminals']) {
+              final shown = labels.contains(label);
+              expect(segment(SessionListScreen, label),
+                  wide && shown ? findsOneWidget : findsNothing, reason: label);
+              expect(tooltipOf(SessionListScreen, label),
+                  !wide && shown ? findsOneWidget : findsNothing, reason: label);
+            }
+            // A label is never cut short.
+            for (final e in find
+                .descendant(of: tabsOf(SessionListScreen), matching: find.byType(RichText))
+                .evaluate()) {
+              final paragraph = e.renderObject! as RenderParagraph;
+              expect(paragraph.didExceedMaxLines, isFalse);
+              expect(paragraph.size.width,
+                  greaterThanOrEqualTo(paragraph.getMaxIntrinsicWidth(double.infinity) - 0.01));
+            }
             final rect = tester.getRect(tabsOf(SessionListScreen));
+            expect(rect.height, 28);
             expect(rect.top, greaterThanOrEqualTo(0));
             expect(rect.bottom, lessThanOrEqualTo(kMacToolbarHeight));
             expect(find.byType(NavigationRail), findsNothing);
@@ -725,22 +745,52 @@ void main() {
         expect(_passthroughRects.values.toSet(), visible(tester));
       });
 
-      testWidgets('macOS narrow (500 px): the control is fully visible, not clipped',
+      testWidgets(
+          'macOS narrow (500 px): the tabs are icon-only segments with label tooltips, inside the bar and clear of its buttons',
           (tester) async {
         await _shell(tester, width: 500, fullScreen: mac(), nodes: [home]);
         await tester.pump();
+        for (final label in ['Sessions', 'History', 'Terminals']) {
+          expect(tooltipOf(SessionListScreen, label), findsOneWidget);
+        }
+        expect(
+            find.descendant(of: tabsOf(SessionListScreen), matching: find.byType(Text)),
+            findsNothing);
         final rect = tester.getRect(tabsOf(SessionListScreen));
         final bar = tester.getRect(barOf(SessionListScreen));
         expect(rect.left, greaterThanOrEqualTo(bar.left));
         expect(rect.right, lessThanOrEqualTo(bar.right));
         expect(rect.left, greaterThanOrEqualTo(tester.getRect(menuButton).right));
-        final actions = find.descendant(
+        final buttons = find.descendant(
             of: barOf(SessionListScreen), matching: find.byType(IconButton));
-        for (final e in actions.evaluate()) {
+        for (final e in buttons.evaluate()) {
           final button = tester.getRect(find.byElementPredicate((x) => x == e));
           expect(button.overlaps(rect), isFalse, reason: '${e.widget}');
         }
         expect(tester.takeException(), isNull);
+      });
+
+      testWidgets(
+          'macOS 700 px with the Sessions search open: the field keeps 200 px (or its intrinsic width), the tabs go icon-only, and the native rects follow',
+          (tester) async {
+        _passthroughRects.clear();
+        final c = await _shell(tester, width: 700, fullScreen: mac(), nodes: [home]);
+        await flush(tester);
+        c.read(sessionSearchProvider.notifier).open();
+        await flush(tester);
+        final field = find.descendant(
+            of: barOf(SessionListScreen), matching: find.byType(TextField));
+        expect(field, findsOneWidget);
+        final intrinsic =
+            tester.renderObject<RenderBox>(field).getMaxIntrinsicWidth(double.infinity);
+        expect(tester.getSize(field).width,
+            greaterThanOrEqualTo(math.min(200, intrinsic)));
+        expect(tooltipOf(SessionListScreen, 'Sessions'), findsOneWidget);
+        expect(segment(SessionListScreen, 'Sessions'), findsNothing);
+        final rect = tester.getRect(tabsOf(SessionListScreen));
+        expect(rect.left, greaterThanOrEqualTo(tester.getRect(field).right));
+        expect(_passthroughRects.values, contains(rect));
+        expect(_passthroughRects.values.toSet(), visible(tester));
       });
     });
 

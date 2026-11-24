@@ -69,6 +69,7 @@ class _AdaptiveNavScaffoldState extends State<AdaptiveNavScaffold> {
       // The toolbars of the page, its app bar's and its body's, show the tabs.
       return ToolbarTabs(
         labels: [for (final d in widget.destinations) d.label],
+        icons: [for (final d in widget.destinations) d.icon],
         selected: widget.selectedIndex,
         onSelected: widget.onSelected,
         child: Scaffold(

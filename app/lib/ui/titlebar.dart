@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:macos_window_utils/macos/ns_window_delegate.dart';
 import 'package:macos_window_utils/macos_window_utils.dart';
@@ -247,17 +248,22 @@ class FullScreenDelegate extends NSWindowDelegate
 }
 
 /// The tabs of the page below, which [ArgusAppBar] shows on macOS as a
-/// segmented control in the center of its row.
+/// segmented control in the center of its row: labels where they fit whole,
+/// else icons with the labels as tooltips.
 class ToolbarTabs extends InheritedWidget {
   const ToolbarTabs({
     super.key,
     required this.labels,
+    required this.icons,
     required this.selected,
     required this.onSelected,
     required super.child,
   });
 
   final List<String> labels;
+
+  /// One per label, shown instead of the labels where they do not fit.
+  final List<Widget> icons;
   final int selected;
   final ValueChanged<int> onSelected;
 
@@ -281,7 +287,8 @@ class ToolbarTabs extends InheritedWidget {
   bool updateShouldNotify(ToolbarTabs oldWidget) =>
       selected != oldWidget.selected ||
       onSelected != oldWidget.onSelected ||
-      !listEquals(labels, oldWidget.labels);
+      !listEquals(labels, oldWidget.labels) ||
+      !listEquals(icons, oldWidget.icons);
 }
 
 /// The name of the current tab as a toolbar title: shown as [Text], and
@@ -299,9 +306,10 @@ class TabTitle extends StatelessWidget {
 }
 
 class _TabsControl extends StatefulWidget {
-  const _TabsControl({required this.tabs});
+  const _TabsControl({required this.tabs, required this.link});
 
   final ToolbarTabs tabs;
+  final _TabsSwitchLink link;
 
   @override
   State<_TabsControl> createState() => _TabsControlState();
@@ -321,8 +329,7 @@ class _TabsControlState extends State<_TabsControl> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _control(List<Widget> segments) {
     final tabs = widget.tabs;
     return CupertinoSlidingSegmentedControl<int>(
       groupValue: tabs.selected,
@@ -334,25 +341,169 @@ class _TabsControlState extends State<_TabsControl> {
       onValueChanged: (i) {
         if (i != null) tabs.onSelected(i);
       },
-      children: {
-        for (var i = 0; i < tabs.labels.length; i++)
-          i: Text(
-            tabs.labels[i],
+      children: {for (var i = 0; i < segments.length; i++) i: segments[i]},
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tabs = widget.tabs;
+    return _TabsSwitch(
+      link: widget.link,
+      labels: _control([
+        for (final label in tabs.labels)
+          Text(
+            label,
             style: const TextStyle(color: AppColors.text, fontSize: 13),
           ),
-      },
+      ]),
+      icons: _control([
+        for (var i = 0; i < tabs.icons.length; i++)
+          Tooltip(
+            message: tabs.labels[i],
+            child: IconTheme.merge(
+              data: const IconThemeData(color: AppColors.text, size: 16),
+              child: tabs.icons[i],
+            ),
+          ),
+      ]),
     );
+  }
+}
+
+/// Lets the toolbar row read the width the icons need from the switch, which
+/// is under a passthrough (a LayoutBuilder, without intrinsic sizes).
+class _TabsSwitchLink {
+  _RenderTabsSwitch? box;
+}
+
+/// Shows [labels] where it fits whole in the width given, else [icons]. The
+/// other one is laid out but neither painted nor hit, and is offstage to
+/// finders and semantics.
+class _TabsSwitch extends MultiChildRenderObjectWidget {
+  _TabsSwitch({
+    required this.link,
+    required Widget labels,
+    required Widget icons,
+  }) : super(children: [labels, icons]);
+
+  final _TabsSwitchLink link;
+
+  @override
+  _RenderTabsSwitch createRenderObject(BuildContext context) =>
+      link.box = _RenderTabsSwitch();
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderTabsSwitch renderObject,
+  ) => link.box = renderObject;
+
+  @override
+  MultiChildRenderObjectElement createElement() => _TabsSwitchElement(this);
+}
+
+class _TabsSwitchElement extends MultiChildRenderObjectElement {
+  _TabsSwitchElement(super.widget);
+
+  @override
+  void debugVisitOnstageChildren(ElementVisitor visitor) {
+    final shown = (renderObject as _RenderTabsSwitch).shown;
+    for (final child in children) {
+      if (child.renderObject == shown) visitor(child);
+    }
+  }
+}
+
+class _SwitchParentData extends ContainerBoxParentData<RenderBox> {}
+
+class _RenderTabsSwitch extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _SwitchParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, _SwitchParentData> {
+  RenderBox? shown;
+
+  /// The width of the icons, as of the last layout.
+  double iconsWidth = 0;
+
+  RenderBox get _labels => firstChild!;
+  RenderBox get _icons => lastChild!;
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _SwitchParentData) {
+      child.parentData = _SwitchParentData();
+    }
+  }
+
+  RenderBox _pick(BoxConstraints constraints) =>
+      _labels.getMaxIntrinsicWidth(double.infinity) <= constraints.maxWidth
+      ? _labels
+      : _icons;
+
+  @override
+  double computeMinIntrinsicWidth(double height) =>
+      _icons.getMaxIntrinsicWidth(height);
+
+  @override
+  double computeMaxIntrinsicWidth(double height) =>
+      _labels.getMaxIntrinsicWidth(height);
+
+  @override
+  double computeMinIntrinsicHeight(double width) => math.max(
+    _labels.getMinIntrinsicHeight(width),
+    _icons.getMinIntrinsicHeight(width),
+  );
+
+  @override
+  double computeMaxIntrinsicHeight(double width) => math.max(
+    _labels.getMaxIntrinsicHeight(width),
+    _icons.getMaxIntrinsicHeight(width),
+  );
+
+  @override
+  Size computeDryLayout(BoxConstraints constraints) => constraints.constrain(
+    _pick(constraints).getDryLayout(constraints.loosen()),
+  );
+
+  @override
+  void performLayout() {
+    final pick = _pick(constraints);
+    iconsWidth = _icons.getMaxIntrinsicWidth(double.infinity);
+    if (pick != shown) {
+      shown = pick;
+      markNeedsSemanticsUpdate();
+    }
+    _labels.layout(constraints.loosen(), parentUsesSize: pick == _labels);
+    _icons.layout(constraints.loosen(), parentUsesSize: pick == _icons);
+    size = constraints.constrain(pick.size);
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) =>
+      context.paintChild(shown!, offset);
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      shown!.hitTest(result, position: position);
+
+  @override
+  void visitChildrenForSemantics(RenderObjectVisitor visitor) {
+    if (shown case final shown?) visitor(shown);
   }
 }
 
 enum _Slot { leading, title, tabs, actions }
 
 /// A toolbar row with [tabs] centered in it, between the [leading] and
-/// [title] at the left and the [actions] at the right. The title shrinks
-/// first when the row is short; then the tabs leave the center; in a row
-/// too short for them, their segments narrow.
-class _TabbedToolbar extends StatelessWidget {
+/// [title] at the left and the [actions] at the right. The row is shared in
+/// this order: the title gets up to [_TabbedToolbarLayout.titleReserve]; the
+/// tabs get their labels' width if it fits, else their icons'; the title
+/// takes what is left, shrinking under its reserve only for the icons.
+class _TabbedToolbar
+    extends SlottedMultiChildRenderObjectWidget<_Slot, RenderBox> {
   const _TabbedToolbar({
+    required this.link,
     required this.spacing,
     required this.leading,
     required this.title,
@@ -360,6 +511,7 @@ class _TabbedToolbar extends StatelessWidget {
     required this.actions,
   });
 
+  final _TabsSwitchLink link;
   final double spacing;
   final Widget? leading;
   final Widget? title;
@@ -367,86 +519,186 @@ class _TabbedToolbar extends StatelessWidget {
   final Widget? actions;
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-    height: kMacToolbarHeight,
-    child: CustomMultiChildLayout(
-      delegate: _TabbedToolbarLayout(spacing),
-      children: [
-        if (leading case final leading?)
-          LayoutId(id: _Slot.leading, child: leading),
-        if (title case final title?) LayoutId(id: _Slot.title, child: title),
-        LayoutId(id: _Slot.tabs, child: tabs),
-        if (actions case final actions?)
-          LayoutId(id: _Slot.actions, child: actions),
-      ],
-    ),
-  );
+  Iterable<_Slot> get slots => _Slot.values;
+
+  @override
+  Widget? childForSlot(_Slot slot) => switch (slot) {
+    _Slot.leading => leading,
+    _Slot.title => title,
+    _Slot.tabs => tabs,
+    _Slot.actions => actions,
+  };
+
+  @override
+  _TabbedToolbarLayout createRenderObject(BuildContext context) =>
+      _TabbedToolbarLayout(
+        link,
+        spacing,
+        MacosToolbarPassthroughScope.maybeNotifyChangesOf(context),
+      );
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _TabbedToolbarLayout renderObject,
+  ) {
+    renderObject
+      ..link = link
+      ..spacing = spacing
+      ..onMoved = MacosToolbarPassthroughScope.maybeNotifyChangesOf(context);
+  }
 }
 
-class _TabbedToolbarLayout extends MultiChildLayoutDelegate {
-  _TabbedToolbarLayout(this.spacing);
+class _TabbedToolbarLayout extends RenderBox
+    with SlottedContainerRenderObjectMixin<_Slot, RenderBox> {
+  _TabbedToolbarLayout(this.link, this._spacing, this.onMoved);
 
-  final double spacing;
+  _TabsSwitchLink link;
+
+  /// The width the title gets before the tabs.
+  static const double titleReserve = 200;
 
   // As AppBar: the leading box is a square of the default toolbar height.
   static const double _leadingWidth = kToolbarHeight;
 
+  double _spacing;
+  set spacing(double value) {
+    if (value == _spacing) return;
+    _spacing = value;
+    markNeedsLayout();
+  }
+
+  /// Called after a frame in which a child moved or resized; the passthrough
+  /// rects are measured again then.
+  VoidCallback? onMoved;
+
+  List<Rect>? _rects;
+
+  RenderBox? get _leading => childForSlot(_Slot.leading);
+  RenderBox? get _title => childForSlot(_Slot.title);
+  RenderBox get _tabs => childForSlot(_Slot.tabs)!;
+  RenderBox? get _actions => childForSlot(_Slot.actions);
+
+  Offset _offsetOf(RenderBox child) =>
+      (child.parentData! as BoxParentData).offset;
+
+  void _place(RenderBox child, Offset offset) =>
+      (child.parentData! as BoxParentData).offset = offset;
+
   @override
-  void performLayout(Size size) {
-    final row = BoxConstraints.tightFor(height: size.height);
+  Size computeDryLayout(BoxConstraints constraints) => constraints.biggest;
+
+  @override
+  void performLayout() {
+    size = constraints.biggest;
+    final height = size.height;
+    final spacing = _spacing;
     var start = 0.0;
-    if (hasChild(_Slot.leading)) {
-      layoutChild(_Slot.leading, row.tighten(width: _leadingWidth));
-      positionChild(_Slot.leading, Offset.zero);
+    if (_leading case final leading?) {
+      leading.layout(
+        BoxConstraints.tightFor(width: _leadingWidth, height: height),
+        parentUsesSize: true,
+      );
+      _place(leading, Offset.zero);
       start = _leadingWidth;
     }
     var end = size.width;
-    if (hasChild(_Slot.actions)) {
-      final width = layoutChild(
-        _Slot.actions,
+    if (_actions case final actions?) {
+      actions.layout(
         BoxConstraints(
           maxWidth: size.width,
-          minHeight: size.height,
-          maxHeight: size.height,
+          minHeight: height,
+          maxHeight: height,
         ),
-      ).width;
-      end -= width;
-      positionChild(_Slot.actions, Offset(end, 0));
+        parentUsesSize: true,
+      );
+      end -= actions.size.width;
+      _place(actions, Offset(end, 0));
     }
-    final tabs = layoutChild(
-      _Slot.tabs,
-      BoxConstraints.loose(Size(math.max(0, end - start), size.height)),
-    );
     final left = start + spacing;
     final right = end - spacing;
-    final centered = (size.width - tabs.width) / 2;
-    final hasTitle = hasChild(_Slot.title);
-    final title = hasTitle
-        ? layoutChild(
-            _Slot.title,
-            BoxConstraints(
-              maxWidth: math.max(0, right - tabs.width - spacing - left),
-            ),
-          )
-        : Size.zero;
-    if (hasTitle) {
-      positionChild(
-        _Slot.title,
-        Offset(left, (size.height - title.height) / 2),
+    final title = _title;
+    // The title's share first; an empty one (e.g. a TabTitle where the tabs
+    // show) takes no space.
+    var reserve = 0.0;
+    if (title != null) {
+      title.layout(
+        BoxConstraints(
+          maxWidth: math.max(0, math.min(titleReserve, right - left)),
+        ),
+        parentUsesSize: true,
+      );
+      reserve = title.size.width;
+    }
+    final hasTitle = reserve > 0;
+    final tabsLeft = hasTitle ? left + reserve + spacing : left;
+    final tabs = _tabs;
+    tabs.layout(
+      BoxConstraints(
+        maxWidth: math.max(0, right - tabsLeft),
+        maxHeight: height,
+      ),
+      parentUsesSize: true,
+    );
+    // The icons do not fit beside the title's share: the title gives way.
+    final iconsWidth = link.box?.iconsWidth ?? 0;
+    if (tabs.size.width < iconsWidth && right - tabsLeft < right - left) {
+      tabs.layout(
+        BoxConstraints(
+          maxWidth: math.max(0, math.min(iconsWidth, right - left)),
+          maxHeight: height,
+        ),
+        parentUsesSize: true,
       );
     }
-    final tabsMin = hasTitle ? left + title.width + spacing : left;
+    final tabsWidth = tabs.size.width;
+    if (title != null) {
+      title.layout(
+        BoxConstraints(
+          maxWidth: hasTitle
+              ? math.max(0, right - tabsWidth - spacing - left)
+              : 0,
+        ),
+        parentUsesSize: true,
+      );
+      _place(title, Offset(left, (height - title.size.height) / 2));
+    }
+    final tabsMin = hasTitle ? left + title!.size.width + spacing : left;
+    final centered = (size.width - tabsWidth) / 2;
     // Off center only as far as the title needs, and never past the ends.
     final x = math.max(
-      math.min(math.max(centered, tabsMin), right - tabs.width),
+      math.min(math.max(centered, tabsMin), right - tabsWidth),
       start,
     );
-    positionChild(_Slot.tabs, Offset(x, (size.height - tabs.height) / 2));
+    _place(tabs, Offset(x, (height - tabs.size.height) / 2));
+
+    final rects = [for (final child in children) _offsetOf(child) & child.size];
+    if (_rects != null && !listEquals(rects, _rects)) {
+      SchedulerBinding.instance.addPostFrameCallback((_) => onMoved?.call());
+    }
+    _rects = rects;
   }
 
   @override
-  bool shouldRelayout(_TabbedToolbarLayout oldDelegate) =>
-      spacing != oldDelegate.spacing;
+  void paint(PaintingContext context, Offset offset) {
+    for (final child in children) {
+      context.paintChild(child, offset + _offsetOf(child));
+    }
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
+    for (final child in children.toList().reversed) {
+      final hit = result.addWithPaintOffset(
+        offset: _offsetOf(child),
+        position: position,
+        hitTest: (result, transformed) =>
+            child.hitTest(result, position: transformed),
+      );
+      if (hit) return true;
+    }
+    return false;
+  }
 }
 
 /// An [AppBar] that, on macOS, is the unified toolbar row: 52 px high, under
@@ -505,6 +757,7 @@ class ArgusAppBar extends StatelessWidget implements PreferredSizeWidget {
         AppBarTheme.of(context).backgroundColor ??
         Theme.of(context).colorScheme.surface;
     final tabs = ToolbarTabs.maybeOf(context);
+    final link = _TabsSwitchLink();
     return MacosToolbarPassthroughScope(
       child: _MacToolbar(
         child: ColoredBox(
@@ -533,23 +786,37 @@ class ArgusAppBar extends StatelessWidget implements PreferredSizeWidget {
                     automaticallyImplyLeading: false,
                     backgroundColor: color,
                     titleSpacing: 0,
-                    title: _TabbedToolbar(
-                      spacing:
-                          titleSpacing ??
-                          AppBarTheme.of(context).titleSpacing ??
-                          NavigationToolbar.kMiddleSpacing,
-                      leading: lead == null ? null : _passthrough(lead),
-                      // The tabs name the page, so a plain text title goes.
-                      title: head == null || head is Text
-                          ? null
-                          : _passthrough(head),
-                      tabs: _passthrough(_TabsControl(tabs: tabs)),
-                      actions: actions == null || actions!.isEmpty
-                          ? null
-                          : Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: actions!.map(_passthrough).toList(),
-                            ),
+                    // Only the title is a header, not the whole row.
+                    excludeHeaderSemantics: true,
+                    title: SizedBox(
+                      height: kMacToolbarHeight,
+                      child: _TabbedToolbar(
+                        link: link,
+                        spacing:
+                            titleSpacing ??
+                            AppBarTheme.of(context).titleSpacing ??
+                            NavigationToolbar.kMiddleSpacing,
+                        leading: lead == null ? null : _passthrough(lead),
+                        // The tabs name the page, so a plain text title goes.
+                        title: head == null || head is Text
+                            ? null
+                            : Semantics(
+                                header: true,
+                                child: _passthrough(head),
+                              ),
+                        tabs: _passthrough(
+                          _TabsControl(tabs: tabs, link: link),
+                        ),
+                        actions: actions == null || actions!.isEmpty
+                            ? null
+                            : _withActionsIconTheme(
+                                context,
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: actions!.map(_passthrough).toList(),
+                                ),
+                              ),
+                      ),
                     ),
                   ),
           ),
@@ -559,6 +826,24 @@ class ArgusAppBar extends StatelessWidget implements PreferredSizeWidget {
   }
 
   static Widget _passthrough(Widget child) => _RoutePassthrough(child: child);
+
+  // The icon theme AppBar gives its actions; the leading gets the theme of
+  // the whole toolbar, which the title slot has too.
+  static Widget _withActionsIconTheme(BuildContext context, Widget actions) {
+    final theme = Theme.of(context);
+    final bar = AppBarTheme.of(context);
+    final data =
+        bar.actionsIconTheme ??
+        bar.iconTheme ??
+        (theme.useMaterial3
+            ? IconThemeData(
+                color:
+                    bar.foregroundColor ?? theme.colorScheme.onSurfaceVariant,
+                size: 24,
+              )
+            : null);
+    return data == null ? actions : IconTheme.merge(data: data, child: actions);
+  }
 
   // What AppBar implies; it is built here so that it can pass through.
   static Widget? _impliedLeading(BuildContext context) {
@@ -740,13 +1025,57 @@ class _RoutePassthrough extends StatefulWidget {
 
 class _RoutePassthroughState extends State<_RoutePassthrough> {
   final _childKey = GlobalKey();
+  Size? _size;
+  bool _empty = false;
+
+  // An empty child (e.g. a TabTitle where the tabs show) passes nothing
+  // through; its size is known after layout, so this follows a frame later.
+  void _onSize(Size size) {
+    _size = size;
+    if (size.isEmpty == _empty) return;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      final empty = _size!.isEmpty;
+      if (mounted && empty != _empty) setState(() => _empty = empty);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    final child = KeyedSubtree(key: _childKey, child: widget.child);
-    return _PassthroughButtons.of(context)
+    final child = KeyedSubtree(
+      key: _childKey,
+      child: _SizeObserver(onSize: _onSize, child: widget.child),
+    );
+    return _PassthroughButtons.of(context) && !_empty
         ? MacosToolbarPassthrough(child: child)
         : child;
+  }
+}
+
+class _SizeObserver extends SingleChildRenderObjectWidget {
+  const _SizeObserver({required this.onSize, super.child});
+
+  final ValueChanged<Size> onSize;
+
+  @override
+  _RenderSizeObserver createRenderObject(BuildContext context) =>
+      _RenderSizeObserver(onSize);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderSizeObserver renderObject,
+  ) => renderObject.onSize = onSize;
+}
+
+class _RenderSizeObserver extends RenderProxyBox {
+  _RenderSizeObserver(this.onSize);
+
+  ValueChanged<Size> onSize;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    onSize(size);
   }
 }
 

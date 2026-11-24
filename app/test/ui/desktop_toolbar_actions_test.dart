@@ -129,19 +129,20 @@ void main() {
       expect(_inAppBar('New session'), findsOneWidget);
       expect(_inAppBar('New terminal'), findsNothing);
 
-      await tester.tap(find.text('Terminals'));
+      // At 800 px the toolbar tabs are icons, with the labels as tooltips.
+      await tester.tap(find.byTooltip('Terminals'));
       await tester.pump();
       expect(find.byType(FloatingActionButton), findsNothing);
       expect(_inAppBar('New session'), findsNothing);
       expect(_inAppBar('New terminal'), findsOneWidget);
 
-      await tester.tap(find.text('Changes'));
+      await tester.tap(find.byTooltip('Changes'));
       await tester.pump();
       expect(find.byType(FloatingActionButton), findsNothing);
       expect(_inAppBar('New session'), findsNothing);
       expect(_inAppBar('New terminal'), findsNothing);
 
-      await tester.tap(find.text('Terminals'));
+      await tester.tap(find.byTooltip('Terminals'));
       await tester.pump();
       await tester.tap(_inAppBar('New terminal'));
       await tester.pump();

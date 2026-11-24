@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:macos_window_utils/macos_window_utils.dart';
@@ -24,11 +25,12 @@ ValueNotifier<bool> _fullScreen([bool value = false]) {
   return n;
 }
 
-Widget _app(Widget home) {
+Widget _app(Widget home, {ThemeData? theme}) {
   final fullScreen = _fullScreen();
   final routes = TitlebarRouteObserver();
   addTearDown(routes.dispose);
   return MaterialApp(
+    theme: theme,
     navigatorObservers: [routes],
     builder: (context, child) =>
         TitlebarScope(fullScreen: fullScreen, routes: routes, child: child!),
@@ -630,14 +632,38 @@ void main() {
       List<String> labels = const ['One', 'Two'],
       int selected = 0,
       ValueChanged<int>? onSelected,
+      ThemeData? theme,
     }) => _app(
       ToolbarTabs(
         labels: labels,
+        icons: [for (final _ in labels) const Icon(Icons.circle_outlined)],
         selected: selected,
         onSelected: onSelected ?? (_) {},
         child: Scaffold(appBar: appBar, body: const SizedBox.expand()),
       ),
+      theme: theme,
     );
+
+    Finder segmentTooltip(String label) =>
+        find.descendant(of: control, matching: find.byTooltip(label));
+    Finder segmentText(String label) =>
+        find.descendant(of: control, matching: find.text(label));
+    Color? iconColor(WidgetTester tester, IconData icon) => tester
+        .widget<RichText>(
+          find.descendant(
+            of: find.byIcon(icon),
+            matching: find.byType(RichText),
+          ),
+        )
+        .text
+        .style
+        ?.color;
+    bool inHeader(SemanticsNode? node) {
+      for (var n = node; n != null; n = n.parent) {
+        if (n.getSemanticsData().flagsCollection.isHeader) return true;
+      }
+      return false;
+    }
 
     testWidgets(
       'a CupertinoSlidingSegmentedControl<int> with the labels, 28 px high, centered in the 52 px row; card background, border thumb, 13 pt text',
@@ -686,6 +712,187 @@ void main() {
           expect(style.color, AppColors.text);
           expect(style.fontSize, 13);
         }
+      },
+    );
+
+    testWidgets(
+      'leading and action icons have the colors of a bar without tabs',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        final theme = buildArgusTheme(platform: TargetPlatform.macOS);
+        ArgusAppBar bar() => ArgusAppBar(
+          leading: IconButton(icon: const Icon(Icons.menu), onPressed: () {}),
+          actions: [IconButton(icon: const Icon(Icons.add), onPressed: () {})],
+        );
+        await tester.pumpWidget(
+          _app(
+            Scaffold(appBar: bar(), body: const SizedBox.expand()),
+            theme: theme,
+          ),
+        );
+        final lead = iconColor(tester, Icons.menu);
+        final action = iconColor(tester, Icons.add);
+        await tester.pumpWidget(tabbed(bar(), theme: theme));
+        expect(control, findsOneWidget);
+        expect(iconColor(tester, Icons.menu), lead);
+        expect(iconColor(tester, Icons.add), action);
+      },
+    );
+
+    testWidgets(
+      'labels that do not fit whole become icons with the labels as tooltips, 28 px high',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        const labels = ['A rather long first label', 'A rather long second'];
+        await tester.pumpWidget(
+          tabbed(
+            ArgusAppBar(
+              leading: IconButton(
+                icon: const Icon(Icons.menu),
+                onPressed: () {},
+              ),
+            ),
+            labels: labels,
+          ),
+        );
+        expect(control, findsOneWidget);
+        for (final label in labels) {
+          expect(segmentTooltip(label), findsOneWidget);
+          expect(segmentText(label), findsNothing);
+        }
+        final widget = tester.widget<CupertinoSlidingSegmentedControl<int>>(
+          control,
+        );
+        expect(widget.backgroundColor, AppColors.card);
+        expect(widget.thumbColor, AppColors.border);
+        expect(tester.getSize(control).height, 28);
+        await tester.tap(find.byIcon(Icons.circle_outlined).last);
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets(
+      'the title keeps 200 px before the tabs get their labels; short labels stay whole beside it',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        // 13 px per glyph in the test font: the labels need about 300 px.
+        const labels = ['Sessions', 'History'];
+        Widget bar(String title) => tabbed(
+          ArgusAppBar(
+            leading: IconButton(icon: const Icon(Icons.menu), onPressed: () {}),
+            title: TextButton(
+              onPressed: () {},
+              child: Text(title, overflow: TextOverflow.ellipsis),
+            ),
+            actions: [
+              for (final icon in [
+                Icons.add,
+                Icons.edit,
+                Icons.share,
+                Icons.delete,
+                Icons.search,
+              ])
+                IconButton(icon: Icon(icon), onPressed: () {}),
+            ],
+          ),
+          labels: labels,
+        );
+        final title = find.byType(TextButton);
+
+        await tester.pumpWidget(bar('A title much wider than the reserve'));
+        expect(tester.getSize(title).width, greaterThanOrEqualTo(200));
+        expect(segmentTooltip('Sessions'), findsOneWidget);
+        expect(
+          tester.getRect(title).right,
+          lessThanOrEqualTo(tester.getRect(control).left),
+        );
+
+        await tester.pumpWidget(bar('Short'));
+        expect(segmentText('Sessions'), findsOneWidget);
+        expect(segmentTooltip('Sessions'), findsNothing);
+      },
+    );
+
+    testWidgets('the tabs and the actions are not in a header; the title is', (
+      tester,
+    ) async {
+      _platform(TargetPlatform.macOS);
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(
+        tabbed(
+          ArgusAppBar(
+            title: TextButton(onPressed: () {}, child: const Text('T')),
+            actions: [
+              IconButton(
+                tooltip: 'Add',
+                icon: const Icon(Icons.add),
+                onPressed: () {},
+              ),
+            ],
+          ),
+        ),
+      );
+      expect(inHeader(tester.getSemantics(find.text('One'))), isFalse);
+      expect(inHeader(tester.getSemantics(find.byTooltip('Add'))), isFalse);
+      expect(inHeader(tester.getSemantics(find.text('T'))), isTrue);
+      semantics.dispose();
+    });
+
+    testWidgets('an empty title takes no space and sends no passthrough rect', (
+      tester,
+    ) async {
+      _platform(TargetPlatform.macOS);
+      await tester.pumpWidget(
+        tabbed(
+          ArgusAppBar(
+            title: const TabTitle('T'),
+            actions: [
+              IconButton(icon: const Icon(Icons.add), onPressed: () {}),
+            ],
+          ),
+        ),
+      );
+      await _flushPassthrough(tester);
+      expect(_passthroughRects.values.where((r) => r.isEmpty), isEmpty);
+      expect(
+        _passthroughRects.values.toSet(),
+        _visiblePassthroughRects(tester),
+      );
+      expect(
+        tester.getRect(control).center.dx,
+        moreOrLessEquals(tester.getRect(find.byType(AppBar)).center.dx),
+      );
+    });
+
+    testWidgets(
+      'after an action grows and moves the tabs, the native rects match',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        final label = ValueNotifier('An action button label');
+        addTearDown(label.dispose);
+        await tester.pumpWidget(
+          tabbed(
+            ArgusAppBar(
+              actions: [
+                ValueListenableBuilder<String>(
+                  valueListenable: label,
+                  builder: (_, text, _) =>
+                      TextButton(onPressed: () {}, child: Text(text)),
+                ),
+              ],
+            ),
+          ),
+        );
+        await _flushPassthrough(tester);
+        final before = tester.getRect(control);
+        label.value = 'An action button label, longer';
+        await _flushPassthrough(tester);
+        expect(tester.getRect(control), isNot(before));
+        expect(_passthroughRects.values, contains(tester.getRect(control)));
+        expect(
+          _passthroughRects.values.toSet(),
+          _visiblePassthroughRects(tester),
+        );
       },
     );
 
@@ -781,6 +988,7 @@ void main() {
           _app(
             ToolbarTabs(
               labels: const ['One', 'Two'],
+              icons: const [Icon(Icons.circle), Icon(Icons.square)],
               selected: 0,
               onSelected: (_) {},
               child: Scaffold(
