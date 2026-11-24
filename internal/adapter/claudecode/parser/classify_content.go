@@ -63,6 +63,9 @@ func decodeContent(raw json.RawMessage) msgContent {
 		if json.Unmarshal(raw, &c.blocks) != nil {
 			c.blocks = nil
 		}
+		for i, b := range c.blocks {
+			c.blocks[i] = b.asDisplayed()
+		}
 		return c
 	}
 	c.isString = raw[0] == '"' && json.Unmarshal(raw, &c.str) == nil
