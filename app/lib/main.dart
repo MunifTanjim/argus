@@ -79,6 +79,7 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
   bool _loaded = false;
   final _navigatorKey = GlobalKey<NavigatorState>();
   final _sidebarStrip = SidebarStripController();
+  final _titlebarRoutes = TitlebarRouteObserver();
 
   @override
   void initState() {
@@ -102,6 +103,7 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _sidebarStrip.dispose();
+    _titlebarRoutes.dispose();
     super.dispose();
   }
 
@@ -133,10 +135,11 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
       // the app items' actions.
       builder: (context, child) => MacMenuBar(
         child: TitlebarScope(
+          routes: _titlebarRoutes,
           child: WindowStrip(controller: _sidebarStrip, child: child!),
         ),
       ),
-      navigatorObservers: [appRouteObserver, _sidebarStrip],
+      navigatorObservers: [appRouteObserver, _sidebarStrip, _titlebarRoutes],
       home: !_loaded
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : creds == null

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:macos_window_utils/macos/ns_window_delegate.dart';
 import 'package:macos_window_utils/macos_window_utils.dart';
 import 'package:macos_window_utils/widgets/macos_toolbar_passthrough.dart';
@@ -31,7 +32,16 @@ class TitlebarInsets extends InheritedWidget {
 /// Provides the root [TitlebarInsets]: [kTrafficLightsInset] on macOS while
 /// not in full screen (where there are no traffic lights), else 0.
 class TitlebarScope extends StatefulWidget {
-  const TitlebarScope({super.key, this.fullScreen, required this.child});
+  const TitlebarScope({
+    super.key,
+    this.fullScreen,
+    this.routes,
+    required this.child,
+  });
+
+  /// Observes the root navigator, so that toolbars in nested navigators
+  /// learn about routes pushed over them there (e.g. a dialog).
+  final TitlebarRouteObserver? routes;
 
   /// Whether the window is in full screen; by default from the window
   /// delegate of macos_window_utils.
@@ -71,16 +81,73 @@ class _TitlebarScopeState extends State<TitlebarScope> {
   @override
   Widget build(BuildContext context) {
     final fullScreen = _fullScreen;
+    final child = _TitlebarRoutes(routes: widget.routes, child: widget.child);
     if (!_isMac || fullScreen == null) {
-      return TitlebarInsets(left: 0, child: widget.child);
+      return TitlebarInsets(left: 0, child: child);
     }
     return ValueListenableBuilder<bool>(
       valueListenable: fullScreen,
       builder: (context, full, child) =>
           TitlebarInsets(left: full ? 0 : kTrafficLightsInset, child: child!),
-      child: widget.child,
+      child: child,
     );
   }
+}
+
+/// Notifies when the routes of the navigator it observes change.
+class TitlebarRouteObserver extends NavigatorObserver with ChangeNotifier {
+  bool _scheduled = false;
+  bool _disposed = false;
+
+  // Calls can arrive mid-build (initial routes); then notify after the frame.
+  void _changed() {
+    final scheduler = SchedulerBinding.instance;
+    if (scheduler.schedulerPhase != SchedulerPhase.persistentCallbacks) {
+      notifyListeners();
+      return;
+    }
+    if (_scheduled) return;
+    _scheduled = true;
+    scheduler.addPostFrameCallback((_) {
+      _scheduled = false;
+      if (!_disposed) notifyListeners();
+    });
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _changed();
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _changed();
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _changed();
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) =>
+      _changed();
+}
+
+class _TitlebarRoutes extends InheritedWidget {
+  const _TitlebarRoutes({required this.routes, required super.child});
+
+  final TitlebarRouteObserver? routes;
+
+  static TitlebarRouteObserver? of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_TitlebarRoutes>()?.routes;
+
+  @override
+  bool updateShouldNotify(_TitlebarRoutes oldWidget) =>
+      routes != oldWidget.routes;
 }
 
 class _FullScreenDelegate extends NSWindowDelegate
@@ -170,7 +237,7 @@ class ArgusAppBar extends StatelessWidget implements PreferredSizeWidget {
         AppBarTheme.of(context).backgroundColor ??
         Theme.of(context).colorScheme.surface;
     return MacosToolbarPassthroughScope(
-      child: _PassthroughRefresh(
+      child: _MacToolbar(
         child: ColoredBox(
           color: color,
           child: Padding(
@@ -207,43 +274,80 @@ class ArgusAppBar extends StatelessWidget implements PreferredSizeWidget {
   }
 }
 
-/// Re-sends the passthrough rects of its [MacosToolbarPassthroughScope] when
-/// the route settles: the rects are measured with the transition's transform,
-/// and a paint-only transition does not lay the toolbar out again.
-class _PassthroughRefresh extends StatefulWidget {
-  const _PassthroughRefresh({required this.child});
+/// Manages the passthrough of a macOS toolbar row by the state of its route
+/// and the routes enclosing its navigator:
+/// - onstage with nothing over it: each interactive child passes through;
+/// - a popup or dialog over it: the whole row passes through, so that the
+///   barrier and menu items over the row receive clicks;
+/// - covered by an opaque route (offstage): nothing passes through, so the
+///   toolbar of the route above drags the window.
+///
+/// The rects are measured with the transitions' transforms, and a paint-only
+/// transition does not lay the toolbar out again, so they are re-sent when a
+/// transition of any of these routes ends.
+class _MacToolbar extends StatefulWidget {
+  const _MacToolbar({required this.child});
 
   final Widget child;
 
   @override
-  State<_PassthroughRefresh> createState() => _PassthroughRefreshState();
+  State<_MacToolbar> createState() => _MacToolbarState();
 }
 
-class _PassthroughRefreshState extends State<_PassthroughRefresh> {
-  ModalRoute<dynamic>? _route;
+class _MacToolbarState extends State<_MacToolbar> {
+  final _rowKey = GlobalKey();
+  List<ModalRoute<dynamic>> _routes = const [];
+  TitlebarRouteObserver? _observer;
   VoidCallback? _notify;
+  bool? _wasRow;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _notify = MacosToolbarPassthroughScope.maybeNotifyChangesOf(context);
-    final route = ModalRoute.of(context);
-    if (route == _route) return;
+    final observer = _TitlebarRoutes.of(context);
+    if (observer != _observer) {
+      _observer?.removeListener(_rebuild);
+      _observer = observer?..addListener(_rebuild);
+    }
+    final routes = _enclosingRoutes(context);
+    if (listEquals(routes, _routes)) return;
     _unlisten();
-    _route = route;
-    route?.animation?.addStatusListener(_onAnimation);
-    route?.secondaryAnimation?.addStatusListener(_onSecondaryAnimation);
+    _routes = routes;
+    for (final route in routes) {
+      route.animation?.addStatusListener(_onAnimation);
+      route.secondaryAnimation?.addStatusListener(_onSecondaryAnimation);
+    }
+  }
+
+  // This route, then the route of each enclosing navigator.
+  static List<ModalRoute<dynamic>> _enclosingRoutes(BuildContext context) {
+    final routes = <ModalRoute<dynamic>>[];
+    var route = ModalRoute.of(context);
+    while (route != null) {
+      routes.add(route);
+      final outer = route.navigator?.context;
+      route = outer == null ? null : ModalRoute.of(outer);
+    }
+    return routes;
   }
 
   @override
   void dispose() {
     _unlisten();
+    _observer?.removeListener(_rebuild);
     super.dispose();
   }
 
   void _unlisten() {
-    _route?.animation?.removeStatusListener(_onAnimation);
-    _route?.secondaryAnimation?.removeStatusListener(_onSecondaryAnimation);
+    for (final route in _routes) {
+      route.animation?.removeStatusListener(_onAnimation);
+      route.secondaryAnimation?.removeStatusListener(_onSecondaryAnimation);
+    }
+  }
+
+  void _rebuild() {
+    if (mounted) setState(() {});
   }
 
   // Pushed and shown.
@@ -251,18 +355,47 @@ class _PassthroughRefreshState extends State<_PassthroughRefresh> {
     if (status.isCompleted) _notify?.call();
   }
 
-  // Shown again after the route above it is popped.
+  // Covered, or shown again after the route above it popped.
   void _onSecondaryAnimation(AnimationStatus status) {
+    _rebuild();
     if (status.isDismissed) _notify?.call();
   }
 
   @override
-  Widget build(BuildContext context) => widget.child;
+  Widget build(BuildContext context) {
+    final onstage = TickerMode.valuesOf(context).enabled;
+    final row = onstage && _routes.any((r) => !r.isCurrent);
+    if (row != _wasRow) {
+      _wasRow = row;
+      // The new passthrough views are measured after the frame.
+      SchedulerBinding.instance.addPostFrameCallback((_) => _notify?.call());
+    }
+    final bar = KeyedSubtree(
+      key: _rowKey,
+      child: _PassthroughButtons(enabled: onstage && !row, child: widget.child),
+    );
+    return row ? MacosToolbarPassthrough(child: bar) : bar;
+  }
 }
 
-/// [MacosToolbarPassthrough] while its route is current and onstage. A
-/// covered route removes its native passthrough views, so that the toolbar
-/// of the route above it drags the window. The child keeps its state.
+class _PassthroughButtons extends InheritedWidget {
+  const _PassthroughButtons({required this.enabled, required super.child});
+
+  final bool enabled;
+
+  static bool of(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<_PassthroughButtons>()
+          ?.enabled ??
+      true;
+
+  @override
+  bool updateShouldNotify(_PassthroughButtons oldWidget) =>
+      enabled != oldWidget.enabled;
+}
+
+/// [MacosToolbarPassthrough] while its toolbar passes buttons through. The
+/// child keeps its state when that changes.
 class _RoutePassthrough extends StatefulWidget {
   const _RoutePassthrough({required this.child});
 
@@ -277,11 +410,10 @@ class _RoutePassthroughState extends State<_RoutePassthrough> {
 
   @override
   Widget build(BuildContext context) {
-    final active =
-        (ModalRoute.isCurrentOf(context) ?? true) &&
-        TickerMode.valuesOf(context).enabled;
     final child = KeyedSubtree(key: _childKey, child: widget.child);
-    return active ? MacosToolbarPassthrough(child: child) : child;
+    return _PassthroughButtons.of(context)
+        ? MacosToolbarPassthrough(child: child)
+        : child;
   }
 }
 

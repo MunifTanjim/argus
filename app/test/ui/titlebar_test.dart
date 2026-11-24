@@ -23,14 +23,24 @@ ValueNotifier<bool> _fullScreen([bool value = false]) {
   return n;
 }
 
-Widget _scaffold(PreferredSizeWidget appBar) {
+Widget _app(Widget home) {
   final fullScreen = _fullScreen();
+  final routes = TitlebarRouteObserver();
+  addTearDown(routes.dispose);
   return MaterialApp(
+    navigatorObservers: [routes],
     builder: (context, child) =>
-        TitlebarScope(fullScreen: fullScreen, child: child!),
-    home: Scaffold(appBar: appBar, body: const SizedBox.expand()),
+        TitlebarScope(fullScreen: fullScreen, routes: routes, child: child!),
+    home: home,
   );
 }
+
+Widget _scaffold(PreferredSizeWidget appBar) =>
+    _app(Scaffold(appBar: appBar, body: const SizedBox.expand()));
+
+Rect _passthroughRectOf(WidgetTester tester, Finder child) => tester.getRect(
+  find.ancestor(of: child, matching: find.byType(MacosToolbarPassthrough)),
+);
 
 // Lets debounced passthrough updates (10 ms) and their post-frame resend run.
 // The package's init future completed outside the fake-async zone, so its
@@ -424,5 +434,102 @@ void main() {
       ),
     );
     expect(tester.getSize(find.byType(ArgusAppBar)).height, 40);
+  });
+
+  group('passthrough with a nested navigator on macOS', () {
+    // The root route holds a nested navigator, like HomeShell.
+    Widget nested() => Scaffold(
+      body: Navigator(
+        onGenerateRoute: (_) => MaterialPageRoute<void>(
+          builder: (_) => Scaffold(
+            appBar: ArgusAppBar(
+              title: const Text('Inner'),
+              actions: [
+                IconButton(icon: const Icon(Icons.add), onPressed: () {}),
+                PopupMenuButton<int>(
+                  icon: const Icon(Icons.more_vert),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 1, child: Text('One')),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    NavigatorState rootNavigator(WidgetTester tester) =>
+        tester.state<NavigatorState>(find.byType(Navigator).first);
+
+    testWidgets(
+      'after a root route over it pops, the inner bar\'s rects are current',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        await tester.pumpWidget(_app(nested()));
+        await _flushPassthrough(tester);
+        rootNavigator(tester).push(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                const Scaffold(appBar: ArgusAppBar(title: Text('Settings'))),
+          ),
+        );
+        await _flushPassthrough(tester);
+        rootNavigator(tester).pop();
+        await _flushPassthrough(tester);
+        expect(
+          _passthroughRects.values,
+          contains(_passthroughRectOf(tester, find.byIcon(Icons.add))),
+        );
+        expect(
+          _passthroughRects.values.toSet(),
+          _visiblePassthroughRects(tester),
+        );
+      },
+    );
+
+    testWidgets(
+      'with a menu open, the whole row passes through; after it closes, the buttons do again',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        await tester.pumpWidget(_app(nested()));
+        await _flushPassthrough(tester);
+        final buttons = _passthroughRects.values.toSet();
+        expect(buttons, hasLength(2));
+
+        await tester.tap(find.byIcon(Icons.more_vert));
+        await _flushPassthrough(tester);
+        expect(find.text('One'), findsOneWidget);
+        expect(_passthroughRects.values.toSet(), {
+          const Rect.fromLTWH(0, 0, 800, kMacToolbarHeight),
+        });
+
+        await tester.tapAt(const Offset(400, 400));
+        await _flushPassthrough(tester);
+        expect(find.text('One'), findsNothing);
+        expect(_passthroughRects.values.toSet(), buttons);
+      },
+    );
+
+    testWidgets(
+      'with a dialog on the root navigator, the inner bar\'s whole row passes through',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        await tester.pumpWidget(_app(nested()));
+        await _flushPassthrough(tester);
+        final buttons = _passthroughRects.values.toSet();
+        showDialog<void>(
+          context: rootNavigator(tester).context,
+          builder: (_) => const Text('dialog'),
+        );
+        await _flushPassthrough(tester);
+        expect(_passthroughRects.values.toSet(), {
+          const Rect.fromLTWH(0, 0, 800, kMacToolbarHeight),
+        });
+        rootNavigator(tester).pop();
+        await _flushPassthrough(tester);
+        expect(_passthroughRects.values.toSet(), buttons);
+      },
+    );
   });
 }
