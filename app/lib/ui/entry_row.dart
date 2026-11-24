@@ -12,11 +12,8 @@ import 'theme.dart';
 import 'tool_registry.dart';
 import 'usage_format.dart';
 
-const _mono = TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1.3);
-final _monoDim = _mono.copyWith(color: AppColors.dim);
-
-const thinkingCountColor = Color(0xFFd79921); // gruvbox neutral yellow
-const toolCountColor = Color(0xFF458588); // gruvbox neutral blue
+const _mono = TextStyle(fontFamily: monoFamily, fontSize: 11, height: 1.3);
+TextStyle _monoDim(ArgusTokens t) => _mono.copyWith(color: t.textDim);
 
 // Matches the TUI duration format.
 String _fmtDuration(int ms) {
@@ -150,29 +147,30 @@ class _UserBand extends StatelessWidget {
   final VoidCallback? onToggle;
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return Padding(
       padding: const EdgeInsets.only(top: 12, bottom: 4),
       child: Container(
         key: const ValueKey('user-band'),
         constraints: const BoxConstraints(minWidth: double.infinity),
-        color: AppColors.card,
+        color: t.surface,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                const Icon(Icons.person, size: 14, color: AppColors.accent),
+                Icon(Icons.person, size: 14, color: t.accent),
                 const SizedBox(width: 6),
                 Text(
                   'You',
                   style: _mono.copyWith(
-                    color: AppColors.text,
+                    color: t.text,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
                 const Spacer(),
-                Text(_clockTime(entry.timestamp), style: _monoDim),
+                Text(_clockTime(entry.timestamp), style: _monoDim(t)),
               ],
             ),
             const SizedBox(height: 4),
@@ -192,18 +190,18 @@ typedef _ArgusKind = ({String label, Color color, bool markdown});
 
 /// Follows the argus-ui Claude Code plugin: messages draw their body as
 /// markdown, notices keep their lines (tool input) as written.
-_ArgusKind _argusKind(String kind) => switch (kind) {
-  'text' => (label: 'message', color: AppColors.accent, markdown: true),
-  'task' => (label: 'task', color: AppColors.link, markdown: true),
-  'reply' => (label: 'reply', color: AppColors.accent, markdown: true),
-  'interaction' => (label: 'prompt', color: AppColors.notice, markdown: false),
-  'turn_ended' => (label: 'turn ended', color: AppColors.dim, markdown: false),
+_ArgusKind _argusKind(String kind, ArgusTokens t) => switch (kind) {
+  'text' => (label: 'message', color: t.accent, markdown: true),
+  'task' => (label: 'task', color: t.link, markdown: true),
+  'reply' => (label: 'reply', color: t.accent, markdown: true),
+  'interaction' => (label: 'prompt', color: t.notice, markdown: false),
+  'turn_ended' => (label: 'turn ended', color: t.textDim, markdown: false),
   'interaction_ended' => (
     label: 'prompt ended',
-    color: AppColors.dim,
+    color: t.textDim,
     markdown: false,
   ),
-  _ => (label: kind, color: AppColors.dim, markdown: false),
+  _ => (label: kind, color: t.textDim, markdown: false),
 };
 
 /// A user entry whose prompt argus delivered: one framed card per message.
@@ -218,6 +216,7 @@ class _ArgusCard extends StatelessWidget {
   final VoidCallback? onToggle;
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final msgs = entry.argusMessages;
     return Padding(
       key: const ValueKey('argus-card'),
@@ -228,17 +227,17 @@ class _ArgusCard extends StatelessWidget {
           if (msgs.length > 1)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
-              child: Text('argus · ${msgs.length} messages', style: _monoDim),
+              child: Text('argus · ${msgs.length} messages', style: _monoDim(t)),
             ),
           for (var i = 0; i < msgs.length; i++)
-            _argusMessage(msgs[i], first: i == 0),
+            _argusMessage(msgs[i], t, first: i == 0),
         ],
       ),
     );
   }
 
-  Widget _argusMessage(ArgusMessage m, {required bool first}) {
-    final k = _argusKind(m.kind);
+  Widget _argusMessage(ArgusMessage m, ArgusTokens t, {required bool first}) {
+    final k = _argusKind(m.kind, t);
     final name = m.child ?? m.from ?? '';
     final session = m.child != null ? m.childSession : m.session;
     return Container(
@@ -247,7 +246,7 @@ class _ArgusCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       constraints: const BoxConstraints(minWidth: double.infinity),
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: t.surface,
         border: Border.all(color: k.color),
         borderRadius: BorderRadius.circular(6),
       ),
@@ -268,7 +267,7 @@ class _ArgusCard extends StatelessWidget {
                 child: Text(
                   name,
                   overflow: TextOverflow.ellipsis,
-                  style: _mono.copyWith(color: AppColors.text),
+                  style: _mono.copyWith(color: t.text),
                 ),
               ),
               if (session != null && session.isNotEmpty) ...[
@@ -277,15 +276,15 @@ class _ArgusCard extends StatelessWidget {
                   child: Text(
                     session,
                     overflow: TextOverflow.ellipsis,
-                    style: _monoDim,
+                    style: _monoDim(t),
                   ),
                 ),
               ],
               const SizedBox(width: 6),
-              Text(m.id, style: _monoDim),
+              Text(m.id, style: _monoDim(t)),
               if (first) ...[
                 const Spacer(),
-                Text(_clockTime(entry.timestamp), style: _monoDim),
+                Text(_clockTime(entry.timestamp), style: _monoDim(t)),
               ],
             ],
           ),
@@ -318,6 +317,7 @@ class _Foldable extends StatelessWidget {
   static const _maxLines = 10;
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final lineCount = '\n'.allMatches(text).length + 1;
     final long = lineCount > _maxLines || text.length > 600;
     return Column(
@@ -329,15 +329,15 @@ class _Foldable extends StatelessWidget {
             maxLines: _maxLines,
             overflow: TextOverflow.ellipsis,
             style: markdown
-                ? const TextStyle(color: AppColors.text, fontSize: 14)
-                : _mono.copyWith(color: AppColors.text, fontSize: 12),
+                ? TextStyle(color: t.text, fontSize: 14)
+                : _mono.copyWith(color: t.text, fontSize: 12),
           )
         else if (markdown)
           appMarkdown(text)
         else
           Text(
             text,
-            style: _mono.copyWith(color: AppColors.text, fontSize: 12),
+            style: _mono.copyWith(color: t.text, fontSize: 12),
           ),
         if (long)
           GestureDetector(
@@ -346,7 +346,7 @@ class _Foldable extends StatelessWidget {
               padding: const EdgeInsets.only(top: 4),
               child: Text(
                 expanded ? 'Show less' : 'Show more',
-                style: _mono.copyWith(color: AppColors.accent),
+                style: _mono.copyWith(color: t.accent),
               ),
             ),
           ),
@@ -366,15 +366,16 @@ class _ThinkingRow extends StatelessWidget {
   final VoidCallback? onToggle;
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final text = (entry.text ?? '').trim();
     final row = Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: [
-          const Icon(Icons.lightbulb, size: 14, color: AppColors.dim),
+          Icon(Icons.lightbulb, size: 14, color: t.textDim),
           const SizedBox(width: 6),
-          Text('Thinking', style: _mono.copyWith(color: AppColors.dim)),
-          if (entry.signature) Text(' 🔒', style: _monoDim),
+          Text('Thinking', style: _mono.copyWith(color: t.textDim)),
+          if (entry.signature) Text(' 🔒', style: _monoDim(t)),
         ],
       ),
     );
@@ -385,7 +386,7 @@ class _ThinkingRow extends StatelessWidget {
         if (expanded)
           Padding(
             padding: const EdgeInsets.only(left: 20, bottom: 4),
-            child: Text(text, style: _monoDim),
+            child: Text(text, style: _monoDim(t)),
           ),
       ],
     );
@@ -405,7 +406,8 @@ class _TeammateMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tm = entry.soleSubagent!;
-    final tc = teamColor(tm.color);
+    final t = context.tokens;
+    final tc = readableOn(teamBrandColor(tm.color, t), t);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Column(
@@ -442,17 +444,18 @@ class _TurnEndDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final e = entry;
     final parts = <InlineSpan>[];
     // The same fields, in the same order, as the TUI's turn footer.
     void add(String s, {Color? color, IconData? icon, Color? iconColor}) {
       // The no-break space keeps a separator from starting a line.
       if (parts.isNotEmpty) {
-        parts.add(TextSpan(text: '\u00A0· ', style: _monoDim));
+        parts.add(TextSpan(text: '\u00A0· ', style: _monoDim(t)));
       }
       final value = TextSpan(
         text: s,
-        style: color == null ? _monoDim : _mono.copyWith(color: color),
+        style: color == null ? _monoDim(t) : _mono.copyWith(color: color),
       );
       if (icon == null) {
         parts.add(value);
@@ -471,10 +474,10 @@ class _TurnEndDivider extends StatelessWidget {
                   child: Icon(
                     icon,
                     size: 12,
-                    color: iconColor ?? AppColors.dim,
+                    color: iconColor ?? t.textDim,
                   ),
                 ),
-                TextSpan(text: ' ', style: _monoDim),
+                TextSpan(text: ' ', style: _monoDim(t)),
                 value,
               ],
             ),
@@ -484,28 +487,28 @@ class _TurnEndDivider extends StatelessWidget {
       );
     }
 
-    if (e.interrupted) add('interrupted', color: AppColors.error);
+    if (e.interrupted) add('interrupted', color: t.error);
     if (e.modelName?.isNotEmpty ?? false) {
-      add(e.modelName!, color: hexColor(e.modelColor) ?? AppColors.secondary);
+      add(e.modelName!, color: hexColor(e.modelColor) ?? t.textSecondary);
     }
     if (e.thinking > 0) {
       add(
         '${e.thinking}',
         icon: Icons.lightbulb,
-        iconColor: thinkingCountColor,
+        iconColor: t.thinking,
       );
     }
     if (e.toolCount > 0) {
-      add('${e.toolCount}', icon: Icons.build, iconColor: toolCountColor);
+      add('${e.toolCount}', icon: Icons.build, iconColor: t.toolCall);
     }
     if (e.usage.output > 0) add(fmtTokens(e.usage.output), icon: Icons.token);
-    if (e.hasContext) add(_fmtContext(e), color: contextColor(e.contextPct));
+    if (e.hasContext) add(_fmtContext(e), color: contextColor(e.contextPct, t));
     if (e.durationMs > 0) add(_fmtDuration(e.durationMs), icon: Icons.schedule);
     final time = _clockTime(e.timestamp);
     if (time.isNotEmpty) add(time);
 
     const lead = 16.0, gap = 8.0;
-    const rule = Divider(color: AppColors.border, height: 1);
+    final rule = Divider(color: t.line, height: 1);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
       child: parts.isEmpty
@@ -514,7 +517,7 @@ class _TurnEndDivider extends StatelessWidget {
           : LayoutBuilder(
               builder: (context, c) => Row(
                 children: [
-                  const SizedBox(width: lead, child: rule),
+                  SizedBox(width: lead, child: rule),
                   const SizedBox(width: gap),
                   ConstrainedBox(
                     constraints: BoxConstraints(
@@ -526,7 +529,7 @@ class _TurnEndDivider extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: gap),
-                  const Expanded(child: rule),
+                  Expanded(child: rule),
                 ],
               ),
             ),
@@ -553,6 +556,7 @@ class _EventCard extends StatelessWidget {
   final String? command;
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final c = entry;
     final err = c.isError;
     final hasDetail = c.detail != null && c.detail!.isNotEmpty;
@@ -562,18 +566,18 @@ class _EventCard extends StatelessWidget {
         Icon(
           Icons.terminal,
           size: 13,
-          color: err ? AppColors.error : AppColors.dim,
+          color: err ? t.error : t.textDim,
         ),
         const SizedBox(width: 6),
         Text(
           title,
           style: _mono.copyWith(
-            color: err ? AppColors.error : AppColors.secondary,
+            color: err ? t.error : t.textSecondary,
           ),
         ),
-        Text('  ·  ${_clockTime(c.timestamp)}', style: _monoDim),
+        Text('  ·  ${_clockTime(c.timestamp)}', style: _monoDim(t)),
         if (preview != null && preview!.isNotEmpty)
-          Text('  ${preview!}', style: _monoDim),
+          Text('  ${preview!}', style: _monoDim(t)),
       ],
     );
 
@@ -594,13 +598,13 @@ class _EventCard extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(
                     '\$ ${command!}',
-                    style: _mono.copyWith(color: AppColors.text),
+                    style: _mono.copyWith(color: t.text),
                   ),
                 ),
               if (hasDetail && expanded)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
-                  child: Text(c.detail!, style: _monoDim),
+                  child: Text(c.detail!, style: _monoDim(t)),
                 ),
             ],
           ),
@@ -616,6 +620,7 @@ class _CompactDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final text = (summary == null || summary!.isEmpty)
         ? 'Context compressed'
         : summary!;
@@ -623,12 +628,12 @@ class _CompactDivider extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
       child: Row(
         children: [
-          const Expanded(child: Divider(color: AppColors.border, height: 1)),
+          const Expanded(child: Divider(height: 1)),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: Text(text, style: _monoDim),
+            child: Text(text, style: _monoDim(t)),
           ),
-          const Expanded(child: Divider(color: AppColors.border, height: 1)),
+          const Expanded(child: Divider(height: 1)),
         ],
       ),
     );

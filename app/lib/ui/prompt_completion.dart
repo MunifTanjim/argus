@@ -208,11 +208,11 @@ class _PromptMenuState extends State<PromptMenu> {
 
   @override
   Widget build(BuildContext context) => Material(
-        color: AppColors.card,
+        color: context.tokens.surface,
         elevation: 4,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(4),
-          side: const BorderSide(color: AppColors.border),
+          side: BorderSide(color: context.tokens.line),
         ),
         clipBehavior: Clip.antiAlias,
         child: SizedBox(
@@ -233,7 +233,7 @@ class _PromptMenuState extends State<PromptMenu> {
     return InkWell(
       onTap: () => widget.onSelect(item),
       child: Container(
-        color: i == widget.selected ? AppColors.border : null,
+        color: i == widget.selected ? context.tokens.surfaceRaised : null,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         alignment: Alignment.centerLeft,
         child: Row(children: [
@@ -241,7 +241,7 @@ class _PromptMenuState extends State<PromptMenu> {
             child: Text.rich(_highlight(item.name, match.hits),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: mono.copyWith(color: AppColors.text)),
+                style: mono.copyWith(color: context.tokens.text)),
           ),
           if (item.description.isNotEmpty) ...[
             const SizedBox(width: 12),
@@ -249,7 +249,7 @@ class _PromptMenuState extends State<PromptMenu> {
               child: Text(_firstLine(item.description),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: mono.copyWith(color: AppColors.dim)),
+                  style: mono.copyWith(color: context.tokens.textDim)),
             ),
           ],
         ]),

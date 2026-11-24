@@ -222,7 +222,7 @@ void main() {
             .decoration as BoxDecoration)
         .color!;
 
-    // Untested → grey (AppColors.dim).
+    // Untested → grey (ArgusTokens.fallback.textDim).
     expect(dot(), const Color(0xFF928374));
 
     container.read(connectionTestResultsProvider.notifier).set('p1', false);
@@ -231,6 +231,6 @@ void main() {
 
     container.read(connectionTestResultsProvider.notifier).set('p1', true);
     await tester.pump();
-    expect(dot(), const Color(0xFF8ec07c)); // AppColors.accent green
+    expect(dot(), const Color(0xFF8ec07c)); // ArgusTokens.fallback.accent green
   });
 }

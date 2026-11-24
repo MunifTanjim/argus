@@ -7,11 +7,6 @@ import 'tool_detail_claude.dart';
 import 'tool_detail.dart';
 import 'tool_detail_codex.dart';
 
-const _blue = Color(0xFF83a598);
-const _green = Color(0xFFb8bb26);
-const _yellow = Color(0xFFfabd2f);
-const _orange = Color(0xFFfe8019);
-const _purple = Color(0xFFd3869b);
 
 /// A tool's icon/color category.
 enum ToolCategory {
@@ -42,17 +37,17 @@ IconData categoryIcon(ToolCategory c) => switch (c) {
       ToolCategory.other => Icons.play_arrow,
     };
 
-Color categoryColor(ToolCategory c) => switch (c) {
-      ToolCategory.read || ToolCategory.web => _blue,
-      ToolCategory.edit || ToolCategory.todo => _yellow,
-      ToolCategory.write => _green,
-      ToolCategory.bash || ToolCategory.skill => _orange,
-      ToolCategory.grep => _purple,
+Color categoryColor(ToolCategory c, ArgusTokens t) => switch (c) {
+      ToolCategory.read || ToolCategory.web => t.toolRead,
+      ToolCategory.edit || ToolCategory.todo => t.toolEdit,
+      ToolCategory.write => t.toolWrite,
+      ToolCategory.bash || ToolCategory.skill => t.toolShell,
+      ToolCategory.grep => t.toolSearch,
       ToolCategory.glob || ToolCategory.task || ToolCategory.other =>
-        AppColors.accent,
+        t.accent,
     };
 
-typedef ToolDetailBuilder = Widget Function(Entry item);
+typedef ToolDetailBuilder = Widget Function(Entry item, ArgusTokens t);
 
 class ToolMeta {
   const ToolMeta(this.display, this.category, [this.detail]);

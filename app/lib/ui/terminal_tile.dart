@@ -64,8 +64,8 @@ class TerminalTile extends ConsumerWidget {
               onTap: () => Navigator.of(ctx).pop('rename'),
             ),
             ListTile(
-              leading: const Icon(Icons.close, color: AppColors.error),
-              title: const Text('Kill', style: TextStyle(color: AppColors.error)),
+              leading: Icon(Icons.close, color: context.tokens.error),
+              title: Text('Kill', style: TextStyle(color: context.tokens.error)),
               onTap: () => Navigator.of(ctx).pop('kill'),
             ),
           ],
@@ -93,7 +93,7 @@ class TerminalTile extends ConsumerWidget {
                 child: const Text('Cancel'),
               ),
               FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+                style: FilledButton.styleFrom(backgroundColor: context.tokens.error),
                 onPressed: () => Navigator.of(ctx).pop(true),
                 child: const Text('Kill'),
               ),
@@ -151,7 +151,7 @@ class TerminalListBody extends ConsumerWidget {
                               ? 'Could not load terminals: ${state.error}'
                               : 'No terminals.',
                           style: state.error != null
-                              ? const TextStyle(color: AppColors.error)
+                              ? TextStyle(color: context.tokens.error)
                               : null,
                         ),
                 ),

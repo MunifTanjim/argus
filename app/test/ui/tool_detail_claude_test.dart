@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/entry.dart';
 import 'package:argus/ui/item_row.dart';
+import 'package:argus/ui/theme.dart';
 import 'package:argus/ui/tool_detail.dart';
 
 Widget _wrapDetail(Entry i) => MaterialApp(
-    home: Scaffold(body: SingleChildScrollView(child: toolDetailBody(i))));
+    home: Scaffold(body: SingleChildScrollView(child: toolDetailBody(i, ArgusTokens.fallback))));
 
 Widget _wrapRow(Entry i) =>
     MaterialApp(home: Scaffold(body: ItemRow(item: i)));

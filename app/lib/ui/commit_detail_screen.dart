@@ -23,6 +23,7 @@ class CommitDetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final t = context.tokens;
     final async = ref.watch(
       workspaceCommitFilesProvider((source.workspaceId, commit.sha)),
     );
@@ -37,12 +38,12 @@ class CommitDetailScreen extends ConsumerWidget {
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, _) => Center(
             child: Text('Could not load commit:\n$e',
-                style: const TextStyle(color: AppColors.dim)),
+                style: TextStyle(color: t.textDim)),
           ),
           data: (files) => files.isEmpty
-              ? const Center(
+              ? Center(
                   child: Text('No files in this commit.',
-                      style: TextStyle(color: AppColors.dim)))
+                      style: TextStyle(color: t.textDim)))
               : CenteredBody(
                   child: ListView(
                     padding: const EdgeInsets.all(12),

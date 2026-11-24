@@ -3,6 +3,8 @@ import 'package:argus/models/session.dart';
 import 'package:argus/ui/status_style.dart';
 import 'package:argus/ui/theme.dart';
 
+final _t = ArgusTokens.fallback;
+
 Session _s(String status, [String? kind]) => Session.fromJson({
       'id': 'n:%1',
       'agent': 'claude',
@@ -16,7 +18,7 @@ void main() {
   test('blocked: awaiting on a permission, question or plan', () {
     for (final k in ['permission', 'question', 'plan']) {
       expect(_s('awaiting_input', k).blocked, isTrue, reason: k);
-      expect(sessionColor(_s('awaiting_input', k)), AppColors.blocked, reason: k);
+      expect(sessionColor(_s('awaiting_input', k), _t), _t.blocked, reason: k);
     }
   });
 
@@ -24,9 +26,9 @@ void main() {
     expect(_s('awaiting_input', 'idle').blocked, isFalse);
     expect(_s('awaiting_input').blocked, isFalse);
     expect(_s('working', 'permission').blocked, isFalse);
-    expect(sessionColor(_s('awaiting_input', 'idle')), AppColors.waiting);
-    expect(sessionColor(_s('awaiting_input')), AppColors.waiting);
-    expect(sessionColor(_s('working')), statusColor(_s('working').status));
+    expect(sessionColor(_s('awaiting_input', 'idle'), _t), _t.waiting);
+    expect(sessionColor(_s('awaiting_input'), _t), _t.waiting);
+    expect(sessionColor(_s('working'), _t), statusColor(_s('working').status, _t));
   });
 
   test('interactionPending ignores the idle kind', () {

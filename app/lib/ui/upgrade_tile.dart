@@ -131,7 +131,7 @@ class _UpgradeTileState extends ConsumerState<UpgradeTile> {
       title: Text('Version ${c.latest} available'),
       subtitle: status == null
           ? null
-          : Text(status, style: const TextStyle(color: AppColors.dim, fontSize: 11)),
+          : Text(status, style: TextStyle(color: context.tokens.textDim, fontSize: 11)),
       trailing: TextButton(
         onPressed: _busy ? null : () => _upgrade(c),
         child: const Text('Upgrade'),

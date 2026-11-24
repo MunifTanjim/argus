@@ -258,6 +258,7 @@ class _PromptScrollbarState extends State<PromptScrollbar> {
 
   /// [bend] runs from 0 (straight) to 1 (fully bent).
   Widget _bar(double h, double bend) {
+    final t = context.tokens;
     final focus = _focusY ?? _lastFocus;
     double shownY(double y) =>
         bend == 0 ? y : lerpDouble(y, fisheyeY(y, focus), bend)!;
@@ -272,7 +273,7 @@ class _PromptScrollbarState extends State<PromptScrollbar> {
               centerX: _touchWidth / 2,
               bend: bend,
               focus: focus,
-              color: AppColors.dim.withValues(alpha: 0.15),
+              color: t.textDim.withValues(alpha: 0.15),
             ),
           ),
         ),
@@ -294,7 +295,7 @@ class _PromptScrollbarState extends State<PromptScrollbar> {
           height: _thumbHeight,
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: AppColors.dim,
+              color: t.textDim,
               borderRadius: BorderRadius.circular(_trackWidth / 2),
             ),
           ),
@@ -308,19 +309,22 @@ class _PromptScrollbarState extends State<PromptScrollbar> {
     double y,
     double h,
     double Function(double) out,
-  ) => Positioned(
+  ) {
+    final t = context.tokens;
+    return Positioned(
     key: ValueKey('prompt-tick-${row.entry.id}'),
     top: (y - _dotSize / 2).clamp(0.0, h - _dotSize),
     right: (_touchWidth - _dotSize) / 2 + out(y),
     width: _dotSize,
     height: _dotSize,
-    child: const DecoratedBox(
+    child: DecoratedBox(
       decoration: BoxDecoration(
-        color: AppColors.accent,
+        color: t.accent,
         shape: BoxShape.circle,
       ),
     ),
-  );
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

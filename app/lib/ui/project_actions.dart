@@ -82,7 +82,7 @@ Future<bool> _confirm(
         ),
         FilledButton(
           style: destructive
-              ? FilledButton.styleFrom(backgroundColor: AppColors.error)
+              ? FilledButton.styleFrom(backgroundColor: ctx.tokens.error)
               : null,
           onPressed: () => Navigator.of(ctx).pop(true),
           child: Text(action),
@@ -420,12 +420,12 @@ Future<T?> _sheet<T>(
         for (final (value, label, icon, danger) in items)
           ListTile(
             leading: IconTheme.merge(
-              data: IconThemeData(color: danger ? AppColors.error : null),
+              data: IconThemeData(color: danger ? context.tokens.error : null),
               child: icon,
             ),
             title: Text(
               label,
-              style: danger ? const TextStyle(color: AppColors.error) : null,
+              style: danger ? TextStyle(color: context.tokens.error) : null,
             ),
             onTap: () => Navigator.of(ctx).pop(value),
           ),

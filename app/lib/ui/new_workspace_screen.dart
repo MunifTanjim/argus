@@ -198,7 +198,7 @@ class _NewWorkspaceScreenState extends ConsumerState<NewWorkspaceScreen> {
                   'setup: ${commandLine(_p.setupScript)}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: AppColors.dim, fontSize: 12),
+                  style: TextStyle(color: context.tokens.textDim, fontSize: 12),
                 ),
               ),
             Padding(
@@ -228,7 +228,7 @@ class _NewWorkspaceScreenState extends ConsumerState<NewWorkspaceScreen> {
                 ),
                 child: Text(
                   _error!,
-                  style: const TextStyle(color: AppColors.error),
+                  style: TextStyle(color: context.tokens.error),
                 ),
               ),
             Expanded(
@@ -356,8 +356,8 @@ class _NewWorkspaceScreenState extends ConsumerState<NewWorkspaceScreen> {
                     padding: const EdgeInsets.all(8),
                     child: Text(
                       'First ${list.items.length} · the filter searches only these',
-                      style: const TextStyle(
-                        color: AppColors.dim,
+                      style: TextStyle(
+                        color: context.tokens.textDim,
                         fontSize: 12,
                       ),
                     ),

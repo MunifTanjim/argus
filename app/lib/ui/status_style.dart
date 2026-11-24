@@ -22,22 +22,22 @@ String statusGlyph(SessionStatus s) {
   }
 }
 
-Color statusColor(SessionStatus s) {
+Color statusColor(SessionStatus s, ArgusTokens t) {
   switch (s) {
     case SessionStatus.working:
-      return const Color(0xFFb8bb26);
+      return t.working;
     case SessionStatus.awaitingInput:
-      return AppColors.waiting;
+      return t.waiting;
     case SessionStatus.dead:
-      return const Color(0xFFfb4934);
+      return t.dead;
     case SessionStatus.idle:
     case SessionStatus.discovered:
     case SessionStatus.starting:
     case SessionStatus.unknown:
-      return const Color(0xFF928374);
+      return t.idle;
   }
 }
 
 /// [statusColor], with blocked sessions set apart.
-Color sessionColor(Session s) =>
-    s.blocked ? AppColors.blocked : statusColor(s.status);
+Color sessionColor(Session s, ArgusTokens t) =>
+    s.blocked ? t.blocked : statusColor(s.status, t);

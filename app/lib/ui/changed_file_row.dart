@@ -3,33 +3,35 @@ import 'package:flutter/material.dart';
 import '../models/changes.dart';
 import 'theme.dart';
 
-const _mono = TextStyle(fontFamily: 'monospace', fontSize: 13);
+const _mono = TextStyle(fontFamily: monoFamily, fontSize: 13);
 
-({String letter, Color color}) changeStyle(String change) => switch (change) {
-      'added' => (letter: 'A', color: const Color(0xFFb8bb26)),
-      'modified' => (letter: 'M', color: const Color(0xFFd79921)),
-      'deleted' => (letter: 'D', color: const Color(0xFFfb4934)),
-      'renamed' => (letter: 'R', color: const Color(0xFFd3869b)),
-      'untracked' => (letter: '?', color: const Color(0xFF83a598)),
-      _ => (letter: '•', color: AppColors.dim),
+({String letter, Color color}) changeStyle(
+        String change, ArgusTokens t) => switch (change) {
+      'added' => (letter: 'A', color: t.changeAdded),
+      'modified' => (letter: 'M', color: t.changeModified),
+      'deleted' => (letter: 'D', color: t.changeDeleted),
+      'renamed' => (letter: 'R', color: t.changeRenamed),
+      'untracked' => (letter: '?', color: t.changeUntracked),
+      _ => (letter: '•', color: t.textDim),
     };
 
 class _UnstagedBadge extends StatelessWidget {
   const _UnstagedBadge();
 
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-        decoration: BoxDecoration(
-          border: Border.all(color: const Color(0xFFd79921)),
-          borderRadius: BorderRadius.circular(3),
-        ),
-        child: const Text('unstaged',
-            style: TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 10,
-                color: Color(0xFFd79921))),
-      );
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        border: Border.all(color: t.changeModified),
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Text('unstaged',
+          style: TextStyle(
+              fontFamily: monoFamily, fontSize: 10, color: t.changeModified)),
+    );
+  }
 }
 
 class ChangedFileRow extends StatelessWidget {
@@ -40,7 +42,8 @@ class ChangedFileRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = changeStyle(file.change);
+    final t = context.tokens;
+    final s = changeStyle(file.change, t);
     final label =
         file.origPath != null ? '${file.origPath} → ${file.path}' : file.path;
     return InkWell(
@@ -49,8 +52,8 @@ class ChangedFileRow extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 6),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         decoration: BoxDecoration(
-          color: AppColors.card,
-          border: Border.all(color: AppColors.border),
+          color: t.surface,
+          border: Border.all(color: t.line),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Row(
@@ -64,7 +67,7 @@ class ChangedFileRow extends StatelessWidget {
             const SizedBox(width: 8),
             Expanded(
               child: Text(label,
-                  style: _mono.copyWith(color: AppColors.text),
+                  style: _mono.copyWith(color: t.text),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis),
             ),
@@ -73,7 +76,7 @@ class ChangedFileRow extends StatelessWidget {
               const _UnstagedBadge(),
               const SizedBox(width: 6),
             ],
-            const Icon(Icons.chevron_right, size: 18, color: AppColors.dim),
+            Icon(Icons.chevron_right, size: 18, color: t.textDim),
           ],
         ),
       ),

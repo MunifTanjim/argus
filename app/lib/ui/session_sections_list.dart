@@ -80,7 +80,7 @@ class SessionSectionsList extends ConsumerWidget {
               true when query.isNotEmpty => 'No sessions match.',
               true when activeOnly => 'No active sessions.',
               _ => emptyText,
-            }, style: const TextStyle(color: AppColors.dim)),
+            }, style: TextStyle(color: context.tokens.textDim)),
           ),
         ],
       );
@@ -224,7 +224,7 @@ class _SectionHeader extends ConsumerWidget {
       child: switch (section.icon) {
         SectionIcon.needsYou => NeedsYouHeader(
           label: section.title,
-          color: sessionColor(section.sessions.first),
+          color: sessionColor(section.sessions.first, context.tokens),
         ),
         SectionIcon.host => NodeHeader(
           label: section.title,
@@ -232,7 +232,7 @@ class _SectionHeader extends ConsumerWidget {
           outdated: outdated,
         ),
         _ => SectionLabel(
-          leading: _leading(),
+          leading: _leading(context),
           label: section.offline
               ? '${section.title} (offline)'
               : section.title,
@@ -242,28 +242,28 @@ class _SectionHeader extends ConsumerWidget {
   }
 
   // Sections of one agent or status share it, so the first session tells.
-  Widget _leading() {
+  Widget _leading(BuildContext context) {
     final first = section.sessions.first;
-    Color tint(Color c) => section.other ? AppColors.dim : c;
+    Color tint(Color c) => section.other ? context.tokens.textDim : c;
     return switch (section.icon) {
-      SectionIcon.project => const RepoIcon(size: 14, color: AppColors.dim),
-      SectionIcon.folder => const Icon(
+      SectionIcon.project => RepoIcon(size: 14, color: context.tokens.textDim),
+      SectionIcon.folder => Icon(
         Icons.folder_outlined,
         size: 14,
-        color: AppColors.dim,
+        color: context.tokens.textDim,
       ),
-      SectionIcon.branch => const GitBranchIcon(size: 14, color: AppColors.dim),
+      SectionIcon.branch => GitBranchIcon(size: 14, color: context.tokens.textDim),
       SectionIcon.agent => Icon(
         Icons.smart_toy_outlined,
         size: 14,
-        color: tint(agentColor(first.agent)),
+        color: tint(agentColor(first.agent, context.tokens)),
       ),
       SectionIcon.status => Text(
         statusGlyph(first.status),
         style: TextStyle(
-          fontFamily: 'monospace',
+          fontFamily: monoFamily,
           fontSize: 12,
-          color: statusColor(first.status),
+          color: statusColor(first.status, context.tokens),
         ),
       ),
       SectionIcon.needsYou || SectionIcon.host => const SizedBox.shrink(),
@@ -290,12 +290,12 @@ class ReconnectBanner extends StatelessWidget {
     };
     return Container(
       width: double.infinity,
-      color: failed ? AppColors.errorSurface : AppColors.awaitingSurface,
+      color: failed ? context.tokens.errorSurface : context.tokens.blockedSurface,
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
       child: Text(
         text,
         style: TextStyle(
-          color: failed ? AppColors.error : AppColors.secondary,
+          color: failed ? context.tokens.error : context.tokens.textSecondary,
           fontSize: 12,
         ),
       ),
@@ -310,20 +310,20 @@ class UnauthorizedBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppColors.errorSurface,
+      color: context.tokens.errorSurface,
       child: InkWell(
         onTap: onTap,
-        child: const Padding(
-          padding: EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
           child: Row(
             children: [
               Expanded(
                 child: Text(
                   'Device not authorized',
-                  style: TextStyle(color: AppColors.error, fontSize: 12),
+                  style: TextStyle(color: context.tokens.error, fontSize: 12),
                 ),
               ),
-              Icon(Icons.chevron_right, size: 16, color: AppColors.error),
+              Icon(Icons.chevron_right, size: 16, color: context.tokens.error),
             ],
           ),
         ),

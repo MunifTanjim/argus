@@ -4,7 +4,6 @@ import '../models/entry.dart';
 import 'theme.dart';
 import 'tool_registry.dart';
 
-const _redColor = Color(0xFFfb4934);
 
 class ItemRow extends StatelessWidget {
   const ItemRow({super.key, required this.item, this.agent, this.onTap});
@@ -19,8 +18,7 @@ class ItemRow extends StatelessWidget {
   final VoidCallback? onTap;
 
   static const _mono =
-      TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.3);
-  static final _monoDim = _mono.copyWith(color: AppColors.dim);
+      TextStyle(fontFamily: monoFamily, fontSize: 12, height: 1.3);
 
   @override
   Widget build(BuildContext context) {
@@ -32,33 +30,39 @@ class ItemRow extends StatelessWidget {
             ? meta!.display
             : (item.toolName ?? 'tool');
         return _row(
+          context,
           leading: Icon(
               meta != null ? categoryIcon(meta.category) : Icons.play_arrow,
               size: 14,
               color: err
-                  ? _redColor
+                  ? context.tokens.error
                   : (meta != null
-                      ? categoryColor(meta.category)
-                      : AppColors.accent)),
+                      ? categoryColor(meta.category, context.tokens)
+                      : context.tokens.accent)),
           label: name,
-          labelColor: err ? _redColor : AppColors.accent,
+          labelColor: err ? context.tokens.error : context.tokens.accent,
           // Error is color-only visually; announce it for screen readers.
           labelSemantics: err ? '$name, error' : null,
           preview: item.inputPreview,
         );
       case EntryKind.skill:
         return _row(
+          context,
           leading: Icon(categoryIcon(ToolCategory.skill),
-              size: 14, color: categoryColor(ToolCategory.skill)),
+              size: 14, color: categoryColor(ToolCategory.skill, context.tokens)),
           label: 'Skill',
-          labelColor: AppColors.accent,
+          labelColor: context.tokens.accent,
           preview: item.inputPreview,
         );
       case EntryKind.subagent:
         final tm = item.soleSubagent;
         if (tm?.isTeammate ?? false) {
-          final tc = teamColor(tm!.color);
+          final tc = readableOn(
+            teamBrandColor(tm!.color, context.tokens),
+            context.tokens,
+          );
           return _row(
+          context,
             leading: Icon(Icons.forum_outlined, size: 14, color: tc),
             label: tm.name.isNotEmpty ? tm.name : 'teammate',
             labelColor: tc,
@@ -67,10 +71,11 @@ class ItemRow extends StatelessWidget {
         }
         if (isAgentRefTool(item.toolName)) {
           return _row(
-            leading: const Icon(Icons.smart_toy_outlined,
-                size: 14, color: AppColors.accent),
+          context,
+            leading: Icon(Icons.smart_toy_outlined,
+                size: 14, color: context.tokens.accent),
             label: toolMeta('codex', item.toolName)!.display,
-            labelColor: AppColors.accent,
+            labelColor: context.tokens.accent,
             preview: item.subagents
                 .map((s) => s.name.isNotEmpty ? s.name : s.id)
                 .where((n) => n.isNotEmpty)
@@ -84,10 +89,11 @@ class ItemRow extends StatelessWidget {
             ? (type.isNotEmpty ? '$name ($type)' : name)
             : (type.isNotEmpty ? type : 'subagent');
         return _row(
-          leading: const Icon(Icons.smart_toy_outlined,
-              size: 14, color: AppColors.accent),
+          context,
+          leading: Icon(Icons.smart_toy_outlined,
+              size: 14, color: context.tokens.accent),
           label: label,
-          labelColor: AppColors.accent,
+          labelColor: context.tokens.accent,
           preview: sub?.desc,
         );
       default:
@@ -95,13 +101,15 @@ class ItemRow extends StatelessWidget {
     }
   }
 
-  Widget _row({
+  Widget _row(
+    BuildContext context, {
     required Widget leading,
     required String label,
     required Color labelColor,
     String? labelSemantics,
     String? preview,
   }) {
+    final monoDim = _mono.copyWith(color: context.tokens.textDim);
     final hasPreview = preview != null && preview.trim().isNotEmpty;
     final labelText = Text(label,
         semanticsLabel: labelSemantics,
@@ -133,10 +141,10 @@ class ItemRow extends StatelessWidget {
                 child: Text(preview.trim(),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: _monoDim),
+                    style: monoDim),
               ),
             ],
-            if (onTap != null) Text(' ›', style: _monoDim),
+            if (onTap != null) Text(' ›', style: monoDim),
           ],
         ),
       ),

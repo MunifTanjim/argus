@@ -121,7 +121,7 @@ class _RunningSheetState extends ConsumerState<_RunningSheet> {
                   ? null
                   : Text(
                       formatElapsed(now.difference(r.since!)),
-                      style: mono.copyWith(color: AppColors.dim),
+                      style: mono.copyWith(color: context.tokens.textDim),
                     ),
               onTap: r.open == null ? null : () => _open(r.open!),
             ),

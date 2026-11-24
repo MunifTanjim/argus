@@ -290,7 +290,7 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
             _PickerField(
               label: 'Agent',
               value: agent?.name ?? 'Choose an agent',
-              valueColor: agent == null ? null : _hexColor(agent.color),
+              valueColor: agent == null ? null : _hexColor(context, agent.color),
               onTap: busy ? null : () => _pickAgent(agents),
             ),
           if (_agent != null &&
@@ -427,7 +427,7 @@ class _SpawnDialogBodyState extends ConsumerState<SpawnDialogBody> {
       selected: _agent,
       choices: [
         for (final a in agents)
-          _Choice(value: a.id, title: a.name, color: _hexColor(a.color)),
+          _Choice(value: a.id, title: a.name, color: _hexColor(context, a.color)),
       ],
     );
     if (v == null || v == _agent) return;
@@ -576,7 +576,7 @@ class _PickerField extends StatelessWidget {
                 if (detail != null && detail!.isNotEmpty)
                   Text(
                     detail!,
-                    style: const TextStyle(color: AppColors.dim, fontSize: 12),
+                    style: TextStyle(color: context.tokens.textDim, fontSize: 12),
                   ),
               ],
             ),
@@ -645,7 +645,7 @@ class _ChoiceScreenState extends State<_ChoiceScreen> {
             if (c.trailing != null && c.trailing!.isNotEmpty)
               Text(
                 c.trailing!,
-                style: const TextStyle(color: AppColors.dim, fontSize: 12),
+                style: TextStyle(color: context.tokens.textDim, fontSize: 12),
               ),
             if (c.value == widget.selected)
               const Padding(
@@ -694,9 +694,10 @@ class _ChoiceScreenState extends State<_ChoiceScreen> {
   }
 }
 
-Color _hexColor(String hex) {
+Color _hexColor(BuildContext context, String hex) {
   final h = hex.startsWith('#') ? hex.substring(1) : hex;
   final v = int.tryParse(h, radix: 16);
-  if (v == null || h.length != 6) return AppColors.dim;
+  if (v == null || h.length != 6) return context.tokens.textDim;
+  // The mask applies full alpha to the parsed user hex.
   return Color(0xFF000000 | v);
 }

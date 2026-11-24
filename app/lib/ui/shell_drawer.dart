@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import 'theme.dart';
+
 /// Tells screens inside the home shell how to open and close the modal
 /// projects drawer. Both callbacks are null when the drawer is a fixed side
 /// panel.
@@ -197,7 +199,7 @@ class ModalShellDrawerState extends State<ModalShellDrawer>
   );
 
   Widget _overlay(BuildContext context) {
-    final scrim = DrawerTheme.of(context).scrimColor ?? Colors.black54;
+    final scrim = DrawerTheme.of(context).scrimColor ?? context.tokens.scrim;
     return GestureDetector(
       key: _overlayKey,
       excludeFromSemantics: true,

@@ -38,7 +38,7 @@ class SetupCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontWeight: FontWeight.w600,
-                color: failed ? AppColors.error : AppColors.secondary,
+                color: failed ? context.tokens.error : context.tokens.textSecondary,
               ),
             ),
             for (final l in setupTail(run))
@@ -46,7 +46,7 @@ class SetupCard extends StatelessWidget {
                 l,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: mono.copyWith(color: AppColors.dim),
+                style: mono.copyWith(color: context.tokens.textDim),
               ),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,

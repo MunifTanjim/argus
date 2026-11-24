@@ -6,71 +6,14 @@ import '../models/entry.dart';
 import 'code_block.dart';
 import 'edit_diff.dart';
 import 'theme.dart';
+import 'tool_detail_common.dart';
 import 'tool_detail.dart';
 
-const _red = Color(0xFFfb4934);
-const _mono = TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.35);
-
-Map<String, dynamic> _input(Entry it) {
-  try {
-    return jsonDecode(it.toolInput ?? '') as Map<String, dynamic>;
-  } catch (_) {
-    return const {};
-  }
-}
-
-Widget _label(String text, {bool error = false}) => Padding(
-      padding: const EdgeInsets.only(top: 8, bottom: 4),
-      child: Text(text,
-          style: TextStyle(
-              color: error ? _red : AppColors.secondary,
-              fontWeight: FontWeight.w700,
-              fontSize: 13)),
-    );
-
-Widget _bold(String text) => Text(text,
-    style:
-        _mono.copyWith(color: AppColors.secondary, fontWeight: FontWeight.w700));
-
-Widget _comment(String text) =>
-    Text('# $text', style: _mono.copyWith(color: AppColors.dim));
-
-Widget _kvDump(String s) {
-  final rows = <Widget>[];
-  for (final raw in s.split('\n')) {
-    final line = raw.trimRight();
-    if (line.trim().isEmpty) continue;
-    final idx = line.indexOf(':');
-    if (idx > 0) {
-      rows.add(RichText(
-        text: TextSpan(style: _mono, children: [
-          TextSpan(
-              text: line.substring(0, idx + 1),
-              style: _mono.copyWith(color: AppColors.dim)),
-          TextSpan(
-              text: line.substring(idx + 1),
-              style: _mono.copyWith(color: AppColors.text)),
-        ]),
-      ));
-    } else {
-      rows.add(Text(line, style: _mono.copyWith(color: AppColors.text)));
-    }
-  }
-  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
-}
-
-Widget _resultSection(Entry it, Widget? body) => body == null
-    ? const SizedBox.shrink()
-    : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        _label(it.resultIsError ? 'Error' : 'Result', error: it.resultIsError),
-        body,
-      ]);
-
 /// An exec-style result: the key/value head, then the output as code.
-Widget _execResultBody(String result) {
+Widget _execResultBody(String result, ArgusTokens t) {
   final r = splitExecResult(result);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    if (r.head.trim().isNotEmpty) _kvDump(r.head),
+    if (r.head.trim().isNotEmpty) kvDump(r.head, t),
     if (r.output.isNotEmpty) codeBlock(r.output),
   ]);
 }
@@ -103,8 +46,8 @@ String agentName(Entry it, String id) {
   return id;
 }
 
-Widget codexExecCommandDetail(Entry it) {
-  final m = _input(it);
+Widget codexExecCommandDetail(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final cmd = toolInputStr(m['cmd']);
   final workdir = toolInputStr(m['workdir']);
   final yieldMs = (m['yield_time_ms'] as num?)?.toInt() ?? 0;
@@ -115,23 +58,23 @@ Widget codexExecCommandDetail(Entry it) {
   ];
   final head = <Widget>[
     if (cmd.isNotEmpty) ...[
-      if (workdir.isNotEmpty) _comment(workdir),
-      _bold('\$ $cmd'),
+      if (workdir.isNotEmpty) toolComment(workdir, t),
+      toolHeader('\$ $cmd', t),
       if (meta.isNotEmpty)
-        Text(meta.join(' · '), style: _mono.copyWith(color: AppColors.dim)),
+        Text(meta.join(' · '), style: codeMono.copyWith(color: t.textDim)),
     ] else if ((it.toolInput ?? '').isNotEmpty)
       codeBlock(it.toolInput!),
   ];
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     ...head,
     if ((it.result ?? '').isNotEmpty)
-      _resultSection(it, _execResultBody(it.result!)),
+      toolResult(it, _execResultBody(it.result!, t), t),
   ]);
 }
 
-Widget codexUpdatePlanDetail(Entry it) {
-  final plan = (_input(it)['plan'] as List?) ?? const [];
-  if (plan.isEmpty) return _generic(it);
+Widget codexUpdatePlanDetail(Entry it, ArgusTokens t) {
+  final plan = (toolInput(it)['plan'] as List?) ?? const [];
+  if (plan.isEmpty) return toolGeneric(it, t);
   final rows = <Widget>[];
   for (final p in plan.cast<Map<String, dynamic>>()) {
     final status = toolInputStr(p['status']);
@@ -143,39 +86,33 @@ Widget codexUpdatePlanDetail(Entry it) {
     rows.add(Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Text('$glyph ${toolInputStr(p['step'])}',
-          style: _mono.copyWith(color: AppColors.text)),
+          style: codeMono.copyWith(color: t.text)),
     ));
   }
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
 }
 
-Widget codexWebSearchDetail(Entry it) {
-  final m = _input(it);
+Widget codexWebSearchDetail(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final query = toolInputStr(m['query']);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    if (query.isNotEmpty) _bold(query),
+    if (query.isNotEmpty) toolHeader(query, t),
     if ((it.result ?? '').isNotEmpty) ...[
-      _label('Result'),
+      toolLabel('Result', t),
       appMarkdown(it.result!),
     ],
   ]);
 }
 
-Widget codexWaitAgentDetail(Entry it) {
-  final m = _input(it);
+Widget codexWaitAgentDetail(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final targets = ((m['targets'] as List?) ?? const []).map((e) => '$e').toList();
   final timeoutMs = (m['timeout_ms'] as num?)?.toInt() ?? 0;
   final head = <Widget>[];
   if (targets.isNotEmpty) {
     final names = targets.map((id) => agentName(it, id)).join(', ');
-    head.add(RichText(
-      text: TextSpan(children: [
-        TextSpan(text: 'Waiting on ', style: _mono.copyWith(color: AppColors.secondary, fontWeight: FontWeight.w700)),
-        TextSpan(text: names, style: _mono.copyWith(color: AppColors.text)),
-        if (timeoutMs > 0)
-          TextSpan(text: '  (timeout ${timeoutMs}ms)', style: _mono.copyWith(color: AppColors.dim)),
-      ]),
-    ));
+    head.add(toolHeadline('Waiting on ', names, t,
+        timeoutMs > 0 ? 'timeout ${timeoutMs}ms' : null));
   } else if ((it.toolInput ?? '').isNotEmpty) {
     head.add(codeBlock(it.toolInput!));
   }
@@ -188,7 +125,7 @@ Widget codexWaitAgentDetail(Entry it) {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         for (final id in ids)
-          if (status[id] != null) _statusBlock(agentName(it, id), status[id]),
+          if (status[id] != null) _statusBlock(agentName(it, id), status[id], t),
       ],
     );
   } else if ((it.result ?? '').isNotEmpty) {
@@ -196,44 +133,39 @@ Widget codexWaitAgentDetail(Entry it) {
   }
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     ...head,
-    _resultSection(it, body),
+    toolResult(it, body, t),
   ]);
 }
 
-Widget codexCloseAgentDetail(Entry it) {
-  final target = toolInputStr(_input(it)['target']);
+Widget codexCloseAgentDetail(Entry it, ArgusTokens t) {
+  final target = toolInputStr(toolInput(it)['target']);
   final head = <Widget>[
     if (target.isNotEmpty)
-      RichText(
-        text: TextSpan(children: [
-          TextSpan(text: 'Closed ', style: _mono.copyWith(color: AppColors.secondary, fontWeight: FontWeight.w700)),
-          TextSpan(text: agentName(it, target), style: _mono.copyWith(color: AppColors.text)),
-        ]),
-      )
+      toolHeadline('Closed ', agentName(it, target), t)
     else if ((it.toolInput ?? '').isNotEmpty)
       codeBlock(it.toolInput!),
   ];
   Widget? body;
   final prev = _resultField(it.result, 'previous_status');
   if (prev != null) {
-    body = _statusBlock(agentName(it, target), prev);
+    body = _statusBlock(agentName(it, target), prev, t);
   } else if ((it.result ?? '').isNotEmpty) {
     body = appMarkdown(it.result!);
   }
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     ...head,
-    _resultSection(it, body),
+    toolResult(it, body, t),
   ]);
 }
 
-Widget _statusBlock(String name, Object? raw) {
+Widget _statusBlock(String name, Object? raw, ArgusTokens t) {
   final s = agentStatus(raw);
-  if (s == null) return _bold(name);
+  if (s == null) return toolHeader(name, t);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     RichText(
       text: TextSpan(children: [
-        TextSpan(text: name, style: _mono.copyWith(color: AppColors.secondary, fontWeight: FontWeight.w700)),
-        TextSpan(text: ': ${s.state}', style: _mono.copyWith(color: AppColors.secondary)),
+        TextSpan(text: name, style: toolHeaderStyle(t)),
+        TextSpan(text: ': ${s.state}', style: codeMono.copyWith(color: t.textSecondary)),
       ]),
     ),
     if (s.message.isNotEmpty) appMarkdown(s.message),
@@ -254,20 +186,6 @@ Object? _resultField(String? result, String key) {
   return null;
 }
 
-Widget _generic(Entry it) =>
-    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      if ((it.toolInput ?? '').isNotEmpty) ...[
-        _label('Input'),
-        codeBlock(it.toolInput!),
-      ],
-      if ((it.result ?? '').isNotEmpty)
-        _resultSection(it, codeBlock(it.result!)),
-    ]);
-
-const _green = Color(0xFFb8bb26);
-final _patchAdd = _mono.copyWith(color: _green);
-final _patchDel = _mono.copyWith(color: _red);
-final _patchCtx = _mono.copyWith(color: AppColors.dim);
 
 class CodexPatchLine {
   final String kind; // '+', '-', ' ', or '@' (hunk header)
@@ -341,7 +259,7 @@ String _patchHeader(CodexPatchFile f) => switch (f.op) {
       _ => f.moveTo.isNotEmpty ? 'M ${f.path} → ${f.moveTo}' : 'M ${f.path}',
     };
 
-Widget codexApplyPatchDetail(Entry it) {
+Widget codexApplyPatchDetail(Entry it, ArgusTokens t) {
   final input = it.toolInput ?? '';
   final files = parseCodexPatch(input);
   final rows = <Widget>[];
@@ -351,10 +269,10 @@ Widget codexApplyPatchDetail(Entry it) {
     for (final f in files) {
       rows.add(Padding(
           padding: const EdgeInsets.only(top: 6, bottom: 2),
-          child: _bold(_patchHeader(f))));
+          child: toolHeader(_patchHeader(f), t)));
       if (f.lines.isEmpty) continue;
       // One Text per file: a large patch stays a handful of widgets.
-      rows.add(Text.rich(TextSpan(style: _mono, children: [
+      rows.add(Text.rich(TextSpan(style: codeMono, children: [
         for (final (i, l) in f.lines.indexed)
           TextSpan(
             text: (i > 0 ? '\n' : '') +
@@ -364,9 +282,9 @@ Widget codexApplyPatchDetail(Entry it) {
                   _ => '${l.kind}${l.text}',
                 },
             style: switch (l.kind) {
-              '+' => _patchAdd,
-              '-' => _patchDel,
-              _ => _patchCtx,
+              '+' => codeMono.copyWith(color: t.diffAdd),
+              '-' => codeMono.copyWith(color: t.diffRemove),
+              _ => codeMono.copyWith(color: t.textDim),
             },
           ),
       ])));
@@ -374,12 +292,12 @@ Widget codexApplyPatchDetail(Entry it) {
   }
   if (it.resultIsError && (it.result ?? '').isNotEmpty) {
     final r = splitExecResult(it.result!);
-    rows.add(_resultSection(it, codeBlock(r.hasMarker ? r.output : it.result!)));
+    rows.add(toolResult(it, codeBlock(r.hasMarker ? r.output : it.result!), t));
   }
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
 }
 
-Widget codexExecDetail(Entry it) {
+Widget codexExecDetail(Entry it, ArgusTokens t) {
   final input = it.toolInput ?? '';
   Widget? body;
   final result = it.result ?? '';
@@ -387,16 +305,16 @@ Widget codexExecDetail(Entry it) {
     if (result.startsWith('aborted')) {
       body = codeBlock(result);
     } else {
-      body = _execResultBody(result);
+      body = _execResultBody(result, t);
     }
   }
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     if (input.isNotEmpty) codeBlock(input, lang: 'javascript'),
-    _resultSection(it, body),
+    toolResult(it, body, t),
   ]);
 }
 
-Widget codexQuestionDetail(Entry it) {
+Widget codexQuestionDetail(Entry it, ArgusTokens t) {
   final answers = _resultField(it.result, 'answers');
   return questionsDetail(it, (q) {
     final raw = answers is Map ? answers[toolInputStr(q['id'])] : null;
@@ -405,14 +323,14 @@ Widget codexQuestionDetail(Entry it) {
         : const <String>[];
     final a = splitCodexAnswer(vals);
     return (picks: [a.label], note: a.note);
-  });
+  }, t);
 }
 
-Widget codexAsyncQuestionDetail(Entry it) {
-  final qs = ((_input(it)['questions'] as List?) ?? const [])
+Widget codexAsyncQuestionDetail(Entry it, ArgusTokens t) {
+  final qs = ((toolInput(it)['questions'] as List?) ?? const [])
       .whereType<Map<String, dynamic>>()
       .toList();
-  if (qs.isEmpty) return _generic(it);
+  if (qs.isEmpty) return toolGeneric(it, t);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     for (final q in qs) ...[
       Padding(
@@ -420,35 +338,35 @@ Widget codexAsyncQuestionDetail(Entry it) {
           child: Text(toolInputStr(q['title']),
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
       for (final o in (q['options'] as List?) ?? const [])
-        Text('• $o', style: _mono.copyWith(color: AppColors.secondary)),
+        Text('• $o', style: codeMono.copyWith(color: t.textSecondary)),
     ],
     if (it.resultIsError && (it.result ?? '').isNotEmpty)
-      _resultSection(it, codeBlock(it.result!, wrap: true))
+      toolResult(it, codeBlock(it.result!, wrap: true), t)
     else
       Padding(
           padding: const EdgeInsets.only(top: 8),
           child: Text('Asked without waiting; answered in a later message.',
-              style: _mono.copyWith(color: AppColors.dim))),
+              style: codeMono.copyWith(color: t.textDim))),
   ]);
 }
 
-Widget codexViewImageDetail(Entry it) {
-  final m = _input(it);
+Widget codexViewImageDetail(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final path = toolInputStr(m['path']);
   final detail = toolInputStr(m['detail']);
   final result = it.result ?? '';
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     if (path.isNotEmpty)
-      _kvDump('path: $path${detail.isNotEmpty ? '\ndetail: $detail' : ''}')
+      kvDump('path: $path${detail.isNotEmpty ? '\ndetail: $detail' : ''}', t)
     else if ((it.toolInput ?? '').isNotEmpty)
       codeBlock(it.toolInput!),
     if (result.startsWith('[image'))
       Padding(
           padding: const EdgeInsets.only(top: 6),
           child: Text('image attached',
-              style: _mono.copyWith(color: AppColors.dim)))
+              style: codeMono.copyWith(color: t.textDim)))
     else if (result.isNotEmpty)
-      _resultSection(it, codeBlock(result)),
+      toolResult(it, codeBlock(result), t),
   ]);
 }
 
@@ -461,50 +379,38 @@ String msDuration(int ms) {
   return h > 0 ? '${h}h${m}m$s' : '${m}m$s';
 }
 
-Widget _headline(String lead, String rest, [String? dim]) => RichText(
-      text: TextSpan(style: _mono, children: [
-        TextSpan(
-            text: lead,
-            style: _mono.copyWith(
-                color: AppColors.secondary, fontWeight: FontWeight.w700)),
-        TextSpan(text: rest, style: _mono.copyWith(color: AppColors.text)),
-        if (dim != null)
-          TextSpan(text: '  ($dim)', style: _mono.copyWith(color: AppColors.dim)),
-      ]),
-    );
-
 /// Code mode's wait on a running exec cell; the result reports the cell like
 /// exec does.
-Widget codexWaitCellDetail(Entry it) {
-  final m = _input(it);
+Widget codexWaitCellDetail(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final cell = toolInputStr(m['cell_id']);
   final yieldMs = (m['yield_time_ms'] as num?)?.toInt() ?? 0;
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     if (cell.isNotEmpty)
-      _headline('Waiting on cell ', cell,
+      toolHeadline('Waiting on cell ', cell, t,
           yieldMs > 0 ? 'yield ${msDuration(yieldMs)}' : null)
     else if ((it.toolInput ?? '').isNotEmpty)
       codeBlock(it.toolInput!),
     if ((it.result ?? '').isNotEmpty)
-      _resultSection(it, _execResultBody(it.result!)),
+      toolResult(it, _execResultBody(it.result!, t), t),
   ]);
 }
 
-Widget codexSleepDetail(Entry it) {
-  final ms = (_input(it)['duration_ms'] as num?)?.toInt() ?? 0;
+Widget codexSleepDetail(Entry it, ArgusTokens t) {
+  final ms = (toolInput(it)['duration_ms'] as num?)?.toInt() ?? 0;
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     if (ms > 0)
-      _headline('Sleep ', msDuration(ms))
+      toolHeadline('Sleep ', msDuration(ms), t)
     else if ((it.toolInput ?? '').isNotEmpty)
       codeBlock(it.toolInput!),
     if ((it.result ?? '').isNotEmpty)
-      _resultSection(it, codeBlock(it.result!)),
+      toolResult(it, codeBlock(it.result!), t),
   ]);
 }
 
 /// Multi-agent v2's wait_agent waits on any agent: the input is only a timeout.
-Widget codexV2WaitAgentDetail(Entry it) {
-  final timeoutMs = (_input(it)['timeout_ms'] as num?)?.toInt() ?? 0;
+Widget codexV2WaitAgentDetail(Entry it, ArgusTokens t) {
+  final timeoutMs = (toolInput(it)['timeout_ms'] as num?)?.toInt() ?? 0;
   final result = it.result ?? '';
   Widget? body;
   if (result.isNotEmpty) {
@@ -513,15 +419,15 @@ Widget codexV2WaitAgentDetail(Entry it) {
     body = message is String || timedOut
         ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             if (timedOut)
-              Text('timed out', style: _mono.copyWith(color: AppColors.dim)),
+              Text('timed out', style: codeMono.copyWith(color: t.textDim)),
             if (message is String && message.isNotEmpty) appMarkdown(message),
           ])
         : codeBlock(result);
   }
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    _headline('Waiting on agents', '',
+    toolHeadline('Waiting on agents', '', t,
         timeoutMs > 0 ? 'timeout ${msDuration(timeoutMs)}' : null),
-    _resultSection(it, body),
+    toolResult(it, body, t),
   ]);
 }
 
@@ -530,52 +436,52 @@ const _encryptedPrefix = 'gAAAAA';
 
 /// Multi-agent v2's send_message and followup_task: a message to the agent at
 /// target. An encrypted message leaves only the target readable.
-Widget codexAgentMessageDetail(Entry it) {
-  final m = _input(it);
+Widget codexAgentMessageDetail(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final target = toolInputStr(m['target']);
-  if (target.isEmpty) return _generic(it);
+  if (target.isEmpty) return toolGeneric(it, t);
   final message = toolInputStr(m['message']);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    _headline('To ', target),
+    toolHeadline('To ', target, t),
     if (message.startsWith(_encryptedPrefix))
-      Text('message encrypted', style: _mono.copyWith(color: AppColors.dim))
+      Text('message encrypted', style: codeMono.copyWith(color: t.textDim))
     else if (message.isNotEmpty)
       appMarkdown(message),
     if ((it.result ?? '').isNotEmpty)
-      _resultSection(it, codeBlock(it.result!)),
+      toolResult(it, codeBlock(it.result!), t),
   ]);
 }
 
-Widget codexInterruptAgentDetail(Entry it) {
-  final target = toolInputStr(_input(it)['target']);
-  if (target.isEmpty) return _generic(it);
+Widget codexInterruptAgentDetail(Entry it, ArgusTokens t) {
+  final target = toolInputStr(toolInput(it)['target']);
+  if (target.isEmpty) return toolGeneric(it, t);
   final result = it.result ?? '';
   final prev = _resultField(result, 'previous_status');
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    _headline('Interrupted ', target),
+    toolHeadline('Interrupted ', target, t),
     if (result.isNotEmpty)
-      _resultSection(it,
-          prev != null ? _statusBlock('Previous status', prev) : codeBlock(result)),
+      toolResult(it,
+          prev != null ? _statusBlock('Previous status', prev, t) : codeBlock(result), t),
   ]);
 }
 
-Widget codexListAgentsDetail(Entry it) {
-  final prefix = toolInputStr(_input(it)['path_prefix']);
+Widget codexListAgentsDetail(Entry it, ArgusTokens t) {
+  final prefix = toolInputStr(toolInput(it)['path_prefix']);
   final result = it.result ?? '';
   final agents = _resultField(result, 'agents');
   Widget? body;
   if (agents is List) {
     body = agents.isEmpty
-        ? Text('no agents', style: _mono.copyWith(color: AppColors.dim))
+        ? Text('no agents', style: codeMono.copyWith(color: t.textDim))
         : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             for (final a in agents.whereType<Map<String, dynamic>>())
-              _statusBlock(toolInputStr(a['agent_name']), a['agent_status']),
+              _statusBlock(toolInputStr(a['agent_name']), a['agent_status'], t),
           ]);
   } else if (result.isNotEmpty) {
     body = codeBlock(result);
   }
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    if (prefix.isNotEmpty) _headline('Agents under ', prefix),
-    _resultSection(it, body),
+    if (prefix.isNotEmpty) toolHeadline('Agents under ', prefix, t),
+    toolResult(it, body, t),
   ]);
 }

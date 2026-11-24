@@ -87,8 +87,8 @@ void main() {
           (w.key! as ValueKey<String>).value.startsWith('argus-message:'),
     );
     expect(frames, findsNWidgets(2));
-    expect(_borderOf(tester, frames.at(0)), AppColors.accent);
-    expect(_borderOf(tester, frames.at(1)), AppColors.notice);
+    expect(_borderOf(tester, frames.at(0)), ArgusTokens.fallback.accent);
+    expect(_borderOf(tester, frames.at(1)), ArgusTokens.fallback.notice);
     expect(find.text('prompt'), findsOneWidget);
     expect(find.text('worker-db'), findsOneWidget);
     expect(find.text('home:argus:%7'), findsOneWidget);
@@ -139,7 +139,7 @@ void main() {
     );
     expect(find.text('Show more'), findsOneWidget);
     final body = tester.widget<Text>(find.textContaining('"k0"'));
-    expect(body.style?.fontFamily, 'monospace');
+    expect(body.style?.fontFamily, monoFamily);
   });
 
   testWidgets('an interaction_ended message is labeled prompt ended', (

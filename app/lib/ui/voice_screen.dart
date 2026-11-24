@@ -114,7 +114,7 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
                   prefs.provider == VoiceProvider.off
                       ? 'Pick a provider to turn on the mic button.'
                       : 'Add a key to turn on the mic button.',
-                  style: const TextStyle(color: AppColors.dim, fontSize: 12),
+                  style: TextStyle(color: context.tokens.textDim, fontSize: 12),
                 ),
               ],
               if (prefs.enabled) ...[
@@ -132,8 +132,8 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
         padding: const EdgeInsets.only(bottom: 8),
         child: Text(
           title.toUpperCase(),
-          style: const TextStyle(
-            color: AppColors.accent,
+          style: TextStyle(
+            color: context.tokens.accent,
             fontSize: 12,
             fontWeight: FontWeight.w700,
           ),
@@ -150,7 +150,6 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
               decoration: InputDecoration(
                 labelText: 'OpenRouter API key',
                 hintText: 'sk-or-v1-…',
-                border: const OutlineInputBorder(),
                 suffixIcon: IconButton(
                   icon: Icon(_reveal ? Icons.visibility_off : Icons.visibility),
                   tooltip: _reveal ? 'Hide' : 'Show',
@@ -166,7 +165,7 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
                   child: Text(
                     _status(dirty: dirty, saved: prefs.apiKey),
                     style: TextStyle(
-                      color: dirty ? AppColors.text : AppColors.dim,
+                      color: dirty ? context.tokens.text : context.tokens.textDim,
                       fontSize: 12,
                     ),
                   ),
@@ -179,15 +178,15 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Your key, your account. Recordings go straight from this device '
               'to openrouter.ai — they do not pass through the gateway.',
-              style: TextStyle(color: AppColors.dim, fontSize: 12),
+              style: TextStyle(color: context.tokens.textDim, fontSize: 12),
             ),
             const SizedBox(height: 24),
-            const Text(
+            Text(
               'Model — cheapest first',
-              style: TextStyle(color: AppColors.dim, fontSize: 12),
+              style: TextStyle(color: context.tokens.textDim, fontSize: 12),
             ),
             ref.watch(transcriptionModelsProvider).when(
                   data: (models) => _picker(models, prefs.model),
@@ -198,18 +197,18 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
                   error: (e, _) => _modelsError(e),
                 ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Prices are per minute of audio, billed to your OpenRouter '
               'account. Models marked /M tok charge per token instead, so their '
               'cost depends on how much you say.',
-              style: TextStyle(color: AppColors.dim, fontSize: 12),
+              style: TextStyle(color: context.tokens.textDim, fontSize: 12),
             ),
           ];
 
   List<Widget> _systemBody(VoicePrefs prefs) => [
-        const Text(
+        Text(
           'Language',
-          style: TextStyle(color: AppColors.dim, fontSize: 12),
+          style: TextStyle(color: context.tokens.textDim, fontSize: 12),
         ),
         ref.watch(systemLanguagesProvider).when(
               data: (languages) => _languagePicker(languages, prefs.language),
@@ -220,16 +219,16 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
               error: (e, _) => _languagesError(e),
             ),
         switch (ref.watch(speechPackInstalledProvider(prefs.language))) {
-          AsyncData(value: true) => const Padding(
-              key: Key('speech-pack-installed'),
-              padding: EdgeInsets.symmetric(vertical: 12),
+          AsyncData(value: true) => Padding(
+              key: const Key('speech-pack-installed'),
+              padding: const EdgeInsets.symmetric(vertical: 12),
               child: Row(
                 children: [
-                  Icon(Icons.check, size: 18, color: AppColors.dim),
-                  SizedBox(width: 8),
+                  Icon(Icons.check, size: 18, color: context.tokens.textDim),
+                  const SizedBox(width: 8),
                   Text(
                     'Speech pack installed',
-                    style: TextStyle(color: AppColors.dim),
+                    style: TextStyle(color: context.tokens.textDim),
                   ),
                 ],
               ),
@@ -253,7 +252,7 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
                   'Apple processes the audio.'
               : 'Recognition runs on this device when it can. Otherwise '
                   'the system speech service processes the audio.',
-          style: const TextStyle(color: AppColors.dim, fontSize: 12),
+          style: TextStyle(color: context.tokens.textDim, fontSize: 12),
         ),
       ];
 
@@ -295,16 +294,15 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
             textCapitalization: TextCapitalization.sentences,
             decoration: InputDecoration(
               hintText: 'Hold the mic and speak',
-              border: const OutlineInputBorder(),
               suffixIcon: suffixIcon,
             ),
           ),
         ),
         if (prefs.provider == VoiceProvider.openrouter) ...[
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'A test dictation is billed like a real one.',
-            style: TextStyle(color: AppColors.dim, fontSize: 12),
+            style: TextStyle(color: context.tokens.textDim, fontSize: 12),
           ),
         ],
       ];
@@ -335,7 +333,7 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
           Expanded(
             child: Text(
               'Could not load the language list: $e',
-              style: const TextStyle(color: AppColors.dim, fontSize: 12),
+              style: TextStyle(color: context.tokens.textDim, fontSize: 12),
             ),
           ),
           TextButton(
@@ -378,7 +376,7 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
                   const SizedBox(width: 8),
                   Text(
                     m.priceLabel,
-                    style: const TextStyle(color: AppColors.dim, fontSize: 12),
+                    style: TextStyle(color: context.tokens.textDim, fontSize: 12),
                   ),
                 ],
               ],
@@ -396,7 +394,7 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
           Expanded(
             child: Text(
               'Could not load the model list: $e',
-              style: const TextStyle(color: AppColors.dim, fontSize: 12),
+              style: TextStyle(color: context.tokens.textDim, fontSize: 12),
             ),
           ),
           TextButton(

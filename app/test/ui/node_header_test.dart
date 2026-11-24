@@ -29,7 +29,7 @@ void main() {
   });
 
   testWidgets('needs you shows the needs-input diamond', (tester) async {
-    await pump(tester, const NeedsYouHeader(label: 'Needs you', color: AppColors.blocked));
+    await pump(tester, NeedsYouHeader(label: 'Needs you', color: ArgusTokens.fallback.blocked));
     expect(find.text('◆'), findsOneWidget);
     expect(find.text('NEEDS YOU'), findsOneWidget);
   });

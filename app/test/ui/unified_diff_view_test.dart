@@ -1,9 +1,10 @@
 import 'package:argus/ui/edit_diff.dart';
+import 'package:argus/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Widget _wrap(String diff) =>
-    MaterialApp(home: Scaffold(body: unifiedDiffView(diff, lang: 'x.txt')));
+    MaterialApp(home: Scaffold(body: unifiedDiffView(diff, ArgusTokens.fallback, lang: 'x.txt')));
 
 void main() {
   testWidgets('shows hunk headers and new-side numbers from the header',

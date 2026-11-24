@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/entry.dart';
 import 'package:argus/ui/edit_diff.dart';
+import 'package:argus/ui/theme.dart';
 
-Widget _wrap(Entry i) => MaterialApp(home: Scaffold(body: editDiffView(i)));
+Widget _wrap(Entry i) => MaterialApp(home: Scaffold(body: editDiffView(i, ArgusTokens.fallback)));
 
 Widget _wrapDiff(String oldS, String newS) => MaterialApp(
     home: Scaffold(
-        body: SingleChildScrollView(child: diffView(oldS, newS))));
+        body: SingleChildScrollView(child: diffView(oldS, newS, ArgusTokens.fallback))));
 
 void main() {
   testWidgets('Edit shows path, old and new', (tester) async {

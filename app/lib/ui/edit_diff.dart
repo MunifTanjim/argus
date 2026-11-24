@@ -7,13 +7,10 @@ import '../util/unified_diff.dart';
 import 'code_block.dart';
 import 'theme.dart';
 
-const _red = Color(0xFFfb4934);
-const _green = Color(0xFFb8bb26);
-const _mono = TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.35);
 
 String toolInputStr(Object? v) => v is String ? v : '';
 
-Widget editDiffView(Entry item) {
+Widget editDiffView(Entry item, ArgusTokens t) {
   Map<String, dynamic>? input;
   try {
     input = jsonDecode(item.toolInput ?? '') as Map<String, dynamic>;
@@ -22,7 +19,7 @@ Widget editDiffView(Entry item) {
   }
   if (input == null) {
     return Text(item.toolInput ?? '',
-        style: _mono.copyWith(color: AppColors.text));
+        style: codeMono.copyWith(color: t.text));
   }
 
   // Key names vary by agent: Claude uses file_path/notebook_path; opencode uses
@@ -35,7 +32,7 @@ Widget editDiffView(Entry item) {
   if (path != null && path.isNotEmpty) {
     blocks.add(Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Text('● $path', style: _mono.copyWith(color: AppColors.dim)),
+      child: Text('● $path', style: codeMono.copyWith(color: t.textDim)),
     ));
   }
 
@@ -45,11 +42,11 @@ Widget editDiffView(Entry item) {
         blocks.add(Padding(
           padding: const EdgeInsets.only(bottom: 4),
           child: Text('(replace all)',
-              style: _mono.copyWith(color: AppColors.dim)),
+              style: codeMono.copyWith(color: t.textDim)),
         ));
       }
       blocks.add(diffView(toolInputStr(input['old_string']),
-          toolInputStr(input['new_string']),
+          toolInputStr(input['new_string']), t,
           lang: path));
       break;
     case 'MultiEdit':
@@ -60,31 +57,31 @@ Widget editDiffView(Entry item) {
           blocks.add(Padding(
             padding: const EdgeInsets.symmetric(vertical: 6),
             child: Text('─── edit ${i + 1} ───',
-                style: _mono.copyWith(color: AppColors.dim)),
+                style: codeMono.copyWith(color: t.textDim)),
           ));
         }
         blocks.add(diffView(
-            toolInputStr(e['old_string']), toolInputStr(e['new_string']),
+            toolInputStr(e['old_string']), toolInputStr(e['new_string']), t,
             lang: path));
       }
       break;
     case 'Write':
-      blocks.add(diffView('', toolInputStr(input['content']), lang: path));
+      blocks.add(diffView('', toolInputStr(input['content']), t, lang: path));
       break;
     // opencode edit uses oldString/newString; write uses content.
     case 'edit':
       blocks.add(diffView(toolInputStr(input['oldString']),
-          toolInputStr(input['newString']),
+          toolInputStr(input['newString']), t,
           lang: path));
       break;
     case 'write':
-      blocks.add(diffView('', toolInputStr(input['content']), lang: path));
+      blocks.add(diffView('', toolInputStr(input['content']), t, lang: path));
       break;
     case 'NotebookEdit':
-      blocks.add(diffView('', toolInputStr(input['new_source']), lang: path));
+      blocks.add(diffView('', toolInputStr(input['new_source']), t, lang: path));
       break;
     default:
-      blocks.add(diffView('', item.toolInput ?? ''));
+      blocks.add(diffView('', item.toolInput ?? '', t));
   }
 
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: blocks);
@@ -102,10 +99,10 @@ const _foldThreshold = 4;
 /// Place it in a bounded-height parent (e.g. a [Flexible]): it sizes to its
 /// content but caps at the granted height, pinning its header and scrolling the
 /// rows on overflow.
-Widget unifiedDiffView(String diff, {String? lang}) =>
-    _CollapsibleDiff(_unifiedLines(diff, lang: langFromPath(lang)));
+Widget unifiedDiffView(String diff, ArgusTokens t, {String? lang}) =>
+    _CollapsibleDiff(_unifiedLines(diff, t, lang: langFromPath(lang)));
 
-List<_DLine> _unifiedLines(String diff, {String? lang}) {
+List<_DLine> _unifiedLines(String diff, ArgusTokens t, {String? lang}) {
   final parsed = parseUnifiedDiff(diff);
   _DKind kindOf(UdKind k) => switch (k) {
         UdKind.hunk => _DKind.hunk,
@@ -131,8 +128,8 @@ List<_DLine> _unifiedLines(String diff, {String? lang}) {
     for (final l in parsed)
       if (l.kind == UdKind.del) l.text,
   ];
-  final newRuns = highlightLines(newSide.join('\n'), lang: lang);
-  final oldRuns = highlightLines(oldSide.join('\n'), lang: lang);
+  final newRuns = highlightLines(newSide.join('\n'), t, lang: lang);
+  final oldRuns = highlightLines(oldSide.join('\n'), t, lang: lang);
   List<CodeRun>? runsAt(List<List<CodeRun>> runs, int idx) =>
       idx >= 0 && idx < runs.length ? runs[idx] : null;
 
@@ -203,6 +200,7 @@ class _CollapsibleDiffState extends State<_CollapsibleDiff> {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final lines = widget.lines;
     if (lines.isEmpty) return const SizedBox.shrink();
 
@@ -222,8 +220,8 @@ class _CollapsibleDiffState extends State<_CollapsibleDiff> {
           continue;
         }
       }
-      rows.add(
-          _diffLineRow(lines[i], _newNo[i], _gutterWidth, _wrap, _highlight));
+      rows.add(_diffLineRow(
+          lines[i], _newNo[i], _gutterWidth, _wrap, _highlight, t));
       i++;
     }
 
@@ -245,8 +243,8 @@ class _CollapsibleDiffState extends State<_CollapsibleDiff> {
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: AppColors.card,
-        border: Border.all(color: AppColors.border),
+        color: t.surface,
+        border: Border.all(color: t.line),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Column(
@@ -256,16 +254,17 @@ class _CollapsibleDiffState extends State<_CollapsibleDiff> {
         children: [
           Container(
             padding: const EdgeInsets.only(left: 8, right: 2),
-            decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: AppColors.border)),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: t.line)),
             ),
             child: Row(
               children: [
                 Expanded(
                   child: Text('diff',
-                      style: _mono.copyWith(color: AppColors.dim, fontSize: 11)),
+                      style: codeMono.copyWith(color: t.textDim, fontSize: 11)),
                 ),
                 codeBarButton(
+                  t,
                   icon: _expandAll ? Icons.unfold_less : Icons.unfold_more,
                   active: _expandAll,
                   tooltip: _expandAll ? 'Collapse unchanged' : 'Expand all',
@@ -275,12 +274,14 @@ class _CollapsibleDiffState extends State<_CollapsibleDiff> {
                   }),
                 ),
                 codeBarButton(
+                  t,
                   icon: Icons.format_color_reset,
                   active: !_highlight,
                   tooltip: _highlight ? 'Disable highlight' : 'Enable highlight',
                   onTap: () => setState(() => _highlight = !_highlight),
                 ),
                 codeBarButton(
+                  t,
                   icon: Icons.wrap_text,
                   active: _wrap,
                   tooltip: _wrap ? 'Disable wrap' : 'Wrap lines',
@@ -306,7 +307,7 @@ class _CollapsibleDiffState extends State<_CollapsibleDiff> {
     final icon = end == widget.lines.length
         ? Icons.keyboard_double_arrow_down
         : Icons.height;
-    const color = Color(0xFF83a598);
+    final color = context.tokens.diffHunk;
     return InkWell(
       onTap: onTap,
       child: Padding(
@@ -322,7 +323,7 @@ class _CollapsibleDiffState extends State<_CollapsibleDiff> {
             ),
             const SizedBox(width: 8),
             Text('Expand $count unchanged lines',
-                style: _mono.copyWith(color: color)),
+                style: codeMono.copyWith(color: color)),
           ],
         ),
       ),
@@ -351,24 +352,25 @@ class _DLine {
 
 const _noEolLabel = r'\ No newline at end of file';
 
-({String prefix, Color color}) _diffLineStyle(_DKind kind) => switch (kind) {
-      _DKind.add => (prefix: '+ ', color: _green),
-      _DKind.del => (prefix: '- ', color: _red),
-      _DKind.context => (prefix: '  ', color: AppColors.text),
-      _DKind.hunk => (prefix: '', color: AppColors.link),
+({String prefix, Color color}) _diffLineStyle(_DKind kind, ArgusTokens t) =>
+    switch (kind) {
+      _DKind.add => (prefix: '+ ', color: t.diffAdd),
+      _DKind.del => (prefix: '- ', color: t.diffRemove),
+      _DKind.context => (prefix: '  ', color: t.text),
+      _DKind.hunk => (prefix: '', color: t.link),
     };
 
 /// Faint background tint marking add/removed lines; null for context.
-Color? _diffLineBg(_DKind kind) => switch (kind) {
-      _DKind.add => _green.withValues(alpha: 0.10),
-      _DKind.del => _red.withValues(alpha: 0.10),
+Color? _diffLineBg(_DKind kind, ArgusTokens t) => switch (kind) {
+      _DKind.add => t.diffAddSurface,
+      _DKind.del => t.diffRemoveSurface,
       _DKind.context || _DKind.hunk => null,
     };
 
 /// Spans for one diff line: the colored `+`/`-`/space prefix, then either
 /// syntax-highlighted runs or a single flat-colored span.
-List<TextSpan> _diffLineSpans(_DLine l, bool highlight) {
-  final s = _diffLineStyle(l.kind);
+List<TextSpan> _diffLineSpans(_DLine l, bool highlight, ArgusTokens t) {
+  final s = _diffLineStyle(l.kind, t);
   final runs = l.runs;
   if (highlight && runs != null) {
     return [
@@ -383,10 +385,10 @@ List<TextSpan> _diffLineSpans(_DLine l, bool highlight) {
 
 /// A numbered diff row: new-side line number (blank for deletions) in a
 /// [gutterWidth]-wide gutter, then the styled line text.
-Widget _diffLineRow(
-    _DLine l, int newNo, double gutterWidth, bool wrap, bool highlight) {
-  final text = Text.rich(TextSpan(children: _diffLineSpans(l, highlight)),
-      style: _mono, softWrap: wrap);
+Widget _diffLineRow(_DLine l, int newNo, double gutterWidth, bool wrap,
+    bool highlight, ArgusTokens t) {
+  final text = Text.rich(TextSpan(children: _diffLineSpans(l, highlight, t)),
+      style: codeMono, softWrap: wrap);
   final row = Row(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -395,32 +397,32 @@ Widget _diffLineRow(
         child: Text(
             l.kind == _DKind.del || l.kind == _DKind.hunk ? '' : '$newNo',
             textAlign: TextAlign.right,
-            style: _mono.copyWith(color: AppColors.dim)),
+            style: codeMono.copyWith(color: t.textDim)),
       ),
       const SizedBox(width: 8),
       wrap ? Expanded(child: text) : text,
     ],
   );
-  final bg = highlight ? _diffLineBg(l.kind) : null;
+  final bg = highlight ? _diffLineBg(l.kind, t) : null;
   final styled = bg == null ? row : ColoredBox(color: bg, child: row);
   if (!l.noEol) return styled;
   return Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [styled, _noEolMarkerRow(gutterWidth)],
+    children: [styled, _noEolMarkerRow(gutterWidth, t)],
   );
 }
 
 /// The no-newline marker, aligned under the line text and dimmed.
-Widget _noEolMarkerRow(double gutterWidth) => Padding(
+Widget _noEolMarkerRow(double gutterWidth, ArgusTokens t) => Padding(
       padding: EdgeInsets.only(left: gutterWidth + 8),
       child: Text(_noEolLabel,
-          style: _mono.copyWith(
-              color: AppColors.dim, fontStyle: FontStyle.italic)),
+          style: codeMono.copyWith(
+              color: t.textDim, fontStyle: FontStyle.italic)),
     );
 
 /// Empty [oldS] yields an all-additions view. [lang] hints the highlight grammar.
-Widget diffView(String oldS, String newS, {String? lang}) =>
-    _DiffBox(_lineDiff(oldS, newS, lang: langFromPath(lang)));
+Widget diffView(String oldS, String newS, ArgusTokens t, {String? lang}) =>
+    _DiffBox(_lineDiff(oldS, newS, t, lang: langFromPath(lang)));
 
 /// Copy is intentionally omitted — a diff is for reading, not grabbing text.
 class _DiffBox extends StatefulWidget {
@@ -439,14 +441,15 @@ class _DiffBoxState extends State<_DiffBox> {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     if (widget.lines.isEmpty) return const SizedBox.shrink();
     final content = _lineNumbers ? _numbered() : _plain();
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: AppColors.card,
-        border: Border.all(color: AppColors.border),
+        color: t.surface,
+        border: Border.all(color: t.line),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Column(
@@ -454,17 +457,18 @@ class _DiffBoxState extends State<_DiffBox> {
         children: [
           Container(
             padding: const EdgeInsets.only(left: 8, right: 2),
-            decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: AppColors.border)),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: t.line)),
             ),
             child: Row(
               children: [
                 Expanded(
                   child: Text('diff',
-                      style: _mono.copyWith(
-                          color: AppColors.dim, fontSize: 11)),
+                      style: codeMono.copyWith(
+                          color: t.textDim, fontSize: 11)),
                 ),
                 codeBarButton(
+                  t,
                   icon: Icons.format_list_numbered,
                   active: _lineNumbers,
                   tooltip:
@@ -472,12 +476,14 @@ class _DiffBoxState extends State<_DiffBox> {
                   onTap: () => setState(() => _lineNumbers = !_lineNumbers),
                 ),
                 codeBarButton(
+                  t,
                   icon: Icons.format_color_reset,
                   active: !_highlight,
                   tooltip: _highlight ? 'Disable highlight' : 'Enable highlight',
                   onTap: () => setState(() => _highlight = !_highlight),
                 ),
                 codeBarButton(
+                  t,
                   icon: Icons.wrap_text,
                   active: _wrap,
                   tooltip: _wrap ? 'Disable wrap' : 'Wrap lines',
@@ -502,11 +508,12 @@ class _DiffBoxState extends State<_DiffBox> {
   // One paragraph of all lines, with a text-background tint (not full-row, which
   // would need per-row layout) on add/removed lines.
   Widget _plain() {
+    final t = context.tokens;
     final spans = <TextSpan>[];
     for (var i = 0; i < widget.lines.length; i++) {
       final l = widget.lines[i];
-      final bg = _highlight ? _diffLineBg(l.kind) : null;
-      for (final span in _diffLineSpans(l, _highlight)) {
+      final bg = _highlight ? _diffLineBg(l.kind, t) : null;
+      for (final span in _diffLineSpans(l, _highlight, t)) {
         spans.add(bg == null
             ? span
             : TextSpan(
@@ -515,25 +522,26 @@ class _DiffBoxState extends State<_DiffBox> {
                     .copyWith(backgroundColor: bg)));
       }
       if (l.noEol) {
-        spans.add(const TextSpan(
+        spans.add(TextSpan(
             text: '\n$_noEolLabel',
             style: TextStyle(
-                color: AppColors.dim, fontStyle: FontStyle.italic)));
+                color: t.textDim, fontStyle: FontStyle.italic)));
       }
       if (i != widget.lines.length - 1) spans.add(const TextSpan(text: '\n'));
     }
-    return Text.rich(TextSpan(children: spans, style: _mono), softWrap: _wrap);
+    return Text.rich(TextSpan(children: spans, style: codeMono), softWrap: _wrap);
   }
 
   // Numbers the new side; deletions get a blank gutter. Starts at 1 (no offset).
   Widget _numbered() {
+    final t = context.tokens;
     final newCount = widget.lines.where((l) => l.kind != _DKind.del).length;
     final gutterWidth = newCount.toString().length * 9.0;
     final rows = <Widget>[];
     var newNo = 0;
     for (final l in widget.lines) {
       if (l.kind != _DKind.del) newNo++;
-      rows.add(_diffLineRow(l, newNo, gutterWidth, _wrap, _highlight));
+      rows.add(_diffLineRow(l, newNo, gutterWidth, _wrap, _highlight, t));
     }
     return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch, children: rows);
@@ -543,7 +551,8 @@ class _DiffBoxState extends State<_DiffBox> {
 /// Line-level LCS diff. Each side is syntax-highlighted once ([lang] hints the
 /// grammar); the per-line runs then attach to their diff line — deletions from
 /// the old side, additions and context from the new side.
-List<_DLine> _lineDiff(String oldS, String newS, {String? lang}) {
+List<_DLine> _lineDiff(String oldS, String newS, ArgusTokens t,
+    {String? lang}) {
   oldS = _normalizeEol(oldS);
   newS = _normalizeEol(newS);
   final a = _split(oldS), b = _split(newS);
@@ -564,8 +573,8 @@ List<_DLine> _lineDiff(String oldS, String newS, {String? lang}) {
     ];
   }
 
-  final oldRuns = highlightLines(oldS, lang: lang);
-  final newRuns = highlightLines(newS, lang: lang);
+  final oldRuns = highlightLines(oldS, t, lang: lang);
+  final newRuns = highlightLines(newS, t, lang: lang);
   // Runs may carry a trailing empty line that _split drops; guard the lookup.
   List<CodeRun>? runsAt(List<List<CodeRun>> runs, int idx) =>
       idx >= 0 && idx < runs.length ? runs[idx] : null;

@@ -66,7 +66,7 @@ class DeviceIdentityScreen extends ConsumerWidget {
                     error: (e, _) => Padding(
                       padding: const EdgeInsets.all(16),
                       child: Text('Error: $e',
-                          style: const TextStyle(color: AppColors.error)),
+                          style: TextStyle(color: context.tokens.error)),
                     ),
                   ),
                 ],
@@ -95,9 +95,9 @@ class _StatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (label, icon, color) = _statusDisplay(summary);
+    final (label, icon, color) = _statusDisplay(context.tokens, summary);
     return Card(
-      color: AppColors.card,
+      color: context.tokens.surface,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
@@ -113,19 +113,22 @@ class _StatusCard extends StatelessWidget {
     );
   }
 
-  static (String, IconData, Color) _statusDisplay(TrustSummary summary) {
-    const green = Color(0xFFb8bb26); // gruvbox green
-    const yellow = Color(0xFFfabd2f); // gruvbox yellow
+  static (String, IconData, Color) _statusDisplay(
+    ArgusTokens t,
+    TrustSummary summary,
+  ) {
+    final green = t.success;
+    final yellow = t.warning;
     switch (trustStatusOf(summary)) {
       case TrustStatus.notConnected:
-        return ('Not connected', Icons.cloud_off_outlined, AppColors.dim);
+        return ('Not connected', Icons.cloud_off_outlined, t.textDim);
       case TrustStatus.openNetwork:
-        return ('Open network', Icons.lock_open_outlined, AppColors.secondary);
+        return ('Open network', Icons.lock_open_outlined, t.textSecondary);
       case TrustStatus.supersededLiveRoot:
       case TrustStatus.supersededNoRoot:
         return ('Trust root superseded', Icons.sync_problem_outlined, yellow);
       case TrustStatus.disabled:
-        return ('Disabled', Icons.block_outlined, AppColors.dim);
+        return ('Disabled', Icons.block_outlined, t.textDim);
       case TrustStatus.authorized:
         return ('Authorized', Icons.verified_outlined, green);
       case TrustStatus.awaitingAuthorization:
@@ -147,7 +150,7 @@ class _SupersededCard extends ConsumerWidget {
     final genesis = summary.supersededByGenesis;
     final words = genesis == null ? '' : genesisFingerprintWords(genesis).join(' ');
     return Card(
-      color: AppColors.card,
+      color: context.tokens.surface,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -161,15 +164,15 @@ class _SupersededCard extends ConsumerWidget {
                   : 'This device is pinned to a trust root that was disabled. The '
                       'network has not re-locked yet. Wait for a signer to re-lock, '
                       'then re-establish trust.',
-              style: const TextStyle(color: AppColors.text),
+              style: TextStyle(color: context.tokens.text),
             ),
             if (genesis != null) ...[
               const SizedBox(height: 12),
-              const Text('New root fingerprint',
-                  style: TextStyle(color: AppColors.dim, fontSize: 12)),
+              Text('New root fingerprint',
+                  style: TextStyle(color: context.tokens.textDim, fontSize: 12)),
               const SizedBox(height: 4),
               SelectableText(words,
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
+                  style: const TextStyle(fontFamily: monoFamily, fontSize: 13)),
             ],
             if (canAdopt) ...[
               const SizedBox(height: 12),
@@ -230,26 +233,26 @@ class _EquivocationBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      color: AppColors.awaitingSurface,
+      color: context.tokens.blockedSurface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: AppColors.awaitingBorder),
+        side: BorderSide(color: context.tokens.blockedBorder),
       ),
-      child: const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 Icon(Icons.warning_amber_outlined,
-                    color: Color(0xFFfe8019), size: 18),
-                SizedBox(width: 8),
+                    color: context.tokens.alert, size: 18),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     'Trust-log equivocation detected',
                     style: TextStyle(
-                      color: Color(0xFFfe8019),
+                      color: context.tokens.alert,
                       fontWeight: FontWeight.bold,
                       fontSize: 14,
                     ),
@@ -257,14 +260,14 @@ class _EquivocationBanner extends StatelessWidget {
                 ),
               ],
             ),
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             Text(
               'The gateway may be showing inconsistent trust-log views across '
               'your nodes — the app cannot fully verify what it relays. '
               'Compare the fingerprint words on each node by running '
               '`argus lock status` and confirming they match. '
               'The app continues to work normally.',
-              style: TextStyle(color: AppColors.secondary, fontSize: 13),
+              style: TextStyle(color: context.tokens.textSecondary, fontSize: 13),
             ),
           ],
         ),
@@ -287,8 +290,8 @@ class _EnrollBody extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Device public key',
-              style: TextStyle(color: AppColors.dim, fontSize: 12)),
+          Text('Device public key',
+              style: TextStyle(color: context.tokens.textDim, fontSize: 12)),
           const SizedBox(height: 4),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -302,8 +305,8 @@ class _EnrollBody extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          const Text('Authorization command',
-              style: TextStyle(color: AppColors.dim, fontSize: 12)),
+          Text('Authorization command',
+              style: TextStyle(color: context.tokens.textDim, fontSize: 12)),
           const SizedBox(height: 4),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -317,9 +320,9 @@ class _EnrollBody extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Run this command on a signer node to authorize this device.',
-            style: TextStyle(color: AppColors.dim, fontSize: 12),
+            style: TextStyle(color: context.tokens.textDim, fontSize: 12),
           ),
         ],
       ),
@@ -352,16 +355,16 @@ class _VerifyBody extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          const Text('trusted signers',
-              style: TextStyle(color: AppColors.dim, fontSize: 12)),
+          Text('trusted signers',
+              style: TextStyle(color: context.tokens.textDim, fontSize: 12)),
           const SizedBox(height: 4),
           for (final signer in summary.signers)
             SelectableText(_keyfmt('sigpub:', signer),
-                style: mono.copyWith(fontSize: 10, color: AppColors.dim)),
+                style: mono.copyWith(fontSize: 10, color: context.tokens.textDim)),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Compare these words with `argus lock status` on a signer node.',
-            style: TextStyle(color: AppColors.dim, fontSize: 12),
+            style: TextStyle(color: context.tokens.textDim, fontSize: 12),
           ),
         ],
       ),

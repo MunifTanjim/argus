@@ -100,21 +100,18 @@ String _runLabel(int thinking, int tools) => [
   if (tools > 0) '$tools ${tools == 1 ? 'tool' : 'tools'}',
 ].join(', ');
 
-const _runStyle = TextStyle(
-  fontFamily: 'monospace',
-  fontSize: 11,
-  color: AppColors.dim,
-);
+TextStyle _runStyle(ArgusTokens t) =>
+    TextStyle(fontFamily: monoFamily, fontSize: 11, color: t.textDim);
 
-List<Widget> _runCounts(int thinking, int tools) => [
+List<Widget> _runCounts(int thinking, int tools, ArgusTokens t) => [
   if (thinking > 0) ...[
-    const Icon(Icons.lightbulb, size: 12, color: thinkingCountColor),
-    Text(' $thinking', style: _runStyle),
+    Icon(Icons.lightbulb, size: 12, color: t.thinking),
+    Text(' $thinking', style: _runStyle(t)),
   ],
-  if (thinking > 0 && tools > 0) const Text(' · ', style: _runStyle),
+  if (thinking > 0 && tools > 0) Text(' · ', style: _runStyle(t)),
   if (tools > 0) ...[
-    const Icon(Icons.build, size: 12, color: toolCountColor),
-    Text(' $tools', style: _runStyle),
+    Icon(Icons.build, size: 12, color: t.toolCall),
+    Text(' $tools', style: _runStyle(t)),
   ],
 ];
 
@@ -267,13 +264,13 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
   }
 
   @override
-  void didUpdateWidget(TranscriptFeed old) {
-    super.didUpdateWidget(old);
+  void didUpdateWidget(TranscriptFeed oldWidget) {
+    super.didUpdateWidget(oldWidget);
     // New transcript data arrived (each delta yields a new list). Tail to the
     // bottom only if the user was already there.
     if (widget.stickToBottom &&
         _following &&
-        !identical(widget.entries, old.entries)) {
+        !identical(widget.entries, oldWidget.entries)) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToBottom());
     }
   }
@@ -287,6 +284,7 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final controller = widget.stickToBottom ? _sc : null;
     if (widget.entries.isEmpty) {
       // No width cap on the empty state: a single centred line gains nothing
@@ -298,7 +296,7 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
           Center(
             child: Text(
               widget.emptyText,
-              style: const TextStyle(color: AppColors.dim),
+              style: TextStyle(color: t.textDim),
             ),
           ),
         ],
@@ -374,6 +372,7 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
     int thinking,
     int tools,
   ) {
+    final t = context.tokens;
     final label = _runLabel(thinking, tools);
     return Align(
       alignment: Alignment.centerLeft,
@@ -396,9 +395,9 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(chevron, size: 16, color: AppColors.dim),
+                Icon(chevron, size: 16, color: t.textDim),
                 const SizedBox(width: 8),
-                ..._runCounts(thinking, tools),
+                ..._runCounts(thinking, tools, t),
               ],
             ),
           ),

@@ -53,7 +53,7 @@ Future<bool> killSession(ActionContext ax, Session s) async {
         ),
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(true),
-          style: TextButton.styleFrom(foregroundColor: Colors.red),
+          style: TextButton.styleFrom(foregroundColor: ctx.tokens.destructive),
           child: const Text('Kill'),
         ),
       ],
@@ -82,7 +82,7 @@ List<Widget> sessionActionTiles(
       ListTile(
         title: Text(
           'Upgrade argus on ${s.nodeLabel ?? 'this node'}',
-          style: const TextStyle(color: AppColors.dim),
+          style: TextStyle(color: sheet.tokens.textDim),
         ),
       ),
     ];
@@ -98,8 +98,8 @@ List<Widget> sessionActionTiles(
     ),
     if (s.canKill)
       ListTile(
-        leading: const Icon(Icons.close, color: AppColors.error),
-        title: const Text('Kill', style: TextStyle(color: AppColors.error)),
+        leading: Icon(Icons.close, color: sheet.tokens.error),
+        title: Text('Kill', style: TextStyle(color: sheet.tokens.error)),
         onTap: () {
           Navigator.of(sheet).pop();
           killSession(ax, s);

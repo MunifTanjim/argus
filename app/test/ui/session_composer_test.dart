@@ -11,6 +11,7 @@ import 'package:argus/data/session_repository.dart';
 import 'package:argus/models/entry.dart';
 import 'package:argus/models/enums.dart';
 import 'package:argus/models/session.dart';
+import 'package:argus/state/appearance.dart';
 import 'package:argus/state/grouping.dart';
 import 'package:argus/state/sessions.dart';
 import 'package:argus/ui/interaction_panel.dart';
@@ -157,8 +158,8 @@ void main() {
             now),
         'Question');
     String line(Summary? s) {
-      final (:parts, base: _) = modelParts(s);
-      return modelLine(parts, parts.length).toPlainText();
+      final (:parts, base: _) = modelParts(s, ArgusTokens.fallback);
+      return modelLine(parts, parts.length, ArgusTokens.fallback).toPlainText();
     }
 
     expect(line(const Summary(modelName: 'Opus 5.5', effort: 'high')),
@@ -295,16 +296,16 @@ void main() {
     Color? iconColor() => t
         .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.expand_more))
         .color;
-    expect(labelColor(), AppColors.blocked);
-    expect(iconColor(), AppColors.blocked);
-    expect(ruleColors(), {AppColors.blocked});
-    expect(surfaces(), isNot(contains(AppColors.awaitingSurface)));
+    expect(labelColor(), ArgusTokens.fallback.blocked);
+    expect(iconColor(), ArgusTokens.fallback.blocked);
+    expect(ruleColors(), {ArgusTokens.fallback.blocked});
+    expect(surfaces(), isNot(contains(ArgusTokens.fallback.blockedSurface)));
     await t.tap(find.byTooltip('Collapse'));
     await t.pump();
     expect(find.byType(InteractionPanel), findsNothing);
-    expect(labelColor(), AppColors.blocked);
-    expect(ruleColors(), {AppColors.awaitingBorder, AppColors.border});
-    expect(surfaces(), contains(AppColors.awaitingSurface));
+    expect(labelColor(), ArgusTokens.fallback.blocked);
+    expect(ruleColors(), {ArgusTokens.fallback.blockedBorder, ArgusTokens.fallback.line});
+    expect(surfaces(), contains(ArgusTokens.fallback.blockedSurface));
     await t.tap(find.byTooltip('Expand'));
     await t.pump();
     expect(find.byType(InteractionPanel), findsOneWidget);
@@ -884,5 +885,23 @@ void main() {
       expect(repo.inputs, isEmpty);
       expect(repo.calls, isEmpty);
     });
+  });
+
+  testWidgets('reply field takes the corner radius from the theme', (t) async {
+    const prefs = AppearancePrefs(radius: CornerRadius.rounded);
+    await t.pumpWidget(ProviderScope(
+      overrides: [
+        sessionRepositoryProvider.overrideWithValue(FakeSessionRepository()),
+      ],
+      child: MaterialApp(
+        theme: buildArgusTheme(prefs: prefs),
+        home: Scaffold(body: SessionComposer(session: _s())),
+      ),
+    ));
+    final border = t
+        .widget<InputDecorator>(find.byType(InputDecorator).first)
+        .decoration
+        .border as OutlineInputBorder;
+    expect(border.borderRadius, BorderRadius.circular(12));
   });
 }

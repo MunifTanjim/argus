@@ -20,6 +20,7 @@ class FileViewScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final t = context.tokens;
     final async = ref.watch(workspaceFileProvider((workspaceId, path)));
     final dir = parentPath(path);
     return Scaffold(
@@ -31,7 +32,7 @@ class FileViewScreen extends ConsumerWidget {
             if (dir.isNotEmpty)
               Text(
                 dir,
-                style: const TextStyle(color: AppColors.dim, fontSize: 12),
+                style: TextStyle(color: t.textDim, fontSize: 12),
               ),
           ],
         ),
@@ -44,14 +45,14 @@ class FileViewScreen extends ConsumerWidget {
           error: (e, _) => Center(
             child: Text(
               'Could not read the file:\n$e',
-              style: const TextStyle(color: AppColors.dim),
+              style: TextStyle(color: t.textDim),
             ),
           ),
           data: (f) => f.notShown
-              ? const Center(
+              ? Center(
                   child: Text(
                     'Binary or too large to show.',
-                    style: TextStyle(color: AppColors.dim),
+                    style: TextStyle(color: t.textDim),
                   ),
                 )
               : SingleChildScrollView(
