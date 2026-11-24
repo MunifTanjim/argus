@@ -53,7 +53,7 @@ Map<String, dynamic> optionRespond({
 
 /// One question's committed answer: `String` (single), `List<String>` (multi),
 /// or the custom text. Null when unanswered. Mirrors the TUI's questionAnswer.
-Object? _answer(QuestionSpec q, QuestionDraft d) {
+Object? questionAnswer(QuestionSpec q, QuestionDraft d) {
   final oi = otherIndex(q);
   final custom = d.custom.trim();
   if (q.multiSelect) {
@@ -76,7 +76,7 @@ Map<String, Object?> _collectAnswers(
     List<QuestionSpec> questions, List<QuestionDraft> drafts) {
   final answers = <String, Object?>{};
   for (var i = 0; i < questions.length; i++) {
-    final a = _answer(questions[i], drafts[i]);
+    final a = questionAnswer(questions[i], drafts[i]);
     if (a != null) answers[questions[i].question ?? ''] = a;
   }
   return answers;
