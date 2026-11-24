@@ -54,6 +54,8 @@ const (
 	MethodSessionsHistorySessions   = "sessions.historySessions"   // request: HistorySessionsParams; result: session.HistorySessionPage
 	MethodSessionsHistoryTranscript = "sessions.historyTranscript" // request: HistoryTranscriptParams; result: transcript.TranscriptView
 	MethodSessionHistoryToolDetail  = "sessions.historyToolDetail" // request: HistoryToolDetailParams; result: ToolDetail
+	MethodSessionWorkflow           = "sessions.workflow"          // request: WorkflowParams; result: transcript.WorkflowView
+	MethodSessionsHistoryWorkflow   = "sessions.historyWorkflow"   // request: HistoryWorkflowParams; result: transcript.WorkflowView
 	MethodNodeIdentify              = "node.identify"              // request: IdentifyParams (optional); result: IdentifyResult
 	MethodServerInfo                = "server.info"                // request: no params; result: ServerInfo
 	MethodServerCheckUpgrade        = "server.checkUpgrade"        // request: UpgradeParams; result: CheckUpgradeResult
@@ -871,6 +873,24 @@ type HistoryTranscriptParams struct {
 	Agent          string `json:"agent,omitempty"` // owning agent; selects the adapter
 	TranscriptPath string `json:"transcript_path"`
 	AgentID        string `json:"agent_id,omitempty"`
+}
+
+// WorkflowParams selects one Workflow run of a live session. AgentID names the
+// trace whose transcript launched the run; "" is the main session.
+type WorkflowParams struct {
+	SessionID string `json:"session_id"`
+	AgentID   string `json:"agent_id,omitempty"`
+	RunID     string `json:"run_id"`
+}
+
+// HistoryWorkflowParams selects one Workflow run of a past session by
+// node-local transcript path.
+type HistoryWorkflowParams struct {
+	NodeID         string `json:"node_id,omitempty"`
+	Agent          string `json:"agent"`
+	TranscriptPath string `json:"transcript_path"`
+	AgentID        string `json:"agent_id,omitempty"`
+	RunID          string `json:"run_id"`
 }
 
 // SessionRef selects a session by id.

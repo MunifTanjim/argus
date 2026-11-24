@@ -27,6 +27,7 @@ var sessionAddressed = map[string]bool{
 	api.MethodSessionRename:          true,
 	api.MethodSessionPromptComplete:  true,
 	api.MethodSessionTasks:           true,
+	api.MethodSessionWorkflow:        true,
 	api.MethodTranscriptSubscribe:    true,
 	api.MethodTerminalOpen:           true,
 }
@@ -67,6 +68,7 @@ var nodeAddressed = map[string]bool{
 	api.MethodSessionsHistorySessions:   true,
 	api.MethodSessionsHistoryTranscript: true,
 	api.MethodSessionHistoryToolDetail:  true,
+	api.MethodSessionsHistoryWorkflow:   true,
 	api.MethodTerminalCreate:            true,
 	api.MethodHostInfo:                  true,
 	api.MethodHostSetWakelock:           true,

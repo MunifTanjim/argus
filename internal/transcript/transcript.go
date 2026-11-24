@@ -32,6 +32,7 @@ const (
 	EntrySystem   EntryKind = "system"   // runtime event / meta row
 	EntryCompact  EntryKind = "compact"  // context-compression boundary
 	EntryShell    EntryKind = "shell"    // user ran `!cmd` directly in the CLI
+	EntryWorkflow EntryKind = "workflow" // a Workflow tool call
 )
 
 // Subagent is one referenced agent. A teammate is also modeled here with
@@ -49,6 +50,33 @@ type Subagent struct {
 	Trace      []Entry `json:"trace,omitempty"` // inline execution trace (history only)
 }
 
+// WorkflowRef identifies one Workflow run and its status.
+type WorkflowRef struct {
+	RunID      string `json:"runId,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Status     string `json:"status"` // running|completed|failed|stopped|raw
+	Remote     bool   `json:"remote,omitempty"`
+	LaunchedAt string `json:"launchedAt,omitempty"` // RFC 3339
+}
+
+type WorkflowAgent struct {
+	ID       string `json:"id"`
+	Label    string `json:"label,omitempty"`
+	State    string `json:"state"`
+	HasTrace bool   `json:"hasTrace,omitempty"`
+}
+
+type WorkflowPhase struct {
+	Title  string          `json:"title,omitempty"`
+	Agents []WorkflowAgent `json:"agents"`
+}
+
+// WorkflowView is a Workflow run with its phases and agents.
+type WorkflowView struct {
+	WorkflowRef
+	Phases []WorkflowPhase `json:"phases"`
+}
+
 // Entry is one visible unit of the conversation timeline. Fields are used per
 // Kind.
 type Entry struct {
@@ -60,7 +88,7 @@ type Entry struct {
 	Text      string `json:"text,omitempty"`
 	Signature bool   `json:"signature,omitempty"` // thinking carried a signature
 
-	// tool, skill, subagent.
+	// tool, skill, subagent, workflow.
 	ToolName      string     `json:"toolName,omitempty"`
 	ToolID        string     `json:"toolId,omitempty"` // tool_use id (subagent linking, detail fetch)
 	ToolInput     string     `json:"toolInput,omitempty"`
@@ -69,6 +97,9 @@ type Entry struct {
 	ResultIsError bool       `json:"resultIsError,omitempty"`
 	Subagents     []Subagent `json:"subagents,omitempty"`
 
+	// workflow.
+	Workflow *WorkflowRef `json:"workflow,omitempty"`
+
 	// turn_end.
 	ModelName   string `json:"modelName,omitempty"`
 	ModelColor  string `json:"modelColor,omitempty"` // hex like "#d3869b"; "" = uncolored
@@ -76,7 +107,7 @@ type Entry struct {
 	StopReason  string `json:"stopReason,omitempty"`
 	DurationMs  int64  `json:"durationMs,omitempty"`
 	Thinking    int    `json:"thinking,omitempty"`  // thinking entries in the turn
-	ToolCount   int    `json:"toolCount,omitempty"` // tool/skill/subagent-op entries in the turn
+	ToolCount   int    `json:"toolCount,omitempty"` // tool/skill/subagent-op/workflow entries in the turn
 	Interrupted bool   `json:"interrupted,omitempty"`
 
 	// turn_end: context-window evolution across the turn.
@@ -117,7 +148,7 @@ func (e Entry) IsTeammate() bool {
 // messages are peer chatter, not calls.
 func (e Entry) IsToolCall() bool {
 	switch e.Kind {
-	case EntryTool, EntrySkill:
+	case EntryTool, EntrySkill, EntryWorkflow:
 		return true
 	case EntrySubagent:
 		return !e.IsTeammate()

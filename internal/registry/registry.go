@@ -75,6 +75,10 @@ type Registry struct {
 	// subagents are keyed by session id.
 	subagents map[string][]session.RunningSubagent
 	shells    map[string][]session.RunningShell
+	// workflows are set by the node (SetWorkflows), not by hooks.
+	workflows map[string][]session.RunningWorkflow
+	// procStart is when the session's agent process started (see HookUpdate.Started).
+	procStart map[string]time.Time
 
 	// decisions are pending decisions by session id, laid over the stored
 	// session by view.
@@ -93,6 +97,8 @@ func New() *Registry {
 		live:          make(map[string]liveState),
 		subagents:     make(map[string][]session.RunningSubagent),
 		shells:        make(map[string][]session.RunningShell),
+		workflows:     make(map[string][]session.RunningWorkflow),
+		procStart:     make(map[string]time.Time),
 		decisions:     make(map[string]*decisionQueue),
 	}
 }
@@ -526,6 +532,8 @@ func (r *Registry) remove(id, paneK string, finalStatus session.Status) {
 	delete(r.live, id)
 	delete(r.subagents, id)
 	delete(r.shells, id)
+	delete(r.workflows, id)
+	delete(r.procStart, id)
 	r.index.clear(paneK, s.AgentSessionID)
 	r.publish(EventRemoved, s)
 }
@@ -622,6 +630,28 @@ func (r *Registry) SetWorkspaceID(id, workspaceID string) {
 	}
 	s.WorkspaceID = workspaceID
 	r.publish(EventUpdated, s)
+}
+
+// SetWorkflows replaces a session's running workflows, publishing an update
+// only when the list changes. No-op for an unknown id.
+func (r *Registry) SetWorkflows(id string, list []session.RunningWorkflow) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.sessions[id]
+	if s == nil || slices.Equal(r.workflows[id], list) {
+		return
+	}
+	r.workflows[id] = slices.Clone(list)
+	r.overlayRunning(s)
+	r.publish(EventUpdated, s)
+}
+
+// ProcStart is when the session's agent process started, or the zero time
+// when unknown.
+func (r *Registry) ProcStart(id string) time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.procStart[id]
 }
 
 // ModelUpdate is a live model and effort as an agent reports them.
@@ -724,6 +754,7 @@ func keepSince[T any](held, list []T, key func(*T) (string, *string), now time.T
 func (r *Registry) overlayRunning(s *session.Session) {
 	s.Subagents = cloneOrNil(r.subagents[s.ID])
 	s.Shells = cloneOrNil(r.shells[s.ID])
+	s.Workflows = cloneOrNil(r.workflows[s.ID])
 }
 
 func cloneOrNil[T any](list []T) []T {
@@ -772,6 +803,9 @@ type HookUpdate struct {
 	// replaces it (empty clears).
 	Subagents *[]session.RunningSubagent
 	Shells    *[]session.RunningShell
+	// Started marks the SessionStart of a new agent process (startup or resume,
+	// not /clear or compaction).
+	Started bool
 	// Cleared marks a /clear: the session's cost starts again.
 	Cleared bool
 }
@@ -886,6 +920,9 @@ func (r *Registry) ApplyHook(u HookUpdate) (session.Session, bool) {
 	}
 	if u.Shells != nil {
 		r.setShells(s.ID, *u.Shells, time.Now())
+	}
+	if u.Started {
+		r.procStart[s.ID] = now()
 	}
 	r.overlayRunning(s)
 

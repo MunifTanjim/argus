@@ -323,7 +323,7 @@ func (d *Node) transcript(ctx context.Context, id string, last int) (api.OrchTra
 	if err != nil {
 		return api.OrchTranscriptResult{}, err
 	}
-	entries := view.Entries
+	entries := markStaleWorkflows(view.Entries, d.reg.ProcStart(s.ID))
 	if last > 0 && last < len(entries) {
 		entries = entries[len(entries)-last:]
 	}

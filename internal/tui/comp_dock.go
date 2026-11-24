@@ -80,6 +80,9 @@ func (d dockComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd, bo
 	case c.m.matches(msg, sessionKeys.Shells):
 		openRunning(c, runningShells)
 		return d, nil, true
+	case c.m.matches(msg, sessionKeys.Workflows):
+		openRunning(c, runningWorkflows)
+		return d, nil, true
 	}
 	if c.m.composing() {
 		d, cmd := d.handleIdleKey(c, msg)

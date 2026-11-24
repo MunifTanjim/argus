@@ -1,0 +1,1 @@
+{"agentType":"workflow-subagent","isBuiltIn":true,"description":"review:pkg","workflowPhase":"Review","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":false,"model":"opus","pickedEffortModel":"claude-opus-5-5","inWorkflowRun":true}

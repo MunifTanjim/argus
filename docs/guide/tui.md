@@ -58,7 +58,9 @@ default, set `tui.verbose-transcript` to `true`, or run the
 
 In a live Claude Code session, run `open subagent` to pick one of the subagents
 that the session runs now and open its transcript. Run `open shell` to pick one
-of the session's background shells and open the call that started it.
+of the session's background shells and open the call that started it. Run
+`open workflow` to pick one of the workflows that the session runs now and open
+its page.
 
 ### Select and copy
 
@@ -284,6 +286,7 @@ To run Lua code on a key, see [Lua](/getting-started/configuration#lua).
 | `open shell` |  | session-dock, transcript |  |  |
 | `open subagent` |  | session-dock, transcript |  |  |
 | `open tmux-pane` |  | home, workspace |  | `O` |
+| `open workflow` |  | session-dock, transcript |  |  |
 | `prev` |  | changes, file-tree, history, home, project-tree, session-dock, settings, sidebar-sessions, spawn, terminals, transcript, workspace | `<Up>` `k` |  |
 | `prev diff-file` |  | file |  | `[f` |
 | `prev prompt` |  | transcript | `{` |  |

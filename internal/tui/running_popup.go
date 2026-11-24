@@ -20,9 +20,10 @@ type runningKind int
 const (
 	runningSubagents runningKind = iota
 	runningShells
+	runningWorkflows
 )
 
-var runningKinds = []runningKind{runningSubagents, runningShells}
+var runningKinds = []runningKind{runningSubagents, runningShells, runningWorkflows}
 
 // runningRow is one running item; open is nil when it has nothing to open.
 type runningRow struct {
@@ -31,8 +32,11 @@ type runningRow struct {
 }
 
 func (k runningKind) title() string {
-	if k == runningShells {
+	switch k {
+	case runningShells:
 		return "Shells"
+	case runningWorkflows:
+		return "Workflows"
 	}
 	return "Subagents"
 }
@@ -42,16 +46,22 @@ func (k runningKind) label(n int) string {
 		return ""
 	}
 	icon := Icon.Subagent
-	if k == runningShells {
+	switch k {
+	case runningShells:
 		icon = Icon.ShellRunning
+	case runningWorkflows:
+		icon = Icon.Workflow
 	}
 	return icon.Render() + " " + strconv.Itoa(n)
 }
 
 func (m model) runningCount(k runningKind) int {
 	s := m.sessions[m.liveSessionID()]
-	if k == runningShells {
+	switch k {
+	case runningShells:
 		return len(s.Shells)
+	case runningWorkflows:
+		return len(s.Workflows)
 	}
 	return len(s.Subagents)
 }
@@ -59,7 +69,8 @@ func (m model) runningCount(k runningKind) int {
 func (m model) runningRows(k runningKind) []runningRow {
 	s := m.sessions[m.liveSessionID()]
 	var rows []runningRow
-	if k == runningShells {
+	switch k {
+	case runningShells:
 		for _, r := range s.Shells {
 			text := strings.Join(slices.DeleteFunc([]string{r.Desc, r.Command}, func(s string) bool { return s == "" }), " · ")
 			if text == "" {
@@ -71,14 +82,19 @@ func (m model) runningRows(k runningKind) []runningRow {
 			}
 			rows = append(rows, row)
 		}
-		return rows
-	}
-	for _, r := range s.Subagents {
-		name := cmp.Or(r.Name, r.Type, "Subagent")
-		if r.Desc != "" {
-			name += " · " + r.Desc
+	case runningWorkflows:
+		for _, r := range s.Workflows {
+			text := cmp.Or(r.Name, "Workflow") + " · " + strconv.Itoa(r.Done) + "/" + strconv.Itoa(r.Total)
+			rows = append(rows, runningRow{text: text, since: r.Since, open: func(v tview) tea.Cmd { return v.drillRunningWorkflow(r) }})
 		}
-		rows = append(rows, runningRow{text: name, since: r.Since, open: func(v tview) tea.Cmd { return v.drillRunning(r) }})
+	default:
+		for _, r := range s.Subagents {
+			name := cmp.Or(r.Name, r.Type, "Subagent")
+			if r.Desc != "" {
+				name += " · " + r.Desc
+			}
+			rows = append(rows, runningRow{text: name, since: r.Since, open: func(v tview) tea.Cmd { return v.drillRunning(r) }})
+		}
 	}
 	return rows
 }

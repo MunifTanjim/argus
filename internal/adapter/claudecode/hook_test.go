@@ -695,3 +695,14 @@ func TestPermissionPromptNotificationLeavesSession(t *testing.T) {
 		t.Errorf("plan base: status=%q interaction=%+v, want the plan kept", s.Status, s.Interaction)
 	}
 }
+
+func TestSessionStartSetsStarted(t *testing.T) {
+	for source, want := range map[string]bool{"resume": true, "startup": true, "clear": false, "compact": false} {
+		reg := registry.New()
+		raw, _ := json.Marshal(map[string]any{"source": source, "session_id": "s1"})
+		got, _ := ProcessHook(reg, HookEvent{Event: "SessionStart", TmuxPane: "%0", TmuxSocket: "default", Payload: raw})
+		if started := !reg.ProcStart(got.ID).IsZero(); started != want {
+			t.Errorf("source %q: started = %v, want %v", source, started, want)
+		}
+	}
+}

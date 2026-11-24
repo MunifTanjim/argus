@@ -29,5 +29,11 @@ func readAgentMeta(path string) agentMeta {
 // SpawnDepth reads spawnDepth from a subagent's agent-<id>.meta.json. Returns 0
 // when the meta file is missing/unreadable, treating it as shallow so drilling stays visible.
 func SpawnDepth(rootPath, agentID string) int {
-	return readAgentMeta(filepath.Join(subagentsDir(rootPath), "agent-"+agentID+".meta.json")).SpawnDepth
+	p := filepath.Join(subagentsDir(rootPath), "agent-"+agentID+".meta.json")
+	if _, err := os.Stat(p); err != nil {
+		if wp, ok := workflowAgentPath(rootPath, agentID, ".meta.json"); ok {
+			p = wp
+		}
+	}
+	return readAgentMeta(p).SpawnDepth
 }

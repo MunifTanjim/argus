@@ -27,4 +27,5 @@ const (
 	EntrySystem   = transcript.EntrySystem
 	EntryCompact  = transcript.EntryCompact
 	EntryShell    = transcript.EntryShell
+	EntryWorkflow = transcript.EntryWorkflow
 )

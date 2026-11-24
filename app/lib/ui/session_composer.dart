@@ -18,6 +18,7 @@ import 'interaction_panel.dart';
 import 'prompt_completion.dart';
 import 'running_shells_sheet.dart';
 import 'running_subagents_sheet.dart';
+import 'running_workflows_sheet.dart';
 import 'theme.dart';
 import 'usage_format.dart';
 import 'voice_input_field.dart';
@@ -599,6 +600,11 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   Widget _shellCount(Session s) => _count(Icons.terminal, s.shells.length,
       () => showRunningShells(context, sessionId: s.id, agent: s.agent));
 
+  Widget _workflowCount(Session s) => _count(
+      Icons.account_tree_outlined,
+      s.workflows.length,
+      () => showRunningWorkflows(context, sessionId: s.id, agent: s.agent));
+
   // The tap target is only as tall as the model line, so the composer never
   // shifts when the count shows.
   Widget _count(IconData icon, int n, VoidCallback onTap) => InkWell(
@@ -644,6 +650,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     final counts = [
       if (s.subagents.isNotEmpty) (s.subagents.length, _subagentCount(s)),
       if (s.shells.isNotEmpty) (s.shells.length, _shellCount(s)),
+      if (s.workflows.isNotEmpty) (s.workflows.length, _workflowCount(s)),
     ];
     final order = [
       for (var n = parts.length; n > base; n--) (counts.length, n),

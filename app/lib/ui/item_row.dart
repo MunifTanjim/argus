@@ -90,6 +90,15 @@ class ItemRow extends StatelessWidget {
           labelColor: AppColors.accent,
           preview: sub?.desc,
         );
+      case EntryKind.workflow:
+        final wf = item.workflow;
+        return _row(
+          leading: const Icon(Icons.account_tree_outlined,
+              size: 14, color: AppColors.accent),
+          label: 'Workflow ${wf?.name ?? ''}'.trim(),
+          labelColor: AppColors.accent,
+          preview: wf?.status,
+        );
       default:
         return const SizedBox.shrink();
     }

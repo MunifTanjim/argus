@@ -283,13 +283,14 @@ var visualKeys = struct {
 // sessionKeys are taken by a live transcript and the session dock before their
 // own keys.
 var sessionKeys = struct {
-	FocusPrompt, FocusTranscript, Raw, Subagents, Shells binding
+	FocusPrompt, FocusTranscript, Raw, Subagents, Shells, Workflows binding
 }{
 	FocusPrompt:     nm("focus prompt", "<Tab>", "prompt"),
 	FocusTranscript: nm("focus transcript", "<Tab>", "read"),
 	Raw:             nm("open live-screen", "<C-t>", "raw"),
 	Subagents:       nm("open subagent", "", "subagents"),
 	Shells:          nm("open shell", "", "shells"),
+	Workflows:       nm("open workflow", "", "workflows"),
 }
 
 // paneKeys move focus between the tree, the main pane, the files sidebar, and

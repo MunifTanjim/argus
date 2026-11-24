@@ -11,6 +11,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/bundle"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/transcript"
 )
 
 // fileClient is an offline tui.Client backed by an extracted .argus bundle. It
@@ -113,6 +114,30 @@ func (c *fileClient) Call(method string, params, out any) error {
 			return err
 		}
 		return assign(out, td)
+	case api.MethodSessionsHistoryWorkflow:
+		p, err := decodeParams[api.HistoryWorkflowParams](params)
+		if err != nil {
+			return err
+		}
+		ws, ok := c.adapter.(adapter.WorkflowSource)
+		if !ok {
+			return fmt.Errorf("unknown workflow: %s", p.RunID)
+		}
+		ref, found, err := ws.FindWorkflow(c.entryPath, p.AgentID, p.RunID, true)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("unknown workflow: %s", p.RunID)
+		}
+		v, ok, err := ws.ReadWorkflow(c.entryPath, ref)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			v = transcript.WorkflowView{WorkflowRef: ref, Phases: []transcript.WorkflowPhase{}}
+		}
+		return assign(out, v)
 	default:
 		return nil // live-only methods are no-ops offline
 	}

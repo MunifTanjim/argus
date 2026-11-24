@@ -683,11 +683,11 @@ The client picks the node for each call:
 | ---- | ------- |
 | All nodes; merge results | `sessions.list`, `sessions.refresh`, `sessions.historyProjects`, `project.list`, `terminal.list` |
 | All nodes; success if one node succeeds | `push.register`, `push.unregister`, `push.test`, `push.setPause` |
-| Node from composite `session_id` | `sessions.transcriptView`, `sessions.toolDetail`, `sessions.capture`, `sessions.input`, `sessions.key`, `sessions.respond`, `sessions.kill`, `session.descendant.count`, `sessions.focus`, `session.rename`, `session.prompt.complete`, `sessions.tasks`, `sessions.changedFiles`, `sessions.fileDiff`, `sessions.commits`, `sessions.commitFiles`, `transcript.subscribe`, `terminal.open` with `session_id` |
+| Node from composite `session_id` | `sessions.transcriptView`, `sessions.toolDetail`, `sessions.capture`, `sessions.input`, `sessions.key`, `sessions.respond`, `sessions.kill`, `session.descendant.count`, `sessions.focus`, `session.rename`, `session.prompt.complete`, `sessions.tasks`, `sessions.workflow`, `sessions.changedFiles`, `sessions.fileDiff`, `sessions.commits`, `sessions.commitFiles`, `transcript.subscribe`, `terminal.open` with `session_id` |
 | Node from composite `terminal_id` | `terminal.kill`, `terminal.rename`, `terminal.open` with `terminal_id` |
 | Node from composite `workspace_id` | `workspace.changedFiles`, `workspace.diff`, `workspace.listDir`, `workspace.readFile`, `workspace.commits`, `workspace.commitFiles`, `workspace.remove`, `workspace.setTarget`, `workspace.runSetup`, `workspace.setupLog` |
 | Node from composite `project_id` | `workspace.create`, `project.rename`, `project.setHidden`, `project.setPinned`, `project.forget`, `project.branches`, `project.prs`, `project.issues` |
-| Node from `node_id` param | `sessions.spawn`, `sessions.resume`, `agents.list`, `agent.model.list`, `sessions.exportBundle`, `sessions.historySessions`, `sessions.historyTranscript`, `sessions.historyToolDetail`, `terminal.create`, `host.info`, `host.setWakelock`, `host.completeDir` |
+| Node from `node_id` param | `sessions.spawn`, `sessions.resume`, `agents.list`, `agent.model.list`, `sessions.exportBundle`, `sessions.historySessions`, `sessions.historyTranscript`, `sessions.historyToolDetail`, `sessions.historyWorkflow`, `terminal.create`, `host.info`, `host.setWakelock`, `host.completeDir` |
 | Node that owns the `sub_id` or `term_id` | `transcript.unsubscribe`, `terminal.input`, `terminal.resize`, `terminal.close` |
 | Node from `node_id` param, or the gateway when `node_id` is empty | `server.checkUpgrade`, `server.upgrade`, `server.restart` |
 | The gateway | `ping`, `server.info`, `nodes.list`, `relay.open`, `relay.close`, `trustlog.sync`, `push.vapidKey`, `clients.*`, `pushport.setToken` |
@@ -1642,9 +1642,18 @@ asks the user, and the parent's `interaction` message says so.
 | `sessions.historySessions`   | request      | `HistorySessionsParams`                                     | `HistorySessionPage`  |
 | `sessions.historyTranscript` | request      | `{ node_id?, agent?, transcript_path, agent_id? }`          | `{ entries: Entry[] }` |
 | `sessions.historyToolDetail` | request      | `{ node_id?, agent?, transcript_path, agent_id?, tool_id }` | `ToolDetail`          |
+| `sessions.workflow`          | request      | `{ session_id, agent_id?, run_id }`                         | `WorkflowView`        |
+| `sessions.historyWorkflow`   | request      | `{ node_id?, agent, transcript_path, agent_id?, run_id }`   | `WorkflowView`        |
 
 `agent_id` selects a subagent trace. History methods use the transcript path on
 the node, because past sessions have no live session id.
+
+`sessions.workflow` and `sessions.historyWorkflow` return one Workflow run:
+its status and its agents grouped by phase. `agent_id` names the trace that
+launched the run; omit it for a run the main session launched. A run that is
+still marked running but was launched before the session's agent process
+started is returned as `stopped`. A run with no recorded progress yet has no
+phases. An unknown `run_id` is an error.
 
 ```ts
 TranscriptSubscribeParams {
@@ -1658,6 +1667,16 @@ TranscriptDelta { sub_id: string, from_index: number, entries: Entry[], queue?: 
 QueuedPrompt    { text: string }
 
 ToolDetail { toolInput?: string, result?: string, resultIsError?: boolean }
+
+WorkflowView {
+  runId?:      string
+  name?:       string
+  status:      string   // running | completed | failed | stopped, or as reported
+  remote?:     boolean
+  launchedAt?: string   // RFC 3339
+  phases:      { title?: string, agents: WorkflowAgent[] }[]
+}
+WorkflowAgent { id: string, label?: string, state: string, hasTrace?: boolean }
 
 HistorySessionsParams {
   node_id?:    string
@@ -1990,6 +2009,7 @@ Session {
   interaction?:       Interaction     // present only while the session waits for input
   subagents?:         RunningSubagent[] // its subagents running now
   shells?:            RunningShell[]  // its background shells running now
+  workflows?:         RunningWorkflow[] // its Workflow runs running now
   parent?:            ParentRef       // the session that started this one through the agent tools
   node_id?, node_label?: string       // added by the client
   offline?:           boolean         // added by the client
@@ -2011,6 +2031,14 @@ RunningShell {
   tool_use_id?:       string          // the call that started it; see sessions.toolDetail
   command?, desc?:    string
   since?:             string          // RFC 3339 UTC; when the node first saw it running
+}
+
+RunningWorkflow {
+  run_id:             string          // see sessions.workflow
+  name?:              string
+  done:               number          // agents finished
+  total:              number          // agents known so far
+  since?:             string          // RFC 3339 UTC; when the run was launched
 }
 
 Summary {
@@ -2088,7 +2116,7 @@ HistorySessionPage {
 Entry {
   id:                  string
   kind:                "user" | "thinking" | "text" | "tool" | "subagent" | "skill"
-                     | "turn_end" | "system" | "compact" | "shell"
+                     | "turn_end" | "system" | "compact" | "shell" | "workflow"
   timestamp?, text?:   string
   signature?:          boolean
   toolName?, toolId?:  string
@@ -2100,6 +2128,7 @@ Entry {
     isTeammate?, idle?, hasTrace?: boolean
     trace?: Entry[]                   // history only
   }[]
+  workflow?:           WorkflowRef    // workflow only
   // turn_end only: emitted once a turn has finished
   modelName?, modelColor?: string
   usage?:              { input?, output?, cacheRead?, cacheCreation?: number }
@@ -2120,6 +2149,14 @@ Entry {
     from?, session?, replyTo?, child?, childSession?: string
     body:   string
   }[]
+}
+
+WorkflowRef {
+  runId?:      string   // see sessions.workflow
+  name?:       string
+  status:      string   // running | completed | failed | stopped, or as reported
+  remote?:     boolean
+  launchedAt?: string   // RFC 3339
 }
 ```
 
