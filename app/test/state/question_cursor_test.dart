@@ -54,7 +54,8 @@ void main() {
     final u = QuestionCursor([q()], allowUnanswered: true);
     u.down();
     u.down();
-    expect(u.enter(), CursorOutcome.submit);
+    expect(u.enter(), CursorOutcome.none);
+    expect(u.confirming, isTrue);
     expect(u.drafts[0].chosen, -1);
 
     final m = QuestionCursor([q(), q()], allowUnanswered: true);
@@ -194,5 +195,45 @@ void main() {
     m.tapOption(1, 0);
     expect(m.drafts[1].toggles, {1});
     expect(m.tab, 1);
+  });
+
+  test(
+    'single question with allowUnanswered opens confirm when unanswered, like the TUI submitChecked',
+    () {
+      final m = QuestionCursor([q(multi: true)], allowUnanswered: true);
+      expect(m.enter(), CursorOutcome.none);
+      expect(m.confirming, isTrue);
+      expect(m.submitSel, 0);
+      m.down();
+      expect(m.enter(), CursorOutcome.none);
+      expect(m.confirming, isFalse);
+      m.toggle();
+      expect(m.enter(), CursorOutcome.submit);
+
+      final t = QuestionCursor([q(multi: true)], allowUnanswered: true);
+      expect(t.tapOption(0, 0), CursorOutcome.none);
+      expect(t.confirming, isFalse);
+      t.drafts[0].toggles.clear();
+      expect(t.enter(), CursorOutcome.none);
+      expect(t.confirming, isTrue);
+      expect(t.tapOption(0, 0), CursorOutcome.none);
+      expect(t.enter(), CursorOutcome.submit);
+
+      final s = QuestionCursor([q()], allowUnanswered: true);
+      expect(s.tapOption(0, 1), CursorOutcome.submit);
+    },
+  );
+
+  test('a notes question with no options does not crash on move or tap', () {
+    final c = QuestionCursor([q(options: [], notes: true)],
+        allowUnanswered: true);
+    expect(c.labels(0), isEmpty);
+    c.down();
+    c.up();
+    expect(c.highlight[0], 0);
+    expect(c.otherActive(0), isFalse);
+    expect(c.tapOption(0, 3), CursorOutcome.none);
+    expect(c.highlight[0], 0);
+    expect(c.confirming, isTrue);
   });
 }

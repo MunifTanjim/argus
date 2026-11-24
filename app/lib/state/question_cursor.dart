@@ -38,9 +38,11 @@ class QuestionCursor {
     if (confirming || onSubmitTab) {
       submitSel = (submitSel + d).clamp(0, 1);
     } else {
-      highlight[tab] = (highlight[tab] + d).clamp(0, labels(tab).length - 1);
+      highlight[tab] = (highlight[tab] + d).clamp(0, _lastRow(tab));
     }
   }
+
+  int _lastRow(int q) => labels(q).isEmpty ? 0 : labels(q).length - 1;
 
   void prevTab() {
     if (confirming) return;
@@ -66,23 +68,18 @@ class QuestionCursor {
     }
     if (onSubmitTab) {
       if (submitSel == 1) return CursorOutcome.cancel;
-      if (allowUnanswered && unansweredCount(questions, drafts) > 0) {
-        confirming = true;
-        submitSel = 0;
-        return CursorOutcome.none;
-      }
-      return CursorOutcome.submit;
+      return _submitChecked();
     }
     final q = questions[tab];
     if (!q.multiSelect) {
       if (otherActive(tab) && drafts[tab].custom.trim().isEmpty) {
         return allowUnanswered && !isMulti
-            ? CursorOutcome.submit
+            ? _submitChecked()
             : CursorOutcome.none;
       }
       drafts[tab].chosen = highlight[tab];
     }
-    if (!isMulti) return CursorOutcome.submit;
+    if (!isMulti) return _submitChecked();
     tab = tab + 1 > questions.length ? questions.length : tab + 1;
     return CursorOutcome.none;
   }
@@ -92,11 +89,22 @@ class QuestionCursor {
   CursorOutcome tapOption(int q, int i) {
     if (confirming) return CursorOutcome.none;
     tab = q;
-    highlight[q] = i.clamp(0, labels(q).length - 1);
+    highlight[q] = i.clamp(0, _lastRow(q));
     if (questions[q].multiSelect) {
       toggle();
       return CursorOutcome.none;
     }
     return enter();
+  }
+
+  /// Submits, first asking for confirmation when questions that may be left
+  /// unanswered are (the TUI's submitChecked).
+  CursorOutcome _submitChecked() {
+    if (allowUnanswered && unansweredCount(questions, drafts) > 0) {
+      confirming = true;
+      submitSel = 0;
+      return CursorOutcome.none;
+    }
+    return CursorOutcome.submit;
   }
 }
