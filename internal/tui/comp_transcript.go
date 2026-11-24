@@ -112,6 +112,9 @@ func (t transcriptComp) commands(c *ctx) []binding {
 		if len(s.Shells) > 0 {
 			out = append(out, sessionKeys.Shells)
 		}
+		if len(s.Workflows) > 0 {
+			out = append(out, sessionKeys.Workflows)
+		}
 	}
 	if t.historyView == histDetail {
 		return bindingsOf(append(out, detailKeys)...)
@@ -264,6 +267,9 @@ func (m tview) liveKey(msg tea.KeyPressMsg) tea.Cmd {
 	case m.c.m.matches(msg, sessionKeys.Shells):
 		openRunning(m.c, runningShells)
 		return nil
+	case m.c.m.matches(msg, sessionKeys.Workflows):
+		openRunning(m.c, runningWorkflows)
+		return nil
 	}
 	if m.c.m.matches(msg, transcriptKeys.Back) {
 		if m.historyView == histDetail {
@@ -399,6 +405,10 @@ func (m tview) updateMsg(msg tea.Msg) tea.Cmd {
 				}
 			}
 		}
+	case workflowMsg:
+		return m.applyWorkflow(msg)
+	case workflowTickMsg:
+		return m.pollWorkflow(msg)
 	case toolDetailMsg:
 		// On error, file a done entry with empty body so the placeholder clears and we don't retry.
 		e := toolBodyEntry{done: true}

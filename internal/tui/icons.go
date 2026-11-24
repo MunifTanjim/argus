@@ -120,6 +120,7 @@ type iconSet struct {
 	Token        StyledIcon
 	Unsigned     StyledIcon
 	User         StyledIcon
+	Workflow     StyledIcon
 	Tool         toolIcons
 	Task         taskIcons
 }
@@ -177,6 +178,7 @@ func initIcons() {
 		Token:        StyledIcon{"\uEDE8", ColorTextDim}, // nf-fa-coins
 		Unsigned:     StyledIcon{"!", ColorContextWarn},
 		User:         StyledIcon{"\uF007", ColorTextSecondary}, // nf-fa-user
+		Workflow:     StyledIcon{"\U000F01FF", ColorAccent},    // nf-md-sitemap
 		Tool: toolIcons{
 			Err:   StyledIcon{glyphWrench, ColorError},
 			Ok:    StyledIcon{glyphWrench, ColorTextDim},

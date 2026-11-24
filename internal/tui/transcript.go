@@ -103,7 +103,7 @@ func (m tview) entryExpandable(e transcript.Entry) bool {
 	switch e.Kind {
 	case transcript.EntryThinking:
 		return strings.TrimSpace(e.Text) != ""
-	case transcript.EntryTool, transcript.EntrySkill:
+	case transcript.EntryTool, transcript.EntrySkill, transcript.EntryWorkflow:
 		return true
 	case transcript.EntrySubagent:
 		if s, ok := soleSubagent(e); ok && s.IsTeammate {
@@ -395,7 +395,7 @@ func (m tview) callRow(e transcript.Entry, expanded, full bool, iw int) (string,
 		row += "  " + StyleDim.Render("↵")
 	}
 	row = truncateLine(row, iw)
-	if !expanded {
+	if !expanded || isWorkflowAgent(e) {
 		return row, chromeSpans(1)
 	}
 	var body string
@@ -608,6 +608,17 @@ func renderCompact(e transcript.Entry, width int) string {
 }
 
 func itemRow(agent string, it transcript.Entry) string {
+	if it.Kind == transcript.EntryWorkflow && it.Workflow != nil {
+		return workflowRow(it.Workflow.Name, it.Workflow.Status)
+	}
+	if isWorkflowAgent(it) {
+		s, _ := soleSubagent(it)
+		name := s.Name
+		if name == "" {
+			name = s.ID
+		}
+		return Icon.Subagent.Render() + " " + StylePrimaryBold.Render(name) + "  " + StyleSecondary.Render(s.Status)
+	}
 	if it.Kind == transcript.EntrySubagent {
 		var name string
 		if isAgentRefTool(it.ToolName) {

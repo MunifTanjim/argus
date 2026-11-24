@@ -170,7 +170,7 @@ var sectionLists = map[string]sectionList{
 		focus: focusWithout("settings", paneKeys.Left, paneKeys.Right, projectsKeys.ToggleSidebar, projectsKeys.ToggleFiles),
 	},
 	"transcript": {
-		own: bindingsOf(slices.Concat(transcriptViewKeys, []any{detailKeys, sessionKeys.FocusPrompt, sessionKeys.Raw, sessionKeys.Subagents, sessionKeys.Shells,
+		own: bindingsOf(slices.Concat(transcriptViewKeys, []any{detailKeys, sessionKeys.FocusPrompt, sessionKeys.Raw, sessionKeys.Subagents, sessionKeys.Shells, sessionKeys.Workflows,
 			redactListKeys, transcriptKeys.Redact, transcriptKeys.RedactList, transcriptKeys.RedactSave,
 			transcriptKeys.Export, transcriptKeys.Resume})...),
 		focus: focusFor("transcript"),
@@ -184,7 +184,7 @@ var sectionLists = map[string]sectionList{
 			listKeys.PageUp, listKeys.PageDown, listKeys.Open, listKeys.Back, spawnKeys.Filter),
 	},
 	"session-dock": {
-		own: bindingsOf(promptKeys, sessionKeys.FocusTranscript, sessionKeys.Raw, sessionKeys.Subagents, sessionKeys.Shells),
+		own: bindingsOf(promptKeys, sessionKeys.FocusTranscript, sessionKeys.Raw, sessionKeys.Subagents, sessionKeys.Shells, sessionKeys.Workflows),
 	},
 }
 

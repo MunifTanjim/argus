@@ -190,6 +190,10 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateTranscript(msg, reads(msg.addr))
 	case histSubagentMsg:
 		return m.updateTranscript(msg, reads(msg.addr))
+	case workflowMsg:
+		return m.updateTranscript(msg, func(t transcriptComp) bool { return t.owner() == msg.owner })
+	case workflowTickMsg:
+		return m.updateTranscript(msg, func(t transcriptComp) bool { return t.owner() == msg.owner })
 	case toolDetailMsg:
 		return m.updateTranscript(msg, func(t transcriptComp) bool {
 			return t.owner() == msg.owner && t.toolBodies[msg.toolID].loading
@@ -495,6 +499,7 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 			cmd = bellCmd()
 		}
 		m.sessions[ev.Session.ID] = ev.Session
+		cmd = tea.Batch(cmd, m.refetchWorkflows(prev, ev.Session))
 		// A session in a workspace the tree lacks means a new repo or worktree.
 		if ws := ev.Session.WorkspaceID; ws != "" {
 			cmd = tea.Batch(cmd, m.left.tree.loadMissing(m.client, ws))
@@ -517,6 +522,11 @@ func (m *model) applyEvent(n api.Notification) tea.Cmd {
 			cmd = tea.Batch(cmd, m.resubscribeLive(ev.Session.ID))
 		}
 	case registry.EventRemoved:
+		gone, ok := m.sessions[ev.Session.ID]
+		if !ok {
+			gone = ev.Session
+		}
+		cmd = m.refetchRemovedWorkflows(gone)
 		delete(m.sessions, ev.Session.ID)
 		delete(m.dock.drafts, ev.Session.ID)
 		delete(m.completions, ev.Session.ID)

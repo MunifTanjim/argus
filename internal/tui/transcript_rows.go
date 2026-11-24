@@ -56,8 +56,9 @@ func isSpawn(e transcript.Entry) bool {
 	return e.Kind == transcript.EntrySubagent && !e.IsTeammate() && !isAgentRefTool(e.ToolName)
 }
 
+// A workflow row stands alone too, as an entry point to its page.
 func inRun(e transcript.Entry) bool {
-	return e.Kind == transcript.EntryThinking || (e.IsToolCall() && !isSpawn(e))
+	return e.Kind == transcript.EntryThinking || (e.IsToolCall() && !isSpawn(e) && e.Kind != transcript.EntryWorkflow)
 }
 
 // buildRows folds each maximal run of thinking/tool entries.
