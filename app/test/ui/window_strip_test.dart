@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -33,18 +34,16 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     await tester.pumpWidget(_app(const SizedBox.expand(key: Key('x'))));
-    expect(kMacTitleStripHeight, 28);
     expect(tester.getSize(stripFinder).height, 28);
     expect(tester.getTopLeft(stripFinder), Offset.zero);
     expect(tester.getTopLeft(find.byKey(const Key('x'))), const Offset(0, 28));
     final box = tester.widget<ColoredBox>(
       find.descendant(of: stripFinder, matching: find.byType(ColoredBox)),
     );
-    expect(box.color, kWindowStripColor);
-    expect(kWindowStripColor, AppColors.canvas);
+    expect(box.color, AppColors.canvas);
   });
 
-  testWidgets('drag on the strip calls startDrag; double-tap calls zoom',
+  testWidgets('drag on the strip calls startDrag; double-tap calls doubleClick',
       (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
@@ -60,15 +59,26 @@ void main() {
         .setMockMethodCallHandler(windowChannel, null));
     await tester.pumpWidget(_app(const SizedBox.expand()));
 
-    await tester.dragFrom(const Offset(100, 10), const Offset(40, 0));
+    final mouse = await tester.startGesture(const Offset(100, 10),
+        kind: PointerDeviceKind.mouse);
+    await mouse.moveBy(const Offset(40, 0));
+    await mouse.up();
     expect(calls, ['startDrag']);
 
     calls.clear();
-    await tester.tapAt(const Offset(100, 10));
+    final pad = await tester.createGesture(kind: PointerDeviceKind.trackpad);
+    await pad.panZoomStart(const Offset(100, 10));
+    await pad.panZoomUpdate(const Offset(100, 10), pan: const Offset(40, 0));
+    await pad.panZoomEnd();
+    await tester.pump();
+    expect(calls, isEmpty);
+
+    calls.clear();
+    await tester.tapAt(const Offset(100, 10), kind: PointerDeviceKind.mouse);
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.tapAt(const Offset(100, 10));
+    await tester.tapAt(const Offset(100, 10), kind: PointerDeviceKind.mouse);
     await tester.pumpAndSettle();
-    expect(calls, ['zoom']);
+    expect(calls, ['doubleClick']);
   });
 
   testWidgets('a full-window pushed route keeps the strip on top',

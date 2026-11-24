@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -23,8 +24,9 @@ class WindowStrip extends StatelessWidget {
         GestureDetector(
           key: const ValueKey('window-strip'),
           behavior: HitTestBehavior.opaque,
+          supportedDevices: const {PointerDeviceKind.mouse},
           onPanStart: (_) => windowChannel.invokeMethod<void>('startDrag'),
-          onDoubleTap: () => windowChannel.invokeMethod<void>('zoom'),
+          onDoubleTap: () => windowChannel.invokeMethod<void>('doubleClick'),
           child: const SizedBox(
             height: kMacTitleStripHeight,
             width: double.infinity,

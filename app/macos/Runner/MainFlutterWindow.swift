@@ -5,7 +5,7 @@ class MainFlutterWindow: NSWindow {
   // performDrag needs the mouse-down event, but the Dart call arrives after
   // the pan gesture starts, when NSApp.currentEvent is no longer the mouse-down.
   private var lastMouseDown: NSEvent?
-  private var mouseDownMonitor: Any?
+  private var mouseMonitor: Any?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -18,8 +18,10 @@ class MainFlutterWindow: NSWindow {
     self.titleVisibility = .hidden
     self.styleMask.insert(.fullSizeContentView)
 
-    mouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
-      if event.window === self { self?.lastMouseDown = event }
+    mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
+      if event.window === self {
+        self?.lastMouseDown = event.type == .leftMouseDown ? event : nil
+      }
       return event
     }
 
@@ -29,10 +31,17 @@ class MainFlutterWindow: NSWindow {
     windowChannel.setMethodCallHandler { [weak self] call, result in
       switch call.method {
       case "startDrag":
-        if let event = self?.lastMouseDown { self?.performDrag(with: event) }
+        if let event = self?.lastMouseDown, (NSEvent.pressedMouseButtons & 1) != 0 {
+          self?.performDrag(with: event)
+        }
         result(nil)
-      case "zoom":
-        self?.performZoom(nil)
+      case "doubleClick":
+        // Follow the system "double-click a window's title bar" setting.
+        switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+        case "Minimize": self?.performMiniaturize(nil)
+        case "None": break
+        default: self?.performZoom(nil)
+        }
         result(nil)
       default:
         result(FlutterMethodNotImplemented)
@@ -45,6 +54,6 @@ class MainFlutterWindow: NSWindow {
   }
 
   deinit {
-    if let monitor = mouseDownMonitor { NSEvent.removeMonitor(monitor) }
+    if let monitor = mouseMonitor { NSEvent.removeMonitor(monitor) }
   }
 }
