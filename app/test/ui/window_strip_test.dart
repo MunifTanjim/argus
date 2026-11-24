@@ -81,6 +81,31 @@ void main() {
     expect(calls, ['doubleClick']);
   });
 
+  testWidgets('the strip collapses in full screen and returns after',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    await tester.pumpWidget(_app(const SizedBox.expand(key: Key('x'))));
+    final x = find.byKey(const Key('x'));
+
+    Future<void> fullScreen(bool on) async {
+      await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+        windowChannel.name,
+        windowChannel.codec.encodeMethodCall(MethodCall('fullScreen', on)),
+        (_) {},
+      );
+      await tester.pump();
+    }
+
+    await fullScreen(true);
+    expect(tester.getTopLeft(x), Offset.zero);
+    expect(tester.getSize(stripFinder).height, 0);
+
+    await fullScreen(false);
+    expect(tester.getTopLeft(x), const Offset(0, 28));
+    expect(tester.getSize(stripFinder).height, 28);
+  });
+
   testWidgets('a full-window pushed route keeps the strip on top',
       (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;

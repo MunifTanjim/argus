@@ -96,7 +96,8 @@ class SidebarStripController extends NavigatorObserver with ChangeNotifier {
 
 /// On macOS the title bar is transparent and the content extends under it, so
 /// a strip above the navigator holds the traffic lights and drags the window.
-class WindowStrip extends StatelessWidget {
+/// In full screen there are no traffic lights, and the strip collapses.
+class WindowStrip extends StatefulWidget {
   const WindowStrip({super.key, this.controller, required this.child});
 
   /// Also a navigator observer of the root navigator.
@@ -110,9 +111,34 @@ class WindowStrip extends StatelessWidget {
       ?.controller;
 
   @override
+  State<WindowStrip> createState() => _WindowStripState();
+}
+
+class _WindowStripState extends State<WindowStrip> {
+  bool _fullScreen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    windowChannel.setMethodCallHandler(_onCall);
+  }
+
+  @override
+  void dispose() {
+    windowChannel.setMethodCallHandler(null);
+    super.dispose();
+  }
+
+  Future<void> _onCall(MethodCall call) async {
+    if (call.method != 'fullScreen' || !mounted) return;
+    setState(() => _fullScreen = call.arguments == true);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final child = widget.child;
     if (defaultTargetPlatform != TargetPlatform.macOS) return child;
-    final controller = this.controller;
+    final controller = widget.controller;
     return Column(
       children: [
         GestureDetector(
@@ -122,7 +148,7 @@ class WindowStrip extends StatelessWidget {
           onPanStart: (_) => windowChannel.invokeMethod<void>('startDrag'),
           onDoubleTap: () => windowChannel.invokeMethod<void>('doubleClick'),
           child: SizedBox(
-            height: kMacTitleStripHeight,
+            height: _fullScreen ? 0 : kMacTitleStripHeight,
             width: double.infinity,
             child: controller == null
                 ? const ColoredBox(color: kWindowStripColor)
