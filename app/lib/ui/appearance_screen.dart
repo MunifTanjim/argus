@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/appearance.dart';
 import 'responsive.dart';
+import 'titlebar.dart';
 
 class AppearanceScreen extends ConsumerWidget {
   const AppearanceScreen({super.key});
@@ -13,7 +14,7 @@ class AppearanceScreen extends ConsumerWidget {
       appearancePrefsProvider.select((p) => p.verboseTranscript),
     );
     return Scaffold(
-      appBar: AppBar(title: const Text('Appearance')),
+      appBar: const ArgusAppBar(title: Text('Appearance')),
       body: SafeArea(
         top: false,
         child: CenteredBody(

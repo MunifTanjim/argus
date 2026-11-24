@@ -11,6 +11,7 @@ import 'node_header.dart';
 import 'relative_time.dart';
 import 'responsive.dart';
 import 'shell_drawer.dart';
+import 'titlebar.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
@@ -35,7 +36,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     final projects = ref.watch(historyProjectsProvider);
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: ArgusAppBar(
         leading: shellMenuButton(context),
         title: FilterTitle(
           query: _query,

@@ -9,6 +9,7 @@ import '../transport/ssh_key_store.dart';
 import '../transport/ssh_keygen.dart';
 import '../transport/ssh_tunnel.dart';
 import '../util/id.dart';
+import 'titlebar.dart';
 
 class KeyLibraryScreen extends ConsumerWidget {
   const KeyLibraryScreen({super.key});
@@ -17,7 +18,7 @@ class KeyLibraryScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final keys = ref.watch(keysProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('SSH keys')),
+      appBar: const ArgusAppBar(title: Text('SSH keys')),
       body: keys.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('$e')),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/terminal_prefs.dart';
+import 'titlebar.dart';
 
 class TerminalSettingsScreen extends ConsumerWidget {
   const TerminalSettingsScreen({super.key});
@@ -10,7 +11,7 @@ class TerminalSettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final prefs = ref.watch(terminalPrefsProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Terminal')),
+      appBar: const ArgusAppBar(title: Text('Terminal')),
       body: SafeArea(
         top: false,
         child: ListView(

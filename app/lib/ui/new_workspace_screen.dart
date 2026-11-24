@@ -12,6 +12,7 @@ import '../state/setup_text.dart';
 import 'branch_picker_screen.dart';
 import 'project_actions.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 
 enum _Tab { newBranch, branches, prs, issues }
 
@@ -185,7 +186,7 @@ class _NewWorkspaceScreenState extends ConsumerState<NewWorkspaceScreen> {
         if (_source(t) case final src?) t: ref.watch(src),
     };
     return Scaffold(
-      appBar: AppBar(title: Text('New workspace in ${_p.name}')),
+      appBar: ArgusAppBar(title: Text('New workspace in ${_p.name}')),
       body: SafeArea(
         top: false,
         child: Column(

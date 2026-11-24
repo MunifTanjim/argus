@@ -13,6 +13,7 @@ import '../transport/jsonrpc.dart';
 import 'duration_sheet.dart';
 import 'responsive.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 
 /// Push notifications settings: the active backend, a test button, a provider
 /// picker, and (when UnifiedPush is active) a distributor picker.
@@ -82,7 +83,7 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
   Widget build(BuildContext context) {
     final active = _controller.activeBackend;
     return Scaffold(
-      appBar: AppBar(title: const Text('Push Notifications')),
+      appBar: const ArgusAppBar(title: Text('Push Notifications')),
       body: SafeArea(
         top: false,
         child: _loading

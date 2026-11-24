@@ -9,6 +9,7 @@ import 'filter_title.dart';
 import 'history_transcript_screen.dart';
 import 'relative_time.dart';
 import 'responsive.dart';
+import 'titlebar.dart';
 
 class HistorySessionsScreen extends ConsumerStatefulWidget {
   const HistorySessionsScreen({super.key, required this.project});
@@ -68,7 +69,7 @@ class _HistorySessionsScreenState extends ConsumerState<HistorySessionsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
+      appBar: ArgusAppBar(
         title: FilterTitle(
           query: _query,
           hint: 'Filter sessions',

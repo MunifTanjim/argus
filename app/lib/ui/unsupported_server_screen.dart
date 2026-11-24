@@ -5,6 +5,7 @@ import '../state/compat.dart';
 import '../state/control.dart';
 import 'responsive.dart';
 import 'sign_out.dart';
+import 'titlebar.dart';
 
 /// Shows [child], or [UnsupportedServerScreen] while the server is older than
 /// [minServerVersion]. An unknown server (not yet fetched, fetch failed) passes.
@@ -36,42 +37,49 @@ class UnsupportedServerScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     return Scaffold(
-      body: SafeArea(
-        child: CenteredBody(
-          maxWidth: 420,
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Icon(Icons.system_update, size: 48, color: theme.colorScheme.error),
-                const SizedBox(height: 16),
-                Text(
-                  'Server too old',
-                  style: theme.textTheme.titleLarge,
-                  textAlign: TextAlign.center,
+      body: Column(
+        children: [
+          const TitlebarSpacer(),
+          Expanded(
+            child: SafeArea(
+              child: CenteredBody(
+                maxWidth: 420,
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Icon(Icons.system_update, size: 48, color: theme.colorScheme.error),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Server too old',
+                        style: theme.textTheme.titleLarge,
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'This app needs argus $minServerVersion or newer; the server '
+                        'runs $version. Upgrade argus on the server, then retry.',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 24),
+                      FilledButton(
+                        onPressed: () => ref.invalidate(serverInfoProvider),
+                        child: const Text('Retry'),
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton(
+                        onPressed: () => disconnect(ref),
+                        child: const Text('Disconnect'),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'This app needs argus $minServerVersion or newer; the server '
-                  'runs $version. Upgrade argus on the server, then retry.',
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                FilledButton(
-                  onPressed: () => ref.invalidate(serverInfoProvider),
-                  child: const Text('Retry'),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton(
-                  onPressed: () => disconnect(ref),
-                  child: const Text('Disconnect'),
-                ),
-              ],
+              ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

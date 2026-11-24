@@ -14,6 +14,7 @@ import '../util/platform.dart';
 import 'key_library_screen.dart';
 import 'responsive.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 
 // Amber marks a profile whose SSH key is missing (dangling); the row dot
 // otherwise reflects the last connection-test result (red/green) or grey when
@@ -31,6 +32,7 @@ class ProfilesScreen extends ConsumerWidget {
       body: SafeArea(
         child: Column(
           children: [
+            const TitlebarSpacer(),
             _LandingHeader(
               onKeys: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const KeyLibraryScreen())),

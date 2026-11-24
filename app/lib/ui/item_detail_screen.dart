@@ -7,6 +7,7 @@ import '../state/tool_detail.dart';
 import 'code_block.dart' show appSelectionArea;
 import 'responsive.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 import 'tool_detail.dart';
 import 'tool_registry.dart';
 
@@ -83,7 +84,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(itemTitle(_item, agent: widget.detailRef.agent))),
+      appBar: ArgusAppBar(title: Text(itemTitle(_item, agent: widget.detailRef.agent))),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : SafeArea(

@@ -19,6 +19,7 @@ import '../util/platform.dart';
 import '../util/sync_frames.dart';
 import 'adaptive_sheet.dart';
 import 'live_emulator.dart';
+import 'titlebar.dart';
 
 
 class LiveScreenScreen extends ConsumerStatefulWidget {
@@ -220,7 +221,7 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
               if (s.workspaceId == t.workspaceId) s,
           ];
     return Scaffold(
-      appBar: AppBar(
+      appBar: ArgusAppBar(
         title: Text(title),
         actions: [
           if (siblings.length > 1)

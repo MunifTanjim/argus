@@ -26,6 +26,7 @@ import 'session_composer.dart';
 import 'session_tasks_screen.dart';
 import 'status_style.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 import 'transcript_feed.dart';
 import 'workspace_screen.dart';
 
@@ -240,7 +241,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
             .select((p) => lookupWorkspace(p.projects, wsId) != null));
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: ArgusAppBar(
         titleSpacing: 0,
         title: Column(
           mainAxisSize: MainAxisSize.min,

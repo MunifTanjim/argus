@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/project_sources.dart';
 import '../state/projects_api.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 
 const double kBranchRowHeight = 48;
 
@@ -147,7 +148,7 @@ class _BranchPickerScreenState extends ConsumerState<BranchPickerScreen> {
     final branches = ref.watch(projectBranchesProvider(widget.projectId));
     if (branches.value case final all?) _scrollToCurrent(all);
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
+      appBar: ArgusAppBar(title: Text(widget.title)),
       body: SafeArea(
         top: false,
         child: Column(

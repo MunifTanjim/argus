@@ -5,6 +5,7 @@ import '../data/openrouter.dart';
 import '../state/voice.dart';
 import 'responsive.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 import 'voice_input_field.dart';
 
 /// Settings for dictation: the transcription provider, then that provider's
@@ -71,7 +72,7 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
     });
     final dirty = _key.text.trim() != prefs.apiKey;
     return Scaffold(
-      appBar: AppBar(title: const Text('Voice Input')),
+      appBar: const ArgusAppBar(title: Text('Voice Input')),
       body: SafeArea(
         top: false,
         child: CenteredBody(

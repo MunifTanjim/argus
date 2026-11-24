@@ -11,6 +11,7 @@ import 'duration_sheet.dart';
 import 'host_format.dart';
 import 'responsive.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 import 'upgrade_tile.dart';
 
 class NodeScreen extends ConsumerStatefulWidget {
@@ -142,7 +143,7 @@ class _NodeScreenState extends ConsumerState<NodeScreen> {
     final wakelock = node?.hostWakelockSupported ?? false;
     final version = node?.version ?? '';
     return Scaffold(
-      appBar: AppBar(title: Text(widget.label)),
+      appBar: ArgusAppBar(title: Text(widget.label)),
       body: SafeArea(
         top: false,
         child: CenteredBody(

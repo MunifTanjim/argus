@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'external_url.dart';
 import 'responsive.dart';
+import 'titlebar.dart';
 
 const _privacyUrl = 'https://argus.muniftanjim.dev/privacy';
 const _projectUrl = 'https://github.com/MunifTanjim/argus';
@@ -12,7 +13,7 @@ class AboutScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('About')),
+      appBar: const ArgusAppBar(title: Text('About')),
       body: SafeArea(
         top: false,
         child: CenteredBody(

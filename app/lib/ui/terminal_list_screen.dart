@@ -12,6 +12,7 @@ import '../util/platform.dart';
 import 'node_header.dart';
 import 'shell_drawer.dart';
 import 'terminal_tile.dart';
+import 'titlebar.dart';
 
 class TerminalListScreen extends ConsumerWidget {
   const TerminalListScreen({super.key});
@@ -66,7 +67,7 @@ class TerminalListScreen extends ConsumerWidget {
       rows.add(TerminalTile(terminal: t));
     }
     return Scaffold(
-      appBar: AppBar(
+      appBar: ArgusAppBar(
         leading: shellMenuButton(context),
         title: const Text('Terminals'),
         actions: [

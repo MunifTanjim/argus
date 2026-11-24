@@ -11,6 +11,7 @@ import 'device_identity_screen.dart';
 import 'session_sections_list.dart';
 import 'shell_drawer.dart';
 import 'spawn_dialog.dart';
+import 'titlebar.dart';
 
 class SessionListScreen extends ConsumerWidget {
   const SessionListScreen({super.key});
@@ -31,7 +32,7 @@ class SessionListScreen extends ConsumerWidget {
         TrustStatus.awaitingAuthorization;
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: ArgusAppBar(
         leading: shellMenuButton(context),
         title: const SessionSearchTitle(child: Text('Sessions')),
         actions: [

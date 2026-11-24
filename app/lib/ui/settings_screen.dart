@@ -15,6 +15,7 @@ import 'terminal_settings_screen.dart';
 import 'responsive.dart';
 import 'sign_out.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 import 'upgrade_tile.dart';
 import 'voice_screen.dart';
 
@@ -33,7 +34,7 @@ class SettingsScreen extends ConsumerWidget {
     // must not crash the settings screen render.
     final sshHostPortValue = _sshHostPortOrNull(creds?.url);
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: const ArgusAppBar(title: Text('Settings')),
       body: SafeArea(
         top: false,
         child: CenteredBody(

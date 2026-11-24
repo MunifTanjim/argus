@@ -9,6 +9,7 @@ import 'changed_file_row.dart';
 import 'responsive.dart';
 import 'shell_drawer.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 
 /// Lists the files a commit changed; tap one to review its parent-vs-commit diff.
 class CommitDetailScreen extends ConsumerWidget {
@@ -27,7 +28,7 @@ class CommitDetailScreen extends ConsumerWidget {
       workspaceCommitFilesProvider((source.workspaceId, commit.sha)),
     );
     return Scaffold(
-      appBar: AppBar(
+      appBar: ArgusAppBar(
         title: Text('${commit.short}  ${commit.subject}'),
         actions: [?shellMenuButton(context)],
       ),

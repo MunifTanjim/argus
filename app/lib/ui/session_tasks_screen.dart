@@ -7,6 +7,7 @@ import '../state/tasks.dart';
 import 'responsive.dart';
 import 'shell_drawer.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 
 const _mono = TextStyle(fontFamily: 'monospace', fontSize: 13);
 
@@ -31,7 +32,7 @@ class _SessionTasksScreenState extends ConsumerState<SessionTasksScreen> {
   Widget build(BuildContext context) {
     final async = ref.watch(tasksProvider(widget.session.id));
     return Scaffold(
-      appBar: AppBar(
+      appBar: ArgusAppBar(
         title: const Text('Tasks'),
         actions: [
           ?shellMenuButton(context),

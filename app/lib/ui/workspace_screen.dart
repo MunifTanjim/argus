@@ -15,6 +15,7 @@ import 'shell_drawer.dart';
 import 'spawn_dialog.dart';
 import 'terminal_tile.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 import 'workspace_changes_tab.dart';
 import 'workspace_files_tab.dart';
 import 'workspace_sessions_tab.dart';
@@ -69,7 +70,7 @@ class WorkspaceScreen extends ConsumerWidget {
       _ => null,
     };
     return AdaptiveNavScaffold(
-      appBar: AppBar(
+      appBar: ArgusAppBar(
         leading: shellMenuButton(context),
         automaticallyImplyLeading: false,
         title: tab == WorkspaceTab.sessions
@@ -182,7 +183,7 @@ class WorkspaceChangesScreen extends ConsumerWidget {
     if (hit == null) return const _WorkspaceGone();
     final (project, workspace) = hit;
     return Scaffold(
-      appBar: AppBar(
+      appBar: ArgusAppBar(
         title: _WorkspaceTitle(project: project, workspace: workspace),
         actions: [
           ?shellMenuButton(context),
@@ -212,7 +213,7 @@ class WorkspaceFilesScreen extends ConsumerWidget {
     if (hit == null) return const _WorkspaceGone();
     final (project, workspace) = hit;
     return Scaffold(
-      appBar: AppBar(
+      appBar: ArgusAppBar(
         title: _WorkspaceTitle(project: project, workspace: workspace),
         actions: [?shellMenuButton(context)],
       ),
@@ -230,7 +231,7 @@ class _WorkspaceGone extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(actions: [?shellMenuButton(context)]),
+      appBar: ArgusAppBar(actions: [?shellMenuButton(context)]),
       body: const Center(
         child: Text(
           'This workspace is no longer available.',

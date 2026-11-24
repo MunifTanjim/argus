@@ -141,7 +141,14 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
       ),
       navigatorObservers: [appRouteObserver, _sidebarStrip, _titlebarRoutes],
       home: !_loaded
-          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+          ? const Scaffold(
+              body: Column(
+                children: [
+                  TitlebarSpacer(),
+                  Expanded(child: Center(child: CircularProgressIndicator())),
+                ],
+              ),
+            )
           : creds == null
               ? const ProfilesScreen()
               : const ServerGate(child: HomeShell()),

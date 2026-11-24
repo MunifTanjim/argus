@@ -9,6 +9,7 @@ import '../state/control.dart';
 import '../state/tool_detail.dart';
 import 'resume_action.dart';
 import 'shell_drawer.dart';
+import 'titlebar.dart';
 import 'transcript_feed.dart';
 
 class HistoryTranscriptScreen extends ConsumerStatefulWidget {
@@ -79,7 +80,7 @@ class _HistoryTranscriptScreenState
         !ref.watch(outdatedNodeIdsProvider
             .select((ids) => ids.contains(widget.session.nodeId)));
     return Scaffold(
-      appBar: AppBar(
+      appBar: ArgusAppBar(
         title: Text(widget.session.displayTitle),
         actions: [
           ?shellMenuButton(context),

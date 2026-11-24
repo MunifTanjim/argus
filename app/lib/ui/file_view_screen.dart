@@ -6,6 +6,7 @@ import '../state/workspace.dart';
 import 'code_block.dart';
 import 'shell_drawer.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 
 /// One workspace file, highlighted by its name. Pushed over the workspace tabs.
 class FileViewScreen extends ConsumerWidget {
@@ -23,7 +24,7 @@ class FileViewScreen extends ConsumerWidget {
     final async = ref.watch(workspaceFileProvider((workspaceId, path)));
     final dir = parentPath(path);
     return Scaffold(
-      appBar: AppBar(
+      appBar: ArgusAppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

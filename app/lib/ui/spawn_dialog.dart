@@ -11,6 +11,7 @@ import '../state/sessions.dart';
 import '../state/spawn_view_model.dart';
 import 'relative_time.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 import 'voice_input_field.dart';
 
 /// A fixed place to spawn in, such as a workspace: the dialog hides its node
@@ -41,7 +42,7 @@ class SpawnDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('New session')),
+        appBar: const ArgusAppBar(title: Text('New session')),
         body: SafeArea(child: SpawnDialogBody(target: target)),
       );
 }
@@ -662,7 +663,7 @@ class _ChoiceScreenState extends State<_ChoiceScreen> {
     final shown = widget.choices.where(_matches).toList();
     final footer = widget.footer;
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
+      appBar: ArgusAppBar(title: Text(widget.title)),
       body: SafeArea(
         top: false,
         child: Column(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../ui/titlebar.dart';
 import 'pairing_uri.dart';
 
 class ScanScreen extends StatefulWidget {
@@ -28,7 +29,7 @@ class _ScanScreenState extends State<ScanScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Scan to connect')),
+      appBar: const ArgusAppBar(title: Text('Scan to connect')),
       body: MobileScanner(onDetect: _onDetect),
     );
   }
