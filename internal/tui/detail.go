@@ -39,6 +39,14 @@ type detailFrame struct {
 	subagentName   string
 	subagentStatus string
 	subagentInput  string
+
+	// A workflow page: the run it lists, the trace that launched it ("" =
+	// main), and its header.
+	workflowRunID   string
+	workflowAgentID string
+	workflowName    string
+	workflowStatus  string
+	workflowTick    string // token of the pending poll ("" = none)
 }
 
 func (f *detailFrame) isExpanded(i int) bool {
@@ -134,6 +142,10 @@ func soleSubagent(it transcript.Entry) (transcript.Subagent, bool) {
 
 // drillable reports whether entering an item opens a meaningful sub-trace.
 func drillable(it transcript.Entry) bool {
+	if it.Kind == transcript.EntryWorkflow {
+		_, ok := workflowRef(it)
+		return ok
+	}
 	s, ok := soleSubagent(it)
 	return ok && s.HasTrace
 }
@@ -161,6 +173,9 @@ func (m tview) enterDetail() tea.Cmd {
 }
 
 func (m tview) drillEntry(e transcript.Entry, agentID string) tea.Cmd {
+	if ref, ok := workflowRef(e); ok {
+		return m.drillWorkflow(ref.RunID, agentID)
+	}
 	if s, ok := soleSubagent(e); ok && s.HasTrace && !s.IsTeammate {
 		return m.drillTrace(e, s)
 	}
@@ -226,6 +241,14 @@ func (m tview) drillRunning(r session.RunningSubagent) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// drillRunningWorkflow opens a running workflow's page as the only frame.
+func (m tview) drillRunningWorkflow(r session.RunningWorkflow) tea.Cmd {
+	cmds := m.closeFrames()
+	m.historyView = histDetail
+	cmds = append(cmds, m.drillWorkflow(r.RunID, ""))
+	return tea.Batch(cmds...)
+}
+
 // drillShell opens a running shell's Bash call as the only frame.
 func (m tview) drillShell(r session.RunningShell) tea.Cmd {
 	cmds := m.closeFrames()
@@ -246,7 +269,9 @@ func (m model) detailable(e transcript.Entry) bool {
 	switch e.Kind {
 	case transcript.EntryThinking, transcript.EntryText:
 		return strings.TrimSpace(e.Text) != ""
-	case transcript.EntryTool, transcript.EntrySkill, transcript.EntrySubagent:
+	case transcript.EntrySubagent:
+		return !isWorkflowAgent(e) || drillable(e)
+	case transcript.EntryTool, transcript.EntrySkill, transcript.EntryWorkflow:
 		return true
 	case transcript.EntryUser:
 		return e.Text != ""
@@ -527,6 +552,12 @@ func (m tview) detailBreadcrumb() string {
 }
 
 func (f *detailFrame) detailHeaderText(width int) string {
+	if f.workflowRunID != "" {
+		if f.workflowName == "" && f.workflowStatus == "" {
+			return ""
+		}
+		return hardWrap(workflowHeader(f.workflowName, f.workflowStatus), width)
+	}
 	if f.subagentType == "" && f.subagentName == "" && f.subagentStatus == "" && f.subagentInput == "" {
 		return ""
 	}

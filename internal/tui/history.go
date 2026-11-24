@@ -69,6 +69,19 @@ func (m model) fetchHistSubagent(addr histAddr, agentID string) tea.Cmd {
 	}
 }
 
+// fetchHistWorkflowFor reads a run, launched from the trace agentID ("" =
+// main), from the transcript at addr for owner.
+func (m model) fetchHistWorkflowFor(owner transcriptOwner, addr histAddr, agentID, runID string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		var view transcript.WorkflowView
+		err := client.Call(api.MethodSessionsHistoryWorkflow, api.HistoryWorkflowParams{
+			NodeID: addr.nodeID, TranscriptPath: addr.path, Agent: addr.agent, AgentID: agentID, RunID: runID,
+		}, &view)
+		return workflowMsg{owner: owner, runID: runID, agentID: agentID, view: view, err: err}
+	}
+}
+
 type histAddr struct{ nodeID, path, agent string }
 
 func (h historyState) addr() histAddr {

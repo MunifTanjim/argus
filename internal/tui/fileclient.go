@@ -113,6 +113,23 @@ func (c *fileClient) Call(method string, params, out any) error {
 			return err
 		}
 		return assign(out, td)
+	case api.MethodSessionsHistoryWorkflow:
+		p, err := decodeParams[api.HistoryWorkflowParams](params)
+		if err != nil {
+			return err
+		}
+		ws, ok := c.adapter.(adapter.WorkflowSource)
+		if !ok {
+			return fmt.Errorf("unknown workflow: %s", p.RunID)
+		}
+		v, found, err := adapter.ReadHistoryWorkflow(ws, c.entryPath, p.AgentID, p.RunID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("unknown workflow: %s", p.RunID)
+		}
+		return assign(out, v)
 	default:
 		return nil // live-only methods are no-ops offline
 	}

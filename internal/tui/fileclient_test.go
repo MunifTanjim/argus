@@ -123,3 +123,38 @@ func TestFileClientSubagentDrill(t *testing.T) {
 		t.Fatal("expected entries from subagent fixture")
 	}
 }
+
+func TestFileClientServesHistoryWorkflow(t *testing.T) {
+	testdata := filepath.Join("..", "adapter", "claudecode", "parser", "testdata")
+	dir := t.TempDir()
+	entry := "root/session.jsonl"
+	entryAbs := filepath.Join(dir, filepath.FromSlash(entry))
+	if err := copyFileForTest(t, filepath.Join(testdata, "workflow-parent.jsonl"), entryAbs); err != nil {
+		t.Fatalf("fixture unavailable: %v", err)
+	}
+	journal := filepath.Join("subagents", "workflows", "wf_fd74c488-8d1", "journal.jsonl")
+	if err := copyFileForTest(t, filepath.Join(testdata, "workflow-parent", journal),
+		filepath.Join(filepath.Dir(entryAbs), "session", journal)); err != nil {
+		t.Fatalf("journal fixture unavailable: %v", err)
+	}
+	fc, err := newFileClient(dir, bundle.Manifest{Agent: "claude", Entry: entry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fc.Close()
+
+	var view transcript.WorkflowView
+	if err := fc.Call(api.MethodSessionsHistoryWorkflow, api.HistoryWorkflowParams{
+		Agent: "claude", TranscriptPath: entryAbs, RunID: "wf_fd74c488-8d1",
+	}, &view); err != nil {
+		t.Fatalf("historyWorkflow: %v", err)
+	}
+	if view.RunID != "wf_fd74c488-8d1" || len(view.Phases) == 0 {
+		t.Fatalf("view = %+v, want the run with phases", view)
+	}
+	if err := fc.Call(api.MethodSessionsHistoryWorkflow, api.HistoryWorkflowParams{
+		Agent: "claude", TranscriptPath: entryAbs, RunID: "wf_nope",
+	}, &view); err == nil {
+		t.Fatal("unknown run: want error")
+	}
+}
