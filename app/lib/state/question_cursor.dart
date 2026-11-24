@@ -54,10 +54,25 @@ class QuestionCursor {
     tab = tab < maxTab ? tab + 1 : maxTab;
   }
 
+  /// On multi-select the other row is toggled by its text, not by Space: it
+  /// counts exactly while the custom text is non-empty.
   void toggle() {
     if (confirming || onSubmitTab || !questions[tab].multiSelect) return;
+    if (highlight[tab] == otherIndex(questions[tab])) return;
     final t = drafts[tab].toggles;
     if (!t.remove(highlight[tab])) t.add(highlight[tab]);
+  }
+
+  void setCustom(int q, String text) {
+    final d = drafts[q];
+    d.custom = text;
+    final oi = otherIndex(questions[q]);
+    if (!questions[q].multiSelect || oi < 0) return;
+    if (text.trim().isEmpty) {
+      d.toggles.remove(oi);
+    } else {
+      d.toggles.add(oi);
+    }
   }
 
   CursorOutcome enter() {

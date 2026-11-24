@@ -429,6 +429,42 @@ void main() {
     expect(sent, isEmpty);
   });
 
+  testWidgets('a multi-select custom answer typed with the keyboard is sent', (
+    tester,
+  ) async {
+    final sent = await _pump(tester, _ix([_q('Pick', 'Which one?', multi: true)]));
+    await _key(tester, LogicalKeyboardKey.arrowDown);
+    await _key(tester, LogicalKeyboardKey.arrowDown);
+    await tester.enterText(_field(), 'mine');
+    await tester.pump();
+    await _key(tester, LogicalKeyboardKey.enter);
+    expect(sent.single['answers'], {
+      'Which one?': ['mine'],
+    });
+  });
+
+  testWidgets(
+    'a multi-select custom answer typed with the keyboard marks the tab and is sent',
+    (tester) async {
+      final sent = await _pump(
+        tester,
+        _ix([_q('H1', 'First?', multi: true), _q('H2', 'Second?')]),
+      );
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      await tester.enterText(_field(), 'mine');
+      await tester.pump();
+      expect(find.text('✓ H1'), findsOneWidget);
+      await _key(tester, LogicalKeyboardKey.enter); // to H2
+      await _key(tester, LogicalKeyboardKey.enter); // H2 = a, to Submit
+      await _key(tester, LogicalKeyboardKey.enter); // Submit
+      expect(sent.single['answers'], {
+        'First?': ['mine'],
+        'Second?': 'a',
+      });
+    },
+  );
+
   testWidgets('Space with the custom field open does not toggle a multi row', (
     tester,
   ) async {

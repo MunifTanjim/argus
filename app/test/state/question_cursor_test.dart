@@ -236,4 +236,24 @@ void main() {
     expect(c.highlight[0], 0);
     expect(c.confirming, isTrue);
   });
+
+  test('on multi-select the other row is toggled exactly while custom text is set', () {
+    final c = QuestionCursor([q(multi: true), q()], allowUnanswered: false);
+    final oi = otherIndex(c.questions[0]);
+    c.setCustom(0, 'mine');
+    expect(c.drafts[0].custom, 'mine');
+    expect(c.drafts[0].toggles, {oi});
+    expect(questionAnswer(c.questions[0], c.drafts[0]), ['mine']);
+    c.down();
+    c.down();
+    c.toggle(); // the text decides, not Space
+    expect(c.drafts[0].toggles, {oi});
+    c.setCustom(0, '  ');
+    expect(c.drafts[0].toggles, isEmpty);
+    c.toggle();
+    expect(c.drafts[0].toggles, isEmpty);
+    c.setCustom(1, 'x'); // single-select: no toggles
+    expect(c.drafts[1].custom, 'x');
+    expect(c.drafts[1].toggles, isEmpty);
+  });
 }

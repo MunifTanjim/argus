@@ -103,7 +103,7 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
     final c = _c;
     _custom = [
       for (var i = 0; i < _qs.length; i++)
-        _draftField((t) => c.drafts[i].custom = t),
+        _draftField((t) => c.setCustom(i, t)),
     ];
     _notes = [
       for (var i = 0; i < _qs.length; i++)
