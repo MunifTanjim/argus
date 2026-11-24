@@ -19,6 +19,7 @@ import 'ui/route_observer.dart';
 import 'ui/sign_out.dart';
 import 'ui/theme.dart';
 import 'ui/unsupported_server_screen.dart';
+import 'ui/window_strip.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -117,6 +118,7 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
       title: 'argus',
       navigatorKey: _navigatorKey,
       theme: buildArgusTheme(platform: defaultTargetPlatform),
+      builder: (context, child) => WindowStrip(child: child!),
       navigatorObservers: [appRouteObserver],
       home: !_loaded
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
