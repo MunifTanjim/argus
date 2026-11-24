@@ -54,6 +54,10 @@ class _TitlebarScopeState extends State<TitlebarScope> {
     if (_isMac && widget.fullScreen == null) {
       _delegate = _FullScreenDelegate();
       _handle = WindowManipulator.addNSWindowDelegate(_delegate!);
+      // The window can start in full screen, before any delegate event.
+      WindowManipulator.isWindowFullscreened().then((full) {
+        if (mounted) _delegate?.seed(full);
+      }, onError: (Object _) {});
     }
   }
 
@@ -82,6 +86,7 @@ class _TitlebarScopeState extends State<TitlebarScope> {
 class _FullScreenDelegate extends NSWindowDelegate
     implements ValueListenable<bool> {
   final _value = ValueNotifier(false);
+  bool _hadEvent = false;
 
   @override
   bool get value => _value.value;
@@ -94,17 +99,32 @@ class _FullScreenDelegate extends NSWindowDelegate
 
   void dispose() => _value.dispose();
 
-  @override
-  void windowWillEnterFullScreen() => _value.value = true;
+  /// The state at start; a delegate event that came first wins.
+  void seed(bool fullScreen) {
+    if (!_hadEvent) _value.value = fullScreen;
+  }
 
   @override
-  void windowDidExitFullScreen() => _value.value = false;
+  void windowWillEnterFullScreen() {
+    _hadEvent = true;
+    _value.value = true;
+  }
+
+  @override
+  void windowDidExitFullScreen() {
+    _hadEvent = true;
+    _value.value = false;
+  }
 }
 
 /// An [AppBar] that, on macOS, is the unified toolbar row: 52 px high, under
 /// the traffic lights, with its content after [TitlebarInsets]. Empty space
 /// in the row drags the window natively; interactive children pass clicks
 /// through the native toolbar to Flutter.
+///
+/// On macOS the leading widget, the actions, and a [title] that is not a
+/// plain [Text] pass clicks through, so they do not drag the window. A plain
+/// [Text] title drags it, like a native title.
 class ArgusAppBar extends StatelessWidget implements PreferredSizeWidget {
   const ArgusAppBar({
     super.key,
@@ -149,27 +169,30 @@ class ArgusAppBar extends StatelessWidget implements PreferredSizeWidget {
         backgroundColor ??
         AppBarTheme.of(context).backgroundColor ??
         Theme.of(context).colorScheme.surface;
-    return ColoredBox(
-      color: color,
-      child: Padding(
-        padding: EdgeInsets.only(left: TitlebarInsets.of(context)),
-        child: AppBar(
-          primary: false,
-          toolbarHeight: kMacToolbarHeight,
-          automaticallyImplyLeading: false,
-          leading: lead == null ? null : _passthrough(lead),
-          // A plain text title stays draggable, like a native title.
-          title: head == null || head is Text ? head : _passthrough(head),
-          actions: actions?.map(_passthrough).toList(),
-          backgroundColor: color,
-          titleSpacing: titleSpacing,
+    return MacosToolbarPassthroughScope(
+      child: _PassthroughRefresh(
+        child: ColoredBox(
+          color: color,
+          child: Padding(
+            padding: EdgeInsets.only(left: TitlebarInsets.of(context)),
+            child: AppBar(
+              primary: false,
+              toolbarHeight: kMacToolbarHeight,
+              automaticallyImplyLeading: false,
+              leading: lead == null ? null : _passthrough(lead),
+              // A plain text title stays draggable, like a native title.
+              title: head == null || head is Text ? head : _passthrough(head),
+              actions: actions?.map(_passthrough).toList(),
+              backgroundColor: color,
+              titleSpacing: titleSpacing,
+            ),
+          ),
         ),
       ),
     );
   }
 
-  static Widget _passthrough(Widget child) =>
-      MacosToolbarPassthrough(child: child);
+  static Widget _passthrough(Widget child) => _RoutePassthrough(child: child);
 
   // What AppBar implies; it is built here so that it can pass through.
   static Widget? _impliedLeading(BuildContext context) {
@@ -181,6 +204,84 @@ class ArgusAppBar extends StatelessWidget implements PreferredSizeWidget {
     return route is PageRoute && route.fullscreenDialog
         ? const CloseButton()
         : const BackButton();
+  }
+}
+
+/// Re-sends the passthrough rects of its [MacosToolbarPassthroughScope] when
+/// the route settles: the rects are measured with the transition's transform,
+/// and a paint-only transition does not lay the toolbar out again.
+class _PassthroughRefresh extends StatefulWidget {
+  const _PassthroughRefresh({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_PassthroughRefresh> createState() => _PassthroughRefreshState();
+}
+
+class _PassthroughRefreshState extends State<_PassthroughRefresh> {
+  ModalRoute<dynamic>? _route;
+  VoidCallback? _notify;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _notify = MacosToolbarPassthroughScope.maybeNotifyChangesOf(context);
+    final route = ModalRoute.of(context);
+    if (route == _route) return;
+    _unlisten();
+    _route = route;
+    route?.animation?.addStatusListener(_onAnimation);
+    route?.secondaryAnimation?.addStatusListener(_onSecondaryAnimation);
+  }
+
+  @override
+  void dispose() {
+    _unlisten();
+    super.dispose();
+  }
+
+  void _unlisten() {
+    _route?.animation?.removeStatusListener(_onAnimation);
+    _route?.secondaryAnimation?.removeStatusListener(_onSecondaryAnimation);
+  }
+
+  // Pushed and shown.
+  void _onAnimation(AnimationStatus status) {
+    if (status.isCompleted) _notify?.call();
+  }
+
+  // Shown again after the route above it is popped.
+  void _onSecondaryAnimation(AnimationStatus status) {
+    if (status.isDismissed) _notify?.call();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+/// [MacosToolbarPassthrough] while its route is current and onstage. A
+/// covered route removes its native passthrough views, so that the toolbar
+/// of the route above it drags the window. The child keeps its state.
+class _RoutePassthrough extends StatefulWidget {
+  const _RoutePassthrough({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_RoutePassthrough> createState() => _RoutePassthroughState();
+}
+
+class _RoutePassthroughState extends State<_RoutePassthrough> {
+  final _childKey = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    final active =
+        (ModalRoute.isCurrentOf(context) ?? true) &&
+        TickerMode.valuesOf(context).enabled;
+    final child = KeyedSubtree(key: _childKey, child: widget.child);
+    return active ? MacosToolbarPassthrough(child: child) : child;
   }
 }
 

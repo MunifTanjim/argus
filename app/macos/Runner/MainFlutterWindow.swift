@@ -15,8 +15,19 @@ class MainFlutterWindow: NSWindow {
     self.setFrame(windowFrame, display: true)
     self.contentMinSize = NSSize(width: 420, height: 600)
 
-    // The rest of the window chrome is set from Dart (main.dart).
     MainFlutterWindowManipulator.start(mainFlutterWindow: self)
+    // start() resets the chrome; set it here so the first frame already has
+    // the unified toolbar row (52 px, traffic lights centered).
+    self.titlebarAppearsTransparent = true
+    self.titleVisibility = .hidden
+    self.styleMask.insert(.fullSizeContentView)
+    let toolbar = NSToolbar(identifier: "ArgusToolbar")
+    toolbar.allowsUserCustomization = false
+    self.toolbar = toolbar
+    self.toolbarStyle = .unified
+    self.titlebarSeparatorStyle = .none
+    // Shows through where Flutter leaves the canvas clear (the side panel).
+    (macOSWindowUtilsViewController.view as? NSVisualEffectView)?.material = .sidebar
 
     RegisterGeneratedPlugins(registry: macOSWindowUtilsViewController.flutterViewController)
 

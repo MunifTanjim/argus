@@ -1,8 +1,16 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:macos_window_utils/macos_window_utils.dart';
 import 'package:macos_window_utils/widgets/macos_toolbar_passthrough.dart';
+import 'package:argus/ui/theme.dart';
 import 'package:argus/ui/titlebar.dart';
+
+const _windowChannel = MethodChannel('macos_window_utils/window_manipulator');
+
+// What the native side was last told: the passthrough rect per id.
+final _passthroughRects = <String, Rect>{};
 
 void _platform(TargetPlatform p) {
   debugDefaultTargetPlatformOverride = p;
@@ -24,7 +32,48 @@ Widget _scaffold(PreferredSizeWidget appBar) {
   );
 }
 
+// Lets debounced passthrough updates (10 ms) and their post-frame resend run.
+// The package's init future completed outside the fake-async zone, so its
+// continuations need real event-loop turns.
+Future<void> _flushPassthrough(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  for (var i = 0; i < 3; i++) {
+    await tester.pump(const Duration(milliseconds: 20));
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+  }
+  await tester.pump();
+}
+
+Set<Rect> _visiblePassthroughRects(WidgetTester tester) => find
+    .byType(MacosToolbarPassthrough)
+    .evaluate()
+    .map((e) => tester.getRect(find.byElementPredicate((x) => x == e)))
+    .toSet();
+
 void main() {
+  setUpAll(() async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(_windowChannel, (call) async {
+          final args = call.arguments as Map?;
+          switch (call.method) {
+            case 'updateToolbarPassthroughView':
+              _passthroughRects[args!['id'] as String] = Rect.fromLTWH(
+                args['x'] as double,
+                args['y'] as double,
+                args['width'] as double,
+                args['height'] as double,
+              );
+            case 'removeToolbarPassthroughView':
+              _passthroughRects.remove(args!['id']);
+          }
+          return true;
+        });
+    await WindowManipulator.initialize();
+  });
+
+  setUp(_passthroughRects.clear);
+
   testWidgets(
     'Android: ArgusAppBar builds an AppBar with the same title, actions and default height',
     (tester) async {
@@ -195,6 +244,28 @@ void main() {
       },
     );
 
+    testWidgets(
+      'on macOS without an injected listenable, left starts from the window full-screen state',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        late BuildContext inner;
+        await tester.pumpWidget(
+          TitlebarScope(
+            child: Builder(
+              builder: (context) {
+                inner = context;
+                return const SizedBox();
+              },
+            ),
+          ),
+        );
+        expect(TitlebarInsets.of(inner), kTrafficLightsInset);
+        // The mocked window answers true to isWindowFullscreened.
+        await _flushPassthrough(tester);
+        expect(TitlebarInsets.of(inner), 0);
+      },
+    );
+
     testWidgets('left is 0 on Linux', (tester) async {
       _platform(TargetPlatform.linux);
       final left = await pumpScope(tester, fullScreen: _fullScreen());
@@ -231,5 +302,127 @@ void main() {
       await tester.pumpWidget(const Column(children: [TitlebarSpacer()]));
       expect(tester.getSize(find.byType(TitlebarSpacer)), Size.zero);
     });
+  });
+
+  group('passthrough on macOS', () {
+    testWidgets(
+      'after a push settles, the native rects are those of the pushed route only',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        await tester.pumpWidget(
+          _scaffold(
+            ArgusAppBar(
+              title: const Text('Root'),
+              actions: [
+                IconButton(icon: const Icon(Icons.add), onPressed: () {}),
+              ],
+            ),
+          ),
+        );
+        await _flushPassthrough(tester);
+        expect(
+          _passthroughRects.values.toSet(),
+          _visiblePassthroughRects(tester),
+        );
+        expect(_passthroughRects, hasLength(1));
+
+        tester
+            .state<NavigatorState>(find.byType(Navigator))
+            .push(
+              MaterialPageRoute<void>(
+                builder: (_) => Scaffold(
+                  appBar: ArgusAppBar(
+                    title: const Text('Pushed'),
+                    actions: [
+                      IconButton(
+                        icon: const Icon(Icons.edit),
+                        onPressed: () {},
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+        await _flushPassthrough(tester);
+        final back = tester.getRect(
+          find.ancestor(
+            of: find.byType(BackButton),
+            matching: find.byType(MacosToolbarPassthrough),
+          ),
+        );
+        expect(_passthroughRects.values, contains(back));
+        // The covered route's toolbar no longer blocks native drag.
+        expect(
+          _passthroughRects.values.toSet(),
+          _visiblePassthroughRects(tester),
+        );
+        expect(_passthroughRects, hasLength(2));
+      },
+    );
+
+    testWidgets(
+      'after a pop settles, the native rects are the root route\'s again',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        await tester.pumpWidget(
+          _scaffold(
+            ArgusAppBar(
+              title: const Text('Root'),
+              actions: [
+                IconButton(icon: const Icon(Icons.add), onPressed: () {}),
+              ],
+            ),
+          ),
+        );
+        final nav = tester.state<NavigatorState>(find.byType(Navigator));
+        nav.push(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                const Scaffold(appBar: ArgusAppBar(title: Text('P'))),
+          ),
+        );
+        await _flushPassthrough(tester);
+        nav.pop();
+        await _flushPassthrough(tester);
+        expect(
+          _passthroughRects.values.toSet(),
+          _visiblePassthroughRects(tester),
+        );
+        expect(_passthroughRects, hasLength(1));
+      },
+    );
+
+    testWidgets(
+      'an interactive title keeps its state when its route is covered',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        final controller = TextEditingController();
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(
+          _scaffold(ArgusAppBar(title: TextField(controller: controller))),
+        );
+        await tester.enterText(find.byType(TextField), 'kept');
+        final state = tester.state(find.byType(EditableText));
+        final nav = tester.state<NavigatorState>(find.byType(Navigator));
+        nav.push(MaterialPageRoute<void>(builder: (_) => const Scaffold()));
+        await _flushPassthrough(tester);
+        nav.pop();
+        await _flushPassthrough(tester);
+        expect(tester.state(find.byType(EditableText)), same(state));
+      },
+    );
+  });
+
+  testWidgets('Linux: ArgusAppBar is 40 px under the desktop theme', (
+    tester,
+  ) async {
+    _platform(TargetPlatform.linux);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildArgusTheme(platform: TargetPlatform.linux),
+        home: const Scaffold(appBar: ArgusAppBar(title: Text('T'))),
+      ),
+    );
+    expect(tester.getSize(find.byType(ArgusAppBar)).height, 40);
   });
 }

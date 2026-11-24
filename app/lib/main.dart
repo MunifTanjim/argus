@@ -49,19 +49,10 @@ Future<void> main(List<String> args) async {
   runApp(const ProviderScope(child: ArgusApp()));
 }
 
-// One unified toolbar row (52 px, traffic lights centered) over the content;
-// Flutter draws the row, and its empty space drags the window natively.
-Future<void> _setUpMacWindow() async {
-  await WindowManipulator.initialize(enableWindowDelegate: true);
-  await WindowManipulator.makeTitlebarTransparent();
-  await WindowManipulator.enableFullSizeContentView();
-  await WindowManipulator.hideTitle();
-  await WindowManipulator.addToolbar();
-  await WindowManipulator.setToolbarStyle(
-      toolbarStyle: NSWindowToolbarStyle.unified);
-  // Shows through where Flutter leaves the canvas clear (the side panel).
-  await WindowManipulator.setMaterial(NSVisualEffectViewMaterial.sidebar);
-}
+// The window chrome (unified toolbar, transparent title bar, sidebar material)
+// is set in MainFlutterWindow.swift; the delegate reports full screen.
+Future<void> _setUpMacWindow() =>
+    WindowManipulator.initialize(enableWindowDelegate: true);
 
 void _registerAssetLicenses() {
   LicenseRegistry.addLicense(() async* {
