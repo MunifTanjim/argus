@@ -49,6 +49,38 @@ class ToolDetailRef {
       );
 }
 
+/// Calls [live] for a live session or [history] for a past one, as [ref]
+/// addresses it, adding [params] to the session/transcript keys.
+Future<Object> callForRef(
+  GatewayClient c,
+  ToolDetailRef ref, {
+  required String live,
+  required String history,
+  required Map<String, Object?> params,
+}) async {
+  final agentId = ref.agentId;
+  if (ref.isHistory) {
+    // node_id is mandatory for gateway-routed history reads.
+    if ((ref.nodeId ?? '').isEmpty) {
+      throw ArgumentError('$history requires a node_id');
+    }
+    return await c.call(history, {
+          'node_id': ref.nodeId,
+          'transcript_path': ref.transcriptPath,
+          if ((agentId ?? '').isNotEmpty) 'agent_id': agentId,
+          if ((ref.agent ?? '').isNotEmpty) 'agent': ref.agent,
+          ...params,
+        })
+        as Object;
+  }
+  return await c.call(live, {
+        'session_id': ref.sessionId,
+        if ((agentId ?? '').isNotEmpty) 'agent_id': agentId,
+        ...params,
+      })
+      as Object;
+}
+
 /// Wraps the on-demand tool-body RPCs. Resolves the client fresh on each call so
 /// reconnects are transparent; a missing client or failed RPC surfaces as
 /// [Error] for the UI to render.
@@ -60,27 +92,13 @@ class ToolDetailApi {
     final c = _clientOf();
     if (c == null) return Result.error(StateError('not connected'));
     try {
-      final agentId = ref.agentId;
-      final Object result;
-      if (ref.isHistory) {
-        // node_id is mandatory for gateway-routed history reads.
-        if ((ref.nodeId ?? '').isEmpty) {
-          throw ArgumentError('history tool detail requires a node_id');
-        }
-        result = await c.call('sessions.historyToolDetail', {
-          'node_id': ref.nodeId,
-          'transcript_path': ref.transcriptPath,
-          if ((agentId ?? '').isNotEmpty) 'agent_id': agentId,
-          if ((ref.agent ?? '').isNotEmpty) 'agent': ref.agent,
-          'tool_id': toolId,
-        }) as Object;
-      } else {
-        result = await c.call('sessions.toolDetail', {
-          'session_id': ref.sessionId,
-          if ((agentId ?? '').isNotEmpty) 'agent_id': agentId,
-          'tool_id': toolId,
-        }) as Object;
-      }
+      final result = await callForRef(
+        c,
+        ref,
+        live: 'sessions.toolDetail',
+        history: 'sessions.historyToolDetail',
+        params: {'tool_id': toolId},
+      );
       return Result.ok(ToolDetail.fromJson(result as Map<String, dynamic>));
     } catch (e) {
       return Result.error(e);

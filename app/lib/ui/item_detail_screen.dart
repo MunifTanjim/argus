@@ -21,6 +21,8 @@ String itemTitle(Entry it, {String? agent}) {
       return it.soleSubagent?.type ?? 'Subagent';
     case EntryKind.skill:
       return 'Skill';
+    case EntryKind.workflow:
+      return 'Workflow';
     default:
       return 'Detail';
   }
@@ -49,6 +51,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
   bool get _needsFetch =>
       (widget.item.kind == EntryKind.tool ||
           widget.item.kind == EntryKind.skill ||
+          widget.item.kind == EntryKind.workflow ||
           isAgentRefTool(widget.item.toolName)) &&
       (widget.item.toolId?.isNotEmpty ?? false) &&
       widget.item.toolInput == null &&

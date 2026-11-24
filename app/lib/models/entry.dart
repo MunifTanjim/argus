@@ -36,6 +36,7 @@ enum EntryKind {
   system,
   compact,
   shell,
+  workflow,
   unknown,
 }
 
@@ -61,6 +62,8 @@ EntryKind entryKindFromWire(String? s) {
       return EntryKind.compact;
     case 'shell':
       return EntryKind.shell;
+    case 'workflow':
+      return EntryKind.workflow;
     default:
       return EntryKind.unknown;
   }
@@ -144,6 +147,28 @@ class Subagent {
   );
 }
 
+/// A Workflow tool run, as carried on a [EntryKind.workflow] entry.
+class WorkflowRef {
+  final String runId;
+  final String name;
+  final String status;
+  final bool remote;
+
+  const WorkflowRef({
+    this.runId = '',
+    this.name = '',
+    this.status = '',
+    this.remote = false,
+  });
+
+  factory WorkflowRef.fromJson(Map<String, dynamic> j) => WorkflowRef(
+    runId: j['runId'] as String? ?? '',
+    name: j['name'] as String? ?? '',
+    status: j['status'] as String? ?? '',
+    remote: j['remote'] as bool? ?? false,
+  );
+}
+
 /// One unit of the flat transcript timeline. Fields are used per [kind].
 class Entry {
   final String id;
@@ -158,6 +183,8 @@ class Entry {
   final String? result;
   final bool resultIsError;
   final List<Subagent> subagents;
+  // workflow
+  final WorkflowRef? workflow;
   // turn_end
   final String? modelName;
   final String? modelColor;
@@ -192,6 +219,7 @@ class Entry {
     this.result,
     this.resultIsError = false,
     this.subagents = const [],
+    this.workflow,
     this.modelName,
     this.modelColor,
     this.usage = const Usage(),
@@ -237,6 +265,9 @@ class Entry {
             ?.map((e) => Subagent.fromJson(e as Map<String, dynamic>))
             .toList() ??
         const [],
+    workflow: j['workflow'] == null
+        ? null
+        : WorkflowRef.fromJson(j['workflow'] as Map<String, dynamic>),
     modelName: j['modelName'] as String?,
     modelColor: j['modelColor'] as String?,
     usage: Usage.fromJson(j['usage'] as Map<String, dynamic>?),
