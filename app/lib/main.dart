@@ -116,7 +116,7 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
     return MaterialApp(
       title: 'argus',
       navigatorKey: _navigatorKey,
-      theme: buildArgusTheme(),
+      theme: buildArgusTheme(platform: defaultTargetPlatform),
       navigatorObservers: [appRouteObserver],
       home: !_loaded
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
