@@ -100,22 +100,24 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
     switch (ix.kind) {
       case InteractionKind.permission:
         return isDesktop
-            ? [_desktopDecision(ix, 'permission')]
+            ? [Flexible(child: _desktopDecision(ix, 'permission'))]
             : _serverDecision(ix, 'permission');
       case InteractionKind.plan:
         return isDesktop
-            ? [_desktopDecision(ix, 'plan')]
+            ? [Flexible(child: _desktopDecision(ix, 'plan'))]
             : _serverDecision(ix, 'plan');
       case InteractionKind.idle:
         return const [];
       case InteractionKind.question:
         return isDesktop
             ? [
-                DesktopQuestions(
-                  session: widget.session,
-                  interaction: ix,
-                  busy: _busy,
-                  onRespond: _respond,
+                Flexible(
+                  child: DesktopQuestions(
+                    session: widget.session,
+                    interaction: ix,
+                    busy: _busy,
+                    onRespond: _respond,
+                  ),
                 ),
               ]
             : _questions(ix);

@@ -489,5 +489,81 @@ void main() {
       await tester.pumpAndSettle();
       expect(c.respondCalls.single['option_value'], 'allow');
     });
+
+    final longText = List.generate(80, (i) => 'line $i').join('\n\n');
+
+    testWidgets('a long question on macOS stays inside the panel bounds', (
+      tester,
+    ) async {
+      platform(TargetPlatform.macOS);
+      await _pumpPanel(
+        tester,
+        _session({
+          ...question,
+          'questions': [
+            {
+              'header': 'Pick',
+              'question': longText,
+              'options': ['a', 'b'],
+            },
+            {
+              'header': 'Two',
+              'question': 'second',
+              'options': ['c'],
+            },
+          ],
+        }),
+        _RecordingControl(),
+      );
+      expect(tester.takeException(), isNull);
+      expect(tester.getRect(find.byType(InteractionPanel)).bottom,
+          lessThanOrEqualTo(600));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Review answers'), findsOneWidget);
+      expect(tester.getBottomLeft(find.text('Cancel')).dy,
+          lessThanOrEqualTo(600));
+    });
+
+    testWidgets('a long plan on macOS keeps the options inside the panel', (
+      tester,
+    ) async {
+      platform(TargetPlatform.macOS);
+      await _pumpPanel(
+        tester,
+        _session({'kind': 'plan', 'request_id': 'p1', 'plan': longText}),
+        _RecordingControl(),
+      );
+      expect(tester.takeException(), isNull);
+      expect(tester.getBottomLeft(find.text('Deny')).dy, lessThanOrEqualTo(600));
+    });
+
+    testWidgets('moving the highlight keeps the option in view', (tester) async {
+      platform(TargetPlatform.macOS);
+      await _pumpPanel(
+        tester,
+        _session({
+          ...question,
+          'questions': [
+            {
+              'header': 'Pick',
+              'question': 'Which one?',
+              'options': [for (var i = 0; i < 40; i++) 'option $i'],
+            },
+          ],
+        }),
+        _RecordingControl(),
+      );
+      for (var i = 0; i < 20; i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      }
+      await tester.pumpAndSettle();
+      final row = tester.getRect(find.text('option 20'));
+      final view = tester.getRect(find.byType(SingleChildScrollView));
+      expect(row.top, greaterThanOrEqualTo(view.top));
+      expect(row.bottom, lessThanOrEqualTo(view.bottom));
+    });
   });
 }

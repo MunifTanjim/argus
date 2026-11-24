@@ -61,6 +61,9 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
   /// highlight or changing tabs opens it again.
   bool _customClosed = false;
 
+  /// Marks the highlighted option row so it can be scrolled into view.
+  final _highlightKey = GlobalKey();
+
   Interaction get _ix => widget.interaction;
   List<QuestionSpec> get _qs => _ix.questions;
 
@@ -167,6 +170,10 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
       if (!mounted || !hadFocus) return;
       final target = _activeField ?? _focus;
       if (!target.hasPrimaryFocus) target.requestFocus();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _highlightKey.currentContext;
+      if (mounted && ctx != null) Scrollable.ensureVisible(ctx);
     });
   }
 
@@ -512,6 +519,7 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
       children: [
         for (var i = 0; i < labels.length; i++)
           _optionRow(
+            key: i == _c.highlight[tab] ? _highlightKey : null,
             highlighted: i == _c.highlight[tab],
             marked: q.multiSelect ? d.toggles.contains(i) : d.chosen == i,
             multi: q.multiSelect,
@@ -538,6 +546,7 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
   }
 
   Widget _optionRow({
+    Key? key,
     required bool highlighted,
     required bool marked,
     required bool multi,
@@ -549,6 +558,7 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
         ? (marked ? Icons.check_box : Icons.check_box_outline_blank)
         : (marked ? Icons.radio_button_checked : Icons.radio_button_unchecked);
     return InkWell(
+      key: key,
       onTap: onTap,
       borderRadius: BorderRadius.circular(4),
       child: Container(
@@ -742,6 +752,7 @@ class _DesktopDecisionState extends State<DesktopDecision> {
     super.didUpdateWidget(old);
     if (old.interaction.requestId != _ix.requestId || old.kind != widget.kind) {
       _highlight = 0;
+      _rejectIndex = 0;
       _reasonOpen = false;
       _reason.clear();
       _focusPanel();
