@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flterm/flterm.dart' as gt;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -255,6 +256,18 @@ void main() {
       'Delete', 'Shift', 'Ctrl', 'Alt', 'Left', 'Down', 'Right', 'Enter',
     ]) {
       expect(find.byTooltip(tip), findsOneWidget, reason: 'missing key: $tip');
+    }
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('desktop has no virtual keys', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final repo = _FakeTerminalRepo();
+    await _pump(tester, repo);
+
+    for (final tip in const ['Escape', 'Ctrl', 'Enter']) {
+      expect(find.byTooltip(tip), findsNothing, reason: 'unexpected key: $tip');
     }
     await tester.pumpWidget(const SizedBox());
   });

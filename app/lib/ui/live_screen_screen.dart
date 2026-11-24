@@ -15,6 +15,7 @@ import '../state/terminal_controller.dart';
 import '../state/terminal_prefs.dart';
 import '../state/terminals.dart';
 import '../transport/connection.dart';
+import '../util/platform.dart';
 import '../util/sync_frames.dart';
 import 'adaptive_sheet.dart';
 import 'live_emulator.dart';
@@ -333,48 +334,50 @@ class _InputBarState extends State<_InputBar> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              // Keys with a clear glyph use an icon; the rest fall back to a
-              // short text label. Modifiers pass `active:` to show armed state.
-              children: [
-                _keyRow([
-                  _capButton(_label('Esc'), 'Escape', () => _pressKey('escape')),
-                  _capButton(_icon(Icons.keyboard_tab), 'Tab',
-                      () => _pressKey('tab')),
-                  _capButton(_label('Home'), 'Home', () => _pressKey('home')),
-                  _capButton(_label('End'), 'End', () => _pressKey('end')),
-                  _capButton(_label('PgUp'), 'PageUp', () => _pressKey('pgup')),
-                  _capButton(_icon(Icons.keyboard_arrow_up), 'Up',
-                      () => _pressKey('up')),
-                  _capButton(_label('PgDn'), 'PageDown',
-                      () => _pressKey('pgdown')),
-                  _capButton(_icon(Icons.backspace_outlined), 'Backspace',
-                      () => _pressKey('backspace')),
-                ]),
-                const SizedBox(height: 4),
-                _keyRow([
-                  _capButton(_label('Del'), 'Delete', () => _pressKey('delete')),
-                  _capButton(_icon(Icons.keyboard_capslock), 'Shift',
-                      () => setState(() => _shift = !_shift), active: _shift),
-                  _capButton(_icon(Icons.keyboard_control_key), 'Ctrl',
-                      () => setState(() => _ctrl = !_ctrl), active: _ctrl),
-                  _capButton(_icon(Icons.keyboard_option_key), 'Alt',
-                      () => setState(() => _alt = !_alt), active: _alt),
-                  _capButton(_icon(Icons.keyboard_arrow_left), 'Left',
-                      () => _pressKey('left')),
-                  _capButton(_icon(Icons.keyboard_arrow_down), 'Down',
-                      () => _pressKey('down')),
-                  _capButton(_icon(Icons.keyboard_arrow_right), 'Right',
-                      () => _pressKey('right')),
-                  _capButton(_icon(Icons.keyboard_return), 'Enter',
-                      () => _pressKey('enter')),
-                ]),
-              ],
+          // A desktop has a physical keyboard, so the virtual keys are omitted.
+          if (!isDesktop)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                // Keys with a clear glyph use an icon; the rest fall back to a
+                // short text label. Modifiers pass `active:` to show armed state.
+                children: [
+                  _keyRow([
+                    _capButton(_label('Esc'), 'Escape', () => _pressKey('escape')),
+                    _capButton(_icon(Icons.keyboard_tab), 'Tab',
+                        () => _pressKey('tab')),
+                    _capButton(_label('Home'), 'Home', () => _pressKey('home')),
+                    _capButton(_label('End'), 'End', () => _pressKey('end')),
+                    _capButton(_label('PgUp'), 'PageUp', () => _pressKey('pgup')),
+                    _capButton(_icon(Icons.keyboard_arrow_up), 'Up',
+                        () => _pressKey('up')),
+                    _capButton(_label('PgDn'), 'PageDown',
+                        () => _pressKey('pgdown')),
+                    _capButton(_icon(Icons.backspace_outlined), 'Backspace',
+                        () => _pressKey('backspace')),
+                  ]),
+                  const SizedBox(height: 4),
+                  _keyRow([
+                    _capButton(_label('Del'), 'Delete', () => _pressKey('delete')),
+                    _capButton(_icon(Icons.keyboard_capslock), 'Shift',
+                        () => setState(() => _shift = !_shift), active: _shift),
+                    _capButton(_icon(Icons.keyboard_control_key), 'Ctrl',
+                        () => setState(() => _ctrl = !_ctrl), active: _ctrl),
+                    _capButton(_icon(Icons.keyboard_option_key), 'Alt',
+                        () => setState(() => _alt = !_alt), active: _alt),
+                    _capButton(_icon(Icons.keyboard_arrow_left), 'Left',
+                        () => _pressKey('left')),
+                    _capButton(_icon(Icons.keyboard_arrow_down), 'Down',
+                        () => _pressKey('down')),
+                    _capButton(_icon(Icons.keyboard_arrow_right), 'Right',
+                        () => _pressKey('right')),
+                    _capButton(_icon(Icons.keyboard_return), 'Enter',
+                        () => _pressKey('enter')),
+                  ]),
+                ],
+              ),
             ),
-          ),
           // Text input row. While a modifier is armed, the next typed character
           // is sent as a modified key instead of buffered.
           if (widget.compose)
