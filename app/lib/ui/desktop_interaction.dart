@@ -58,7 +58,12 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
     super.didUpdateWidget(old);
     if (old.interaction.requestId != _ix.requestId ||
         old.interaction.questions.length != _qs.length) {
-      _disposeFields();
+      // The old fields stay mounted until this frame is built.
+      final custom = _custom, notes = _notes;
+      final customFocus = _customFocus, noteFocus = _noteFocus;
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _disposeFields(custom, notes, customFocus, noteFocus),
+      );
       _reset();
     }
   }
@@ -66,32 +71,50 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
   void _reset() {
     _c = QuestionCursor(_qs, allowUnanswered: _ix.allowUnanswered);
     _customClosed = false;
+    final c = _c;
     _custom = [
       for (var i = 0; i < _qs.length; i++)
-        TextEditingController()
-          ..addListener(() => _c.drafts[i].custom = _custom[i].text),
+        _draftField((t) => c.drafts[i].custom = t),
     ];
     _notes = [
       for (var i = 0; i < _qs.length; i++)
-        TextEditingController()
-          ..addListener(() => _c.drafts[i].note = _notes[i].text),
+        _draftField((t) => c.drafts[i].note = t),
     ];
     _customFocus = [for (final _ in _qs) FocusNode()];
     _noteFocus = [for (final _ in _qs) FocusNode()];
   }
 
-  void _disposeFields() {
-    for (final c in [..._custom, ..._notes]) {
+  /// A controller that stores its text through [store] and rebuilds, so the
+  /// tab label's ✓ follows typing.
+  TextEditingController _draftField(void Function(String text) store) {
+    final controller = TextEditingController();
+    var last = '';
+    controller.addListener(() {
+      if (controller.text == last) return;
+      last = controller.text;
+      store(last);
+      if (mounted) setState(() {});
+    });
+    return controller;
+  }
+
+  void _disposeFields(
+    List<TextEditingController> custom,
+    List<TextEditingController> notes,
+    List<FocusNode> customFocus,
+    List<FocusNode> noteFocus,
+  ) {
+    for (final c in [...custom, ...notes]) {
       c.dispose();
     }
-    for (final f in [..._customFocus, ..._noteFocus]) {
+    for (final f in [...customFocus, ...noteFocus]) {
       f.dispose();
     }
   }
 
   @override
   void dispose() {
-    _disposeFields();
+    _disposeFields(_custom, _notes, _customFocus, _noteFocus);
     _focus.dispose();
     super.dispose();
   }
@@ -198,11 +221,9 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
       _act(o);
       return KeyEventResult.handled;
     }
-    // Multi-select rows toggle with Space even while the custom field is open,
-    // as in the TUI.
     if (k == LogicalKeyboardKey.space &&
+        !field &&
         _onQuestion &&
-        !_noteActive &&
         _qs[_c.tab].multiSelect) {
       _update(_c.toggle);
       return KeyEventResult.handled;

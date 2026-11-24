@@ -429,4 +429,44 @@ void main() {
     expect(await tester.sendKeyEvent(LogicalKeyboardKey.enter), isFalse);
     expect(sent, isEmpty);
   });
+
+  testWidgets('Space with the custom field open does not toggle a multi row', (
+    tester,
+  ) async {
+    await _pump(tester, _ix([_q('Pick', 'Which one?', multi: true)]));
+    await _key(tester, LogicalKeyboardKey.arrowDown);
+    await _key(tester, LogicalKeyboardKey.arrowDown);
+    expect(_field(), findsOneWidget);
+    expect(await tester.sendKeyEvent(LogicalKeyboardKey.space), isFalse);
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.check_box), findsNothing);
+  });
+
+  testWidgets('a new requestId with the custom field open does not throw', (
+    tester,
+  ) async {
+    final ix = _ix([_q('Pick', 'Which one?')]);
+    final sent = await _pump(tester, ix);
+    await _key(tester, LogicalKeyboardKey.arrowDown);
+    await _key(tester, LogicalKeyboardKey.arrowDown);
+    await tester.enterText(_field(), 'typing');
+    await tester.pumpWidget(_host(_session({...ix, 'request_id': 'r9'}), sent));
+    expect(tester.takeException(), isNull);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(_field(), findsNothing);
+  });
+
+  testWidgets('typing a custom answer marks the tab answered', (tester) async {
+    await _pump(
+      tester,
+      _ix([_q('H1', 'First?', multi: true), _q('H2', 'Second?')]),
+    );
+    await tester.tap(find.text(otherLabel));
+    await tester.pumpAndSettle();
+    expect(find.text('✓ H1'), findsNothing);
+    await tester.enterText(_field(), 'mine');
+    await tester.pump();
+    expect(find.text('✓ H1'), findsOneWidget);
+  });
 }
