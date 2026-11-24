@@ -125,7 +125,7 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
     popToRootOnSignOut(ref, _navigatorKey);
 
     return MaterialApp(
-      title: 'argus',
+      title: 'Argus',
       navigatorKey: _navigatorKey,
       theme: buildArgusTheme(platform: defaultTargetPlatform),
       // One menu bar for the whole app: HomeShell, when mounted, registers

@@ -55,7 +55,7 @@ Future<List<String>> _pump(WidgetTester tester, {Widget? child}) async {
 }
 
 const _appItems = [
-  ('argus', 'Settings…'),
+  ('Argus', 'Settings…'),
   ('View', 'Quick Switcher'),
   ('View', 'Sessions'),
   ('View', 'History'),
@@ -100,22 +100,22 @@ Future<void> _chord(WidgetTester tester, LogicalKeyboardKey key) async {
 
 void main() {
   testWidgets(
-      'macOS: PlatformMenuBar is present with argus, Edit, View, Session, Window menus',
+      'macOS: PlatformMenuBar is present with Argus, Edit, View, Session, Window menus',
       (tester) async {
     _platform(TargetPlatform.macOS);
     final sent = _menuChannel(tester);
     await _pump(tester);
     expect(find.text('body'), findsOneWidget);
     expect([for (final m in _menus(tester)) m.label],
-        ['argus', 'Edit', 'View', 'Session', 'Window']);
-    expect(_provided(_menu(tester, 'argus')), [
+        ['Argus', 'Edit', 'View', 'Session', 'Window']);
+    expect(_provided(_menu(tester, 'Argus')), [
       PlatformProvidedMenuItemType.about,
       PlatformProvidedMenuItemType.hide,
       PlatformProvidedMenuItemType.hideOtherApplications,
       PlatformProvidedMenuItemType.showAllApplications,
       PlatformProvidedMenuItemType.quit,
     ]);
-    expect(_item(tester, 'argus', 'Settings…'), isNotNull);
+    expect(_item(tester, 'Argus', 'Settings…'), isNotNull);
     for (final label in ['Cut', 'Copy', 'Paste', 'Select All']) {
       expect(_item(tester, 'Edit', label), isNotNull);
     }
@@ -169,7 +169,7 @@ void main() {
     _platform(TargetPlatform.macOS);
     _menuChannel(tester);
     final log = await _pump(tester);
-    _item(tester, 'argus', 'Settings…').onSelected!();
+    _item(tester, 'Argus', 'Settings…').onSelected!();
     _item(tester, 'View', 'Quick Switcher').onSelected!();
     _item(tester, 'View', 'Keyboard Shortcuts').onSelected!();
     _item(tester, 'Session', 'Back').onSelected!();
@@ -247,7 +247,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: Scaffold(body: _bar(null, registry: registry))));
     expect(find.byType(PlatformMenuBar), findsOneWidget);
-    expect(_provided(_menu(tester, 'argus')),
+    expect(_provided(_menu(tester, 'Argus')),
         contains(PlatformProvidedMenuItemType.quit));
     for (final (menu, label) in _appItems) {
       expect(_item(tester, menu, label).onSelected, isNull, reason: label);

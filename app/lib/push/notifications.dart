@@ -109,7 +109,7 @@ class PushNotifications {
     final id = sessionNotificationId(m.sessionId ?? m.title ?? m.body ?? '');
     await _plugin.show(
       id,
-      m.title ?? 'argus',
+      m.title ?? 'Argus',
       m.body ?? '',
       NotificationDetails(
         android: AndroidNotificationDetails(

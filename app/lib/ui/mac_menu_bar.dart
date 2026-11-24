@@ -133,7 +133,7 @@ class _MacMenuBarState extends State<MacMenuBar> {
   List<PlatformMenuItem> _build() {
     _builtEnabled = _enabled;
     return [
-      PlatformMenu(label: 'argus', menus: [
+      PlatformMenu(label: 'Argus', menus: [
         const PlatformMenuItemGroup(members: [
           PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.about),
         ]),
