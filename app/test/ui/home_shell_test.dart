@@ -1,9 +1,11 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:macos_window_utils/macos_window_utils.dart';
 import 'package:macos_window_utils/widgets/macos_toolbar_passthrough.dart';
@@ -109,6 +111,7 @@ Future<ProviderContainer> _shell(
   SessionRepository? repo,
   ValueListenable<bool>? fullScreen,
   bool menuBar = false,
+  List<NodeRef>? nodes,
 }) async {
   tester.view.physicalSize = Size(width, 900);
   tester.view.devicePixelRatio = 1;
@@ -116,6 +119,11 @@ Future<ProviderContainer> _shell(
   final c = ProviderContainer(overrides: [
     gatewayProvider.overrideWithValue(null),
     if (repo != null) sessionRepositoryProvider.overrideWithValue(repo),
+    if (nodes != null) ...[
+      _nodesProvider.overrideWith((ref) => nodes),
+      serverInfoProvider.overrideWith((ref) async =>
+          ServerInfo(version: '', nodes: ref.watch(_nodesProvider))),
+    ],
   ]);
   addTearDown(c.dispose);
   await c.read(projectsProvider.notifier).load(FakeGatewayClient((m, p) async => _tree()));
@@ -133,6 +141,8 @@ Future<ProviderContainer> _shell(
   await tester.pump();
   return c;
 }
+
+final _nodesProvider = StateProvider<List<NodeRef>>((ref) => const []);
 
 Widget _titlebarApp(ValueListenable<bool> fullScreen) {
   final routes = TitlebarRouteObserver();
@@ -505,24 +515,13 @@ void main() {
         'wide: the main area\'s toolbar starts at the main area\'s left edge (inset 0), and the side panel has a 52 px header area at the top',
         (tester) async {
       final c = await _shell(tester, width: 1000, fullScreen: mac());
-      // Home has its tab rail at the left of the main area.
-      final rail = find.byType(NavigationRail);
-      expect(tester.getTopLeft(rail).dx, kSidePanelWidth + 1);
-      expect(tester.getTopLeft(barOf(SessionListScreen)).dx,
-          tester.getTopRight(rail).dx + 1);
+      expect(tester.getTopLeft(barOf(SessionListScreen)).dx, kSidePanelWidth + 1);
       expect(tester.getRect(panelHeader),
           const Rect.fromLTWH(0, 0, kSidePanelWidth, kMacToolbarHeight));
 
       c.read(scopeProvider.notifier).state = 'A:w2';
       await tester.pumpAndSettle();
       expect(tester.getTopLeft(barOf(WorkspaceScreen)).dx, kSidePanelWidth + 1);
-    });
-
-    testWidgets('wide: the home tab rail starts below the toolbar row', (tester) async {
-      await _shell(tester, width: 1000, fullScreen: mac());
-      final destination = find.descendant(
-          of: find.byType(NavigationRail), matching: find.byIcon(Icons.forum_outlined));
-      expect(tester.getTopLeft(destination).dy, greaterThanOrEqualTo(kMacToolbarHeight));
     });
 
     testWidgets('wide: a session pushed in the nested navigator has a toolbar with inset 0',
@@ -583,6 +582,167 @@ void main() {
         }
       });
     }
+
+    group('tabs', () {
+      final tabs = find.byType(CupertinoSlidingSegmentedControl<int>);
+      Finder tabsOf(Type screen) =>
+          find.descendant(of: find.byType(screen), matching: tabs);
+      Finder segment(Type screen, String label) =>
+          find.descendant(of: tabsOf(screen), matching: find.text(label));
+      int? selectedOf(WidgetTester tester, Type screen) => tester
+          .widget<CupertinoSlidingSegmentedControl<int>>(tabsOf(screen))
+          .groupValue;
+      const home = NodeRef('A', 'home');
+      const noTerminals = NodeRef('A', 'home', terminalSupported: false);
+
+      // As the passthrough group's flush, but History keeps a progress
+      // indicator spinning, so it pumps past the transitions instead of
+      // settling.
+      Future<void> flush(WidgetTester tester) async {
+        await _pumpRoute(tester);
+        for (var i = 0; i < 3; i++) {
+          await tester.pump(const Duration(milliseconds: 20));
+          await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+        }
+        await tester.pump();
+      }
+
+      Set<Rect> visible(WidgetTester tester) => find
+          .byType(MacosToolbarPassthrough)
+          .evaluate()
+          .map((e) => tester.getRect(find.byElementPredicate((x) => x == e)))
+          .toSet();
+
+      for (final width in [1000.0, 500.0]) {
+        for (final terminals in [false, true]) {
+          testWidgets(
+              'macOS ${width.toInt()} px${terminals ? ' with terminals' : ''}: Home shows a segmented control with Sessions, History${terminals ? ', Terminals' : ''} in the toolbar row, and no NavigationRail and no NavigationBar',
+              (tester) async {
+            await _shell(tester,
+                width: width,
+                fullScreen: mac(),
+                nodes: [terminals ? home : noTerminals]);
+            await tester.pump();
+            expect(tabsOf(SessionListScreen), findsOneWidget);
+            expect(segment(SessionListScreen, 'Sessions'), findsOneWidget);
+            expect(segment(SessionListScreen, 'History'), findsOneWidget);
+            expect(segment(SessionListScreen, 'Terminals'),
+                terminals ? findsOneWidget : findsNothing);
+            final rect = tester.getRect(tabsOf(SessionListScreen));
+            expect(rect.top, greaterThanOrEqualTo(0));
+            expect(rect.bottom, lessThanOrEqualTo(kMacToolbarHeight));
+            expect(find.byType(NavigationRail), findsNothing);
+            expect(find.byType(NavigationBar), findsNothing);
+          });
+        }
+      }
+
+      testWidgets(
+          'macOS: tapping History selects the History tab; ⌘2 also selects it and the control follows',
+          (tester) async {
+        final c = await _shell(tester, width: 1000, fullScreen: mac(), nodes: [home]);
+        await tester.pump();
+        expect(selectedOf(tester, SessionListScreen), 0);
+        await tester.tap(segment(SessionListScreen, 'History'));
+        await _pumpRoute(tester);
+        expect(c.read(homeTabProvider), HomeTab.history);
+        expect(find.byType(HistoryScreen), findsOneWidget);
+        expect(selectedOf(tester, HistoryScreen), 1);
+
+        await tester.tap(segment(HistoryScreen, 'Sessions'));
+        await _pumpRoute(tester);
+        expect(c.read(homeTabProvider), HomeTab.sessions);
+        expect(selectedOf(tester, SessionListScreen), 0);
+
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.digit2);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.digit2);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        await _pumpRoute(tester);
+        expect(c.read(homeTabProvider), HomeTab.history);
+        expect(selectedOf(tester, HistoryScreen), 1);
+      });
+
+      testWidgets(
+          'macOS: the Sessions toolbar omits its plain "Sessions" title; the Workspace toolbar keeps its workspace title on the left and shows the four tabs centered',
+          (tester) async {
+        // Wide enough for the four labels in the test font.
+        final c = await _shell(tester, width: 1600, fullScreen: mac(), nodes: [home]);
+        await tester.pump();
+        expect(
+            find.descendant(
+                of: find.byType(SessionListScreen), matching: find.text('Sessions')),
+            findsOneWidget);
+        expect(segment(SessionListScreen, 'Sessions'), findsOneWidget);
+
+        c.read(scopeProvider.notifier).state = 'A:w2';
+        await tester.pumpAndSettle();
+        final control = tabsOf(WorkspaceScreen);
+        expect(control, findsOneWidget);
+        for (final label in ['Sessions', 'Changes', 'Files', 'Terminals']) {
+          expect(segment(WorkspaceScreen, label), findsOneWidget, reason: label);
+        }
+        final title = find.descendant(
+            of: barOf(WorkspaceScreen), matching: find.text('registry'));
+        expect(title, findsOneWidget);
+        final rect = tester.getRect(control);
+        expect(tester.getRect(title).right, lessThanOrEqualTo(rect.left));
+        expect(rect.center.dx,
+            moreOrLessEquals(tester.getRect(barOf(WorkspaceScreen)).center.dx));
+      });
+
+      testWidgets('macOS: a session pushed in the nested navigator shows no tabs',
+          (tester) async {
+        final c = await _shell(tester, width: 1000, fullScreen: mac(), nodes: [home]);
+        c.read(sessionsProvider.notifier).replaceAll([_session('s1')]);
+        c.read(pendingOpenSessionProvider.notifier).state = const PendingOpen('s1');
+        await _pumpRoute(tester);
+        expect(find.byType(SessionDetailScreen), findsOneWidget);
+        expect(tabsOf(SessionDetailScreen), findsNothing);
+        expect(tabs, findsNothing);
+      });
+
+      testWidgets(
+          'macOS: the control is inside the passthrough rects; after switching tabs and after the Terminals tab appears, the sent rects match the control',
+          (tester) async {
+        _passthroughRects.clear();
+        final c = await _shell(tester,
+            width: 1000, fullScreen: mac(), nodes: [noTerminals]);
+        await flush(tester);
+        Rect rectOf(Type screen) => tester.getRect(tabsOf(screen));
+        expect(_passthroughRects.values, contains(rectOf(SessionListScreen)));
+        expect(_passthroughRects.values.toSet(), visible(tester));
+
+        await tester.tap(segment(SessionListScreen, 'History'));
+        await flush(tester);
+        expect(_passthroughRects.values, contains(rectOf(HistoryScreen)));
+        expect(_passthroughRects.values.toSet(), visible(tester));
+
+        c.read(_nodesProvider.notifier).state = const [home];
+        await flush(tester);
+        expect(segment(HistoryScreen, 'Terminals'), findsOneWidget);
+        expect(_passthroughRects.values, contains(rectOf(HistoryScreen)));
+        expect(_passthroughRects.values.toSet(), visible(tester));
+      });
+
+      testWidgets('macOS narrow (500 px): the control is fully visible, not clipped',
+          (tester) async {
+        await _shell(tester, width: 500, fullScreen: mac(), nodes: [home]);
+        await tester.pump();
+        final rect = tester.getRect(tabsOf(SessionListScreen));
+        final bar = tester.getRect(barOf(SessionListScreen));
+        expect(rect.left, greaterThanOrEqualTo(bar.left));
+        expect(rect.right, lessThanOrEqualTo(bar.right));
+        expect(rect.left, greaterThanOrEqualTo(tester.getRect(menuButton).right));
+        final actions = find.descendant(
+            of: barOf(SessionListScreen), matching: find.byType(IconButton));
+        for (final e in actions.evaluate()) {
+          final button = tester.getRect(find.byElementPredicate((x) => x == e));
+          expect(button.overlaps(rect), isFalse, reason: '${e.widget}');
+        }
+        expect(tester.takeException(), isNull);
+      });
+    });
 
     group('passthrough', () {
       setUp(_passthroughRects.clear);
@@ -674,10 +834,10 @@ void main() {
         await flush(tester);
         expect(_passthroughRects.values, contains(const Rect.fromLTWH(
             kTrafficLightsInset, 0, kSidePanelWidth - kTrafficLightsInset, kMacToolbarHeight)));
-        // The main toolbar is after Home's tab rail, at inset 0.
-        final left = tester.getTopRight(find.byType(NavigationRail)).dx + 1;
+        // The main toolbar is after the side panel, at inset 0.
+        const left = kSidePanelWidth + 1;
         expect(_passthroughRects.values,
-            contains(Rect.fromLTWH(left, 0, 1000 - left, kMacToolbarHeight)));
+            contains(const Rect.fromLTWH(left, 0, 1000 - left, kMacToolbarHeight)));
       });
 
       testWidgets('narrow: under a dialog, the open drawer\'s header passes through after the traffic lights',

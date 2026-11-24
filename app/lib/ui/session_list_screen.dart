@@ -34,7 +34,7 @@ class SessionListScreen extends ConsumerWidget {
     return Scaffold(
       appBar: ArgusAppBar(
         leading: shellMenuButton(context),
-        title: const SessionSearchTitle(child: Text('Sessions')),
+        title: const SessionSearchTitle(child: TabTitle('Sessions')),
         actions: [
           if (isDesktop)
             IconButton(

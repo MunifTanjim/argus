@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -51,22 +52,101 @@ void main() {
     expect(find.byType(NavigationRail), findsNothing);
   });
 
-  testWidgets('shows a NavigationRail on macOS at 1200 px', (tester) async {
-    await _pump(tester, TargetPlatform.macOS, 1200, _scaffold([]));
-    expect(find.byType(NavigationRail), findsOneWidget);
-    expect(find.byType(NavigationBar), findsNothing);
-    expect(find.text('body'), findsOneWidget);
+  for (final width in [1200.0, 800.0]) {
+    testWidgets(
+      'macOS at $width px: no rail and no bottom bar; the tabs are a segmented control in the toolbar',
+      (tester) async {
+        await _pump(
+          tester,
+          TargetPlatform.macOS,
+          width,
+          MaterialApp(
+            home: AdaptiveNavScaffold(
+              appBar: const ArgusAppBar(),
+              body: const Text('body'),
+              destinations: _destinations,
+              selectedIndex: 1,
+              onSelected: (_) {},
+            ),
+          ),
+        );
+        expect(find.byType(NavigationRail), findsNothing);
+        expect(find.byType(NavigationBar), findsNothing);
+        expect(find.byType(VerticalDivider), findsNothing);
+        expect(find.text('body'), findsOneWidget);
+        final control = find.descendant(
+          of: find.byType(ArgusAppBar),
+          matching: find.byType(CupertinoSlidingSegmentedControl<int>),
+        );
+        expect(control, findsOneWidget);
+        expect(
+          tester
+              .widget<CupertinoSlidingSegmentedControl<int>>(control)
+              .groupValue,
+          1,
+        );
+        for (final label in ['One', 'Two']) {
+          expect(
+            find.descendant(of: control, matching: find.text(label)),
+            findsOneWidget,
+          );
+        }
+      },
+    );
+  }
+
+  testWidgets('macOS: a segment tap calls onSelected with the index', (
+    tester,
+  ) async {
+    final taps = <int>[];
+    await _pump(
+      tester,
+      TargetPlatform.macOS,
+      1200,
+      MaterialApp(
+        home: AdaptiveNavScaffold(
+          appBar: const ArgusAppBar(),
+          body: const Text('body'),
+          destinations: _destinations,
+          selectedIndex: 0,
+          onSelected: taps.add,
+        ),
+      ),
+    );
+    await tester.tap(find.text('Two'));
+    await tester.pumpAndSettle();
+    expect(taps, [1]);
   });
 
-  testWidgets('shows a bottom NavigationBar on macOS at 800 px', (tester) async {
-    await _pump(tester, TargetPlatform.macOS, 800, _scaffold([]));
+  testWidgets('macOS: the body reaches the top without a TitlebarSpacer', (
+    tester,
+  ) async {
+    await _pump(tester, TargetPlatform.macOS, 1200, _scaffold([]));
+    expect(find.byType(TitlebarSpacer), findsNothing);
+    expect(tester.getTopLeft(find.text('body')).dy, 0);
+  });
+
+  testWidgets('Linux at 1200 px: a NavigationRail and no segmented control', (
+    tester,
+  ) async {
+    await _pump(tester, TargetPlatform.linux, 1200, _scaffold([]));
+    expect(find.byType(NavigationRail), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
+    expect(find.byType(CupertinoSlidingSegmentedControl<int>), findsNothing);
+  });
+
+  testWidgets('Android: a bottom NavigationBar and no segmented control', (
+    tester,
+  ) async {
+    await _pump(tester, TargetPlatform.android, 1200, _scaffold([]));
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.byType(NavigationRail), findsNothing);
+    expect(find.byType(CupertinoSlidingSegmentedControl<int>), findsNothing);
   });
 
   testWidgets('a rail tap calls onSelected with the index', (tester) async {
     final taps = <int>[];
-    await _pump(tester, TargetPlatform.macOS, 1200, _scaffold(taps));
+    await _pump(tester, TargetPlatform.linux, 1200, _scaffold(taps));
     await tester.tap(find.text('Two'));
     expect(taps, [1]);
   });
@@ -102,22 +182,5 @@ void main() {
     expect(selectVisibleTab(2), isFalse);
     expect(selectVisibleTab(-1), isFalse);
     expect(taps, isEmpty);
-  });
-
-  testWidgets('macOS: the rail top gap is a TitlebarSpacer of 52 px', (
-    tester,
-  ) async {
-    await _pump(tester, TargetPlatform.macOS, 1200, _scaffold([]));
-    final spacer = find.descendant(
-      of: find.byType(Scaffold),
-      matching: find.byType(TitlebarSpacer),
-    );
-    expect(spacer, findsOneWidget);
-    expect(tester.getSize(spacer).height, kMacToolbarHeight);
-    expect(tester.getTopLeft(spacer).dy, 0);
-    expect(
-      tester.getTopLeft(find.byType(NavigationRail)).dy,
-      kMacToolbarHeight,
-    );
   });
 }

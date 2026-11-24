@@ -43,7 +43,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           hint: 'Filter projects',
           onChanged: (q) => setState(() => _query = q),
           onClose: () => setState(() => _query = null),
-          child: const Text('History'),
+          child: const TabTitle('History'),
         ),
         actions: [
           FilterButton(

@@ -1,9 +1,14 @@
+import 'dart:math' as math;
+
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:macos_window_utils/macos/ns_window_delegate.dart';
 import 'package:macos_window_utils/macos_window_utils.dart';
 import 'package:macos_window_utils/widgets/macos_toolbar_passthrough.dart';
+
+import 'theme.dart';
 
 /// The height of the unified toolbar row on macOS; the traffic lights are
 /// centered in it.
@@ -241,6 +246,209 @@ class FullScreenDelegate extends NSWindowDelegate
   }
 }
 
+/// The tabs of the page below, which [ArgusAppBar] shows on macOS as a
+/// segmented control in the center of its row.
+class ToolbarTabs extends InheritedWidget {
+  const ToolbarTabs({
+    super.key,
+    required this.labels,
+    required this.selected,
+    required this.onSelected,
+    required super.child,
+  });
+
+  final List<String> labels;
+  final int selected;
+  final ValueChanged<int> onSelected;
+
+  /// The tabs for a toolbar at [context]; null where there are none, or where
+  /// a route was pushed above them (the toolbar belongs to that route).
+  static ToolbarTabs? maybeOf(BuildContext context) {
+    final tabs = context.dependOnInheritedWidgetOfExactType<ToolbarTabs>();
+    final page = ModalRoute.of(context)?.subtreeContext;
+    if (tabs == null || page == null) return tabs;
+    var onPage = false;
+    context
+        .getElementForInheritedWidgetOfExactType<ToolbarTabs>()!
+        .visitAncestorElements((element) {
+          onPage = element == page;
+          return !onPage;
+        });
+    return onPage ? tabs : null;
+  }
+
+  @override
+  bool updateShouldNotify(ToolbarTabs oldWidget) =>
+      selected != oldWidget.selected ||
+      onSelected != oldWidget.onSelected ||
+      !listEquals(labels, oldWidget.labels);
+}
+
+/// The name of the current tab as a toolbar title: shown as [Text], and
+/// omitted where the toolbar shows the tabs, like a plain [Text] title.
+class TabTitle extends StatelessWidget {
+  const TabTitle(this.data, {super.key});
+
+  final String data;
+
+  @override
+  Widget build(BuildContext context) =>
+      _isMac && ToolbarTabs.maybeOf(context) != null
+      ? const SizedBox.shrink()
+      : Text(data);
+}
+
+class _TabsControl extends StatefulWidget {
+  const _TabsControl({required this.tabs});
+
+  final ToolbarTabs tabs;
+
+  @override
+  State<_TabsControl> createState() => _TabsControlState();
+}
+
+class _TabsControlState extends State<_TabsControl> {
+  @override
+  void didUpdateWidget(_TabsControl oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final tabs = widget.tabs;
+    final old = oldWidget.tabs;
+    // The control and the toolbar children around it may have moved without
+    // new constraints, which alone re-measure a passthrough.
+    if (tabs.selected != old.selected || !listEquals(tabs.labels, old.labels)) {
+      final notify = MacosToolbarPassthroughScope.maybeNotifyChangesOf(context);
+      SchedulerBinding.instance.addPostFrameCallback((_) => notify?.call());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tabs = widget.tabs;
+    return CupertinoSlidingSegmentedControl<int>(
+      groupValue: tabs.selected,
+      backgroundColor: AppColors.card,
+      thumbColor: AppColors.border,
+      // The segments are at least 28 px high; without vertical padding, so is
+      // the control.
+      padding: const EdgeInsets.symmetric(horizontal: 3),
+      onValueChanged: (i) {
+        if (i != null) tabs.onSelected(i);
+      },
+      children: {
+        for (var i = 0; i < tabs.labels.length; i++)
+          i: Text(
+            tabs.labels[i],
+            style: const TextStyle(color: AppColors.text, fontSize: 13),
+          ),
+      },
+    );
+  }
+}
+
+enum _Slot { leading, title, tabs, actions }
+
+/// A toolbar row with [tabs] centered in it, between the [leading] and
+/// [title] at the left and the [actions] at the right. The title shrinks
+/// first when the row is short; then the tabs leave the center; in a row
+/// too short for them, their segments narrow.
+class _TabbedToolbar extends StatelessWidget {
+  const _TabbedToolbar({
+    required this.spacing,
+    required this.leading,
+    required this.title,
+    required this.tabs,
+    required this.actions,
+  });
+
+  final double spacing;
+  final Widget? leading;
+  final Widget? title;
+  final Widget tabs;
+  final Widget? actions;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: kMacToolbarHeight,
+    child: CustomMultiChildLayout(
+      delegate: _TabbedToolbarLayout(spacing),
+      children: [
+        if (leading case final leading?)
+          LayoutId(id: _Slot.leading, child: leading),
+        if (title case final title?) LayoutId(id: _Slot.title, child: title),
+        LayoutId(id: _Slot.tabs, child: tabs),
+        if (actions case final actions?)
+          LayoutId(id: _Slot.actions, child: actions),
+      ],
+    ),
+  );
+}
+
+class _TabbedToolbarLayout extends MultiChildLayoutDelegate {
+  _TabbedToolbarLayout(this.spacing);
+
+  final double spacing;
+
+  // As AppBar: the leading box is a square of the default toolbar height.
+  static const double _leadingWidth = kToolbarHeight;
+
+  @override
+  void performLayout(Size size) {
+    final row = BoxConstraints.tightFor(height: size.height);
+    var start = 0.0;
+    if (hasChild(_Slot.leading)) {
+      layoutChild(_Slot.leading, row.tighten(width: _leadingWidth));
+      positionChild(_Slot.leading, Offset.zero);
+      start = _leadingWidth;
+    }
+    var end = size.width;
+    if (hasChild(_Slot.actions)) {
+      final width = layoutChild(
+        _Slot.actions,
+        BoxConstraints(
+          maxWidth: size.width,
+          minHeight: size.height,
+          maxHeight: size.height,
+        ),
+      ).width;
+      end -= width;
+      positionChild(_Slot.actions, Offset(end, 0));
+    }
+    final tabs = layoutChild(
+      _Slot.tabs,
+      BoxConstraints.loose(Size(math.max(0, end - start), size.height)),
+    );
+    final left = start + spacing;
+    final right = end - spacing;
+    final centered = (size.width - tabs.width) / 2;
+    final hasTitle = hasChild(_Slot.title);
+    final title = hasTitle
+        ? layoutChild(
+            _Slot.title,
+            BoxConstraints(
+              maxWidth: math.max(0, right - tabs.width - spacing - left),
+            ),
+          )
+        : Size.zero;
+    if (hasTitle) {
+      positionChild(
+        _Slot.title,
+        Offset(left, (size.height - title.height) / 2),
+      );
+    }
+    final tabsMin = hasTitle ? left + title.width + spacing : left;
+    // Off center only as far as the title needs, and never past the ends.
+    final x = math.max(
+      math.min(math.max(centered, tabsMin), right - tabs.width),
+      start,
+    );
+    positionChild(_Slot.tabs, Offset(x, (size.height - tabs.height) / 2));
+  }
+
+  @override
+  bool shouldRelayout(_TabbedToolbarLayout oldDelegate) =>
+      spacing != oldDelegate.spacing;
+}
+
 /// An [AppBar] that, on macOS, is the unified toolbar row: 52 px high, under
 /// the traffic lights, with its content after [TitlebarInsets]. Empty space
 /// in the row drags the window natively; interactive children pass clicks
@@ -249,6 +457,9 @@ class FullScreenDelegate extends NSWindowDelegate
 /// On macOS the leading widget, the actions, and a [title] that is not a
 /// plain [Text] pass clicks through, so they do not drag the window. A plain
 /// [Text] title drags it, like a native title.
+///
+/// Under [ToolbarTabs] of its own route, on macOS, it shows the tabs in the
+/// center of the row and omits a plain [Text] title.
 class ArgusAppBar extends StatelessWidget implements PreferredSizeWidget {
   const ArgusAppBar({
     super.key,
@@ -293,23 +504,54 @@ class ArgusAppBar extends StatelessWidget implements PreferredSizeWidget {
         backgroundColor ??
         AppBarTheme.of(context).backgroundColor ??
         Theme.of(context).colorScheme.surface;
+    final tabs = ToolbarTabs.maybeOf(context);
     return MacosToolbarPassthroughScope(
       child: _MacToolbar(
         child: ColoredBox(
           color: color,
           child: Padding(
             padding: EdgeInsets.only(left: TitlebarInsets.of(context)),
-            child: AppBar(
-              primary: false,
-              toolbarHeight: kMacToolbarHeight,
-              automaticallyImplyLeading: false,
-              leading: lead == null ? null : _passthrough(lead),
-              // A plain text title stays draggable, like a native title.
-              title: head == null || head is Text ? head : _passthrough(head),
-              actions: actions?.map(_passthrough).toList(),
-              backgroundColor: color,
-              titleSpacing: titleSpacing,
-            ),
+            child: tabs == null
+                ? AppBar(
+                    primary: false,
+                    toolbarHeight: kMacToolbarHeight,
+                    automaticallyImplyLeading: false,
+                    leading: lead == null ? null : _passthrough(lead),
+                    // A plain text title stays draggable, like a native title.
+                    title: head == null || head is Text
+                        ? head
+                        : _passthrough(head),
+                    actions: actions?.map(_passthrough).toList(),
+                    backgroundColor: color,
+                    titleSpacing: titleSpacing,
+                  )
+                // The whole row is laid out here, so that the tabs are
+                // centered in it.
+                : AppBar(
+                    primary: false,
+                    toolbarHeight: kMacToolbarHeight,
+                    automaticallyImplyLeading: false,
+                    backgroundColor: color,
+                    titleSpacing: 0,
+                    title: _TabbedToolbar(
+                      spacing:
+                          titleSpacing ??
+                          AppBarTheme.of(context).titleSpacing ??
+                          NavigationToolbar.kMiddleSpacing,
+                      leading: lead == null ? null : _passthrough(lead),
+                      // The tabs name the page, so a plain text title goes.
+                      title: head == null || head is Text
+                          ? null
+                          : _passthrough(head),
+                      tabs: _passthrough(_TabsControl(tabs: tabs)),
+                      actions: actions == null || actions!.isEmpty
+                          ? null
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: actions!.map(_passthrough).toList(),
+                            ),
+                    ),
+                  ),
           ),
         ),
       ),

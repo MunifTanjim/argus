@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -617,6 +618,253 @@ void main() {
         rootNavigator(tester).pop();
         await _flushPassthrough(tester);
         expect(_passthroughRects.values.toSet(), buttons);
+      },
+    );
+  });
+
+  group('toolbar tabs on macOS', () {
+    final control = find.byType(CupertinoSlidingSegmentedControl<int>);
+
+    Widget tabbed(
+      PreferredSizeWidget appBar, {
+      List<String> labels = const ['One', 'Two'],
+      int selected = 0,
+      ValueChanged<int>? onSelected,
+    }) => _app(
+      ToolbarTabs(
+        labels: labels,
+        selected: selected,
+        onSelected: onSelected ?? (_) {},
+        child: Scaffold(appBar: appBar, body: const SizedBox.expand()),
+      ),
+    );
+
+    testWidgets(
+      'a CupertinoSlidingSegmentedControl<int> with the labels, 28 px high, centered in the 52 px row; card background, border thumb, 13 pt text',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        await tester.pumpWidget(
+          tabbed(
+            ArgusAppBar(
+              leading: IconButton(
+                icon: const Icon(Icons.menu),
+                onPressed: () {},
+              ),
+              actions: [
+                IconButton(icon: const Icon(Icons.add), onPressed: () {}),
+                IconButton(icon: const Icon(Icons.edit), onPressed: () {}),
+              ],
+            ),
+            selected: 1,
+          ),
+        );
+        final widget = tester.widget<CupertinoSlidingSegmentedControl<int>>(
+          control,
+        );
+        expect(widget.groupValue, 1);
+        expect(widget.backgroundColor, AppColors.card);
+        expect(widget.thumbColor, AppColors.border);
+        expect(widget.children.keys, [0, 1]);
+        final rect = tester.getRect(control);
+        expect(rect.height, 28);
+        expect(rect.center.dy, kMacToolbarHeight / 2);
+        // Centered in the row after the traffic lights.
+        expect(
+          rect.center.dx,
+          moreOrLessEquals(tester.getRect(find.byType(AppBar)).center.dx),
+        );
+        for (final label in ['One', 'Two']) {
+          final style = tester
+              .widget<RichText>(
+                find.descendant(
+                  of: find.descendant(of: control, matching: find.text(label)),
+                  matching: find.byType(RichText),
+                ),
+              )
+              .text
+              .style!;
+          expect(style.color, AppColors.text);
+          expect(style.fontSize, 13);
+        }
+      },
+    );
+
+    testWidgets('a segment tap calls onSelected with its index', (
+      tester,
+    ) async {
+      _platform(TargetPlatform.macOS);
+      final taps = <int>[];
+      await tester.pumpWidget(
+        tabbed(const ArgusAppBar(), onSelected: taps.add),
+      );
+      await tester.tap(find.text('Two'));
+      await tester.pumpAndSettle();
+      expect(taps, [1]);
+    });
+
+    testWidgets('a plain Text title is omitted', (tester) async {
+      _platform(TargetPlatform.macOS);
+      await tester.pumpWidget(tabbed(const ArgusAppBar(title: Text('Title'))));
+      expect(find.text('Title'), findsNothing);
+      expect(control, findsOneWidget);
+    });
+
+    testWidgets('TabTitle shows its text without tabs and nothing with them', (
+      tester,
+    ) async {
+      _platform(TargetPlatform.macOS);
+      await tester.pumpWidget(
+        _scaffold(
+          ArgusAppBar(
+            title: TextButton(onPressed: () {}, child: const TabTitle('T')),
+          ),
+        ),
+      );
+      expect(find.text('T'), findsOneWidget);
+      await tester.pumpWidget(
+        tabbed(
+          ArgusAppBar(
+            title: TextButton(onPressed: () {}, child: const TabTitle('T')),
+          ),
+        ),
+      );
+      expect(find.text('T'), findsNothing);
+    });
+
+    testWidgets(
+      'an interactive title stays at the left; a long one shrinks so the control stays whole and clear of the actions',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        Widget bar(String title) => tabbed(
+          ArgusAppBar(
+            leading: IconButton(icon: const Icon(Icons.menu), onPressed: () {}),
+            title: TextButton(
+              onPressed: () {},
+              child: Text(title, overflow: TextOverflow.ellipsis),
+            ),
+            actions: [
+              IconButton(icon: const Icon(Icons.add), onPressed: () {}),
+            ],
+          ),
+        );
+        await tester.pumpWidget(bar('Short'));
+        final title = find.byType(TextButton);
+        expect(
+          tester.getRect(title).right,
+          lessThanOrEqualTo(tester.getRect(control).left),
+        );
+        expect(
+          tester.getRect(control).center.dx,
+          moreOrLessEquals(tester.getRect(find.byType(AppBar)).center.dx),
+        );
+
+        await tester.pumpWidget(bar('A much longer title ' * 6));
+        final rect = tester.getRect(control);
+        expect(tester.getRect(title).right, lessThanOrEqualTo(rect.left));
+        expect(
+          rect.right,
+          lessThanOrEqualTo(tester.getRect(find.byIcon(Icons.add)).left),
+        );
+        expect(
+          rect.left,
+          greaterThanOrEqualTo(tester.getRect(find.byIcon(Icons.menu)).right),
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'the bars of routes above the tabs\' route show no tabs, the bar of that route does',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        await tester.pumpWidget(
+          _app(
+            ToolbarTabs(
+              labels: const ['One', 'Two'],
+              selected: 0,
+              onSelected: (_) {},
+              child: Scaffold(
+                appBar: const ArgusAppBar(),
+                body: Navigator(
+                  onGenerateRoute: (_) => MaterialPageRoute<void>(
+                    builder: (_) => const Scaffold(
+                      appBar: ArgusAppBar(title: Text('Inner')),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        Finder tabsIn(String title) => find.descendant(
+          of: find.ancestor(
+            of: find.text(title),
+            matching: find.byType(ArgusAppBar),
+          ),
+          matching: control,
+        );
+        expect(control, findsOneWidget);
+        expect(find.text('Inner'), findsOneWidget);
+        expect(tabsIn('Inner'), findsNothing);
+        tester
+            .state<NavigatorState>(find.byType(Navigator).last)
+            .push(
+              MaterialPageRoute<void>(
+                builder: (_) =>
+                    const Scaffold(appBar: ArgusAppBar(title: Text('Pushed'))),
+              ),
+            );
+        await tester.pumpAndSettle();
+        expect(find.text('Pushed'), findsOneWidget);
+        expect(tabsIn('Pushed'), findsNothing);
+        expect(control, findsOneWidget);
+      },
+    );
+
+    testWidgets('Linux: ArgusAppBar shows no tabs', (tester) async {
+      _platform(TargetPlatform.linux);
+      await tester.pumpWidget(tabbed(const ArgusAppBar(title: Text('Title'))));
+      expect(control, findsNothing);
+      expect(find.text('Title'), findsOneWidget);
+    });
+
+    testWidgets(
+      'the control passes through; after the selection and the labels change, the native rects match',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        Widget bar(List<String> labels, int selected) => tabbed(
+          ArgusAppBar(
+            title: TextButton(onPressed: () {}, child: const Text('T')),
+            actions: [
+              IconButton(icon: const Icon(Icons.add), onPressed: () {}),
+            ],
+          ),
+          labels: labels,
+          selected: selected,
+        );
+        await tester.pumpWidget(bar(const ['One', 'Two'], 0));
+        await _flushPassthrough(tester);
+        expect(
+          _passthroughRects.values,
+          contains(_passthroughRectOf(tester, control)),
+        );
+        expect(_passthroughRectOf(tester, control), tester.getRect(control));
+
+        await tester.pumpWidget(bar(const ['One', 'Two'], 1));
+        await _flushPassthrough(tester);
+        expect(
+          _passthroughRects.values.toSet(),
+          _visiblePassthroughRects(tester),
+        );
+
+        await tester.pumpWidget(bar(const ['One', 'Two', 'Three'], 1));
+        await _flushPassthrough(tester);
+        expect(_passthroughRectOf(tester, control), tester.getRect(control));
+        expect(_passthroughRects.values, contains(tester.getRect(control)));
+        expect(
+          _passthroughRects.values.toSet(),
+          _visiblePassthroughRects(tester),
+        );
       },
     );
   });

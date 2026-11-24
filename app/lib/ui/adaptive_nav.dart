@@ -12,7 +12,8 @@ class AdaptiveNavDestination {
 }
 
 /// A [Scaffold] with a bottom [NavigationBar], or a side [NavigationRail] on
-/// wide desktop windows.
+/// wide desktop windows. On macOS the tabs are in the toolbar instead, as
+/// [ToolbarTabs].
 class AdaptiveNavScaffold extends StatefulWidget {
   const AdaptiveNavScaffold({
     super.key,
@@ -64,6 +65,19 @@ class _AdaptiveNavScaffoldState extends State<AdaptiveNavScaffold> {
 
   @override
   Widget build(BuildContext context) {
+    if (defaultTargetPlatform == TargetPlatform.macOS) {
+      // The toolbars of the page, its app bar's and its body's, show the tabs.
+      return ToolbarTabs(
+        labels: [for (final d in widget.destinations) d.label],
+        selected: widget.selectedIndex,
+        onSelected: widget.onSelected,
+        child: Scaffold(
+          appBar: widget.appBar,
+          floatingActionButton: widget.floatingActionButton,
+          body: widget.body,
+        ),
+      );
+    }
     final wide = useDesktopLayout(context);
     final rail = NavigationRail(
       labelType: NavigationRailLabelType.all,
@@ -74,26 +88,13 @@ class _AdaptiveNavScaffoldState extends State<AdaptiveNavScaffold> {
           NavigationRailDestination(icon: d.icon, label: Text(d.label)),
       ],
     );
-    // Without an app bar above it, the rail would reach into the macOS
-    // toolbar row, where clicks drag the window.
-    final underToolbar =
-        widget.appBar == null && defaultTargetPlatform == TargetPlatform.macOS;
     return Scaffold(
       appBar: widget.appBar,
       floatingActionButton: widget.floatingActionButton,
       body: wide
           ? Row(
               children: [
-                underToolbar
-                    ? IntrinsicWidth(
-                        child: Column(
-                          children: [
-                            const TitlebarSpacer(),
-                            Expanded(child: rail),
-                          ],
-                        ),
-                      )
-                    : rail,
+                rail,
                 const VerticalDivider(width: 1),
                 Expanded(child: widget.body),
               ],
