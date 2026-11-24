@@ -1,11 +1,14 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/core/result.dart';
 import 'package:argus/data/session_repository.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/state/respond_params.dart';
+import 'package:argus/ui/desktop_interaction.dart';
 import 'package:argus/ui/interaction_panel.dart';
 import '../support/fake_session_repository.dart';
 
@@ -399,6 +402,92 @@ void main() {
       expect(find.text('does B'), findsOneWidget);
       expect(find.textContaining('preview-alpha'), findsOneWidget);
       expect(find.textContaining('preview-bravo'), findsOneWidget);
+    });
+  });
+
+  group('desktop keyboard panel', () {
+    final question = {
+      'kind': 'question',
+      'request_id': 'q1',
+      'questions': [
+        {
+          'header': 'Pick',
+          'question': 'Which one?',
+          'options': ['a', 'b'],
+        },
+      ],
+    };
+
+    void platform(TargetPlatform p) {
+      debugDefaultTargetPlatformOverride = p;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    }
+
+    testWidgets('on Android the panel renders the current cards and buttons', (
+      tester,
+    ) async {
+      platform(TargetPlatform.android);
+      await _pumpPanel(tester, _session(question), _RecordingControl());
+      expect(find.byType(DesktopQuestions), findsNothing);
+      expect(find.text('Submit'), findsOneWidget);
+      await _pumpPanel(
+        tester,
+        _session({'kind': 'permission', 'request_id': 'p1'}),
+        _RecordingControl(),
+      );
+      expect(find.byType(DesktopDecision), findsNothing);
+      expect(find.byType(FilledButton), findsOneWidget);
+    });
+
+    testWidgets('on macOS the panel renders DesktopQuestions', (tester) async {
+      platform(TargetPlatform.macOS);
+      await _pumpPanel(tester, _session(question), _RecordingControl());
+      expect(find.byType(DesktopQuestions), findsOneWidget);
+      expect(find.text('Submit'), findsNothing);
+    });
+
+    testWidgets('on macOS the panel renders DesktopDecision', (tester) async {
+      platform(TargetPlatform.macOS);
+      await _pumpPanel(
+        tester,
+        _session({'kind': 'permission', 'request_id': 'p1'}),
+        _RecordingControl(),
+      );
+      expect(find.byType(DesktopDecision), findsOneWidget);
+      expect(find.byType(FilledButton), findsNothing);
+    });
+
+    testWidgets(
+      'on macOS the question panel has focus after it appears; j moves the highlight without typing',
+      (tester) async {
+        platform(TargetPlatform.macOS);
+        final c = _RecordingControl();
+        await _pumpPanel(tester, _session(question), c);
+        await tester.pump();
+        expect(FocusManager.instance.primaryFocus?.debugLabel,
+            'DesktopQuestions');
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+        await tester.pump();
+        expect(find.byType(TextField), findsNothing);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(c.respondCalls.single['answers'], {'Which one?': 'b'});
+      },
+    );
+
+    testWidgets('on macOS a permission is answered from the keyboard', (
+      tester,
+    ) async {
+      platform(TargetPlatform.macOS);
+      final c = _RecordingControl();
+      await _pumpPanel(
+        tester,
+        _session({'kind': 'permission', 'request_id': 'p1'}),
+        c,
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(c.respondCalls.single['option_value'], 'allow');
     });
   });
 }

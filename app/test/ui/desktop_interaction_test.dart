@@ -69,13 +69,11 @@ Widget _host(
       alignment: Alignment.topLeft,
       child: SizedBox(
         width: width,
-        child: SingleChildScrollView(
-          child: DesktopQuestions(
-            session: s,
-            interaction: s.interaction!,
-            busy: false,
-            onRespond: sent.add,
-          ),
+        child: DesktopQuestions(
+          session: s,
+          interaction: s.interaction!,
+          busy: false,
+          onRespond: sent.add,
         ),
       ),
     ),
@@ -426,7 +424,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump(); // the busy progress bar never settles
     expect(await tester.sendKeyEvent(LogicalKeyboardKey.enter), isFalse);
     expect(sent, isEmpty);
   });
@@ -471,6 +469,260 @@ void main() {
     expect(find.text('✓ H1'), findsOneWidget);
   });
 
+  group('scrolling and focus', () {
+    final longText = List.generate(80, (i) => 'line $i').join('\n\n');
+
+    Future<void> pumpShort(
+      WidgetTester tester,
+      Widget w, {
+      bool settle = true,
+    }) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      tester.view.physicalSize = const Size(1200, 400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: Align(alignment: Alignment.topLeft, child: w)),
+        ),
+      );
+      // A busy progress bar never settles.
+      settle ? await tester.pumpAndSettle() : await tester.pump();
+    }
+
+    DesktopQuestions questions(Session s, {bool busy = false}) =>
+        DesktopQuestions(
+          session: s,
+          interaction: s.interaction!,
+          busy: busy,
+          onRespond: (_) {},
+        );
+
+    testWidgets('a long question scrolls and its options stay reachable', (
+      tester,
+    ) async {
+      final s = _session(_ix([_q('Pick', longText)]));
+      await pumpShort(tester, questions(s));
+      expect(tester.takeException(), isNull);
+      expect(
+        find.descendant(
+          of: find.byType(DesktopQuestions),
+          matching: find.byType(SingleChildScrollView),
+        ),
+        findsOneWidget,
+      );
+      await tester.drag(
+        find.byType(SingleChildScrollView),
+        const Offset(0, -20000),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.getBottomLeft(find.text('b')).dy, lessThanOrEqualTo(400));
+    });
+
+    testWidgets('the Submit tab controls stay visible under a long summary', (
+      tester,
+    ) async {
+      final s = _session(
+        _ix([_q('One', longText), _q('Two', 'second')]),
+      );
+      await pumpShort(tester, questions(s));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Review answers'), findsOneWidget);
+      expect(
+        tester.getBottomLeft(find.text('Cancel')).dy,
+        lessThanOrEqualTo(400),
+      );
+    });
+
+    testWidgets('busy shows the progress bar', (tester) async {
+      final s = _session(_ix([_q('Pick', 'Which one?')]));
+      await pumpShort(tester, questions(s, busy: true), settle: false);
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    });
+
+    testWidgets('a long plan scrolls and the options stay reachable', (
+      tester,
+    ) async {
+      final s = _session({
+        'kind': 'plan',
+        'request_id': 'p1',
+        'plan': longText,
+        'options': [
+          {'label': 'Yes', 'value': 'allow'},
+          {'label': 'No', 'value': 'deny', 'reject': true},
+        ],
+      });
+      await pumpShort(
+        tester,
+        DesktopDecision(
+          session: s,
+          interaction: s.interaction!,
+          kind: 'plan',
+          detail: decisionDetail(s, s.interaction!, 'plan'),
+          busy: false,
+          onRespond: (_) {},
+        ),
+      );
+      expect(tester.takeException(), isNull);
+      expect(tester.getBottomLeft(find.text('No')).dy, lessThanOrEqualTo(400));
+    });
+
+    testWidgets('busy decision shows the progress bar', (tester) async {
+      final s = _session({'kind': 'permission', 'request_id': 'd1'});
+      await pumpShort(
+        tester,
+        DesktopDecision(
+          session: s,
+          interaction: s.interaction!,
+          kind: 'permission',
+          detail: const [],
+          busy: true,
+          onRespond: (_) {},
+        ),
+        settle: false,
+      );
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    });
+
+    String? focusedLabel() => FocusManager.instance.primaryFocus?.debugLabel;
+
+    // A text field outside the panel that holds focus until the panel asks.
+    Future<ValueNotifier<Session?>> pumpSwappable(
+      WidgetTester tester,
+      Session? first,
+      Widget Function(Session s) panel,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      tester.view.physicalSize = const Size(1200, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final current = ValueNotifier<Session?>(first);
+      addTearDown(current.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ValueListenableBuilder<Session?>(
+              valueListenable: current,
+              builder: (_, s, _) => Column(
+                children: [
+                  const TextField(key: ValueKey('outside')),
+                  if (s != null) Expanded(child: panel(s)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return current;
+    }
+
+    testWidgets('the question panel takes focus on first mount', (
+      tester,
+    ) async {
+      final s = _session(_ix([_q('Pick', 'Which one?')]));
+      final cur = await pumpSwappable(tester, null, questions);
+      await tester.tap(find.byKey(const ValueKey('outside')));
+      await tester.pump();
+      expect(focusedLabel(), isNot('DesktopQuestions'));
+      cur.value = s;
+      await tester.pumpAndSettle();
+      expect(focusedLabel(), 'DesktopQuestions');
+    });
+
+    testWidgets('a new request id returns focus to the question panel', (
+      tester,
+    ) async {
+      final ix = _ix([_q('Pick', 'Which one?')]);
+      final cur = await pumpSwappable(tester, _session(ix), questions);
+      await tester.tap(find.byKey(const ValueKey('outside')));
+      await tester.pump();
+      expect(focusedLabel(), isNot('DesktopQuestions'));
+      cur.value = _session({...ix, 'request_id': 'r2'});
+      await tester.pumpAndSettle();
+      expect(focusedLabel(), 'DesktopQuestions');
+    });
+
+    DesktopDecision decision(Session s, String kind) => DesktopDecision(
+      session: s,
+      interaction: s.interaction!,
+      kind: kind,
+      detail: const [],
+      busy: false,
+      onRespond: (_) {},
+    );
+
+    testWidgets('the decision panel takes focus on first mount', (
+      tester,
+    ) async {
+      final s = _session({'kind': 'permission', 'request_id': 'd1'});
+      final cur = await pumpSwappable(
+        tester,
+        null,
+        (s) => decision(s, 'permission'),
+      );
+      await tester.tap(find.byKey(const ValueKey('outside')));
+      await tester.pump();
+      cur.value = s;
+      await tester.pumpAndSettle();
+      expect(focusedLabel(), 'DesktopDecision');
+    });
+
+    testWidgets('a new request id returns focus to the decision panel', (
+      tester,
+    ) async {
+      final cur = await pumpSwappable(
+        tester,
+        _session({'kind': 'permission', 'request_id': 'd1'}),
+        (s) => decision(s, 'permission'),
+      );
+      await tester.tap(find.byKey(const ValueKey('outside')));
+      await tester.pump();
+      cur.value = _session({'kind': 'permission', 'request_id': 'd2'});
+      await tester.pumpAndSettle();
+      expect(focusedLabel(), 'DesktopDecision');
+    });
+
+    testWidgets('a new kind returns focus to the decision panel', (
+      tester,
+    ) async {
+      var kind = 'permission';
+      final cur = await pumpSwappable(
+        tester,
+        _session({'kind': 'permission', 'request_id': 'd1'}),
+        (s) => decision(s, kind),
+      );
+      await tester.tap(find.byKey(const ValueKey('outside')));
+      await tester.pump();
+      kind = 'plan';
+      cur.value = _session({'kind': 'permission', 'request_id': 'd1'});
+      await tester.pumpAndSettle();
+      expect(focusedLabel(), 'DesktopDecision');
+    });
+
+    testWidgets('a new request id with the reason field open refocuses the panel', (
+      tester,
+    ) async {
+      final cur = await pumpSwappable(
+        tester,
+        _session({'kind': 'permission', 'request_id': 'd1'}),
+        (s) => decision(s, 'permission'),
+      );
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      await _key(tester, LogicalKeyboardKey.enter);
+      expect(find.text('Reason (optional)'), findsOneWidget);
+      cur.value = _session({'kind': 'permission', 'request_id': 'd2'});
+      await tester.pumpAndSettle();
+      expect(find.text('Reason (optional)'), findsNothing);
+      expect(focusedLabel(), 'DesktopDecision');
+    });
+  });
+
   group('DesktopDecision', () {
     Map<String, dynamic> dix({
       String kind = 'permission',
@@ -513,15 +765,13 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: SingleChildScrollView(
-              child: DesktopDecision(
-                session: s,
-                interaction: s.interaction!,
-                kind: kind,
-                detail: decisionDetail(s, s.interaction!, kind),
-                busy: false,
-                onRespond: sent.add,
-              ),
+            body: DesktopDecision(
+              session: s,
+              interaction: s.interaction!,
+              kind: kind,
+              detail: decisionDetail(s, s.interaction!, kind),
+              busy: false,
+              onRespond: sent.add,
             ),
           ),
         ),
@@ -585,6 +835,67 @@ void main() {
         );
       },
     );
+
+    testWidgets('Enter in the reason field sends the reject option picked', (
+      tester,
+    ) async {
+      final sent = await pumpDecision(
+        tester,
+        dix(
+          options: [
+            ...threeOptions,
+            {'label': 'Never', 'value': 'never', 'reject': true},
+          ],
+        ),
+      );
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      await _key(tester, LogicalKeyboardKey.enter);
+      await tester.enterText(reasonField(), 'nope');
+      await _key(tester, LogicalKeyboardKey.enter);
+      expect(sent.single['option_value'], 'never');
+      expect(sent.single['reason'], 'nope');
+    });
+
+    testWidgets('a shorter option list under the same request id does not throw', (
+      tester,
+    ) async {
+      final sent = <Map<String, dynamic>>[];
+      Widget host(Session s) => MaterialApp(
+        home: Scaffold(
+          body: DesktopDecision(
+            session: s,
+            interaction: s.interaction!,
+            kind: 'permission',
+            detail: const [],
+            busy: false,
+            onRespond: sent.add,
+          ),
+        ),
+      );
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      await tester.pumpWidget(host(_session(dix(options: threeOptions))));
+      await tester.pumpAndSettle();
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      await _key(tester, LogicalKeyboardKey.arrowDown);
+      await tester.pumpWidget(
+        host(
+          _session(
+            dix(
+              options: [
+                {'label': 'Yes', 'value': 'allow'},
+                {'label': 'Later', 'value': 'later'},
+              ],
+            ),
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+      await _key(tester, LogicalKeyboardKey.enter);
+      expect(sent.single['option_value'], 'later');
+    });
 
     testWidgets('Esc closes the reason field', (tester) async {
       await pumpDecision(tester, dix());

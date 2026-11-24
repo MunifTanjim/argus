@@ -10,6 +10,7 @@ import '../models/enums.dart';
 import '../models/session.dart';
 import '../state/respond_params.dart';
 import '../state/respond_view_model.dart';
+import '../util/platform.dart';
 import 'code_block.dart';
 import 'desktop_interaction.dart';
 import 'theme.dart';
@@ -98,17 +99,39 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
   List<Widget> _body(Interaction ix) {
     switch (ix.kind) {
       case InteractionKind.permission:
-        return _serverDecision(ix, 'permission');
+        return isDesktop
+            ? [_desktopDecision(ix, 'permission')]
+            : _serverDecision(ix, 'permission');
       case InteractionKind.plan:
-        return _serverDecision(ix, 'plan');
+        return isDesktop
+            ? [_desktopDecision(ix, 'plan')]
+            : _serverDecision(ix, 'plan');
       case InteractionKind.idle:
         return const [];
       case InteractionKind.question:
-        return _questions(ix);
+        return isDesktop
+            ? [
+                DesktopQuestions(
+                  session: widget.session,
+                  interaction: ix,
+                  busy: _busy,
+                  onRespond: _respond,
+                ),
+              ]
+            : _questions(ix);
       case InteractionKind.unknown:
         return [const Text('Unsupported interaction')];
     }
   }
+
+  Widget _desktopDecision(Interaction ix, String kind) => DesktopDecision(
+    session: widget.session,
+    interaction: ix,
+    kind: kind,
+    detail: decisionDetail(widget.session, ix, kind),
+    busy: _busy,
+    onRespond: _respond,
+  );
 
   /// Renders server-built decision options: one button per option, the reject
   /// choice opens a free-text field prompted by its placeholder. The client only
@@ -142,7 +165,7 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
     }
 
     return [
-      _scrollBody(detail),
+      scrollBody(detail),
       const SizedBox(height: 16),
       if (!_denying)
         for (var i = 0; i < options.length; i++)
@@ -218,7 +241,7 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
         ) !=
         null;
     return [
-      _scrollBody([
+      scrollBody([
         for (var qi = 0; qi < qs.length; qi++)
           _questionCard(qs[qi], drafts[qi]),
       ]),
@@ -415,7 +438,7 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
 
 /// The prompt's scrolling part; the fixed parts around it set the panel's
 /// minimum height.
-Widget _scrollBody(List<Widget> children) => Flexible(
+Widget scrollBody(List<Widget> children) => Flexible(
       child: _Scrolling(
         child: SingleChildScrollView(
           child: Column(

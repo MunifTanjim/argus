@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/enums.dart';
 import 'package:argus/models/session.dart';
+import 'package:argus/data/session_repository.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/navigation.dart';
 import 'package:argus/state/projects.dart';
@@ -15,6 +16,7 @@ import 'package:argus/state/sessions.dart';
 import 'package:argus/state/terminal_prefs.dart';
 import 'package:argus/ui/desktop_shortcuts.dart';
 import 'package:argus/ui/home_shell.dart';
+import 'package:argus/ui/interaction_panel.dart';
 import 'package:argus/ui/live_emulator.dart';
 import 'package:argus/ui/session_card.dart';
 import 'package:argus/ui/session_composer.dart';
@@ -22,6 +24,7 @@ import 'package:argus/ui/session_detail_screen.dart';
 import 'package:argus/ui/session_list_screen.dart';
 
 import '../support/fake_gateway_client.dart';
+import '../support/fake_session_repository.dart';
 
 class _Calls {
   final log = <String>[];
@@ -155,6 +158,49 @@ void main() {
   testWidgets('Cmd+N on macOS calls onSpawn', (tester) async {
     _platform(TargetPlatform.macOS);
     final calls = await _pump(tester, const Text('body'));
+    expect(await _chord(tester, LogicalKeyboardKey.keyN), isTrue);
+    expect(calls.log, ['spawn']);
+  });
+
+  testWidgets('Cmd+N still calls onSpawn while the question panel has focus',
+      (tester) async {
+    _platform(TargetPlatform.macOS);
+    final s = Session(
+      id: 's1',
+      agent: 'claude',
+      tmux: const TmuxLocation(
+        server: TmuxServerKind.default_,
+        paneId: '',
+        sessionName: '',
+        windowIndex: 0,
+        currentPath: '',
+      ),
+      status: SessionStatus.awaitingInput,
+      source: SessionSource.discovered,
+      inputMode: InputMode.pane,
+      interaction: Interaction.fromJson(const {
+        'kind': 'question',
+        'request_id': 'q1',
+        'questions': [
+          {
+            'header': 'Pick',
+            'question': 'Which one?',
+            'options': ['a', 'b'],
+          },
+        ],
+      }),
+    );
+    final calls = await _pump(
+      tester,
+      ProviderScope(
+        overrides: [
+          sessionRepositoryProvider.overrideWithValue(FakeSessionRepository()),
+        ],
+        child: InteractionPanel(session: s),
+      ),
+    );
+    await tester.pump();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'DesktopQuestions');
     expect(await _chord(tester, LogicalKeyboardKey.keyN), isTrue);
     expect(calls.log, ['spawn']);
   });

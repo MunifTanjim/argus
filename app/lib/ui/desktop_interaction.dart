@@ -6,6 +6,7 @@ import '../models/session.dart';
 import '../state/question_cursor.dart';
 import '../state/respond_params.dart';
 import 'code_block.dart';
+import 'interaction_panel.dart' show scrollBody;
 import 'theme.dart';
 
 /// Below this panel width the option preview stacks under the options.
@@ -67,6 +68,14 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
   void initState() {
     super.initState();
     _reset();
+    _focusPanel();
+  }
+
+  /// Takes focus once the frame that shows the panel is built.
+  void _focusPanel() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.requestFocus();
+    });
   }
 
   @override
@@ -81,6 +90,7 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
         (_) => _disposeFields(custom, notes, customFocus, noteFocus),
       );
       _reset();
+      _focusPanel();
     }
   }
 
@@ -306,26 +316,37 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
     if (_qs.isEmpty) return const SizedBox.shrink();
     return Focus(
       focusNode: _focus,
-      autofocus: true,
       onKeyEvent: _onKey,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (_c.isMulti) ...[_tabBar(), const SizedBox(height: 12)],
-          if (_c.confirming)
-            ..._confirmBody()
-          else if (_c.onSubmitTab)
-            ..._submitTabBody()
-          else
-            ..._questionBody(),
-          if (!_c.confirming) ...[
+          if (_c.confirming) ...[
+            scrollBody(_confirmBody()),
+            const SizedBox(height: 12),
+            ..._controls(['Proceed', 'Go back']),
+          ] else ...[
+            if (_c.onSubmitTab) ...[
+              scrollBody(_submitTabBody()),
+              const SizedBox(height: 12),
+              ..._controls([
+                'Submit',
+                _ix.cancelInterrupts ? 'Interrupt' : 'Cancel',
+              ]),
+            ] else
+              scrollBody(_questionBody()),
             const SizedBox(height: 12),
             Text(
               _ix.cancelInterrupts ? 'c · interrupt' : 'c · chat about this',
               style: const TextStyle(color: AppColors.dim, fontSize: 12),
             ),
           ],
+          if (widget.busy)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: LinearProgressIndicator(),
+            ),
         ],
       ),
     );
@@ -619,8 +640,6 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
             ),
           ),
       ],
-      const SizedBox(height: 12),
-      ..._controls(['Submit', _ix.cancelInterrupts ? 'Interrupt' : 'Cancel']),
     ];
   }
 
@@ -635,8 +654,6 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
         '$n unanswered ${n == 1 ? 'question' : 'questions'}',
         style: const TextStyle(color: AppColors.dim),
       ),
-      const SizedBox(height: 12),
-      ..._controls(['Proceed', 'Go back']),
     ];
   }
 
@@ -698,8 +715,27 @@ class _DesktopDecisionState extends State<DesktopDecision> {
   int _highlight = 0;
   bool _reasonOpen = false;
 
+  /// The reject option whose reason field is open.
+  int _rejectIndex = 0;
+
   Interaction get _ix => widget.interaction;
   List<DecisionOption> get _options => decisionOptions(_ix);
+
+  /// The highlighted row, kept inside a list that may have shrunk.
+  int get _hl => _highlight.clamp(0, _options.length - 1);
+
+  @override
+  void initState() {
+    super.initState();
+    _focusPanel();
+  }
+
+  /// Takes focus once the frame that shows the panel is built.
+  void _focusPanel() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.requestFocus();
+    });
+  }
 
   @override
   void didUpdateWidget(DesktopDecision old) {
@@ -708,6 +744,7 @@ class _DesktopDecisionState extends State<DesktopDecision> {
       _highlight = 0;
       _reasonOpen = false;
       _reason.clear();
+      _focusPanel();
     }
   }
 
@@ -736,6 +773,7 @@ class _DesktopDecisionState extends State<DesktopDecision> {
     if (o.reject) {
       _update(() {
         _highlight = i;
+        _rejectIndex = i;
         _reasonOpen = true;
       });
       return;
@@ -754,15 +792,14 @@ class _DesktopDecisionState extends State<DesktopDecision> {
     optionRespond(
       sessionId: widget.session.id,
       kind: widget.kind,
-      value: decisionReject(_ix).value,
+      value: _options[_rejectIndex.clamp(0, _options.length - 1)].value,
       reason: _reason.text,
       requestId: _ix.requestId,
     ),
   );
 
-  void _move(int d) => _update(
-    () => _highlight = (_highlight + d).clamp(0, _options.length - 1),
-  );
+  void _move(int d) =>
+      _update(() => _highlight = (_hl + d).clamp(0, _options.length - 1));
 
   KeyEventResult _onKey(FocusNode _, KeyEvent e) {
     if (e is KeyUpEvent || widget.busy) return KeyEventResult.ignored;
@@ -790,7 +827,7 @@ class _DesktopDecisionState extends State<DesktopDecision> {
       if (_reasonOpen) {
         _sendReject();
       } else {
-        _select(_highlight);
+        _select(_hl);
       }
       return KeyEventResult.handled;
     }
@@ -817,16 +854,16 @@ class _DesktopDecisionState extends State<DesktopDecision> {
   @override
   Widget build(BuildContext context) {
     final options = _options;
-    final reject = decisionReject(_ix);
+    final hl = _hl;
+    final reject = options[_rejectIndex.clamp(0, options.length - 1)];
     return Focus(
       focusNode: _focus,
-      autofocus: true,
       onKeyEvent: _onKey,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          ...widget.detail,
+          scrollBody(widget.detail),
           const SizedBox(height: 16),
           if (_reasonOpen)
             TextField(
@@ -851,16 +888,14 @@ class _DesktopDecisionState extends State<DesktopDecision> {
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: i == _highlight ? AppColors.border : null,
+                    color: i == hl ? AppColors.border : null,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     options[i].label,
                     style: TextStyle(
-                      color: i == _highlight
-                          ? AppColors.text
-                          : AppColors.secondary,
-                      fontWeight: i == _highlight ? FontWeight.w700 : null,
+                      color: i == hl ? AppColors.text : AppColors.secondary,
+                      fontWeight: i == hl ? FontWeight.w700 : null,
                     ),
                   ),
                 ),
