@@ -69,6 +69,7 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
     with WidgetsBindingObserver {
   bool _loaded = false;
   final _navigatorKey = GlobalKey<NavigatorState>();
+  final _sidebarStrip = SidebarStripController();
 
   @override
   void initState() {
@@ -91,6 +92,7 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _sidebarStrip.dispose();
     super.dispose();
   }
 
@@ -118,8 +120,9 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
       title: 'argus',
       navigatorKey: _navigatorKey,
       theme: buildArgusTheme(platform: defaultTargetPlatform),
-      builder: (context, child) => WindowStrip(child: child!),
-      navigatorObservers: [appRouteObserver],
+      builder: (context, child) =>
+          WindowStrip(controller: _sidebarStrip, child: child!),
+      navigatorObservers: [appRouteObserver, _sidebarStrip],
       home: !_loaded
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : creds == null

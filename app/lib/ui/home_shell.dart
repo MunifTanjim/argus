@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -27,6 +28,8 @@ import 'shell_drawer.dart';
 import 'shortcut_sheet.dart';
 import 'spawn_dialog.dart';
 import 'terminal_list_screen.dart';
+import 'theme.dart';
+import 'window_strip.dart';
 import 'workspace_screen.dart';
 
 const double kSidePanelWidth = 300;
@@ -47,6 +50,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   // builds a new one from its remembered session.
   _ScopeNavigator? _nav;
   bool _canPop = false;
+  SidebarStripController? _strip;
+  Route<dynamic>? _route;
 
   @override
   void initState() {
@@ -61,6 +66,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   // Deep-link a tapped notification's session. Keep the request until its
   // session is actually known, so a cold-launch tap opens once the list is
   // fetched rather than being dropped while the list is still empty.
+  @override
+  void dispose() {
+    if (_route case final route?) _strip?.hide(route);
+    super.dispose();
+  }
+
   void _openPending() {
     if (!mounted) return;
     final pending = ref.read(pendingOpenSessionProvider);
@@ -268,6 +279,14 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final main = _navigator(_nav!);
     final screenWidth = MediaQuery.sizeOf(context).width;
     final wide = screenWidth >= kSidePanelMinWidth;
+    // On macOS the window's sidebar material shows through the side panel. A
+    // modal drawer slides over the content, so it stays opaque.
+    final translucent = wide && defaultTargetPlatform == TargetPlatform.macOS;
+    _strip = WindowStrip.sidebarOf(context);
+    _route = ModalRoute.of(context);
+    if (_route case final route?) {
+      _strip?.show(route, translucent ? kSidePanelWidth : 0);
+    }
 
     return PopScope(
       canPop: scope == null && homeTab == HomeTab.sessions && !_canPop,
@@ -286,12 +305,24 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           onQuickSwitcher: () => showQuickSwitcher(context),
           onShortcutSheet: () => showShortcutSheet(context),
           child: Scaffold(
+            backgroundColor: translucent ? Colors.transparent : null,
             body: wide
                 ? Row(
                     children: [
-                      const SizedBox(width: kSidePanelWidth, child: ProjectDrawer()),
+                      SizedBox(
+                        width: kSidePanelWidth,
+                        child: ProjectDrawer(color: translucent ? kSidebarTint : null),
+                      ),
                       const VerticalDivider(width: 1),
-                      Expanded(child: main),
+                      Expanded(
+                        child: translucent
+                            ? ColoredBox(
+                                key: const ValueKey('shell-main'),
+                                color: AppColors.canvas,
+                                child: main,
+                              )
+                            : main,
+                      ),
                     ],
                   )
                 : ModalShellDrawer(

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,6 +32,8 @@ import 'package:argus/ui/session_detail_screen.dart';
 import 'package:argus/ui/session_list_screen.dart';
 import 'package:argus/ui/shell_drawer.dart';
 import 'package:argus/ui/terminal_list_screen.dart';
+import 'package:argus/ui/theme.dart';
+import 'package:argus/ui/window_strip.dart';
 import 'package:argus/ui/workspace_screen.dart';
 
 import '../support/fake_gateway_client.dart';
@@ -98,6 +101,7 @@ Future<ProviderContainer> _shell(
   WidgetTester tester, {
   double width = 400,
   SessionRepository? repo,
+  SidebarStripController? strip,
 }) async {
   tester.view.physicalSize = Size(width, 900);
   tester.view.devicePixelRatio = 1;
@@ -110,7 +114,14 @@ Future<ProviderContainer> _shell(
   await c.read(projectsProvider.notifier).load(FakeGatewayClient((m, p) async => _tree()));
   await tester.pumpWidget(UncontrolledProviderScope(
     container: c,
-    child: const MaterialApp(home: HomeShell()),
+    child: strip == null
+        ? const MaterialApp(home: HomeShell())
+        : MaterialApp(
+            navigatorObservers: [strip],
+            builder: (context, child) =>
+                WindowStrip(controller: strip, child: child!),
+            home: const HomeShell(),
+          ),
   ));
   await tester.pump();
   return c;
@@ -346,6 +357,70 @@ void main() {
     await _shell(tester, width: 1000);
     expect(find.text('registry'), findsOneWidget);
     expect(find.byIcon(Icons.menu), findsNothing);
+  });
+
+  group('sidebar background', () {
+    Color? panelColor(WidgetTester tester) => tester
+        .widget<Material>(find
+            .descendant(of: find.byType(ProjectDrawer), matching: find.byType(Material))
+            .first)
+        .color;
+    Color? shellBackground(WidgetTester tester) =>
+        tester.widget<Scaffold>(find.byType(Scaffold).first).backgroundColor;
+
+    testWidgets('macOS wide: the side panel is tinted and the main area is canvas',
+        (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      await _shell(tester, width: 1000);
+      expect(panelColor(tester), kSidebarTint);
+      expect(shellBackground(tester), Colors.transparent);
+      final main = find.byKey(const ValueKey('shell-main'));
+      expect(tester.widget<ColoredBox>(main).color, AppColors.canvas);
+      expect(find.descendant(of: main, matching: find.byType(Navigator)), findsOneWidget);
+      expect(find.descendant(of: main, matching: find.byType(ProjectDrawer)), findsNothing);
+    });
+
+    testWidgets('macOS narrow: the modal drawer stays opaque over the content',
+        (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      await _shell(tester);
+      await tester.tap(find.byIcon(Icons.menu));
+      await tester.pumpAndSettle();
+      expect(panelColor(tester), AppColors.card);
+      expect(shellBackground(tester), isNull);
+      expect(find.byKey(const ValueKey('shell-main')), findsNothing);
+    });
+
+    for (final platform in [TargetPlatform.android, TargetPlatform.linux]) {
+      testWidgets('$platform: the side panel background is unchanged', (tester) async {
+        debugDefaultTargetPlatformOverride = platform;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        await _shell(tester, width: 1000);
+        expect(panelColor(tester), AppColors.card);
+        expect(shellBackground(tester), isNull);
+        expect(find.byKey(const ValueKey('shell-main')), findsNothing);
+      });
+    }
+
+    testWidgets('macOS: the window strip is tinted over the side panel only',
+        (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final strip = SidebarStripController();
+      addTearDown(strip.dispose);
+      await _shell(tester, width: 1000, strip: strip);
+      await tester.pump();
+      final tint = find.byKey(const ValueKey('window-strip-sidebar'));
+      expect(tester.getSize(tint), const Size(kSidePanelWidth, kMacTitleStripHeight));
+      expect(tester.widget<ColoredBox>(tint).color, kSidebarTint);
+
+      tester.view.physicalSize = const Size(600, 900);
+      await tester.pump();
+      await tester.pump();
+      expect(tint, findsNothing);
+    });
   });
 
   testWidgets('Settings opens from the drawer footer', (tester) async {

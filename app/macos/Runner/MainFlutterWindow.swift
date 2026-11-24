@@ -9,8 +9,24 @@ class MainFlutterWindow: NSWindow {
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
+    // Flutter paints the canvas itself; where it leaves the view clear (the
+    // side panel), the sidebar material behind it shows through.
+    flutterViewController.backgroundColor = .clear
+    let effectView = NSVisualEffectView()
+    effectView.material = .sidebar
+    effectView.blendingMode = .behindWindow
+    effectView.state = .followsWindowActiveState
+
     let windowFrame = self.frame
-    self.contentViewController = flutterViewController
+    let rootViewController = NSViewController()
+    rootViewController.view = NSView(frame: self.contentRect(forFrameRect: windowFrame))
+    rootViewController.addChild(flutterViewController)
+    for view in [effectView, flutterViewController.view] {
+      view.frame = rootViewController.view.bounds
+      view.autoresizingMask = [.width, .height]
+      rootViewController.view.addSubview(view)
+    }
+    self.contentViewController = rootViewController
     self.setFrame(windowFrame, display: true)
     self.contentMinSize = NSSize(width: 420, height: 600)
 

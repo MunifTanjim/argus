@@ -97,4 +97,81 @@ void main() {
     expect(tester.getTopLeft(find.byType(AppBar)).dy, 28);
     expect(tester.getTopLeft(stripFinder).dy, 0);
   });
+
+  group('sidebar', () {
+    final tint = find.byKey(const ValueKey('window-strip-sidebar'));
+
+    // Returns the owner route.
+    Future<Route<dynamic>> pumpOwner(
+        WidgetTester tester, SidebarStripController strip) async {
+      late Route<dynamic> owner;
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      await tester.pumpWidget(MaterialApp(
+        navigatorObservers: [strip],
+        builder: (context, navigator) =>
+            WindowStrip(controller: strip, child: navigator!),
+        home: Builder(builder: (context) {
+          owner = ModalRoute.of(context)!;
+          WindowStrip.sidebarOf(context)!.show(owner, 300);
+          return const SizedBox.expand();
+        }),
+      ));
+      await tester.pump();
+      return owner;
+    }
+
+    testWidgets('the strip is tinted over the owner route\'s sidebar',
+        (tester) async {
+      final strip = SidebarStripController();
+      addTearDown(strip.dispose);
+      await pumpOwner(tester, strip);
+      expect(tester.getRect(tint), const Rect.fromLTWH(0, 0, 300, 28));
+      expect(tester.widget<ColoredBox>(tint).color, kSidebarTint);
+      final rest = find.descendant(
+        of: stripFinder,
+        matching: find.byWidgetPredicate(
+            (w) => w is ColoredBox && w.color == AppColors.canvas),
+      );
+      expect(tester.getRect(rest).left, 300);
+    });
+
+    testWidgets('an opaque route over the owner makes the strip canvas',
+        (tester) async {
+      final strip = SidebarStripController();
+      addTearDown(strip.dispose);
+      await pumpOwner(tester, strip);
+      final nav = tester.state<NavigatorState>(find.byType(Navigator));
+      nav.push(MaterialPageRoute<void>(
+          fullscreenDialog: true, builder: (_) => const SizedBox.expand()));
+      await tester.pumpAndSettle();
+      expect(tint, findsNothing);
+      nav.pop();
+      await tester.pumpAndSettle();
+      expect(tint, findsOneWidget);
+    });
+
+    testWidgets('a dialog over the owner keeps the tint', (tester) async {
+      final strip = SidebarStripController();
+      addTearDown(strip.dispose);
+      await pumpOwner(tester, strip);
+      showDialog<void>(
+          context: tester.state<NavigatorState>(find.byType(Navigator)).context,
+          builder: (_) => const Text('dialog'));
+      await tester.pumpAndSettle();
+      expect(tint, findsOneWidget);
+    });
+
+    testWidgets('hide by the owner clears the tint', (tester) async {
+      final strip = SidebarStripController();
+      addTearDown(strip.dispose);
+      final owner = await pumpOwner(tester, strip);
+      strip.hide(MaterialPageRoute<void>(builder: (_) => const SizedBox()));
+      await tester.pump();
+      expect(tint, findsOneWidget);
+      strip.hide(owner);
+      await tester.pump();
+      expect(tint, findsNothing);
+    });
+  });
 }

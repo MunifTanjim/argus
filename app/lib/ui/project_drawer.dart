@@ -22,7 +22,10 @@ const _amber = Color(0xFFd79921);
 const _green = Color(0xFF689d6a);
 
 class ProjectDrawer extends ConsumerStatefulWidget {
-  const ProjectDrawer({super.key});
+  const ProjectDrawer({super.key, this.color});
+
+  /// The background; the card color when null.
+  final Color? color;
 
   @override
   ConsumerState<ProjectDrawer> createState() => _ProjectDrawerState();
@@ -109,7 +112,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
     final tab = ref.watch(leftSidebarTabProvider);
 
     return Material(
-      color: AppColors.card,
+      color: widget.color ?? AppColors.card,
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
