@@ -99,6 +99,27 @@ void main() {
     await client.close();
   });
 
+  test('workflow methods route by session id and by node id', () async {
+    final seen = <String, Map>{};
+    final a = LoopbackNode('A', await generateKeyPair(), (m, p) {
+      seen[m] = jsonDecode(utf8.decode(p)) as Map;
+      return _json(null);
+    });
+    final lnk = MultiNodeLoopbackLink({'A': a});
+    final client = E2EClient(lnk.incoming, lnk.send, await generateKeyPair());
+    await client.connect();
+    await client.call('sessions.workflow', {'session_id': 'A:s1', 'run_id': 'wf'});
+    expect(seen['sessions.workflow']!['session_id'], 's1');
+    await client.call('sessions.historyWorkflow', {
+      'node_id': 'A',
+      'agent': 'claude',
+      'transcript_path': '/t',
+      'run_id': 'wf',
+    });
+    expect(seen['sessions.historyWorkflow']!['run_id'], 'wf');
+    await client.close();
+  });
+
   test('sessions.spawn (nodeAddressed, compositeResult) composites the result id', () async {
     final a = LoopbackNode('A', await generateKeyPair(), (m, p) => _json({'session_id': 's9'}));
     final lnk = MultiNodeLoopbackLink({'A': a});

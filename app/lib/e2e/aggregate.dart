@@ -22,7 +22,7 @@ const Set<String> sessionAddressed = {
   'sessions.key', 'sessions.respond', 'sessions.kill', 'sessions.changedFiles',
   'sessions.fileDiff', 'sessions.commits', 'sessions.commitFiles', 'sessions.focus',
   'session.rename', 'session.prompt.complete', 'session.descendant.count', 'sessions.tasks',
-  'transcript.subscribe', 'terminal.open',
+  'sessions.workflow', 'transcript.subscribe', 'terminal.open',
 };
 
 /// Methods routed by an explicit node_id (or the sole node).
@@ -30,6 +30,7 @@ const Set<String> nodeAddressed = {
   'sessions.spawn', 'sessions.resume', 'agents.list', 'agent.model.list',
   'sessions.exportBundle',
   'sessions.historySessions', 'sessions.historyTranscript', 'sessions.historyToolDetail',
+  'sessions.historyWorkflow',
   'terminal.create', 'host.info', 'host.setWakelock', 'host.completeDir',
 };
 

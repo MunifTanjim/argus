@@ -220,6 +220,30 @@ class RunningShell {
       );
 }
 
+class RunningWorkflow {
+  final String runId;
+  final String? name;
+  final int done;
+  final int total;
+  final DateTime? since;
+
+  const RunningWorkflow({
+    required this.runId,
+    this.name,
+    this.done = 0,
+    this.total = 0,
+    this.since,
+  });
+
+  factory RunningWorkflow.fromJson(Map<String, dynamic> j) => RunningWorkflow(
+        runId: j['run_id'] as String? ?? '',
+        name: j['name'] as String?,
+        done: (j['done'] as num?)?.toInt() ?? 0,
+        total: (j['total'] as num?)?.toInt() ?? 0,
+        since: DateTime.tryParse(j['since'] as String? ?? ''),
+      );
+}
+
 class Session {
   final String id;
   final String agent;
@@ -245,6 +269,7 @@ class Session {
   /// Also empty from a node too old to report them.
   final List<RunningSubagent> subagents;
   final List<RunningShell> shells;
+  final List<RunningWorkflow> workflows;
   final String? nodeId;
   final String? nodeLabel;
   final bool offline;
@@ -278,6 +303,7 @@ class Session {
     this.interaction,
     this.subagents = const [],
     this.shells = const [],
+    this.workflows = const [],
     this.nodeId,
     this.nodeLabel,
     this.offline = false,
@@ -314,6 +340,10 @@ class Session {
             const [],
         shells: (j['shells'] as List?)
                 ?.map((e) => RunningShell.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            const [],
+        workflows: (j['workflows'] as List?)
+                ?.map((e) => RunningWorkflow.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             const [],
         nodeId: j['node_id'] as String?,

@@ -85,6 +85,7 @@ Session _s({
   String? since,
   List<Map<String, dynamic>>? subagents,
   List<Map<String, dynamic>>? shells,
+  List<Map<String, dynamic>>? workflows,
   bool? canPrompt,
 }) =>
     Session.fromJson({
@@ -100,6 +101,7 @@ Session _s({
       'status_since': ?since,
       'subagents': ?subagents,
       'shells': ?shells,
+      'workflows': ?workflows,
       // Default: what the node sends.
       'can_prompt': canPrompt ??
           (status != 'working' &&
@@ -667,6 +669,64 @@ void main() {
       await t.pumpAndSettle();
       expect(find.text('make test'), findsOneWidget);
       expect(find.text('npm run dev'), findsOneWidget);
+    });
+  });
+
+  group('running workflows', () {
+    final two = [
+      {'run_id': 'wf1', 'name': 'review', 'done': 1, 'total': 3},
+      {'run_id': 'wf2', 'done': 0, 'total': 2},
+    ];
+    final summary = {'model_name': 'Opus 5.5', 'effort': 'high'};
+
+    testWidgets('the model line shows the count after the others', (t) async {
+      await _pump(
+          t,
+          _s(shells: [
+            {'id': 'b1', 'tool_use_id': 't1', 'command': 'make'},
+          ], workflows: two, summary: summary),
+          _Recording());
+      expect(find.byIcon(Icons.account_tree_outlined), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
+      expect(t.getTopLeft(find.byIcon(Icons.terminal)).dx,
+          lessThan(t.getTopLeft(find.byIcon(Icons.account_tree_outlined)).dx));
+      expect(t.getTopLeft(find.byIcon(Icons.account_tree_outlined)).dx,
+          lessThan(t.getTopLeft(find.text('Opus 5.5 · high')).dx));
+    });
+
+    testWidgets('none shows no icon', (t) async {
+      await _pump(t, _s(summary: summary), _Recording());
+      expect(find.byIcon(Icons.account_tree_outlined), findsNothing);
+    });
+
+    testWidgets('the count leaves the model line at 20 px', (t) async {
+      double line() => t
+          .getSize(find
+              .ancestor(
+                  of: find.text('Opus 5.5 · high'),
+                  matching: find.byType(Container))
+              .first)
+          .height;
+      await _pump(t, _s(summary: summary), _Recording());
+      expect(line(), 20);
+      final without = t.getSize(find.byType(SessionComposer)).height;
+      await _pump(t, _s(workflows: two, summary: summary), _Recording());
+      expect(line(), 20);
+      expect(t.getSize(find.byType(SessionComposer)).height, without);
+    });
+
+    testWidgets('tapping the count opens the sheet', (t) async {
+      final container = ProviderContainer(overrides: [
+        sessionRepositoryProvider.overrideWithValue(_Recording()),
+      ]);
+      addTearDown(container.dispose);
+      final s = _s(workflows: two, summary: summary);
+      container.read(sessionsProvider.notifier).put(s);
+      await _pump(t, s, _Recording(), container: container);
+      await t.tap(find.byIcon(Icons.account_tree_outlined));
+      await t.pumpAndSettle();
+      expect(find.text('review · 1/3'), findsOneWidget);
+      expect(find.text('Workflow · 0/2'), findsOneWidget);
     });
   });
 

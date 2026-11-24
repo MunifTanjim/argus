@@ -11,6 +11,7 @@ import 'subagent_trace_screen.dart';
 import 'theme.dart';
 import 'tool_registry.dart';
 import 'usage_format.dart';
+import 'workflow_screen.dart';
 
 const _mono = TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1.3);
 final _monoDim = _mono.copyWith(color: AppColors.dim);
@@ -45,6 +46,15 @@ String _clockTime(String? ts) {
 
 /// Returns null when [e] has nothing deeper to show.
 VoidCallback? drillFor(BuildContext context, Entry e, ToolDetailRef ref) {
+  if (e.kind == EntryKind.workflow) {
+    final wf = e.workflow;
+    if (wf == null || wf.runId.isEmpty || wf.remote) return null;
+    return () => Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => WorkflowScreen(parentRef: ref, runId: wf.runId),
+      ),
+    );
+  }
   if (e.kind == EntryKind.tool ||
       e.kind == EntryKind.skill ||
       isAgentRefTool(e.toolName)) {
@@ -127,6 +137,7 @@ class EntryRow extends StatelessWidget {
         );
       case EntryKind.tool:
       case EntryKind.skill:
+      case EntryKind.workflow:
       case EntryKind.subagent:
         return ItemRow(
           item: e,
