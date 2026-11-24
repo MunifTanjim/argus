@@ -68,6 +68,7 @@ dependencies:
   # Compares server/node versions against the app's minimums (state/compat.dart).
   pub_semver: ^2.2.0
   cbor: ^6.5.1
+  macos_window_utils: ^1.9.1
 
 dev_dependencies:
   flutter_test:

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:macos_window_utils/macos_window_utils.dart';
 
 import 'pairing/gateway_store.dart';
 import 'pairing/legacy_migration.dart';
@@ -19,6 +20,7 @@ import 'ui/profiles_screen.dart';
 import 'ui/route_observer.dart';
 import 'ui/sign_out.dart';
 import 'ui/theme.dart';
+import 'ui/titlebar.dart';
 import 'ui/unsupported_server_screen.dart';
 import 'ui/window_strip.dart';
 
@@ -42,8 +44,23 @@ Future<void> main(List<String> args) async {
     await initUnifiedPush();
     if (args.contains('--unifiedpush-bg')) return;
   }
+  if (defaultTargetPlatform == TargetPlatform.macOS) await _setUpMacWindow();
   _registerAssetLicenses();
   runApp(const ProviderScope(child: ArgusApp()));
+}
+
+// One unified toolbar row (52 px, traffic lights centered) over the content;
+// Flutter draws the row, and its empty space drags the window natively.
+Future<void> _setUpMacWindow() async {
+  await WindowManipulator.initialize(enableWindowDelegate: true);
+  await WindowManipulator.makeTitlebarTransparent();
+  await WindowManipulator.enableFullSizeContentView();
+  await WindowManipulator.hideTitle();
+  await WindowManipulator.addToolbar();
+  await WindowManipulator.setToolbarStyle(
+      toolbarStyle: NSWindowToolbarStyle.unified);
+  // Shows through where Flutter leaves the canvas clear (the side panel).
+  await WindowManipulator.setMaterial(NSVisualEffectViewMaterial.sidebar);
 }
 
 void _registerAssetLicenses() {
@@ -124,7 +141,9 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
       // One menu bar for the whole app: HomeShell, when mounted, registers
       // the app items' actions.
       builder: (context, child) => MacMenuBar(
-        child: WindowStrip(controller: _sidebarStrip, child: child!),
+        child: TitlebarScope(
+          child: WindowStrip(controller: _sidebarStrip, child: child!),
+        ),
       ),
       navigatorObservers: [appRouteObserver, _sidebarStrip],
       home: !_loaded

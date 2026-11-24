@@ -1,16 +1,14 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:flutter/services.dart';
 
 import 'theme.dart';
+import 'titlebar.dart';
 
 const double kMacTitleStripHeight = 28;
 const Color kWindowStripColor = AppColors.canvas;
 // A light tint over the macOS sidebar vibrancy, so text contrast stays.
 const Color kSidebarTint = Color(0x14000000);
-const MethodChannel windowChannel = MethodChannel('argus/window');
 
 /// Tracks the root navigator's routes so the strip can match the translucent
 /// sidebar of the route that shows one, until an opaque route covers it.
@@ -95,9 +93,11 @@ class SidebarStripController extends NavigatorObserver with ChangeNotifier {
 }
 
 /// On macOS the title bar is transparent and the content extends under it, so
-/// a strip above the navigator holds the traffic lights and drags the window.
-/// In full screen there are no traffic lights, and the strip collapses.
-class WindowStrip extends StatefulWidget {
+/// a strip above the navigator holds the traffic lights. The strip lies in
+/// the native toolbar area, which drags the window. In full screen there are
+/// no traffic lights (the root [TitlebarInsets] is 0), and the strip
+/// collapses.
+class WindowStrip extends StatelessWidget {
   const WindowStrip({super.key, this.controller, required this.child});
 
   /// Also a navigator observer of the root navigator.
@@ -111,52 +111,22 @@ class WindowStrip extends StatefulWidget {
       ?.controller;
 
   @override
-  State<WindowStrip> createState() => _WindowStripState();
-}
-
-class _WindowStripState extends State<WindowStrip> {
-  bool _fullScreen = false;
-
-  @override
-  void initState() {
-    super.initState();
-    windowChannel.setMethodCallHandler(_onCall);
-  }
-
-  @override
-  void dispose() {
-    windowChannel.setMethodCallHandler(null);
-    super.dispose();
-  }
-
-  Future<void> _onCall(MethodCall call) async {
-    if (call.method != 'fullScreen' || !mounted) return;
-    setState(() => _fullScreen = call.arguments == true);
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final child = widget.child;
     if (defaultTargetPlatform != TargetPlatform.macOS) return child;
-    final controller = widget.controller;
+    final fullScreen = TitlebarInsets.of(context) == 0;
+    final controller = this.controller;
     return Column(
       children: [
-        GestureDetector(
+        SizedBox(
           key: const ValueKey('window-strip'),
-          behavior: HitTestBehavior.opaque,
-          supportedDevices: const {PointerDeviceKind.mouse},
-          onPanStart: (_) => windowChannel.invokeMethod<void>('startDrag'),
-          onDoubleTap: () => windowChannel.invokeMethod<void>('doubleClick'),
-          child: SizedBox(
-            height: _fullScreen ? 0 : kMacTitleStripHeight,
-            width: double.infinity,
-            child: controller == null
-                ? const ColoredBox(color: kWindowStripColor)
-                : ListenableBuilder(
-                    listenable: controller,
-                    builder: (context, _) => _background(controller.width),
-                  ),
-          ),
+          height: fullScreen ? 0 : kMacTitleStripHeight,
+          width: double.infinity,
+          child: controller == null
+              ? const ColoredBox(color: kWindowStripColor)
+              : ListenableBuilder(
+                  listenable: controller,
+                  builder: (context, _) => _background(controller.width),
+                ),
         ),
         Expanded(
           child: controller == null

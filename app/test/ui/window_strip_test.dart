@@ -1,13 +1,18 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/ui/theme.dart';
+import 'package:argus/ui/titlebar.dart';
 import 'package:argus/ui/window_strip.dart';
 
-Widget _app(Widget child) => MaterialApp(
-      builder: (context, navigator) => WindowStrip(child: navigator!),
+Widget _app(Widget child,
+        {ValueListenable<bool> fullScreen =
+            const AlwaysStoppedAnimation(false)}) =>
+    MaterialApp(
+      builder: (context, navigator) => TitlebarScope(
+        fullScreen: fullScreen,
+        child: WindowStrip(child: navigator!),
+      ),
       home: child,
     );
 
@@ -43,57 +48,18 @@ void main() {
     expect(box.color, AppColors.canvas);
   });
 
-  testWidgets('drag on the strip calls startDrag; double-tap calls doubleClick',
-      (tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final calls = <String>[];
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      windowChannel,
-      (call) async {
-        calls.add(call.method);
-        return null;
-      },
-    );
-    addTearDown(() => tester.binding.defaultBinaryMessenger
-        .setMockMethodCallHandler(windowChannel, null));
-    await tester.pumpWidget(_app(const SizedBox.expand()));
-
-    final mouse = await tester.startGesture(const Offset(100, 10),
-        kind: PointerDeviceKind.mouse);
-    await mouse.moveBy(const Offset(40, 0));
-    await mouse.up();
-    expect(calls, ['startDrag']);
-
-    calls.clear();
-    final pad = await tester.createGesture(kind: PointerDeviceKind.trackpad);
-    await pad.panZoomStart(const Offset(100, 10));
-    await pad.panZoomUpdate(const Offset(100, 10), pan: const Offset(40, 0));
-    await pad.panZoomEnd();
-    await tester.pump();
-    expect(calls, isEmpty);
-
-    calls.clear();
-    await tester.tapAt(const Offset(100, 10), kind: PointerDeviceKind.mouse);
-    await tester.pump(const Duration(milliseconds: 50));
-    await tester.tapAt(const Offset(100, 10), kind: PointerDeviceKind.mouse);
-    await tester.pumpAndSettle();
-    expect(calls, ['doubleClick']);
-  });
-
   testWidgets('the strip collapses in full screen and returns after',
       (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    await tester.pumpWidget(_app(const SizedBox.expand(key: Key('x'))));
+    final full = ValueNotifier(false);
+    addTearDown(full.dispose);
+    await tester.pumpWidget(
+        _app(const SizedBox.expand(key: Key('x')), fullScreen: full));
     final x = find.byKey(const Key('x'));
 
     Future<void> fullScreen(bool on) async {
-      await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
-        windowChannel.name,
-        windowChannel.codec.encodeMethodCall(MethodCall('fullScreen', on)),
-        (_) {},
-      );
+      full.value = on;
       await tester.pump();
     }
 
@@ -134,8 +100,10 @@ void main() {
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       await tester.pumpWidget(MaterialApp(
         navigatorObservers: [strip],
-        builder: (context, navigator) =>
-            WindowStrip(controller: strip, child: navigator!),
+        builder: (context, navigator) => TitlebarScope(
+          fullScreen: const AlwaysStoppedAnimation(false),
+          child: WindowStrip(controller: strip, child: navigator!),
+        ),
         home: Builder(builder: (context) {
           owner = ModalRoute.of(context)!;
           WindowStrip.sidebarOf(context)!.show(owner, 300);

@@ -37,6 +37,7 @@ import 'package:argus/ui/shell_drawer.dart';
 import 'package:argus/ui/spawn_dialog.dart';
 import 'package:argus/ui/terminal_list_screen.dart';
 import 'package:argus/ui/theme.dart';
+import 'package:argus/ui/titlebar.dart';
 import 'package:argus/ui/window_strip.dart';
 import 'package:argus/ui/workspace_screen.dart';
 
@@ -128,8 +129,9 @@ Future<ProviderContainer> _shell(
         ? const MaterialApp(home: HomeShell())
         : MaterialApp(
             navigatorObservers: [strip],
-            builder: (context, child) =>
-                WindowStrip(controller: strip, child: child!),
+            builder: (context, child) => TitlebarScope(
+                fullScreen: const AlwaysStoppedAnimation(false),
+                child: WindowStrip(controller: strip, child: child!)),
             home: const HomeShell(),
           ),
   ));
