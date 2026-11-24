@@ -47,3 +47,61 @@ func TestRepeatedSubagentsSnapshotPublishesOnce(t *testing.T) {
 		t.Fatalf("published %d updates, want 1 for the change and none for the repeat", n)
 	}
 }
+
+func TestSetWorkflowsPublishesOnChange(t *testing.T) {
+	r := New()
+	s, _ := r.ApplyHook(HookUpdate{Agent: "a", AgentSessionID: "s1", Status: session.StatusIdle})
+	events, cancel := r.Subscribe()
+	defer cancel()
+	list := []session.RunningWorkflow{{RunID: "wf_1", Done: 1, Total: 3}}
+	r.SetWorkflows(s.ID, list)
+	if n := len(events); n != 1 {
+		t.Fatalf("published %d events, want 1", n)
+	}
+	if ev := <-events; len(ev.Session.Workflows) != 1 || ev.Session.Workflows[0].RunID != "wf_1" {
+		t.Fatalf("event lacks workflows: %+v", ev.Session.Workflows)
+	}
+	r.SetWorkflows(s.ID, list)
+	if n := len(events); n != 0 {
+		t.Fatalf("unchanged list published %d events", n)
+	}
+	r.SetWorkflows(s.ID, nil)
+	if n := len(events); n != 1 {
+		t.Fatalf("clearing published %d events, want 1", n)
+	}
+	if ev := <-events; len(ev.Session.Workflows) != 0 {
+		t.Fatalf("workflows not cleared: %+v", ev.Session.Workflows)
+	}
+}
+
+func TestWorkflowsSurviveReconcileAndClearOnRemove(t *testing.T) {
+	r := New()
+	s, _ := r.ApplyHook(HookUpdate{Agent: "a", AgentSessionID: "s1", Status: session.StatusIdle})
+	r.SetWorkflows(s.ID, []session.RunningWorkflow{{RunID: "wf_1"}})
+	r.ReconcileSessions("a", []DiscoveredSession{{AgentSessionID: "s1"}})
+	if got := r.view(r.sessions[s.ID]); len(got.Workflows) != 1 {
+		t.Fatalf("reconcile dropped workflows: %+v", got.Workflows)
+	}
+	r.ApplyHook(HookUpdate{Agent: "a", AgentSessionID: "s1", Status: session.StatusDead})
+	if _, ok := r.workflows[s.ID]; ok {
+		t.Fatal("workflows outlived the session")
+	}
+}
+
+func TestProcStartRecordedOnSessionStart(t *testing.T) {
+	clock := time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC)
+	old := now
+	now = func() time.Time { return clock }
+	t.Cleanup(func() { now = old })
+
+	r := New()
+	s, _ := r.ApplyHook(HookUpdate{Agent: "a", AgentSessionID: "s1", Status: session.StatusIdle, Started: true})
+	if got := r.ProcStart(s.ID); !got.Equal(clock) {
+		t.Fatalf("ProcStart = %v, want %v", got, clock)
+	}
+	clock = clock.Add(time.Hour)
+	r.ApplyHook(HookUpdate{Agent: "a", AgentSessionID: "s1", Status: session.StatusWorking})
+	if got := r.ProcStart(s.ID); !got.Equal(clock.Add(-time.Hour)) {
+		t.Fatalf("a later hook moved ProcStart to %v", got)
+	}
+}

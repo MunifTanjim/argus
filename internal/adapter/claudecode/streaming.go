@@ -21,6 +21,8 @@ type StreamingTranscript struct {
 	links      map[string]string // agentID -> toolUseID (cumulative)
 	metaCache  map[string]string // agentID -> toolUseID, from meta.json sidecars
 	queue      promptQueue
+	workflows  *parser.WorkflowScanner
+	depth      int // subagent spawn depth once read; 0 = not yet known
 }
 
 var _ adapter.QueueSource = (*StreamingTranscript)(nil)
@@ -30,7 +32,8 @@ var _ adapter.QueueSource = (*StreamingTranscript)(nil)
 // clears the sidechain flag while reading a subagent file. Nested children are
 // linked, suppressed past MaxSubagentDepth.
 func NewStreamingTranscript(path, rootPath string, isSubagent bool) *StreamingTranscript {
-	return &StreamingTranscript{path: path, rootPath: rootPath, isSubagent: isSubagent, links: map[string]string{}, metaCache: map[string]string{}}
+	return &StreamingTranscript{path: path, rootPath: rootPath, isSubagent: isSubagent, links: map[string]string{}, metaCache: map[string]string{},
+		workflows: parser.NewWorkflowScanner(path)}
 }
 
 // Refresh reads newly appended lines, updates state, and returns the full folded
@@ -43,6 +46,7 @@ func (s *StreamingTranscript) Refresh() ([]Entry, error) {
 		s.links = map[string]string{}
 		s.metaCache = map[string]string{}
 		s.queue.clear()
+		s.workflows = parser.NewWorkflowScanner(s.path)
 	}
 
 	newMsgs, newLinks, ops, newOffset, err := parser.ReadSessionIncrementalWithQueue(s.path, s.offset, s.isSubagent)
@@ -59,17 +63,23 @@ func (s *StreamingTranscript) Refresh() ([]Entry, error) {
 		s.links[agentID] = toolUseID
 	}
 	s.offset = newOffset
+	// Scanned after the session read so every folded Workflow call has been seen.
+	if err := s.workflows.Scan(); err != nil {
+		return nil, err
+	}
 
 	pchunks := parser.BuildChunks(s.msgs)
 	agentRefs := parser.AgentRefsFromLinks(s.rootPath, s.links)
-	if s.isSubagent &&
-		parser.SpawnDepth(s.rootPath, parser.AgentIDFromPath(s.path)) >= parser.MaxSubagentDepth {
+	if s.isSubagent && s.depth == 0 {
+		s.depth = parser.SpawnDepth(s.rootPath, parser.AgentIDFromPath(s.path))
+	}
+	if s.isSubagent && s.depth >= parser.MaxSubagentDepth {
 		agentRefs = nil
 	} else {
 		// meta.json sidecars link still-running subagents (no tool_result yet).
 		addMetaRefs(agentRefs, s.rootPath, s.metaCache)
 	}
-	return foldEntries(pchunks, agentRefs, false), nil
+	return foldEntries(pchunks, agentRefs, s.workflows.Launch, s.rootPath, false), nil
 }
 
 func (s *StreamingTranscript) Queue() []transcript.QueuedPrompt { return s.queue.prompts() }

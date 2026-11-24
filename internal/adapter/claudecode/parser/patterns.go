@@ -29,13 +29,15 @@ var (
 
 // Bash mode regexes -- used by classify.go and sanitize.go.
 var (
-	reBashStdout        = regexp.MustCompile(`(?is)<bash-stdout>(.*?)</bash-stdout>`)
-	reBashStderr        = regexp.MustCompile(`(?is)<bash-stderr>(.*?)</bash-stderr>`)
-	reBashInput         = regexp.MustCompile(`(?is)<bash-input>(.*?)</bash-input>`)
-	reTaskNotifySummary = regexp.MustCompile(`(?is)<summary>(.*?)</summary>`)
-	reTaskNotifyStatus  = regexp.MustCompile(`(?is)<status>(.*?)</status>`)
-	reXMLTag            = regexp.MustCompile(`<[^>]+>`)
-	reWhitespace        = regexp.MustCompile(`\s+`)
+	reBashStdout          = regexp.MustCompile(`(?is)<bash-stdout>(.*?)</bash-stdout>`)
+	reBashStderr          = regexp.MustCompile(`(?is)<bash-stderr>(.*?)</bash-stderr>`)
+	reBashInput           = regexp.MustCompile(`(?is)<bash-input>(.*?)</bash-input>`)
+	reTaskNotifySummary   = regexp.MustCompile(`(?is)<summary>(.*?)</summary>`)
+	reTaskNotification    = regexp.MustCompile(`(?is)<task-notification>(.*?)</task-notification>`)
+	reTaskNotifyStatus    = regexp.MustCompile(`(?is)<status>(.*?)</status>`)
+	reTaskNotifyToolUseID = regexp.MustCompile(`(?is)<tool-use-id>(.*?)</tool-use-id>`)
+	reXMLTag              = regexp.MustCompile(`<[^>]+>`)
+	reWhitespace          = regexp.MustCompile(`\s+`)
 )
 
 // Teammate message regexes -- used by classify.go, session.go, and subagent.go.

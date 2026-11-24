@@ -17,7 +17,7 @@ func TestFoldItem_SkillToolBecomesEntrySkill(t *testing.T) {
 		ToolResult:  "# Systematic Debugging\n\nFind root cause first.",
 	}
 
-	it, ok := foldItem(pit, nil, "0")
+	it, ok := (&folder{}).foldItem(pit, "0")
 	if !ok {
 		t.Fatal("foldItem dropped the Skill item")
 	}
@@ -46,7 +46,7 @@ func TestFoldItem_TaskToolStaysSubagent(t *testing.T) {
 		SubagentType: "Explore",
 	}
 
-	it, ok := foldItem(pit, nil, "0")
+	it, ok := (&folder{}).foldItem(pit, "0")
 	if !ok {
 		t.Fatal("foldItem dropped the Task item")
 	}
@@ -64,7 +64,7 @@ func TestFoldItem_SubagentCarriesSpawnName(t *testing.T) {
 		TeamMemberName: "codex-comments",
 	}
 
-	it, ok := foldItem(pit, nil, "0")
+	it, ok := (&folder{}).foldItem(pit, "0")
 	if !ok {
 		t.Fatal("foldItem dropped the Agent item")
 	}
@@ -84,7 +84,7 @@ func TestFoldItem_TeammateMessageBecomesTeammateSubagent(t *testing.T) {
 		TeammateColor: "red",
 	}
 
-	it, ok := foldItem(pit, nil, "0")
+	it, ok := (&folder{}).foldItem(pit, "0")
 	if !ok {
 		t.Fatal("foldItem dropped the teammate item")
 	}
@@ -111,7 +111,7 @@ func TestFoldItem_TeammateIdleCarriesFlag(t *testing.T) {
 		TeammateIdle:  true,
 	}
 
-	it, ok := foldItem(pit, nil, "0")
+	it, ok := (&folder{}).foldItem(pit, "0")
 	if !ok {
 		t.Fatal("foldItem dropped the idle teammate item")
 	}

@@ -142,9 +142,5 @@ func AgentIDsByToolID(sessionPath string) map[string]string {
 // SubagentFilePath resolves the JSONL path for a subagent id and reports whether
 // it exists.
 func SubagentFilePath(sessionPath, agentID string) (string, bool) {
-	p := filepath.Join(subagentsDir(sessionPath), "agent-"+agentID+".jsonl")
-	if info, err := os.Stat(p); err != nil || info.IsDir() {
-		return "", false
-	}
-	return p, true
+	return agentFilePath(sessionPath, agentID, ".jsonl")
 }

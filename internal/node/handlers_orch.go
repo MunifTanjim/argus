@@ -151,7 +151,12 @@ func (d *Node) transcriptView(s session.Session) (transcript.TranscriptView, err
 	if s.TranscriptPath == "" {
 		return transcript.TranscriptView{}, nil
 	}
-	return d.adapterFor(s.Agent).ReadTranscriptView(s.TranscriptPath)
+	v, err := d.adapterFor(s.Agent).ReadTranscriptView(s.TranscriptPath)
+	if err != nil {
+		return v, err
+	}
+	v.Entries = markStaleWorkflows(v.Entries, d.reg.ProcStart(s.ID))
+	return v, nil
 }
 
 func (d *Node) handleOrchSessionCurrent(ctx context.Context, params json.RawMessage) (any, error) {

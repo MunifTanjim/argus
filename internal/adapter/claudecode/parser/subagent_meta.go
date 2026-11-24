@@ -3,7 +3,6 @@ package parser
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 )
 
 // MaxSubagentDepth caps how deep subagent drilling is offered: a child is
@@ -29,5 +28,9 @@ func readAgentMeta(path string) agentMeta {
 // SpawnDepth reads spawnDepth from a subagent's agent-<id>.meta.json. Returns 0
 // when the meta file is missing/unreadable, treating it as shallow so drilling stays visible.
 func SpawnDepth(rootPath, agentID string) int {
-	return readAgentMeta(filepath.Join(subagentsDir(rootPath), "agent-"+agentID+".meta.json")).SpawnDepth
+	p, ok := agentFilePath(rootPath, agentID, ".meta.json")
+	if !ok {
+		return 0
+	}
+	return readAgentMeta(p).SpawnDepth
 }
