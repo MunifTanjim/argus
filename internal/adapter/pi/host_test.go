@@ -78,6 +78,17 @@ func (h *hostHarness) piWrite(line string) {
 	}
 }
 
+const hostSyncLine = `{"type":"test_sync"}`
+
+// piSync returns after the host has recorded every line written before it. A
+// pipe write returns when the host reads the bytes, and the host reads the
+// next line only after it records the previous one. The host does not record
+// the sync line, but it can forward it to a client, so read skips it.
+func (h *hostHarness) piSync() {
+	h.t.Helper()
+	h.piWrite(hostSyncLine)
+}
+
 func (h *hostHarness) piRead() string {
 	h.t.Helper()
 	ch := make(chan string, 1)
@@ -113,11 +124,15 @@ func (h *hostHarness) dial() *hostClient {
 func (c *hostClient) read() string {
 	c.t.Helper()
 	c.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	l, err := c.r.ReadString('\n')
-	if err != nil {
-		c.t.Fatalf("client read: %v", err)
+	for {
+		l, err := c.r.ReadString('\n')
+		if err != nil {
+			c.t.Fatalf("client read: %v", err)
+		}
+		if l = strings.TrimSuffix(l, "\n"); l != hostSyncLine {
+			return l
+		}
 	}
-	return strings.TrimSuffix(l, "\n")
 }
 
 func (c *hostClient) readType() string {
@@ -200,6 +215,7 @@ func TestHostReplaysOpenDialogs(t *testing.T) {
 	h.piWrite(u1)
 	h.piWrite(`{"type":"extension_ui_request","id":"n1","method":"notify","message":"hi"}`)
 	h.piWrite(u2)
+	h.piSync()
 	c := h.connect()
 	if got := c.read(); got != u1 {
 		t.Fatalf("replay[0] = %q", got)
@@ -241,6 +257,7 @@ func TestHostDropsTheDialogsOfASettledRun(t *testing.T) {
 	h.piWrite(`{"type":"agent_start"}`)
 	h.piWrite(`{"type":"extension_ui_request","id":"u2","method":"confirm","title":"b"}`)
 	h.piWrite(`{"type":"agent_settled","aborted":true}`)
+	h.piSync()
 	c := h.connect()
 	if got := c.read(); got != idle {
 		t.Fatalf("replay[0] = %q", got)
@@ -280,6 +297,7 @@ func TestHostReplaysTheLastQueue(t *testing.T) {
 	h.piWrite(`{"type":"queue_update","steering":["one"],"followUp":[]}`)
 	q2 := `{"type":"queue_update","steering":["two"],"followUp":[]}`
 	h.piWrite(q2)
+	h.piSync()
 	c := h.connect()
 	if got := c.read(); got != q2 {
 		t.Fatalf("replay = %q", got)
