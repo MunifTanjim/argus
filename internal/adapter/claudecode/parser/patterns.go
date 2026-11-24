@@ -60,6 +60,7 @@ type contentBlockJSON struct {
 	Name      string          `json:"name"`
 	Text      string          `json:"text"`
 	Thinking  string          `json:"thinking"`
+	Signature string          `json:"signature"`
 	Input     json.RawMessage `json:"input"`
 	ToolUseID string          `json:"tool_use_id"`
 	Content   json.RawMessage `json:"content"`

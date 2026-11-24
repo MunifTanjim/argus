@@ -9,3 +9,6 @@ func ScanSessionPreview(path string) (string, int) {
 	m := scanSessionMetadata(path)
 	return m.firstMsg, m.turnCount
 }
+
+// IsNarration exposes isNarration for tests.
+var IsNarration = isNarration

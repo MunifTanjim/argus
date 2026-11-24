@@ -236,12 +236,13 @@ func isOngoingFromActivities(activities []activity) bool {
 func scanOngoingAssistant(e *metadataScanEntry, activityIndex *int,
 	lastEndingIndex *int, hasAny, hasAfter *bool, shutdownIDs, pendingToolIDs map[string]bool) {
 
-	var blocks []ongoingBlock
+	var blocks []contentBlockJSON
 	if err := json.Unmarshal(e.Message.Content, &blocks); err != nil {
 		return
 	}
 
 	for _, b := range blocks {
+		b = b.asDisplayed()
 		switch b.Type {
 		case "thinking":
 			if strings.TrimSpace(b.Thinking) != "" {
@@ -341,17 +342,6 @@ func scanOngoingUser(e *metadataScanEntry, activityIndex *int,
 			}
 		}
 	}
-}
-
-// ongoingBlock is the minimal struct for parsing assistant content blocks
-// during ongoing detection. Only captures fields needed for activity classification.
-type ongoingBlock struct {
-	Type     string          `json:"type"`
-	ID       string          `json:"id"`
-	Name     string          `json:"name"`
-	Text     string          `json:"text"`
-	Thinking string          `json:"thinking"`
-	Input    json.RawMessage `json:"input"`
 }
 
 // ongoingUserBlock is the minimal struct for parsing user content blocks
