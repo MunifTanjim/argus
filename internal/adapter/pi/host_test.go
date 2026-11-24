@@ -78,6 +78,18 @@ func (h *hostHarness) piWrite(line string) {
 	}
 }
 
+// hostSyncLine is a record the host does not track; piSync writes it.
+const hostSyncLine = `{"type":"sync"}`
+
+// piSync returns once the host has recorded every line written before it: a
+// pipe write completes only when the host reads again, which it does after
+// recording the previous line. A client that connects next may still receive
+// the sync line itself as a live line.
+func (h *hostHarness) piSync() {
+	h.t.Helper()
+	h.piWrite(hostSyncLine)
+}
+
 func (h *hostHarness) piRead() string {
 	h.t.Helper()
 	ch := make(chan string, 1)
@@ -241,12 +253,17 @@ func TestHostDropsTheDialogsOfASettledRun(t *testing.T) {
 	h.piWrite(`{"type":"agent_start"}`)
 	h.piWrite(`{"type":"extension_ui_request","id":"u2","method":"confirm","title":"b"}`)
 	h.piWrite(`{"type":"agent_settled","aborted":true}`)
+	h.piSync()
 	c := h.connect()
 	if got := c.read(); got != idle {
 		t.Fatalf("replay[0] = %q", got)
 	}
 	h.piWrite(`{"type":"agent_end"}`)
-	if got := c.read(); got != `{"type":"agent_end"}` {
+	got := c.read()
+	if got == hostSyncLine {
+		got = c.read()
+	}
+	if got != `{"type":"agent_end"}` {
 		t.Fatalf("after replay = %q, want the run's dialog dropped", got)
 	}
 }
