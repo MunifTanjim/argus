@@ -6,6 +6,7 @@ import '../models/session.dart';
 import '../state/question_cursor.dart';
 import '../state/respond_params.dart';
 import 'code_block.dart';
+import 'desktop_shortcuts.dart' show liveTerminalHasFocus, textInputHasFocus;
 import 'interaction_panel.dart' show scrollBody;
 import 'theme.dart';
 
@@ -28,6 +29,58 @@ DecisionOption decisionReject(Interaction ix) => ix.options.firstWhere(
       const DecisionOption(label: 'Reject', value: 'deny', reject: true),
 );
 
+final _enters = {LogicalKeyboardKey.enter, LogicalKeyboardKey.numpadEnter};
+final _arrows = {
+  LogicalKeyboardKey.arrowUp,
+  LogicalKeyboardKey.arrowDown,
+  LogicalKeyboardKey.arrowLeft,
+  LogicalKeyboardKey.arrowRight,
+};
+
+/// The question panel's letter keys.
+final _letters = {
+  LogicalKeyboardKey.keyJ,
+  LogicalKeyboardKey.keyK,
+  LogicalKeyboardKey.keyN,
+  LogicalKeyboardKey.keyC,
+};
+
+/// Whether [e] is a held key's repeat: Enter and `c` act once per press.
+bool _isRepeat(KeyEvent e) => e is KeyRepeatEvent;
+
+/// Focus for a desktop panel: it takes focus when its prompt appears and when
+/// it is shown again (its route back on top, or the collapsed panel
+/// expanded), but not from a route on top or from a text field or live
+/// terminal elsewhere.
+mixin _PanelFocus<T extends StatefulWidget> on State<T> {
+  FocusNode get panelFocus;
+
+  bool _wasShown = false;
+
+  // A hidden panel (a route on top, or collapsed) has its tickers disabled.
+  bool get _shown =>
+      (ModalRoute.isCurrentOf(context) ?? true) &&
+      TickerMode.valuesOf(context).enabled;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final shown = _shown;
+    if (shown && !_wasShown) focusPanel();
+    _wasShown = shown;
+  }
+
+  /// Takes focus once the frame that shows the panel is built.
+  void focusPanel() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_shown) return;
+      final elsewhere = textInputHasFocus() || liveTerminalHasFocus();
+      if (elsewhere && !panelFocus.hasFocus) return;
+      panelFocus.requestFocus();
+    });
+  }
+}
+
 /// An agent's questions answered with the keyboard, as in the TUI: one question
 /// at a time, a highlight separate from the committed answer, and a Submit tab
 /// when there are several questions.
@@ -49,8 +102,11 @@ class DesktopQuestions extends StatefulWidget {
   State<DesktopQuestions> createState() => _DesktopQuestionsState();
 }
 
-class _DesktopQuestionsState extends State<DesktopQuestions> {
+class _DesktopQuestionsState extends State<DesktopQuestions>
+    with _PanelFocus<DesktopQuestions> {
   final _focus = FocusNode(debugLabel: 'DesktopQuestions');
+  @override
+  FocusNode get panelFocus => _focus;
   late QuestionCursor _c;
   List<TextEditingController> _custom = [];
   List<TextEditingController> _notes = [];
@@ -71,14 +127,6 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
   void initState() {
     super.initState();
     _reset();
-    _focusPanel();
-  }
-
-  /// Takes focus once the frame that shows the panel is built.
-  void _focusPanel() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focus.requestFocus();
-    });
   }
 
   @override
@@ -93,7 +141,7 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
         (_) => _disposeFields(custom, notes, customFocus, noteFocus),
       );
       _reset();
-      _focusPanel();
+      focusPanel();
     }
   }
 
@@ -160,11 +208,12 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
       : (_customActive ? _customFocus[_c.tab] : null);
 
   /// Applies [change], then moves focus to the open field (or back to the panel)
-  /// once the frame that shows it is built.
-  void _update(VoidCallback change) {
+  /// once the frame that shows it is built. A click passes [takeFocus]: it
+  /// moves focus into the panel even when focus was elsewhere.
+  void _update(VoidCallback change, {bool takeFocus = false}) {
     // A field that closes takes its focus with it, so remember whether the
     // panel had focus before the change.
-    final hadFocus = _focus.hasFocus;
+    final hadFocus = takeFocus || _focus.hasFocus;
     setState(change);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !hadFocus) return;
@@ -177,10 +226,10 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
     });
   }
 
-  void _move(VoidCallback m) => _update(() {
+  void _move(VoidCallback m, {bool takeFocus = false}) => _update(() {
     m();
     _customClosed = false;
-  });
+  }, takeFocus: takeFocus);
 
   void _act(CursorOutcome o) {
     final sid = widget.session.id;
@@ -215,9 +264,7 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
   }
 
   KeyEventResult _onKey(FocusNode _, KeyEvent e) {
-    if (e is KeyUpEvent || widget.busy || _qs.isEmpty) {
-      return KeyEventResult.ignored;
-    }
+    if (e is KeyUpEvent || _qs.isEmpty) return KeyEventResult.ignored;
     final kb = HardwareKeyboard.instance;
     if (kb.isMetaPressed || kb.isControlPressed || kb.isAltPressed) {
       return KeyEventResult.ignored;
@@ -225,6 +272,15 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
     final k = e.logicalKey;
     final plain = !kb.isShiftPressed;
     final field = _customActive || _noteActive;
+
+    if (widget.busy) {
+      // Swallow the panel's own keys, so j/k do not move focus out.
+      final own = _arrows.contains(k) ||
+          _enters.contains(k) ||
+          (!field && k == LogicalKeyboardKey.space) ||
+          (!field && plain && _letters.contains(k));
+      return own ? KeyEventResult.handled : KeyEventResult.ignored;
+    }
 
     if (k == LogicalKeyboardKey.escape) {
       if (!field) return KeyEventResult.ignored;
@@ -245,7 +301,8 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
       _move(_c.down);
       return KeyEventResult.handled;
     }
-    if (k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.numpadEnter) {
+    if (_enters.contains(k)) {
+      if (_isRepeat(e)) return KeyEventResult.handled;
       late CursorOutcome o;
       _move(() {
         if (_noteActive) _c.drafts[_c.tab].noteOpen = false;
@@ -287,7 +344,7 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
       return KeyEventResult.handled;
     }
     if (plain && k == LogicalKeyboardKey.keyC && !_c.confirming) {
-      _act(CursorOutcome.chat);
+      if (!_isRepeat(e)) _act(CursorOutcome.chat);
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -295,27 +352,24 @@ class _DesktopQuestionsState extends State<DesktopQuestions> {
 
   void _tapOption(int q, int i) {
     if (widget.busy) return;
-    _focus.requestFocus();
     late CursorOutcome o;
-    _move(() => o = _c.tapOption(q, i));
+    _move(() => o = _c.tapOption(q, i), takeFocus: true);
     _act(o);
   }
 
   void _tapControl(int i) {
     if (widget.busy) return;
-    _focus.requestFocus();
     late CursorOutcome o;
     _move(() {
       _c.submitSel = i;
       o = _c.enter();
-    });
+    }, takeFocus: true);
     _act(o);
   }
 
   void _tapTab(int i) {
     if (widget.busy || _c.confirming) return;
-    _focus.requestFocus();
-    _move(() => _c.tab = i);
+    _move(() => _c.tab = i, takeFocus: true);
   }
 
   @override
@@ -718,8 +772,11 @@ class DesktopDecision extends StatefulWidget {
   State<DesktopDecision> createState() => _DesktopDecisionState();
 }
 
-class _DesktopDecisionState extends State<DesktopDecision> {
+class _DesktopDecisionState extends State<DesktopDecision>
+    with _PanelFocus<DesktopDecision> {
   final _focus = FocusNode(debugLabel: 'DesktopDecision');
+  @override
+  FocusNode get panelFocus => _focus;
   final _reasonFocus = FocusNode();
   final _reason = TextEditingController();
   int _highlight = 0;
@@ -735,19 +792,6 @@ class _DesktopDecisionState extends State<DesktopDecision> {
   int get _hl => _highlight.clamp(0, _options.length - 1);
 
   @override
-  void initState() {
-    super.initState();
-    _focusPanel();
-  }
-
-  /// Takes focus once the frame that shows the panel is built.
-  void _focusPanel() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focus.requestFocus();
-    });
-  }
-
-  @override
   void didUpdateWidget(DesktopDecision old) {
     super.didUpdateWidget(old);
     if (old.interaction.requestId != _ix.requestId || old.kind != widget.kind) {
@@ -755,7 +799,7 @@ class _DesktopDecisionState extends State<DesktopDecision> {
       _rejectIndex = 0;
       _reasonOpen = false;
       _reason.clear();
-      _focusPanel();
+      focusPanel();
     }
   }
 
@@ -768,9 +812,10 @@ class _DesktopDecisionState extends State<DesktopDecision> {
   }
 
   /// Applies [change], then moves focus to the reason field (or back to the
-  /// panel) once the frame that shows it is built.
-  void _update(VoidCallback change) {
-    final hadFocus = _focus.hasFocus;
+  /// panel) once the frame that shows it is built. A click passes [takeFocus]:
+  /// it moves focus into the panel even when focus was elsewhere.
+  void _update(VoidCallback change, {bool takeFocus = false}) {
+    final hadFocus = takeFocus || _focus.hasFocus;
     setState(change);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !hadFocus) return;
@@ -779,14 +824,14 @@ class _DesktopDecisionState extends State<DesktopDecision> {
     });
   }
 
-  void _select(int i) {
+  void _select(int i, {bool takeFocus = false}) {
     final o = _options[i];
     if (o.reject) {
       _update(() {
         _highlight = i;
         _rejectIndex = i;
         _reasonOpen = true;
-      });
+      }, takeFocus: takeFocus);
       return;
     }
     widget.onRespond(
@@ -813,13 +858,24 @@ class _DesktopDecisionState extends State<DesktopDecision> {
       _update(() => _highlight = (_hl + d).clamp(0, _options.length - 1));
 
   KeyEventResult _onKey(FocusNode _, KeyEvent e) {
-    if (e is KeyUpEvent || widget.busy) return KeyEventResult.ignored;
+    if (e is KeyUpEvent) return KeyEventResult.ignored;
     final kb = HardwareKeyboard.instance;
     if (kb.isMetaPressed || kb.isControlPressed || kb.isAltPressed) {
       return KeyEventResult.ignored;
     }
     final k = e.logicalKey;
     final plain = !kb.isShiftPressed;
+
+    if (widget.busy) {
+      // Swallow the panel's own keys, so j/k do not move focus out.
+      final own = k == LogicalKeyboardKey.arrowUp ||
+          k == LogicalKeyboardKey.arrowDown ||
+          _enters.contains(k) ||
+          (!_reasonOpen &&
+              plain &&
+              (k == LogicalKeyboardKey.keyJ || k == LogicalKeyboardKey.keyK));
+      return own ? KeyEventResult.handled : KeyEventResult.ignored;
+    }
 
     if (k == LogicalKeyboardKey.escape) {
       if (!_reasonOpen) return KeyEventResult.ignored;
@@ -834,7 +890,8 @@ class _DesktopDecisionState extends State<DesktopDecision> {
       _move(1);
       return KeyEventResult.handled;
     }
-    if (k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.numpadEnter) {
+    if (_enters.contains(k)) {
+      if (_isRepeat(e)) return KeyEventResult.handled;
       if (_reasonOpen) {
         _sendReject();
       } else {
@@ -857,9 +914,8 @@ class _DesktopDecisionState extends State<DesktopDecision> {
 
   void _tap(int i) {
     if (widget.busy) return;
-    _focus.requestFocus();
     setState(() => _highlight = i);
-    _select(i);
+    _select(i, takeFocus: true);
   }
 
   @override

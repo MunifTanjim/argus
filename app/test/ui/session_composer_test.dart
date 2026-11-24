@@ -887,6 +887,30 @@ void main() {
     });
   });
 
+  testWidgets('expanding the collapsed panel on desktop gives it focus again',
+      (t) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final repo = _Recording();
+    await _pump(
+        t,
+        _s(status: 'awaiting_input', interaction: {
+          'kind': 'permission',
+          'request_id': 'p1',
+          'tool_name': 'Bash'
+        }),
+        repo);
+    await t.pumpAndSettle();
+    String? focused() => FocusManager.instance.primaryFocus?.debugLabel;
+    expect(focused(), 'DesktopDecision');
+    await t.tap(find.byTooltip('Collapse'));
+    await t.pumpAndSettle();
+    expect(focused(), isNot('DesktopDecision'));
+    await t.tap(find.byTooltip('Expand'));
+    await t.pumpAndSettle();
+    expect(focused(), 'DesktopDecision');
+  });
+
   group('send key', () {
     void mac(WidgetTester t) {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;

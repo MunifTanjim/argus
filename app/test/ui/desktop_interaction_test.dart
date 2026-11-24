@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/state/respond_params.dart';
 import 'package:argus/ui/desktop_interaction.dart';
+import 'package:argus/ui/desktop_shortcuts.dart';
 import 'package:argus/ui/interaction_panel.dart';
 
 Session _session(Map<String, dynamic> interaction, {String agent = 'claude'}) =>
@@ -425,7 +426,24 @@ void main() {
       ),
     );
     await tester.pump(); // the busy progress bar never settles
-    expect(await tester.sendKeyEvent(LogicalKeyboardKey.enter), isFalse);
+    // The panel's own keys are swallowed, so j/k do not move focus out.
+    for (final k in [
+      LogicalKeyboardKey.enter,
+      LogicalKeyboardKey.numpadEnter,
+      LogicalKeyboardKey.arrowUp,
+      LogicalKeyboardKey.arrowDown,
+      LogicalKeyboardKey.arrowLeft,
+      LogicalKeyboardKey.arrowRight,
+      LogicalKeyboardKey.keyJ,
+      LogicalKeyboardKey.keyK,
+      LogicalKeyboardKey.space,
+      LogicalKeyboardKey.keyN,
+      LogicalKeyboardKey.keyC,
+    ]) {
+      expect(await tester.sendKeyEvent(k), isTrue, reason: '$k');
+    }
+    expect(await tester.sendKeyEvent(LogicalKeyboardKey.keyX), isFalse);
+    expect(await tester.sendKeyEvent(LogicalKeyboardKey.escape), isFalse);
     expect(sent, isEmpty);
   });
 
@@ -464,6 +482,32 @@ void main() {
       });
     },
   );
+
+  testWidgets('held Enter advances one tab, not through all of them', (
+    tester,
+  ) async {
+    final sent = await _pump(
+      tester,
+      _ix([_q('H1', 'First?'), _q('H2', 'Second?'), _q('H3', 'Third?')]),
+    );
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
+    expect(await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter), isTrue);
+    expect(await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter), isTrue);
+    expect(await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter), isTrue);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('Second?'), findsOneWidget);
+    expect(sent, isEmpty);
+  });
+
+  testWidgets('held c sends one clarify', (tester) async {
+    final sent = await _pump(tester, _ix([_q('Pick', 'Which one?')]));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyC);
+    expect(await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyC), isTrue);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyC);
+    await tester.pumpAndSettle();
+    expect(sent, hasLength(1));
+  });
 
   testWidgets('Space with the custom field open does not toggle a multi row', (
     tester,
@@ -626,7 +670,8 @@ void main() {
 
     String? focusedLabel() => FocusManager.instance.primaryFocus?.debugLabel;
 
-    // A text field outside the panel that holds focus until the panel asks.
+    // A focusable outside the panel (not a text field, which keeps its focus)
+    // that holds focus until the panel asks.
     Future<ValueNotifier<Session?>> pumpSwappable(
       WidgetTester tester,
       Session? first,
@@ -646,7 +691,16 @@ void main() {
               valueListenable: current,
               builder: (_, s, _) => Column(
                 children: [
-                  const TextField(key: ValueKey('outside')),
+                  Focus(
+                    key: const ValueKey('outside'),
+                    child: Builder(
+                      builder: (c) => GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => Focus.of(c).requestFocus(),
+                        child: const SizedBox(width: 200, height: 40),
+                      ),
+                    ),
+                  ),
                   if (s != null) Expanded(child: panel(s)),
                 ],
               ),
@@ -756,6 +810,194 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Reason (optional)'), findsNothing);
       expect(focusedLabel(), 'DesktopDecision');
+    });
+
+    // Each panel, with the label its focus node carries and a prompt for it.
+    final panels = <(String, Map<String, dynamic>, Widget Function(Session, List<Map<String, dynamic>>))>[
+      (
+        'DesktopDecision',
+        {'kind': 'permission', 'request_id': 'd1'},
+        (s, sent) => DesktopDecision(
+          session: s,
+          interaction: s.interaction!,
+          kind: 'permission',
+          detail: const [],
+          busy: false,
+          onRespond: sent.add,
+        ),
+      ),
+      (
+        'DesktopQuestions',
+        _ix([_q('Pick', 'Which one?')]),
+        (s, sent) => DesktopQuestions(
+          session: s,
+          interaction: s.interaction!,
+          busy: false,
+          onRespond: sent.add,
+        ),
+      ),
+    ];
+
+    for (final (label, ix, build) in panels) {
+      testWidgets('$label: a prompt under a pushed route leaves its text '
+          'field focused, and takes focus once the route pops', (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        final nav = GlobalKey<NavigatorState>();
+        final cur = ValueNotifier<Session?>(null);
+        addTearDown(cur.dispose);
+        final sent = <Map<String, dynamic>>[];
+        await tester.pumpWidget(
+          MaterialApp(
+            navigatorKey: nav,
+            home: Scaffold(
+              body: ValueListenableBuilder<Session?>(
+                valueListenable: cur,
+                builder: (_, s, _) =>
+                    s == null ? const SizedBox() : build(s, sent),
+              ),
+            ),
+          ),
+        );
+        nav.currentState!.push(
+          MaterialPageRoute<void>(
+            builder: (_) => const Scaffold(
+              body: TextField(key: ValueKey('top'), autofocus: true),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        bool topFocused() => tester
+            .widget<EditableText>(
+              find.descendant(
+                of: find.byKey(const ValueKey('top')),
+                matching: find.byType(EditableText),
+              ),
+            )
+            .focusNode
+            .hasPrimaryFocus;
+        expect(topFocused(), isTrue);
+        cur.value = _session(ix);
+        await tester.pumpAndSettle();
+        expect(topFocused(), isTrue);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(sent, isEmpty);
+        nav.currentState!.pop();
+        await tester.pumpAndSettle();
+        expect(focusedLabel(), label);
+      });
+
+      testWidgets('$label: a prompt leaves a focused live terminal focused', (
+        tester,
+      ) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        final terminal = FocusNode(debugLabel: 'terminal');
+        addTearDown(terminal.dispose);
+        liveTerminalFocusNodes.add(terminal);
+        addTearDown(() => liveTerminalFocusNodes.remove(terminal));
+        final cur = ValueNotifier<Session?>(null);
+        addTearDown(cur.dispose);
+        final sent = <Map<String, dynamic>>[];
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: ValueListenableBuilder<Session?>(
+                valueListenable: cur,
+                builder: (_, s, _) => Column(
+                  children: [
+                    Focus(
+                      focusNode: terminal,
+                      child: const SizedBox(width: 200, height: 40),
+                    ),
+                    if (s != null) Expanded(child: build(s, sent)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+        terminal.requestFocus();
+        await tester.pump();
+        expect(terminal.hasPrimaryFocus, isTrue);
+        cur.value = _session(ix);
+        await tester.pumpAndSettle();
+        expect(terminal.hasPrimaryFocus, isTrue);
+      });
+    }
+
+    // A text field outside the panel holds focus while the panel is shown.
+    Future<List<Map<String, dynamic>>> pumpBesideText(
+      WidgetTester tester,
+      Widget Function(List<Map<String, dynamic>> sent) panel,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      tester.view.physicalSize = const Size(1200, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final sent = <Map<String, dynamic>>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                const TextField(key: ValueKey('outside-text')),
+                Expanded(child: panel(sent)),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('outside-text')));
+      await tester.pumpAndSettle();
+      expect(focusedLabel(), isNot('DesktopQuestions'));
+      expect(focusedLabel(), isNot('DesktopDecision'));
+      return sent;
+    }
+
+    testWidgets('clicking the other row focuses its field while focus was '
+        'in another text field', (tester) async {
+      final s = _session(_ix([_q('Pick', 'Which one?')]));
+      await pumpBesideText(
+        tester,
+        (sent) => DesktopQuestions(
+          session: s,
+          interaction: s.interaction!,
+          busy: false,
+          onRespond: sent.add,
+        ),
+      );
+      await tester.tap(find.text(otherLabel));
+      await tester.pumpAndSettle();
+      expect(_fieldFocused(tester), isTrue);
+    });
+
+    testWidgets('clicking the reject option focuses the reason field while '
+        'focus was in another text field', (tester) async {
+      final s = _session({'kind': 'permission', 'request_id': 'd1'});
+      await pumpBesideText(
+        tester,
+        (sent) => DesktopDecision(
+          session: s,
+          interaction: s.interaction!,
+          kind: 'permission',
+          detail: const [],
+          busy: false,
+          onRespond: sent.add,
+        ),
+      );
+      await tester.tap(find.text('Deny'));
+      await tester.pumpAndSettle();
+      final reason = tester.widget<EditableText>(
+        find.descendant(
+          of: find.byType(DesktopDecision),
+          matching: find.byType(EditableText),
+        ),
+      );
+      expect(reason.focusNode.hasPrimaryFocus, isTrue);
     });
   });
 
@@ -997,8 +1239,30 @@ void main() {
         ),
       );
       await tester.pump(); // the busy progress bar never settles
-      expect(await tester.sendKeyEvent(LogicalKeyboardKey.enter), isFalse);
+      // The panel's own keys are swallowed, so j/k do not move focus out.
+      for (final k in [
+        LogicalKeyboardKey.enter,
+        LogicalKeyboardKey.numpadEnter,
+        LogicalKeyboardKey.arrowUp,
+        LogicalKeyboardKey.arrowDown,
+        LogicalKeyboardKey.keyJ,
+        LogicalKeyboardKey.keyK,
+      ]) {
+        expect(await tester.sendKeyEvent(k), isTrue, reason: '$k');
+      }
+      expect(await tester.sendKeyEvent(LogicalKeyboardKey.keyX), isFalse);
+      expect(await tester.sendKeyEvent(LogicalKeyboardKey.escape), isFalse);
       expect(sent, isEmpty);
+    });
+
+    testWidgets('held Enter sends the permission once', (tester) async {
+      final sent = await pumpDecision(tester, dix(options: threeOptions));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
+      expect(await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter), isTrue);
+      expect(await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter), isTrue);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(sent, hasLength(1));
     });
   });
 }
