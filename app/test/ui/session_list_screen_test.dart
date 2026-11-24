@@ -36,7 +36,10 @@ void main() {
             _s('dev:2', 'dev', 'working'),
           ])),
       gatewayProvider.overrideWithValue(null),
+      groupByStoreProvider.overrideWithValue(
+          GroupByStore(_MemKv({'sessions.groupBy': 'host'}))),
     ]));
+    await tester.pump();
     await tester.pump();
     expect(find.text('NEEDS YOU'), findsOneWidget);
     expect(find.text('◆'), findsWidgets);
@@ -196,7 +199,7 @@ void main() {
     });
   });
   testWidgets('the group-by menu regroups the list and is saved', (tester) async {
-    final kv = _MemKv();
+    final kv = _MemKv({'sessions.groupBy': 'host'});
     await tester.pumpWidget(_app([
       sessionsProvider.overrideWith(() => _SeededSessions([
             _sa('dev:1', 'dev', 'working', 'claude'),
@@ -206,6 +209,7 @@ void main() {
       groupByStoreProvider.overrideWithValue(GroupByStore(kv)),
     ]));
     await tester.pump();
+    await tester.pump();
     expect(find.text('DEV'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Group sessions'));
@@ -214,7 +218,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('DEV'), findsNothing);
-    expect(find.text('WORKING'), findsOneWidget);
+    // The WORKING status tile shares the section label's text.
+    expect(find.text('WORKING'), findsNWidgets(2));
     expect(find.text('IDLE'), findsOneWidget);
     expect(kv.m['sessions.groupBy'], 'status');
   });
@@ -228,6 +233,9 @@ class _SeededSessions extends SessionsNotifier {
 }
 
 class _MemKv implements SecureKv {
+  _MemKv([Map<String, String> seed = const {}]) {
+    m.addAll(seed);
+  }
   final m = <String, String>{};
   @override
   Future<String?> read(String key) async => m[key];

@@ -71,7 +71,7 @@ class GroupByStore {
     final v = await _kv.read(_key);
     return GroupBy.values.firstWhere(
       (g) => g.name == v,
-      orElse: () => GroupBy.host,
+      orElse: () => GroupBy.status,
     );
   }
 
@@ -86,7 +86,7 @@ class GroupByController extends Notifier<GroupBy> {
   GroupBy build() {
     // Hydrate async.
     _load();
-    return GroupBy.host;
+    return GroupBy.status;
   }
 
   // Set by a choice made while the load runs, so the load does not undo it.

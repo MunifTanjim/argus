@@ -473,6 +473,13 @@ class ArgusTokens extends ThemeExtension<ArgusTokens> {
   final AppDensity density;
   final StatusStyle statusStyle;
 
+  /// Space between session rows. Filled cards and comfortable rows are set
+  /// apart by a gap; compact quiet rows touch and are split by a divider.
+  double get rowGap =>
+      statusStyle == StatusStyle.filled || density == AppDensity.comfortable
+          ? 8
+          : 0;
+
   @override
   ArgusTokens copyWith({
     Color? canvas,

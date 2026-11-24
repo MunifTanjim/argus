@@ -76,10 +76,10 @@ void main() {
   });
 
   group('group-by', () {
-    test('host by default; a choice is saved', () async {
+    test('status by default; a choice is saved', () async {
       final kv = _FakeKv({});
       final c = _groupContainer(kv);
-      expect(c.read(groupByProvider), GroupBy.host);
+      expect(c.read(groupByProvider), GroupBy.status);
       await c.read(groupByProvider.notifier).set(GroupBy.project);
       expect(c.read(groupByProvider), GroupBy.project);
       expect(kv.m['sessions.groupBy'], 'project');
@@ -92,9 +92,18 @@ void main() {
       expect(c.read(groupByProvider), GroupBy.agent);
     });
 
-    test('an unknown stored value falls back to host', () async {
+    test('an unknown stored value falls back to status', () async {
       final g =
           await GroupByStore(_FakeKv({'sessions.groupBy': 'folder'})).load();
+      expect(g, GroupBy.status);
+    });
+
+    test('the store defaults to status with nothing saved', () async {
+      expect(await GroupByStore(_FakeKv({})).load(), GroupBy.status);
+    });
+
+    test('a saved host value still wins', () async {
+      final g = await GroupByStore(_FakeKv({'sessions.groupBy': 'host'})).load();
       expect(g, GroupBy.host);
     });
 

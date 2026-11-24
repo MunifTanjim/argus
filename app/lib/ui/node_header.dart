@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/enums.dart';
+import 'card_layout.dart';
 import 'status_style.dart';
 import 'theme.dart';
 
@@ -19,16 +20,16 @@ class SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(
     children: [
-      SizedBox(width: 14, child: Center(child: leading)),
-      const SizedBox(width: 6),
+      SizedBox(width: kLeadWidth, child: Center(child: leading)),
+      const SizedBox(width: kLeadGap),
       Expanded(
         child: Text(
           label.toUpperCase(),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(
+          style: mono.copyWith(
             color: color ?? context.tokens.textDim,
-            fontSize: 11,
+            fontSize: 10,
             fontWeight: FontWeight.w600,
             letterSpacing: 0.8,
           ),

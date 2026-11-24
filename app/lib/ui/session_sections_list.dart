@@ -8,8 +8,10 @@ import '../state/gateway.dart';
 import '../state/grouping.dart';
 import '../state/projects.dart';
 import '../state/session_filter.dart';
+import '../state/status_filter.dart';
 import '../transport/connection.dart';
 import 'agent_badge.dart';
+import 'blocked_card.dart';
 import 'nerd_icon.dart';
 import 'node_header.dart';
 import 'responsive.dart';
@@ -26,6 +28,7 @@ class SessionSectionsList extends ConsumerWidget {
     required this.sessions,
     this.emptyText = 'No sessions.',
     this.groupBy = GroupBy.host,
+    this.applyStatusFilter = false,
   });
 
   final Iterable<Session> sessions;
@@ -34,25 +37,48 @@ class SessionSectionsList extends ConsumerWidget {
   /// The home list's grouping; workspace lists keep host.
   final GroupBy groupBy;
 
+  /// Whether the home status tiles' filter applies; workspace lists ignore it.
+  final bool applyStatusFilter;
+
   // A tap opens the session; a long press offers its actions.
   Widget _buildCard(
     BuildContext context,
     Session s,
     SessionSection section,
     bool multiAgent,
-  ) => SessionCard(
-    session: s,
-    showNode: section.showNode,
-    showAgent: multiAgent,
-    onTap: () => Navigator.of(context).push(sessionDetailRoute(s)),
-    onLongPress: () => showSessionActions(context, s),
-  );
+  ) => s.blocked
+      // Rows without a gap touch; the bordered card needs one below it.
+      ? Padding(
+          padding: EdgeInsets.only(
+            bottom: context.tokens.rowGap == 0 ? 8 : 0,
+          ),
+          child: BlockedCard(
+            session: s,
+            showNode: section.showNode,
+          ),
+        )
+      : SessionCard(
+          session: s,
+          showNode: section.showNode,
+          showAgent: multiAgent,
+          onTap: () => Navigator.of(context).push(sessionDetailRoute(s)),
+          onLongPress: () => showSessionActions(context, s),
+        );
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final activeOnly = ref.watch(activeOnlyProvider);
     final query = ref.watch(sessionSearchProvider) ?? '';
+    final tileFilter = applyStatusFilter ? ref.watch(statusFilterProvider) : null;
+    if (tileFilter != null && tileCounts(sessions)[tileFilter] == 0) {
+      // The provider cannot change during build. Clearing is idempotent, so
+      // the listener fires once: the filter is null afterwards.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (ref.context.mounted) ref.read(statusFilterProvider.notifier).clear();
+      });
+    }
     final shown = sessions
+        .where((s) => tileFilter == null || tileStatusOf(s) == tileFilter)
         .where((s) => !activeOnly || isActiveSession(s))
         .where((s) => matchesSessionQuery(s, query))
         .toList();
@@ -93,7 +119,7 @@ class SessionSectionsList extends ConsumerWidget {
             _SectionHeader(section: section),
             for (final s in section.sessions)
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: EdgeInsets.only(bottom: context.tokens.rowGap),
                 child: _buildCard(context, s, section, multiAgent),
               ),
             const SizedBox(height: 8),
@@ -220,7 +246,8 @@ class _SectionHeader extends ConsumerWidget {
     final outdated = ref.watch(outdatedNodeIdsProvider
         .select((ids) => section.sessions.any((s) => ids.contains(s.nodeId))));
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8, top: 4),
+      // The header starts at the cards' left edge.
+      padding: const EdgeInsets.only(top: 4, bottom: 8),
       child: switch (section.icon) {
         SectionIcon.needsYou => NeedsYouHeader(
           label: section.title,

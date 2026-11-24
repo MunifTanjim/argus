@@ -8,6 +8,7 @@ Session _s(
   String node,
   String repo,
   String task, {
+  String? name,
   Map<String, dynamic>? interaction,
 }) => Session.fromJson(
   jsonDecode(
@@ -24,6 +25,7 @@ Session _s(
             'current_path': '/p',
           },
           'repo': repo,
+          'name': ?name,
           'node_id': node,
           'node_label': node,
           'summary': {
@@ -41,7 +43,8 @@ Session _s(
 );
 
 /// The sessions the home goldens show: one blocked on a permission prompt,
-/// one waiting, two working, one idle, across two hosts.
+/// one waiting, two working, one idle, across two hosts. Two have a session
+/// name, so the goldens show both title layouts.
 final homeFixtureSessions = [
   _s(
     'mac:%1',
@@ -61,9 +64,10 @@ final homeFixtureSessions = [
     'mac',
     'website',
     'finish the landing page',
+    name: 'landing-page',
     interaction: {'kind': 'idle'},
   ),
-  _s('mac:%3', 'working', 'mac', 'argus', 'fix the bug'),
+  _s('mac:%3', 'working', 'mac', 'argus', 'fix the bug', name: 'auth-refactor'),
   _s('linux:%4', 'working', 'linux', 'infra', 'migrate the database'),
   _s('linux:%5', 'idle', 'linux', 'infra', 'review the diff'),
 ];
