@@ -243,14 +243,29 @@ List<SessionSection> buildSections(
   }
   final sorted = groups.values.toList()..sort((a, b) => a.compareTo(b));
 
+  // Status grouping splits "Needs you" into Blocked (a prompt stops the
+  // agent) and Waiting (the agent finished its turn).
+  final split = by == GroupBy.status;
+  final blocked = split ? awaiting.where((s) => s.blocked).toList() : awaiting;
+  final waiting =
+      split ? awaiting.where((s) => !s.blocked).toList() : const <Session>[];
+
   return [
-    if (awaiting.isNotEmpty)
+    if (blocked.isNotEmpty)
       SessionSection(
-        title: 'Needs you',
+        title: split ? 'Blocked' : 'Needs you',
         icon: SectionIcon.needsYou,
         needsYou: true,
         showNode: multiNode,
-        sessions: awaiting,
+        sessions: blocked,
+      ),
+    if (waiting.isNotEmpty)
+      SessionSection(
+        title: 'Waiting',
+        icon: SectionIcon.needsYou,
+        needsYou: true,
+        showNode: multiNode,
+        sessions: waiting,
       ),
     for (final g in sorted)
       SessionSection(

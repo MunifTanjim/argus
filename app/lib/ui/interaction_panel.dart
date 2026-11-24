@@ -8,6 +8,7 @@ import '../data/session_repository.dart';
 import '../models/entry.dart';
 import '../models/enums.dart';
 import '../models/session.dart';
+import '../state/decision_options.dart';
 import '../state/respond_params.dart';
 import '../state/respond_view_model.dart';
 import 'code_block.dart';
@@ -158,23 +159,14 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
           const DecisionOption(label: 'Reject', value: 'deny', reject: true),
     );
 
-    final options = ix.options.isNotEmpty
-        ? ix.options
-        : const [
-            DecisionOption(label: 'Allow', value: 'allow'),
-            DecisionOption(label: 'Deny', value: 'deny', reject: true),
-          ];
+    final options = effectiveOptions(ix);
 
     Widget optionButton(DecisionOption o, bool primary) {
       void onTap() {
         if (o.reject) {
           setState(() => _denying = true);
         } else {
-          _respond(optionRespond(
-              sessionId: _sid,
-              kind: kind,
-              value: o.value,
-              requestId: ix.requestId));
+          _respond(oneTapRespond(widget.session, o));
         }
       }
 

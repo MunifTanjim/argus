@@ -8,6 +8,7 @@ import '../state/sessions.dart';
 import '../transport/connection.dart';
 import 'device_identity_screen.dart';
 import 'session_sections_list.dart';
+import 'status_tiles.dart';
 import 'shell_drawer.dart';
 import 'spawn_dialog.dart';
 
@@ -57,12 +58,14 @@ class SessionListScreen extends ConsumerWidget {
                 MaterialPageRoute(builder: (_) => const DeviceIdentityScreen()),
               ),
             ),
+          StatusTiles(sessions: sessions),
           Expanded(
             child: RefreshIndicator(
               onRefresh: () => _refresh(ref),
               child: SessionSectionsList(
                 sessions: sessions,
                 groupBy: ref.watch(groupByProvider),
+                applyStatusFilter: true,
                 emptyText: unauthorized
                     ? 'Sessions appear after this device is authorized.'
                     : 'No sessions.',

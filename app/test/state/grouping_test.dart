@@ -185,8 +185,45 @@ void main() {
         _g('a:3', 'alpha', 'working'),
         _g('a:4', 'alpha', 'awaiting_input'),
       ], by: GroupBy.status);
-      expect(_titles(s), ['Needs you', 'working', 'idle', 'dead']);
+      expect(_titles(s), ['Waiting', 'working', 'idle', 'dead']);
       expect(s.first.showNode, isTrue);
+    });
+
+    test('status grouping splits blocked from waiting', () {
+      final s = buildSections([
+        _s('a:1', 'alpha', 'awaiting_input', kind: 'permission'),
+        _s('a:2', 'alpha', 'awaiting_input', kind: 'idle'),
+        _s('a:3', 'alpha', 'working'),
+      ], by: GroupBy.status);
+      expect(_titles(s), ['Blocked', 'Waiting', 'working']);
+      expect(s[0].sessions.map((x) => x.id), ['a:1']);
+      expect(s[1].sessions.map((x) => x.id), ['a:2']);
+      expect(s[0].needsYou && s[1].needsYou, isTrue);
+      expect(s[0].icon, SectionIcon.needsYou);
+      expect(s[1].icon, SectionIcon.needsYou);
+    });
+
+    test('host grouping keeps one Needs you section', () {
+      final s = buildSections([
+        _s('a:1', 'alpha', 'awaiting_input', kind: 'permission'),
+        _s('a:2', 'alpha', 'awaiting_input', kind: 'idle'),
+      ], by: GroupBy.host);
+      expect(_titles(s), ['Needs you']);
+      expect(s.single.sessions.map((x) => x.id), ['a:1', 'a:2']);
+    });
+
+    test('Waiting is omitted when empty', () {
+      final s = buildSections([
+        _s('a:1', 'alpha', 'awaiting_input', kind: 'permission'),
+      ], by: GroupBy.status);
+      expect(_titles(s), ['Blocked']);
+    });
+
+    test('Blocked is omitted when nothing is blocked', () {
+      final s = buildSections([
+        _s('a:1', 'alpha', 'awaiting_input', kind: 'idle'),
+      ], by: GroupBy.status);
+      expect(_titles(s), ['Waiting']);
     });
 
     test('host sections name the host; cards do not', () {
