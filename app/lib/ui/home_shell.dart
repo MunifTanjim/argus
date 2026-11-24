@@ -65,9 +65,48 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     onSelectTab: (i) {
       if (!_covered) selectVisibleTab(i);
     },
+    onToggleSidebar: _uncovered(_toggleSidebar),
+    sidebarShown: _sidebarShown,
   );
+  // On macOS the wide layout's side panel can be hidden for the session.
+  bool _panelShown = true;
+  bool _wide = false;
+  // For the menu bar's label; set after the frame, as the menu bar is an
+  // ancestor.
+  final _sidebarShown = ValueNotifier(true);
+  bool _syncScheduled = false;
 
   bool get _covered => _route?.isCurrent == false;
+
+  static bool get _isMac => defaultTargetPlatform == TargetPlatform.macOS;
+
+  // The side panel in the wide layout, the open modal drawer otherwise.
+  bool get _sidebarVisible => _wide
+      ? _panelShown || !_isMac
+      : _drawerKey.currentState?.isOpen ?? false;
+
+  void _toggleSidebar() {
+    if (!_isMac) return;
+    if (!_wide) {
+      final drawer = _drawerKey.currentState;
+      if (drawer == null) return;
+      drawer.isOpen ? drawer.close() : drawer.open();
+      return;
+    }
+    setState(() => _panelShown = !_panelShown);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) TitlebarScope.toolbarsMoved(context);
+    });
+  }
+
+  void _syncSidebarShown() {
+    if (_syncScheduled) return;
+    _syncScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncScheduled = false;
+      if (mounted) _sidebarShown.value = _sidebarVisible;
+    });
+  }
 
   VoidCallback _uncovered(VoidCallback action) => () {
     if (!_covered) action();
@@ -87,6 +126,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   @override
   void dispose() {
     shellMenuRegistry.unregister(_menuActions);
+    _sidebarShown.dispose();
     super.dispose();
   }
 
@@ -305,11 +345,59 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     if (_nav == null || _nav!.scope != scope) _nav = _enter(scope);
     final main = _navigator(_nav!);
     final screenWidth = MediaQuery.sizeOf(context).width;
-    final wide = screenWidth >= kSidePanelMinWidth;
+    final wide = _wide = screenWidth >= kSidePanelMinWidth;
+    final panel = wide && (_panelShown || !_isMac);
     // On macOS the window's sidebar material shows through the side panel. A
     // modal drawer slides over the content, so it stays opaque.
-    final translucent = wide && defaultTargetPlatform == TargetPlatform.macOS;
-    _route = ModalRoute.of(context);
+    final translucent = panel && _isMac;
+    final route = _route = ModalRoute.of(context);
+    // Not under a page pushed over the shell; under a popup or dialog, it
+    // passes through as the rest of the toolbar row does.
+    final toggle =
+        _isMac &&
+        (route == null ||
+            route.isCurrent ||
+            (route.secondaryAnimation?.isDismissed ?? true));
+    // The traffic lights sit over the side panel; elsewhere the toolbar
+    // leaves room for them and the toggle.
+    final mainInset = panel
+        ? 0.0
+        : _isMac
+        ? TitlebarInsets.of(context) + kSidebarToggleWidth
+        : null;
+    final mainArea = mainInset == null
+        ? main
+        : TitlebarInsets(
+            left: mainInset,
+            child: translucent
+                ? ColoredBox(
+                    key: const ValueKey('shell-main'),
+                    color: AppColors.canvas,
+                    child: main,
+                  )
+                : main,
+          );
+    _syncSidebarShown();
+    final body = wide
+        ? Row(
+            children: [
+              if (panel) ...[
+                SizedBox(
+                  width: kSidePanelWidth,
+                  child: ProjectDrawer(color: translucent ? kSidebarTint : null),
+                ),
+                const VerticalDivider(width: 1),
+              ],
+              Expanded(key: const ValueKey('shell-main-area'), child: mainArea),
+            ],
+          )
+        : ModalShellDrawer(
+            key: _drawerKey,
+            width: min(screenWidth - 56, kDrawerMaxWidth),
+            drawer: const ProjectDrawer(),
+            onOpenChanged: (_) => setState(() {}),
+            child: mainArea,
+          );
 
     return PopScope(
       canPop: scope == null && homeTab == HomeTab.sessions && !_canPop,
@@ -325,36 +413,26 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           onSettings: _settings,
           onQuickSwitcher: () => showQuickSwitcher(context),
           onShortcutSheet: () => showShortcutSheet(context),
+          onToggleSidebar: _toggleSidebar,
           child: Scaffold(
             backgroundColor: translucent ? Colors.transparent : null,
-            body: wide
-                ? Row(
+            // The same tree with or without the toggle, so the panel keeps
+            // its state.
+            body: !_isMac
+                ? body
+                : Stack(
                     children: [
-                      SizedBox(
-                        width: kSidePanelWidth,
-                        child: ProjectDrawer(color: translucent ? kSidebarTint : null),
-                      ),
-                      const VerticalDivider(width: 1),
-                      // The traffic lights sit over the side panel.
-                      Expanded(
-                        child: TitlebarInsets(
+                      Positioned.fill(child: body),
+                      if (toggle)
+                        Positioned(
                           left: 0,
-                          child: translucent
-                              ? ColoredBox(
-                                  key: const ValueKey('shell-main'),
-                                  color: AppColors.canvas,
-                                  child: main,
-                                )
-                              : main,
+                          top: 0,
+                          child: SidebarToggleBar(
+                            shown: _sidebarVisible,
+                            onPressed: _toggleSidebar,
+                          ),
                         ),
-                      ),
                     ],
-                  )
-                : ModalShellDrawer(
-                    key: _drawerKey,
-                    width: min(screenWidth - 56, kDrawerMaxWidth),
-                    drawer: const ProjectDrawer(),
-                    child: main,
                   ),
           ),
         ),

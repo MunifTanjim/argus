@@ -18,6 +18,10 @@ const double kMacToolbarHeight = 52;
 /// The space at the left of the toolbar row that the traffic lights take.
 const double kTrafficLightsInset = 80;
 
+/// The space the sidebar toggle takes after the traffic lights: the 28 px
+/// button and the gaps around it.
+const double kSidebarToggleWidth = 36;
+
 /// A light tint over the macOS sidebar vibrancy, so text contrast stays.
 const Color kSidebarTint = Color(0x14000000);
 
@@ -1136,6 +1140,57 @@ class _RenderSizeObserver extends RenderProxyBox {
   void performLayout() {
     super.performLayout();
     onSize(size);
+  }
+}
+
+/// The sidebar toggle in the macOS toolbar row, beside the traffic lights:
+/// a 52 px row from the window's left edge to [TitlebarInsets] plus
+/// [kSidebarToggleWidth], with the button 4 px after the inset. It passes
+/// clicks through like the buttons of an [ArgusAppBar].
+class SidebarToggleBar extends StatelessWidget {
+  const SidebarToggleBar({
+    super.key,
+    required this.shown,
+    required this.onPressed,
+  });
+
+  /// Whether the sidebar is shown, which names the button's action.
+  final bool shown;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final inset = TitlebarInsets.of(context);
+    return MacosToolbarPassthroughScope(
+      child: _MacToolbar(
+        child: SizedBox(
+          width: inset + kSidebarToggleWidth,
+          height: kMacToolbarHeight,
+          child: Padding(
+            padding: EdgeInsets.only(left: inset + 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: ArgusAppBar._passthrough(
+                IconButton(
+                  icon: const Icon(Icons.view_sidebar_outlined),
+                  tooltip: shown ? 'Hide Sidebar' : 'Show Sidebar',
+                  iconSize: 18,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 28,
+                    height: 28,
+                  ),
+                  style: const ButtonStyle(
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: onPressed,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

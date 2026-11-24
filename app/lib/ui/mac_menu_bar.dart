@@ -11,6 +11,8 @@ class ShellMenuActions {
     required this.onQuickSwitcher,
     required this.onShortcutSheet,
     required this.onSelectTab,
+    required this.onToggleSidebar,
+    this.sidebarShown,
   });
 
   final VoidCallback onBack;
@@ -19,6 +21,10 @@ class ShellMenuActions {
   final VoidCallback onQuickSwitcher;
   final VoidCallback onShortcutSheet;
   final void Function(int index) onSelectTab;
+  final VoidCallback onToggleSidebar;
+
+  /// Whether the sidebar is shown, for the label of View › Hide Sidebar.
+  final ValueListenable<bool>? sidebarShown;
 }
 
 /// The actions of the mounted shell, if any. The menu bar lives above the
@@ -99,13 +105,17 @@ class _MacMenuBarState extends State<MacMenuBar> {
       widget.registry ?? shellMenuRegistry;
   // PlatformMenuBar sends the menus to the platform again whenever the items
   // are new objects, so they are rebuilt only when the app items turn on or
-  // off, and call the registered actions when selected.
+  // off or the sidebar item's label changes, and call the registered actions
+  // when selected.
   late bool _builtEnabled;
+  late bool _builtSidebarShown;
   late List<PlatformMenuItem> _menus;
+  ValueListenable<bool>? _sidebar;
 
   @override
   void initState() {
     super.initState();
+    _listenSidebar();
     _menus = _build();
     _registry.addListener(_onRegistry);
   }
@@ -113,13 +123,30 @@ class _MacMenuBarState extends State<MacMenuBar> {
   @override
   void dispose() {
     _registry.removeListener(_onRegistry);
+    _sidebar?.removeListener(_update);
     super.dispose();
   }
 
   bool get _enabled => _registry.actions != null;
 
+  bool get _sidebarShown => _sidebar?.value ?? true;
+
+  void _listenSidebar() {
+    final sidebar = _registry.actions?.sidebarShown;
+    if (sidebar == _sidebar) return;
+    _sidebar?.removeListener(_update);
+    _sidebar = sidebar?..addListener(_update);
+  }
+
   void _onRegistry() {
-    if (_enabled == _builtEnabled) return;
+    _listenSidebar();
+    _update();
+  }
+
+  void _update() {
+    if (_enabled == _builtEnabled && _sidebarShown == _builtSidebarShown) {
+      return;
+    }
     setState(() => _menus = _build());
   }
 
@@ -132,6 +159,7 @@ class _MacMenuBarState extends State<MacMenuBar> {
 
   List<PlatformMenuItem> _build() {
     _builtEnabled = _enabled;
+    _builtSidebarShown = _sidebarShown;
     return [
       PlatformMenu(label: 'Argus', menus: [
         const PlatformMenuItemGroup(members: [
@@ -174,6 +202,11 @@ class _MacMenuBarState extends State<MacMenuBar> {
         ),
       ]),
       PlatformMenu(label: 'View', menus: [
+        PlatformMenuItemGroup(members: [
+          PlatformMenuItem(
+              label: _builtSidebarShown ? 'Hide Sidebar' : 'Show Sidebar',
+              onSelected: _app((a) => a.onToggleSidebar())),
+        ]),
         PlatformMenuItemGroup(members: [
           PlatformMenuItem(
               label: 'Quick Switcher',

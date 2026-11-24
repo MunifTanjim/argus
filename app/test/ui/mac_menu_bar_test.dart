@@ -23,13 +23,17 @@ List<MethodCall> _menuChannel(WidgetTester tester) {
   return calls;
 }
 
-ShellMenuActions _actions(List<String> log) => ShellMenuActions(
+ShellMenuActions _actions(List<String> log,
+        {ValueListenable<bool>? sidebarShown}) =>
+    ShellMenuActions(
       onBack: () => log.add('back'),
       onSpawn: () => log.add('spawn'),
       onSettings: () => log.add('settings'),
       onQuickSwitcher: () => log.add('quick'),
       onShortcutSheet: () => log.add('sheet'),
       onSelectTab: (i) => log.add('tab $i'),
+      onToggleSidebar: () => log.add('sidebar'),
+      sidebarShown: sidebarShown,
     );
 
 ShellMenuRegistry _registry() {
@@ -56,6 +60,7 @@ Future<List<String>> _pump(WidgetTester tester, {Widget? child}) async {
 
 const _appItems = [
   ('Argus', 'Settings…'),
+  ('View', 'Hide Sidebar'),
   ('View', 'Quick Switcher'),
   ('View', 'Sessions'),
   ('View', 'History'),
@@ -120,6 +125,7 @@ void main() {
       expect(_item(tester, 'Edit', label), isNotNull);
     }
     for (final label in [
+      'Hide Sidebar',
       'Quick Switcher',
       'Sessions',
       'History',
@@ -176,6 +182,35 @@ void main() {
     expect(log, ['settings', 'quick', 'sheet', 'back']);
   });
 
+  testWidgets(
+      'View › Hide Sidebar calls onToggleSidebar; its label follows the sidebar without sending the menus for other rebuilds',
+      (tester) async {
+    _platform(TargetPlatform.macOS);
+    final sent = _menuChannel(tester);
+    final shown = ValueNotifier(true);
+    addTearDown(shown.dispose);
+    final registry = _registry();
+    final log = <String>[];
+    registry.register(_actions(log, sidebarShown: shown));
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: _bar(null, registry: registry))));
+    _item(tester, 'View', 'Hide Sidebar').onSelected!();
+    expect(log, ['sidebar']);
+
+    shown.value = false;
+    await tester.pump();
+    expect(_all(_menu(tester, 'View').menus).where((i) => i.label == 'Hide Sidebar'),
+        isEmpty);
+    _item(tester, 'View', 'Show Sidebar').onSelected!();
+    expect(log, ['sidebar', 'sidebar']);
+    final before = sent.length;
+    await tester.pump();
+    expect(sent.length, before);
+    shown.value = true;
+    await tester.pump();
+    expect(_item(tester, 'View', 'Hide Sidebar'), isNotNull);
+  });
+
   // Flutter handles a key first, and AppKit redispatches the keys it leaves
   // unhandled to the main menu. An app item with a key equivalent would then
   // fire whenever DesktopShortcuts' guards leave the key alone.
@@ -190,7 +225,7 @@ void main() {
             i is! PlatformProvidedMenuItem)
           i,
     ];
-    expect(custom, hasLength(12));
+    expect(custom, hasLength(13));
     for (final i in custom) {
       expect(i.shortcut, isNull, reason: i.label);
     }
@@ -264,7 +299,7 @@ void main() {
       _item(tester, menu, label).onSelected!();
     }
     expect(log, [
-      'settings', 'quick', 'tab 0', 'tab 1', 'tab 2', 'sheet', 'spawn', 'back',
+      'settings', 'sidebar', 'quick', 'tab 0', 'tab 1', 'tab 2', 'sheet', 'spawn', 'back',
     ]);
 
     registry.unregister(actions);

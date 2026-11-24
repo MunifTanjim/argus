@@ -34,8 +34,10 @@ class ShellDrawerScope extends InheritedWidget {
 
 /// The button that opens the modal projects drawer: the AppBar leading of a
 /// scope root, the first AppBar action of a screen pushed above one. Null when
-/// there is no modal drawer to open.
+/// there is no modal drawer to open, and on macOS, where the sidebar toggle
+/// beside the traffic lights opens it.
 Widget? shellMenuButton(BuildContext context) {
+  if (defaultTargetPlatform == TargetPlatform.macOS) return null;
   final open = ShellDrawerScope.openDrawerOf(context);
   if (open == null) return null;
   return IconButton(
@@ -65,11 +67,15 @@ class ModalShellDrawer extends StatefulWidget {
     required this.width,
     required this.drawer,
     required this.child,
+    this.onOpenChanged,
   });
 
   final double width;
   final Widget drawer;
   final Widget child;
+
+  /// Called when [ModalShellDrawerState.isOpen] changes.
+  final ValueChanged<bool>? onOpenChanged;
 
   @override
   State<ModalShellDrawer> createState() => ModalShellDrawerState();
@@ -84,6 +90,7 @@ class ModalShellDrawerState extends State<ModalShellDrawer>
   final _focusScope = FocusScopeNode();
   final _overlayKey = GlobalKey();
   LocalHistoryEntry? _historyEntry;
+  bool _wasOpen = false;
   bool _edgeActive = false;
   double _peek = 0;
 
@@ -95,6 +102,8 @@ class ModalShellDrawerState extends State<ModalShellDrawer>
 
   @override
   void dispose() {
+    // Removing the entry closes the drawer, which is no change to report.
+    _controller.removeStatusListener(_onStatus);
     _historyEntry?.remove();
     _controller.dispose();
     _focusScope.dispose();
@@ -128,6 +137,10 @@ class ModalShellDrawerState extends State<ModalShellDrawer>
     // The drawer's toolbar area slid without a layout change.
     if (status.isCompleted || status.isDismissed) {
       TitlebarScope.toolbarsMoved(context);
+    }
+    if (isOpen != _wasOpen) {
+      _wasOpen = isOpen;
+      widget.onOpenChanged?.call(isOpen);
     }
   }
 

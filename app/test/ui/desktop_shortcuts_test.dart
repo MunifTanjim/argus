@@ -48,6 +48,7 @@ Future<_Calls> _pump(WidgetTester tester, Widget body) async {
       onSettings: () => calls.log.add('settings'),
       onQuickSwitcher: () => calls.log.add('quick'),
       onShortcutSheet: () => calls.log.add('sheet'),
+      onToggleSidebar: () => calls.log.add('sidebar'),
       child: Navigator(
         onGenerateRoute: (s) => MaterialPageRoute(
           settings: s,
@@ -70,6 +71,17 @@ Future<bool> _chord(WidgetTester tester, LogicalKeyboardKey key) async {
   final handled = await tester.sendKeyDownEvent(key);
   await tester.sendKeyUpEvent(key);
   await tester.sendKeyUpEvent(_mod);
+  await tester.pump();
+  return handled;
+}
+
+Future<bool> _ctrlCmd(WidgetTester tester, LogicalKeyboardKey key) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+  final handled = await tester.sendKeyDownEvent(key);
+  await tester.sendKeyUpEvent(key);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
   await tester.pump();
   return handled;
 }
@@ -221,6 +233,58 @@ void main() {
     await _chord(tester, LogicalKeyboardKey.comma);
     await _press(tester, LogicalKeyboardKey.slash, character: '?', shift: true);
     expect(calls.log, ['quick', 'settings', 'sheet']);
+  });
+
+  testWidgets('⌃⌘S on macOS calls onToggleSidebar; ⌘S and ⌃S do not',
+      (tester) async {
+    _platform(TargetPlatform.macOS);
+    final calls = await _pump(tester, const Text('body'));
+    expect(await _ctrlCmd(tester, LogicalKeyboardKey.keyS), isTrue);
+    expect(calls.log, ['sidebar']);
+    expect(await _chord(tester, LogicalKeyboardKey.keyS), isFalse);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    expect(calls.log, ['sidebar']);
+  });
+
+  testWidgets('⌃⌘S does nothing while a TextField has focus', (tester) async {
+    _platform(TargetPlatform.macOS);
+    final calls =
+        await _pump(tester, const TextField(autofocus: true));
+    await tester.pump();
+    expect(textInputHasFocus(), isTrue);
+    expect(await _ctrlCmd(tester, LogicalKeyboardKey.keyS), isFalse);
+    expect(calls.log, isEmpty);
+  });
+
+  testWidgets('on linux, ⌃⌘S and Ctrl+S are not bound', (tester) async {
+    _platform(TargetPlatform.linux);
+    final calls = await _pump(tester, const Text('body'));
+    expect(await _ctrlCmd(tester, LogicalKeyboardKey.keyS), isFalse);
+    expect(await _chord(tester, LogicalKeyboardKey.keyS), isFalse);
+    expect(calls.log, isEmpty);
+  });
+
+  testWidgets(
+      'on macOS, ⌃⌘S fires over a terminal that consumes every key, which never sees it',
+      (tester) async {
+    _platform(TargetPlatform.macOS);
+    final seen = <LogicalKeyboardKey>[];
+    final terminal = FocusNode(onKeyEvent: (_, e) {
+      seen.add(e.logicalKey);
+      return KeyEventResult.handled;
+    });
+    addTearDown(terminal.dispose);
+    liveTerminalFocusNodes.add(terminal);
+    addTearDown(() => liveTerminalFocusNodes.remove(terminal));
+    final calls = await _pump(
+        tester, Focus(focusNode: terminal, child: const Text('terminal')));
+    terminal.requestFocus();
+    await tester.pump();
+    await _ctrlCmd(tester, LogicalKeyboardKey.keyS);
+    expect(calls.log, ['sidebar']);
+    expect(seen, isNot(contains(LogicalKeyboardKey.keyS)));
   });
 
   testWidgets('/ does not open the shortcut sheet', (tester) async {
@@ -571,7 +635,10 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     final linux = shortcutDescriptions();
     debugDefaultTargetPlatformOverride = null;
-    expect(mac, hasLength(10));
+    expect(mac, hasLength(11));
+    expect(linux, hasLength(10));
+    expect([for (final d in mac) d.keys], contains('⌃⌘S'));
+    expect([for (final d in linux) d.keys], isNot(contains('⌃⌘S')));
     expect(mac.first.keys, '⌘K');
     expect(mac.first.action, contains('terminal'));
     expect(linux.first.keys, 'Ctrl+K');

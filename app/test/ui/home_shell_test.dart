@@ -475,7 +475,7 @@ void main() {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       await _shell(tester);
-      await tester.tap(find.byIcon(Icons.menu));
+      await tester.tap(find.byIcon(Icons.view_sidebar_outlined));
       await tester.pumpAndSettle();
       expect(panelColor(tester), AppColors.card);
       expect(shellBackground(tester), isNull);
@@ -511,8 +511,8 @@ void main() {
       of: find.byType(ProjectDrawer),
       matching: find.byType(TitlebarSpacer),
     );
-    final menuButton =
-        find.ancestor(of: find.byIcon(Icons.menu), matching: find.byType(IconButton));
+    final sidebarToggle = find.ancestor(
+        of: find.byIcon(Icons.view_sidebar_outlined), matching: find.byType(IconButton));
 
     testWidgets(
         'wide: the main area\'s toolbar starts at the main area\'s left edge (inset 0), and the side panel has a 52 px header area at the top',
@@ -536,9 +536,13 @@ void main() {
       expect(tester.getTopLeft(barOf(SessionDetailScreen)).dx, kSidePanelWidth + 1);
     });
 
-    testWidgets('narrow: the main toolbar\'s first child starts at x >= 80', (tester) async {
+    testWidgets('narrow: the main toolbar starts at x >= 116, after the sidebar toggle',
+        (tester) async {
       await _shell(tester, fullScreen: mac());
-      expect(tester.getTopLeft(menuButton).dx, greaterThanOrEqualTo(kTrafficLightsInset));
+      expect(tester.getTopLeft(barOf(SessionListScreen)).dx,
+          greaterThanOrEqualTo(kTrafficLightsInset + kSidebarToggleWidth));
+      expect(tester.getTopLeft(barOf(SessionListScreen)).dx,
+          greaterThanOrEqualTo(tester.getRect(sidebarToggle).right));
     });
 
     testWidgets('Settings pushed on the root navigator: its toolbar content starts at x >= 80',
@@ -551,12 +555,13 @@ void main() {
           greaterThanOrEqualTo(kTrafficLightsInset));
     });
 
-    testWidgets('full screen: the narrow main toolbar starts at x = 0', (tester) async {
+    testWidgets('full screen: the narrow main toolbar starts after the sidebar toggle',
+        (tester) async {
       final fullScreen = mac();
       await _shell(tester, fullScreen: fullScreen);
       fullScreen.value = true;
       await tester.pump();
-      expect(tester.getTopLeft(barOf(SessionListScreen)).dx, 0);
+      expect(tester.getTopLeft(barOf(SessionListScreen)).dx, kSidebarToggleWidth);
     });
 
     for (final wide in [true, false]) {
@@ -565,7 +570,7 @@ void main() {
           (tester) async {
         await _shell(tester, width: wide ? 1000 : 400, fullScreen: mac());
         if (!wide) {
-          await tester.tap(find.byIcon(Icons.menu));
+          await tester.tap(sidebarToggle);
           await tester.pumpAndSettle();
         }
         expect(tester.getRect(panelHeader).height, kMacToolbarHeight);
@@ -760,7 +765,7 @@ void main() {
         final bar = tester.getRect(barOf(SessionListScreen));
         expect(rect.left, greaterThanOrEqualTo(bar.left));
         expect(rect.right, lessThanOrEqualTo(bar.right));
-        expect(rect.left, greaterThanOrEqualTo(tester.getRect(menuButton).right));
+        expect(rect.left, greaterThanOrEqualTo(tester.getRect(sidebarToggle).right));
         final buttons = find.descendant(
             of: barOf(SessionListScreen), matching: find.byType(IconButton));
         for (final e in buttons.evaluate()) {
@@ -819,7 +824,7 @@ void main() {
         await _shell(tester, fullScreen: mac());
         await flush(tester);
         expect(_passthroughRects.values.toSet(), visible(tester));
-        await tester.tap(find.byIcon(Icons.menu));
+        await tester.tap(sidebarToggle);
         await flush(tester);
         expect(_passthroughRects.values.toSet(), visible(tester));
         await tester.tapAt(const Offset(390, 500));
@@ -893,7 +898,7 @@ void main() {
       testWidgets('narrow: under a dialog, the open drawer\'s header passes through after the traffic lights',
           (tester) async {
         await _shell(tester, fullScreen: mac());
-        await tester.tap(find.byIcon(Icons.menu));
+        await tester.tap(sidebarToggle);
         await flush(tester);
         showDialog<void>(
           context: tester.element(find.byType(HomeShell)),
@@ -904,6 +909,230 @@ void main() {
         expect(_passthroughRects.values, contains(Rect.fromLTWH(
             kTrafficLightsInset, 0, drawer - kTrafficLightsInset, kMacToolbarHeight)));
       });
+    });
+  });
+
+  group('sidebar toggle', () {
+    ValueNotifier<bool> mac() {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final fullScreen = ValueNotifier(false);
+      addTearDown(fullScreen.dispose);
+      return fullScreen;
+    }
+
+    final toggle = find.ancestor(
+        of: find.byIcon(Icons.view_sidebar_outlined),
+        matching: find.byType(IconButton));
+    Finder barOf(Type screen) => find
+        .descendant(of: find.byType(screen), matching: find.byType(AppBar))
+        .first;
+    final panel = find.byType(ProjectDrawer);
+
+    Future<void> tapToggle(WidgetTester tester) async {
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> ctrlCmdS(WidgetTester tester) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.keyS);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.keyS);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+    }
+
+    // Lets debounced passthrough updates (10 ms) and their post-frame resend
+    // run.
+    Future<void> flush(WidgetTester tester) async {
+      await tester.pumpAndSettle();
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      }
+      await tester.pump();
+    }
+
+    Set<Rect> visible(WidgetTester tester) => find
+        .byType(MacosToolbarPassthrough)
+        .evaluate()
+        .map((e) => tester.getRect(find.byElementPredicate((x) => x == e)))
+        .toSet();
+
+    const toggleRect = Rect.fromLTWH(kTrafficLightsInset + 4, 12, 28, 28);
+
+    testWidgets(
+        'macOS wide: one toggle at x = 84 in the 52 px row; tap hides the side panel; the main toolbar\'s first child then starts at x >= 116; tap again shows it',
+        (tester) async {
+      await _shell(tester, width: 1000, fullScreen: mac());
+      expect(toggle, findsOneWidget);
+      expect(tester.getRect(toggle), toggleRect);
+      expect(find.byTooltip('Hide Sidebar'), findsOneWidget);
+      expect(panel, findsOneWidget);
+
+      await tapToggle(tester);
+      expect(panel, findsNothing);
+      expect(find.byTooltip('Show Sidebar'), findsOneWidget);
+      expect(tester.getRect(toggle), toggleRect);
+      expect(tester.getTopLeft(barOf(SessionListScreen)).dx,
+          greaterThanOrEqualTo(kTrafficLightsInset + kSidebarToggleWidth));
+      expect(tester.getSize(find.byType(Navigator).last).width, 1000);
+
+      await tapToggle(tester);
+      expect(panel, findsOneWidget);
+      expect(find.byTooltip('Hide Sidebar'), findsOneWidget);
+      expect(tester.getTopLeft(barOf(SessionListScreen)).dx, kSidePanelWidth + 1);
+    });
+
+    testWidgets('macOS narrow: tap opens the drawer; tap again closes it',
+        (tester) async {
+      await _shell(tester, fullScreen: mac());
+      expect(tester.getRect(toggle), toggleRect);
+      expect(find.byTooltip('Show Sidebar'), findsOneWidget);
+      expect(tester.getTopLeft(barOf(SessionListScreen)).dx,
+          greaterThanOrEqualTo(kTrafficLightsInset + kSidebarToggleWidth));
+      await tapToggle(tester);
+      expect(panel, findsOneWidget);
+      expect(tester.state<ModalShellDrawerState>(find.byType(ModalShellDrawer)).isOpen,
+          isTrue);
+      expect(find.byTooltip('Hide Sidebar'), findsOneWidget);
+      await tapToggle(tester);
+      expect(panel, findsNothing);
+      expect(find.byTooltip('Show Sidebar'), findsOneWidget);
+    });
+
+    testWidgets('macOS: no "Projects" menu button in any toolbar', (tester) async {
+      final c = await _shell(tester, fullScreen: mac());
+      expect(find.byTooltip('Projects'), findsNothing);
+      expect(find.byIcon(Icons.menu), findsNothing);
+      // Switched in the wide layout, then narrowed (but wide enough for the
+      // workspace toolbar).
+      tester.view.physicalSize = const Size(1000, 900);
+      await tester.pumpAndSettle();
+      c.read(scopeProvider.notifier).state = 'A:w2';
+      await tester.pumpAndSettle();
+      tester.view.physicalSize = const Size(600, 900);
+      await tester.pumpAndSettle();
+      expect(find.byType(WorkspaceScreen), findsOneWidget);
+      expect(find.byTooltip('Projects'), findsNothing);
+      c.read(sessionsProvider.notifier).replaceAll([_session('s2', workspaceId: 'A:w2')]);
+      c.read(pendingOpenSessionProvider.notifier).state = const PendingOpen('s2');
+      await _pumpRoute(tester);
+      expect(find.byType(SessionDetailScreen), findsOneWidget);
+      expect(find.byTooltip('Projects'), findsNothing);
+      expect(find.byIcon(Icons.menu), findsNothing);
+    });
+
+    testWidgets('macOS full screen: the toggle is at x = 4', (tester) async {
+      final fullScreen = mac();
+      await _shell(tester, width: 1000, fullScreen: fullScreen);
+      fullScreen.value = true;
+      await tester.pump();
+      expect(tester.getRect(toggle), const Rect.fromLTWH(4, 12, 28, 28));
+      await tapToggle(tester);
+      expect(tester.getTopLeft(barOf(SessionListScreen)).dx,
+          greaterThanOrEqualTo(kSidebarToggleWidth));
+    });
+
+    testWidgets('macOS: Settings pushed on the root navigator hides the toggle',
+        (tester) async {
+      await _shell(tester, width: 1000, fullScreen: mac());
+      final anyToggle = find.byIcon(Icons.view_sidebar_outlined, skipOffstage: false);
+      await tester.tap(find.descendant(of: panel, matching: find.text('Settings')));
+      await tester.pumpAndSettle();
+      expect(find.byType(SettingsScreen), findsOneWidget);
+      expect(anyToggle, findsNothing);
+      Navigator.of(tester.element(find.byType(SettingsScreen))).pop();
+      await tester.pumpAndSettle();
+      expect(anyToggle, findsOneWidget);
+
+      // A dialog leaves it drawn.
+      showDialog<void>(
+        context: tester.element(find.byType(HomeShell)),
+        builder: (_) => const Text('dialog'),
+      );
+      await tester.pumpAndSettle();
+      expect(anyToggle, findsOneWidget);
+    });
+
+    testWidgets(
+        'macOS: the toggle\'s passthrough rect matches its position after hide/show and after a layout switch',
+        (tester) async {
+      _passthroughRects.clear();
+      await _shell(tester, width: 1000, fullScreen: mac());
+      await flush(tester);
+      expect(_passthroughRects.values, contains(toggleRect));
+      expect(_passthroughRects.values.toSet(), visible(tester));
+
+      for (var i = 0; i < 2; i++) {
+        await tester.tap(toggle);
+        await flush(tester);
+        expect(_passthroughRects.values, contains(toggleRect));
+        expect(_passthroughRects.values.toSet(), visible(tester));
+      }
+
+      tester.view.physicalSize = const Size(400, 900);
+      await flush(tester);
+      expect(_passthroughRects.values, contains(toggleRect));
+      expect(_passthroughRects.values.toSet(), visible(tester));
+      tester.view.physicalSize = const Size(1000, 900);
+      await flush(tester);
+      expect(_passthroughRects.values, contains(toggleRect));
+      expect(_passthroughRects.values.toSet(), visible(tester));
+    });
+
+    testWidgets(
+        '⌃⌘S toggles the sidebar; it does nothing while a TextField has focus; View › Hide Sidebar toggles it',
+        (tester) async {
+      mac();
+      _mockMenuChannel(tester);
+      await _shell(tester, width: 1000, menuBar: true);
+      await ctrlCmdS(tester);
+      expect(panel, findsNothing);
+      await ctrlCmdS(tester);
+      expect(panel, findsOneWidget);
+
+      await tester.tap(find.descendant(of: panel, matching: find.byType(TextField)));
+      await tester.pump();
+      await ctrlCmdS(tester);
+      expect(panel, findsOneWidget);
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+
+      await _select(tester, 'Hide Sidebar');
+      expect(panel, findsNothing);
+      await _select(tester, 'Show Sidebar');
+      expect(panel, findsOneWidget);
+      expect(_menuItem(tester, 'Hide Sidebar').shortcut, isNull);
+    });
+
+    testWidgets('macOS narrow: ⌃⌘S opens and closes the drawer', (tester) async {
+      await _shell(tester, fullScreen: mac());
+      await ctrlCmdS(tester);
+      expect(panel, findsOneWidget);
+      await ctrlCmdS(tester);
+      expect(panel, findsNothing);
+    });
+
+    testWidgets(
+        'Linux wide: no toggle and the side panel is always shown; Linux narrow: the Projects menu button opens the drawer',
+        (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      await _shell(tester, width: 1000);
+      expect(find.byIcon(Icons.view_sidebar_outlined), findsNothing);
+      expect(panel, findsOneWidget);
+      await ctrlCmdS(tester);
+      expect(panel, findsOneWidget);
+
+      tester.view.physicalSize = const Size(400, 900);
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.view_sidebar_outlined), findsNothing);
+      await tester.tap(find.byTooltip('Projects'));
+      await tester.pumpAndSettle();
+      expect(panel, findsOneWidget);
     });
   });
 

@@ -79,6 +79,7 @@ List<({String keys, String action})> shortcutDescriptions() {
     (keys: mod('['), action: 'Back'),
     (keys: mod('L'), action: 'Focus the reply box'),
     (keys: mod(','), action: 'Settings'),
+    if (_isMac) (keys: '⌃⌘S', action: 'Show or hide the sidebar'),
     (keys: '/', action: 'Focus the reply box'),
     (keys: 'Esc', action: 'Back'),
     (keys: 'J / K', action: 'Next / previous item'),
@@ -97,7 +98,8 @@ const _tabKeys = [
 /// handle bubbles up to here; a shortcut whose guard fails passes it on.
 ///
 /// A focused terminal takes keys first. On Linux it keeps every Ctrl key; on
-/// macOS the Cmd shortcuts are taken before it, except Cmd+K, which clears it.
+/// macOS the Cmd shortcuts and ⌃⌘S are taken before it, except Cmd+K, which
+/// clears it.
 class DesktopShortcuts extends StatefulWidget {
   const DesktopShortcuts({
     super.key,
@@ -107,6 +109,7 @@ class DesktopShortcuts extends StatefulWidget {
     required this.onSettings,
     required this.onQuickSwitcher,
     required this.onShortcutSheet,
+    this.onToggleSidebar,
   });
 
   final Widget child;
@@ -115,6 +118,9 @@ class DesktopShortcuts extends StatefulWidget {
   final VoidCallback onSettings;
   final VoidCallback onQuickSwitcher;
   final VoidCallback onShortcutSheet;
+
+  /// Bound to ⌃⌘S on macOS only.
+  final VoidCallback? onToggleSidebar;
 
   @override
   State<DesktopShortcuts> createState() => _DesktopShortcutsState();
@@ -154,6 +160,17 @@ class _DesktopShortcutsState extends State<DesktopShortcuts> {
     return mod && !kb.isAltPressed && !kb.isShiftPressed;
   }
 
+  // ⌃⌘S, macOS only.
+  static bool _isToggleSidebar(LogicalKeyboardKey k) {
+    final kb = HardwareKeyboard.instance;
+    return _isMac &&
+        k == LogicalKeyboardKey.keyS &&
+        kb.isMetaPressed &&
+        kb.isControlPressed &&
+        !kb.isAltPressed &&
+        !kb.isShiftPressed;
+  }
+
   VoidCallback? _modAction(LogicalKeyboardKey k) {
     final w = widget;
     if (k == LogicalKeyboardKey.keyK) return w.onQuickSwitcher;
@@ -174,6 +191,12 @@ class _DesktopShortcutsState extends State<DesktopShortcuts> {
     if (_modOnly()) {
       // Over a terminal, _onEarlyKey has taken the macOS ones already.
       return liveTerminalHasFocus() ? null : _modAction(k);
+    }
+    if (_isToggleSidebar(k)) {
+      // Over a terminal, _onEarlyKey has taken it already.
+      return liveTerminalHasFocus() || textInputHasFocus()
+          ? null
+          : widget.onToggleSidebar;
     }
     if (kb.isMetaPressed || kb.isControlPressed || kb.isAltPressed) return null;
     final shift = kb.isShiftPressed;
@@ -214,12 +237,22 @@ class _DesktopShortcutsState extends State<DesktopShortcuts> {
           ? KeyEventResult.handled
           : KeyEventResult.ignored;
     }
-    if (!isDesktop || !_isMac || !liveTerminalHasFocus() || !_modOnly()) {
+    final k = e.logicalKey;
+    final toggle = _isToggleSidebar(k);
+    if (!isDesktop ||
+        !_isMac ||
+        !liveTerminalHasFocus() ||
+        !(_modOnly() || toggle)) {
       return KeyEventResult.ignored;
     }
-    final k = e.logicalKey;
-    final result =
-        _run(e, k == LogicalKeyboardKey.keyK ? null : _modAction(k));
+    final result = _run(
+      e,
+      toggle
+          ? widget.onToggleSidebar
+          : k == LogicalKeyboardKey.keyK
+          ? null
+          : _modAction(k),
+    );
     if (result == KeyEventResult.handled) _earlyDown.add(e.physicalKey);
     return result;
   }
