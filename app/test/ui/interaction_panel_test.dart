@@ -10,6 +10,7 @@ import 'package:argus/models/session.dart';
 import 'package:argus/state/respond_params.dart';
 import 'package:argus/ui/desktop_interaction.dart';
 import 'package:argus/ui/interaction_panel.dart';
+import 'package:argus/ui/theme.dart';
 import '../support/fake_session_repository.dart';
 
 class _RecordingControl extends FakeSessionRepository {
@@ -42,6 +43,7 @@ Future<void> _pumpPanel(
   await tester.pumpWidget(ProviderScope(
     overrides: [sessionRepositoryProvider.overrideWithValue(c)],
     child: MaterialApp(
+        theme: buildArgusTheme(),
         home: Scaffold(
             body: SizedBox(height: 600, child: InteractionPanel(session: s)))),
   ));

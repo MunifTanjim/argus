@@ -9,6 +9,7 @@ import 'package:argus/state/respond_params.dart';
 import 'package:argus/ui/desktop_interaction.dart';
 import 'package:argus/ui/desktop_shortcuts.dart';
 import 'package:argus/ui/interaction_panel.dart';
+import 'package:argus/ui/theme.dart';
 
 Session _session(Map<String, dynamic> interaction, {String agent = 'claude'}) =>
     Session.fromJson(
@@ -65,6 +66,7 @@ Widget _host(
   List<Map<String, dynamic>> sent, {
   double width = 900,
 }) => MaterialApp(
+  theme: buildArgusTheme(),
   home: Scaffold(
     body: Align(
       alignment: Alignment.topLeft,
@@ -415,6 +417,7 @@ void main() {
     final s = _session(_ix([_q('Pick', 'Which one?')]));
     await tester.pumpWidget(
       MaterialApp(
+        theme: buildArgusTheme(),
         home: Scaffold(
           body: DesktopQuestions(
             session: s,
@@ -564,6 +567,7 @@ void main() {
       addTearDown(tester.view.reset);
       await tester.pumpWidget(
         MaterialApp(
+          theme: buildArgusTheme(),
           home: Scaffold(body: Align(alignment: Alignment.topLeft, child: w)),
         ),
       );
@@ -686,6 +690,7 @@ void main() {
       addTearDown(current.dispose);
       await tester.pumpWidget(
         MaterialApp(
+          theme: buildArgusTheme(),
           home: Scaffold(
             body: ValueListenableBuilder<Session?>(
               valueListenable: current,
@@ -849,6 +854,7 @@ void main() {
         final sent = <Map<String, dynamic>>[];
         await tester.pumpWidget(
           MaterialApp(
+            theme: buildArgusTheme(),
             navigatorKey: nav,
             home: Scaffold(
               body: ValueListenableBuilder<Session?>(
@@ -902,6 +908,7 @@ void main() {
         final sent = <Map<String, dynamic>>[];
         await tester.pumpWidget(
           MaterialApp(
+            theme: buildArgusTheme(),
             home: Scaffold(
               body: ValueListenableBuilder<Session?>(
                 valueListenable: cur,
@@ -940,6 +947,7 @@ void main() {
       final sent = <Map<String, dynamic>>[];
       await tester.pumpWidget(
         MaterialApp(
+          theme: buildArgusTheme(),
           home: Scaffold(
             body: Column(
               children: [
@@ -1042,6 +1050,7 @@ void main() {
       final s = _session(ix);
       await tester.pumpWidget(
         MaterialApp(
+          theme: buildArgusTheme(),
           home: Scaffold(
             body: DesktopDecision(
               session: s,
@@ -1141,6 +1150,7 @@ void main() {
     ) async {
       final sent = <Map<String, dynamic>>[];
       Widget host(Session s) => MaterialApp(
+        theme: buildArgusTheme(),
         home: Scaffold(
           body: DesktopDecision(
             session: s,
@@ -1226,6 +1236,7 @@ void main() {
       final s = _session(dix());
       await tester.pumpWidget(
         MaterialApp(
+          theme: buildArgusTheme(),
           home: Scaffold(
             body: DesktopDecision(
               session: s,

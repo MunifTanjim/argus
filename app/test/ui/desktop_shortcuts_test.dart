@@ -23,6 +23,7 @@ import 'package:argus/ui/session_composer.dart';
 import 'package:argus/ui/session_detail_screen.dart';
 import 'package:argus/ui/session_list_screen.dart';
 import 'package:argus/ui/spawn_dialog.dart';
+import 'package:argus/ui/theme.dart';
 
 import '../support/fake_gateway_client.dart';
 import '../support/fake_session_repository.dart';
@@ -130,7 +131,7 @@ Future<ProviderContainer> _shell(WidgetTester tester) async {
       .load(FakeGatewayClient((m, p) async => {'projects': []}));
   await tester.pumpWidget(UncontrolledProviderScope(
     container: c,
-    child: const MaterialApp(home: HomeShell()),
+    child: MaterialApp(theme: buildArgusTheme(), home: const HomeShell()),
   ));
   await tester.pump();
   return c;
@@ -233,7 +234,8 @@ void main() {
     await _shell(tester);
     await _chord(tester, LogicalKeyboardKey.keyN);
     await _pumpRoute(tester);
-    expect(find.byType(SpawnDialog), findsOneWidget);
+    // Offstage too, so a second dialog under the first is counted.
+    expect(find.byType(SpawnDialog, skipOffstage: false), findsOneWidget);
   });
 
   testWidgets('Cmd+2 selects the History tab', (tester) async {
