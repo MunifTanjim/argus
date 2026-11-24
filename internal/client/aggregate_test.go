@@ -91,4 +91,7 @@ func TestMethodSetsMirrorGateway(t *testing.T) {
 	if !nodeAddressed[api.MethodHostInfo] || !nodeAddressed[api.MethodHostSetWakelock] {
 		t.Error("nodeAddressed missing host.info/host.setWakelock")
 	}
+	if !sessionAddressed[api.MethodSessionWorkflow] || !nodeAddressed[api.MethodSessionsHistoryWorkflow] {
+		t.Error("workflow methods not routed")
+	}
 }

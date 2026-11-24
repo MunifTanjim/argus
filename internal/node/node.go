@@ -155,6 +155,8 @@ type Node struct {
 	conns       map[api.Notifier]*connSubs // per-connection transcript subscriptions
 	transcripts *transcriptCache
 
+	workflows *workflowWatcher
+
 	termsMu sync.Mutex
 	terms   map[api.Notifier]*connTerms // per-connection live terminals
 
@@ -536,6 +538,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 		forgeFor:     forge.For,
 		conns:        map[api.Notifier]*connSubs{},
 		transcripts:  newTranscriptCache(transcriptCacheMaxIdle, transcriptCacheIdleTTL),
+		workflows:    newWorkflowWatcher(),
 		terms:        map[api.Notifier]*connTerms{},
 		sessionTerms: map[string]*term{},
 		resuming:     map[string]string{},
@@ -670,6 +673,7 @@ func (d *Node) Run(ctx context.Context, socketPath string) error {
 	workspaceEvents, stopWorkspaceEvents := d.reg.Subscribe()
 	defer stopWorkspaceEvents()
 	go d.watchSessionWorkspacesLoop(ctx, workspaceEvents)
+	go d.watchWorkflowsLoop(ctx, workflowPollInterval)
 
 	// Subsequent scans are on demand (client refresh, hook events, spawn/kill).
 	go func() {

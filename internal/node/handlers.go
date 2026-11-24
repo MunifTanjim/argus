@@ -42,6 +42,8 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodSessionsHistorySessions, d.handleHistorySessions)
 	srv.Handle(api.MethodSessionsHistoryTranscript, d.handleHistoryTranscript)
 	srv.Handle(api.MethodSessionHistoryToolDetail, d.handleHistoryToolDetail)
+	srv.Handle(api.MethodSessionWorkflow, d.handleSessionWorkflow)
+	srv.Handle(api.MethodSessionsHistoryWorkflow, d.handleHistoryWorkflow)
 	srv.Handle(api.MethodTranscriptSubscribe, d.handleTranscriptSubscribe)
 	srv.Handle(api.MethodTranscriptUnsubscribe, d.handleTranscriptUnsubscribe)
 	srv.Handle(api.MethodTerminalOpen, d.handleTerminalOpen)

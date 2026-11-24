@@ -196,6 +196,15 @@ type RunningShell struct {
 	Since     string `json:"since,omitempty"` // RFC 3339 UTC, first seen running
 }
 
+// RunningWorkflow is a Claude Code Workflow tool run still in progress.
+type RunningWorkflow struct {
+	RunID string `json:"run_id"`
+	Name  string `json:"name,omitempty"`
+	Done  int    `json:"done"`
+	Total int    `json:"total"`           // agents known so far
+	Since string `json:"since,omitempty"` // RFC 3339 UTC, launch time
+}
+
 // Session is argus's record for a single AI coding tool session.
 type Session struct {
 	// ID is argus's internal identifier (stable for the session's lifetime).
@@ -257,6 +266,7 @@ type Session struct {
 
 	Subagents []RunningSubagent `json:"subagents,omitempty"`
 	Shells    []RunningShell    `json:"shells,omitempty"`
+	Workflows []RunningWorkflow `json:"workflows,omitempty"`
 
 	// Interaction is the pending user request (non-nil only while awaiting input).
 	Interaction *Interaction `json:"interaction,omitempty"`

@@ -33,7 +33,7 @@ func readTranscriptView(path string, finished bool) (TranscriptView, error) {
 			}
 		}
 	}
-	return TranscriptView{Entries: foldEntries(pchunks, agentRefs, finished)}, nil
+	return TranscriptView{Entries: foldEntries(pchunks, agentRefs, scanWorkflows(path), path, finished)}, nil
 }
 
 // ReadSubagentView folds a single subagent file (resolved by agentID under
@@ -57,7 +57,7 @@ func readSubagentView(rootPath, agentID string, finished bool) (TranscriptView, 
 	if parser.SpawnDepth(rootPath, agentID) < parser.MaxSubagentDepth {
 		agentRefs = parser.ChildAgentRefs(sub, rootPath)
 	}
-	return TranscriptView{Entries: foldEntries(pchunks, agentRefs, finished)}, true, nil
+	return TranscriptView{Entries: foldEntries(pchunks, agentRefs, scanWorkflows(sub), rootPath, finished)}, true, nil
 }
 
 // addMetaRefs merges meta.json-derived refs (which link still-running subagents)
@@ -81,7 +81,7 @@ func ReadStreamingView(path string) ([]Entry, error) {
 	}
 	refs := parser.AgentIDsByToolID(path)
 	addMetaRefs(refs, path, nil)
-	return foldEntries(pchunks, refs, false), nil
+	return foldEntries(pchunks, refs, scanWorkflows(path), path, false), nil
 }
 
 // FindToolDetail returns the full input/result for a tool entry by tool_use id.
@@ -102,14 +102,42 @@ func FindToolDetail(path, agentID, toolID string) (ToolDetail, bool, error) {
 	if err != nil {
 		return ToolDetail{}, false, err
 	}
-	d, ok := transcript.FindToolDetail(foldEntries(pchunks, nil, false), toolID)
+	// Tool detail needs no workflow run state, so no launch lookup.
+	d, ok := transcript.FindToolDetail(foldEntries(pchunks, nil, nil, path, false), toolID)
 	return d, ok, nil
+}
+
+// workflowLookup returns the Workflow launch for a tool_use id.
+type workflowLookup func(toolID string) (parser.WorkflowLaunch, bool)
+
+// scanWorkflows returns a lookup over path's Workflow launches. The file is
+// scanned on the first lookup, so transcripts without Workflow calls are not
+// read twice.
+func scanWorkflows(path string) workflowLookup {
+	var s *parser.WorkflowScanner
+	return func(toolID string) (parser.WorkflowLaunch, bool) {
+		if s == nil {
+			s = parser.NewWorkflowScanner(path)
+			_ = s.Scan() // on error the lookup finds nothing; the entry still folds
+		}
+		return s.Launch(toolID)
+	}
+}
+
+// folder carries the per-read context foldItem needs.
+type folder struct {
+	agentRefs map[string]string
+	workflows workflowLookup // nil: Workflow entries carry no launch data
+	rootPath  string         // session root holding workflow run state
+	finished  bool
 }
 
 // foldEntries follows each finished AI turn with a turn_end entry. The last
 // turn gets one only once it is no longer ongoing, or when finished (history
-// reads: the session is over even if its last turn never completed).
-func foldEntries(pchunks []parser.Chunk, agentRefs map[string]string, finished bool) []Entry {
+// reads: the session is over even if its last turn never completed). Workflow
+// calls resolve their status against rootPath (see resolveWorkflowRef).
+func foldEntries(pchunks []parser.Chunk, agentRefs map[string]string, workflows workflowLookup, rootPath string, finished bool) []Entry {
+	f := &folder{agentRefs: agentRefs, workflows: workflows, rootPath: rootPath, finished: finished}
 	var out []Entry
 	lastDone := finished || !parser.IsOngoing(pchunks)
 	interrupted := parser.LastTurnInterrupted(pchunks)
@@ -121,9 +149,9 @@ func foldEntries(pchunks []parser.Chunk, agentRefs map[string]string, finished b
 			if strings.TrimSpace(pc.UserText) != "" {
 				out = append(out, transcript.UserEntries(Entry{ID: id, Kind: EntryUser, Timestamp: ts, Text: pc.UserText})...)
 			}
-			out = append(out, foldItems(pc.Items, agentRefs, id)...)
+			out = append(out, f.foldItems(pc.Items, id)...)
 		case parser.AIChunk:
-			items := foldItems(pc.Items, agentRefs, id)
+			items := f.foldItems(pc.Items, id)
 			out = append(out, items...)
 			last := i == len(pchunks)-1
 			if !last || lastDone {
@@ -171,17 +199,17 @@ func turnEnd(pc parser.Chunk, items []Entry, id string, interrupted bool) Entry 
 	return e
 }
 
-func foldItems(pitems []parser.DisplayItem, agentRefs map[string]string, chunkID string) []Entry {
+func (f *folder) foldItems(pitems []parser.DisplayItem, chunkID string) []Entry {
 	var out []Entry
 	for j, pit := range pitems {
-		if e, ok := foldItem(pit, agentRefs, chunkID+"."+strconv.Itoa(j)); ok {
+		if e, ok := f.foldItem(pit, chunkID+"."+strconv.Itoa(j)); ok {
 			out = append(out, transcript.UserEntries(e)...)
 		}
 	}
 	return out
 }
 
-func foldItem(pit parser.DisplayItem, agentRefs map[string]string, id string) (Entry, bool) {
+func (f *folder) foldItem(pit parser.DisplayItem, id string) (Entry, bool) {
 	e := Entry{ID: id}
 	switch pit.Type {
 	case parser.ItemThinking:
@@ -209,9 +237,13 @@ func foldItem(pit parser.DisplayItem, agentRefs map[string]string, id string) (E
 			IsTeammate: true,
 		}}
 	case parser.ItemToolCall:
-		if pit.ToolName == "Skill" {
+		switch pit.ToolName {
+		case "Skill":
 			e.Kind = EntrySkill
-		} else {
+		case "Workflow":
+			e.Kind = EntryWorkflow
+			e.Workflow = f.workflowRef(pit.ToolID)
+		default:
 			e.Kind = EntryTool
 		}
 		fillTool(&e, pit)
@@ -219,7 +251,7 @@ func foldItem(pit parser.DisplayItem, agentRefs map[string]string, id string) (E
 		e.Kind = EntrySubagent
 		fillTool(&e, pit)
 		sub := Subagent{
-			ID:   agentRefs[pit.ToolID],
+			ID:   f.agentRefs[pit.ToolID],
 			Name: pit.TeamMemberName, // spawn name from Task/Agent "name" input (e.g. "codex-comments")
 			Type: pit.SubagentType,
 			Desc: pit.SubagentDesc,
@@ -230,6 +262,18 @@ func foldItem(pit parser.DisplayItem, agentRefs map[string]string, id string) (E
 		return Entry{}, false
 	}
 	return e, true
+}
+
+func (f *folder) workflowRef(toolID string) *transcript.WorkflowRef {
+	if f.workflows == nil {
+		return nil
+	}
+	l, ok := f.workflows(toolID)
+	if !ok {
+		l = parser.WorkflowLaunch{ToolID: toolID}
+	}
+	ref := resolveWorkflowRef(l, f.rootPath, f.finished)
+	return &ref
 }
 
 func fillTool(e *Entry, pit parser.DisplayItem) {

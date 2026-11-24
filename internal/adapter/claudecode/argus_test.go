@@ -35,7 +35,7 @@ func wantArgusRows(t *testing.T, es []transcript.Entry, baseID string) {
 }
 
 func TestFoldEntriesSplitsArgusMessages(t *testing.T) {
-	es := foldEntries([]parser.Chunk{{Type: parser.UserChunk, Timestamp: t0, UserText: argusTaskPrompt}}, nil, true)
+	es := foldEntries([]parser.Chunk{{Type: parser.UserChunk, Timestamp: t0, UserText: argusTaskPrompt}}, nil, nil, "", true)
 	wantArgusRows(t, es, "0")
 }
 
@@ -45,7 +45,7 @@ func TestFoldEntriesSplitsArgusMessagesInQueuedPrompt(t *testing.T) {
 		{Type: parser.AIChunk, Timestamp: t0, Items: []parser.DisplayItem{
 			{Type: parser.ItemQueuedPrompt, Text: argusTaskPrompt, Timestamp: t0.Add(time.Minute)},
 		}},
-	}, nil, true)
+	}, nil, nil, "", true)
 	if es[0].ArgusMessages != nil {
 		t.Fatalf("plain prompt got ArgusMessages %+v", es[0].ArgusMessages)
 	}

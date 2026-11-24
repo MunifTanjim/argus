@@ -205,6 +205,7 @@ func (d *Node) handleTranscriptSubscribe(ctx context.Context, params json.RawMes
 	if err != nil {
 		return nil, err
 	}
+	entries = markStaleWorkflows(entries, d.reg.ProcStart(p.SessionID))
 	from := clampFrom(entries, p.HaveEntries)
 
 	// Task-change detection rides this subscription: only for the main session
@@ -307,6 +308,11 @@ func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessio
 	}
 	var idleSurfaced bool
 	var idleSince time.Time
+	// A run left running by an exited agent process reads as stopped.
+	var stale staleWorkflowMarker
+	markStale := func(entries []transcript.Entry) []transcript.Entry {
+		return stale.mark(entries, d.reg.ProcStart(sessionID))
+	}
 	t := time.NewTicker(transcriptPollInterval)
 	defer t.Stop()
 	for {
@@ -320,6 +326,7 @@ func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessio
 				if next, nextSt, entries, ok := d.nextTranscript(sessionID, a, path); ok {
 					d.transcripts.release(st)
 					d.log.Info("transcript.switch", "sub_id", subID, "from", path, "to", next)
+					entries = markStale(entries)
 					st, path = nextSt, next
 					if sentQueue != nil {
 						if q, ok := nextSt.Queue(); ok {
@@ -342,6 +349,7 @@ func (d *Node) pollTranscript(ctx context.Context, n api.Notifier, subID, sessio
 			if err != nil {
 				continue // transient (file rotated/locked); try next tick
 			}
+			cur = markStale(cur)
 			if driveStatus {
 				interrupted := lastTurnInterrupted(cur)
 				if interrupted && !idleSurfaced {

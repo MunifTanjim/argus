@@ -386,6 +386,7 @@ func processHook(reg *registry.Registry, ev HookEvent, p hookPayload) (session.S
 		CostUSD:            cost,
 		Subagents:          subagents,
 		Shells:             shells,
+		Started:            event == "SessionStart" && (p.Source == "startup" || p.Source == "resume"),
 		Cleared:            event == "SessionStart" && p.Source == "clear",
 	})
 }

@@ -33,7 +33,7 @@ func doneTurn() []parser.Chunk {
 }
 
 func TestFoldEntriesFlatSequence(t *testing.T) {
-	es := foldEntries(doneTurn(), nil, false)
+	es := foldEntries(doneTurn(), nil, nil, "", false)
 	want := []EntryKind{EntryUser, EntryThinking, EntryTool, EntryText, EntryTurnEnd}
 	if got := kinds(es); !reflect.DeepEqual(got, want) {
 		t.Fatalf("kinds = %v, want %v", got, want)
@@ -65,7 +65,7 @@ func TestFoldEntriesFooterAppearsOnlyWhenDone(t *testing.T) {
 			{Type: parser.ItemToolCall, ToolName: "Bash", ToolID: "tu1"}, // no result yet
 		}},
 	}
-	if got := kinds(foldEntries(running, nil, false)); got[len(got)-1] == EntryTurnEnd {
+	if got := kinds(foldEntries(running, nil, nil, "", false)); got[len(got)-1] == EntryTurnEnd {
 		t.Fatalf("running turn got a footer: %v", got)
 	}
 
@@ -73,7 +73,7 @@ func TestFoldEntriesFooterAppearsOnlyWhenDone(t *testing.T) {
 	done[1].Items = append(done[1].Items,
 		parser.DisplayItem{Type: parser.ItemOutput, Text: "done"})
 	done[1].Items[1].ToolResult = "ok"
-	got := foldEntries(done, nil, false)
+	got := foldEntries(done, nil, nil, "", false)
 	if got[len(got)-1].Kind != EntryTurnEnd {
 		t.Fatalf("finished turn has no footer: %v", kinds(got))
 	}
@@ -86,7 +86,7 @@ func TestFoldEntriesNoFooterWhileTextAwaitsToolUse(t *testing.T) {
 			{Type: parser.ItemOutput, Text: "let me check"},
 		}},
 	}
-	if got := kinds(foldEntries(chunks, nil, false)); got[len(got)-1] == EntryTurnEnd {
+	if got := kinds(foldEntries(chunks, nil, nil, "", false)); got[len(got)-1] == EntryTurnEnd {
 		t.Fatalf("turn awaiting its tool_use got a footer: %v", got)
 	}
 }
@@ -99,10 +99,10 @@ func TestFoldEntriesFinishedClosesDeadTurn(t *testing.T) {
 			{Type: parser.ItemToolCall, ToolName: "Bash", ToolID: "tu1"},
 		}},
 	}
-	if got := kinds(foldEntries(died, nil, false)); got[len(got)-1] == EntryTurnEnd {
+	if got := kinds(foldEntries(died, nil, nil, "", false)); got[len(got)-1] == EntryTurnEnd {
 		t.Fatalf("live read of an open turn got a footer: %v", got)
 	}
-	if got := kinds(foldEntries(died, nil, true)); got[len(got)-1] != EntryTurnEnd {
+	if got := kinds(foldEntries(died, nil, nil, "", true)); got[len(got)-1] != EntryTurnEnd {
 		t.Fatalf("finished read has no final footer: %v", got)
 	}
 }
@@ -111,7 +111,7 @@ func TestFoldEntriesEarlierTurnAlwaysHasFooter(t *testing.T) {
 	cs := append(doneTurn(), parser.Chunk{Type: parser.UserChunk, Timestamp: t0, UserText: "next"},
 		parser.Chunk{Type: parser.AIChunk, Timestamp: t0, Items: []parser.DisplayItem{
 			{Type: parser.ItemToolCall, ToolName: "Bash", ToolID: "tu9"}}})
-	es := foldEntries(cs, nil, false)
+	es := foldEntries(cs, nil, nil, "", false)
 	n := 0
 	for _, e := range es {
 		if e.Kind == EntryTurnEnd {
@@ -129,7 +129,7 @@ func TestFoldEntriesInterruptedFooter(t *testing.T) {
 		{Type: parser.AIChunk, Timestamp: t0, Interrupted: true, Items: []parser.DisplayItem{
 			{Type: parser.ItemToolCall, ToolName: "Bash", ToolID: "tu1"}}},
 	}
-	es := foldEntries(cs, nil, false)
+	es := foldEntries(cs, nil, nil, "", false)
 	last := es[len(es)-1]
 	if last.Kind != EntryTurnEnd || !last.Interrupted {
 		t.Fatalf("last = %+v, want interrupted footer", last)
@@ -143,7 +143,7 @@ func TestFoldEntriesInterruptedFooterSurvivesNextPrompt(t *testing.T) {
 			{Type: parser.ItemToolCall, ToolName: "Bash", ToolID: "tu1"}}},
 		{Type: parser.UserChunk, Timestamp: t0, UserText: "try again"},
 	}
-	for _, e := range foldEntries(cs, nil, false) {
+	for _, e := range foldEntries(cs, nil, nil, "", false) {
 		if e.Kind == EntryTurnEnd {
 			if !e.Interrupted {
 				t.Fatalf("footer = %+v, want interrupted after a later prompt", e)
@@ -157,7 +157,7 @@ func TestFoldEntriesInterruptedFooterSurvivesNextPrompt(t *testing.T) {
 func TestFoldEntriesStableIDs(t *testing.T) {
 	short := doneTurn()
 	long := append(doneTurn(), parser.Chunk{Type: parser.UserChunk, Timestamp: t0, UserText: "more"})
-	a, b := foldEntries(short, nil, false), foldEntries(long, nil, false)
+	a, b := foldEntries(short, nil, nil, "", false), foldEntries(long, nil, nil, "", false)
 	for i := range a {
 		if a[i].ID != b[i].ID || a[i].Kind != b[i].Kind {
 			t.Fatalf("entry %d changed: %+v vs %+v", i, a[i], b[i])
@@ -173,7 +173,7 @@ func TestFoldEntriesUserSkillAndOtherKinds(t *testing.T) {
 		{Type: parser.CompactChunk, Timestamp: t0, Output: "Compacted"},
 		{Type: parser.ShellChunk, Timestamp: t0, ShellCommand: "ls", Output: "a", IsError: true},
 	}
-	es := foldEntries(cs, nil, false)
+	es := foldEntries(cs, nil, nil, "", false)
 	want := []EntryKind{EntryUser, EntrySkill, EntrySystem, EntryCompact, EntryShell}
 	if got := kinds(es); !reflect.DeepEqual(got, want) {
 		t.Fatalf("kinds = %v, want %v", got, want)
@@ -192,7 +192,7 @@ func TestFoldEntriesQueuedPromptIsUserEntryInsideTurn(t *testing.T) {
 			{Type: parser.ItemOutput, Text: "done, and X too"},
 		}},
 	}
-	es := foldEntries(cs, nil, false)
+	es := foldEntries(cs, nil, nil, "", false)
 	want := []EntryKind{EntryUser, EntryTool, EntryUser, EntryText, EntryTurnEnd}
 	if got := kinds(es); !reflect.DeepEqual(got, want) {
 		t.Fatalf("kinds = %v, want %v", got, want)

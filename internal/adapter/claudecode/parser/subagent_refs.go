@@ -144,7 +144,7 @@ func AgentIDsByToolID(sessionPath string) map[string]string {
 func SubagentFilePath(sessionPath, agentID string) (string, bool) {
 	p := filepath.Join(subagentsDir(sessionPath), "agent-"+agentID+".jsonl")
 	if info, err := os.Stat(p); err != nil || info.IsDir() {
-		return "", false
+		return workflowAgentPath(sessionPath, agentID, ".jsonl")
 	}
 	return p, true
 }

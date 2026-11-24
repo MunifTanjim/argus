@@ -26,6 +26,7 @@ func New() adapter.Adapter { return &ccAdapter{toolUses: &toolUseMap{}} }
 
 var _ adapter.Adapter = (*ccAdapter)(nil)
 var _ adapter.TaskSource = (*ccAdapter)(nil)
+var _ adapter.WorkflowSource = (*ccAdapter)(nil)
 var _ adapter.Prompter = (*ccAdapter)(nil)
 var _ adapter.ModBridged = (*ccAdapter)(nil)
 var _ adapter.Dismisser = (*ccAdapter)(nil)

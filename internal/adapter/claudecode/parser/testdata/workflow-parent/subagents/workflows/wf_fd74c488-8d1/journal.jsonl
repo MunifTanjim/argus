@@ -1,0 +1,14 @@
+{"type":"launched"}
+{"type":"started","key":"v2:8c2da08d47345f7b7d44223facdd8870bae6503e207f7996b5536d48087d6523","agentId":"a684b9c31f9c90f4a","label":"review:pkg","phase":"Review"}
+{"type":"started","key":"v2:bac725146c473fac7bf8bd14b2d5dd7f3c81ca1ab6c38990f0b5b63fa43e0c09","agentId":"a38632b42e805656b","label":"review:node-core","phase":"Review"}
+{"type":"started","key":"v2:9487a90e5f337f2fbaa98669b23297e319de81e95400a76e0eb15f8065002bdc","agentId":"ac326705e12223425","label":"review:node-rout","phase":"Review"}
+{"type":"started","key":"v2:fa977609f17bf6efcd4d6c45a31a45d3026e71456fff561d562d0d4ad966e991","agentId":"ad665d4375cc9672f","label":"review:node-appr","phase":"Review"}
+{"type":"started","key":"v2:3b40d1f61b6584b84c04de19160c33e4f2a3a8ee456ff2bc6104fb893ad4f45c","agentId":"a19480ee4c39bbcfe","label":"review:surface","phase":"Review"}
+{"type":"started","key":"v2:5845c8226149d6d6c3e7ddb04d7107353c9107ddf9fb0491bc7345b1d6d5a0c0","agentId":"a1225f91929c783cf","label":"review:tui","phase":"Review"}
+{"type":"result","key":"v2:5845c8226149d6d6c3e7ddb04d7107353c9107ddf9fb0491bc7345b1d6d5a0c0","agentId":"a1225f91929c783cf","result":"ok","remoteControlDeviceReport":false,"toolsUsed":["Bash","Read","Write"],"sessionId":"e6f50662-cb62-4847-abfe-471ba788db2a"}
+{"type":"started","key":"v2:299c8b302ab9159b872deab4e1fc0ae361b029335318488888c46b014f9b29b1","agentId":"a632ccd38aedfba88","label":"review:app","phase":"Review"}
+{"type":"result","key":"v2:3b40d1f61b6584b84c04de19160c33e4f2a3a8ee456ff2bc6104fb893ad4f45c","agentId":"a19480ee4c39bbcfe","result":"ok","remoteControlDeviceReport":false,"toolsUsed":["Bash","Read","Write"],"sessionId":"e6f50662-cb62-4847-abfe-471ba788db2a"}
+{"type":"result","key":"v2:9487a90e5f337f2fbaa98669b23297e319de81e95400a76e0eb15f8065002bdc","agentId":"ac326705e12223425","result":"ok","remoteControlDeviceReport":false,"toolsUsed":["Bash","Read","Write"],"sessionId":"e6f50662-cb62-4847-abfe-471ba788db2a"}
+{"type":"result","key":"v2:bac725146c473fac7bf8bd14b2d5dd7f3c81ca1ab6c38990f0b5b63fa43e0c09","agentId":"a38632b42e805656b","result":"ok","remoteControlDeviceReport":false,"toolsUsed":["Bash","Write"],"sessionId":"e6f50662-cb62-4847-abfe-471ba788db2a"}
+{"type":"result","key":"v2:fa977609f17bf6efcd4d6c45a31a45d3026e71456fff561d562d0d4ad966e991","agentId":"ad665d4375cc9672f","result":"ok","remoteControlDeviceReport":false,"toolsUsed":["Bash","Write"],"sessionId":"e6f50662-cb62-4847-abfe-471ba788db2a"}
+{"type":"result","key":"v2:8c2da08d47345f7b7d44223facdd8870bae6503e207f7996b5536d48087d6523","agentId":"a684b9c31f9c90f4a","result":"ok","remoteControlDeviceReport":false,"toolsUsed":["Bash","Write"],"sessionId":"e6f50662-cb62-4847-abfe-471ba788db2a"}

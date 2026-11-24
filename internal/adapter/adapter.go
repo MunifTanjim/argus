@@ -136,6 +136,29 @@ type TaskSource interface {
 	TaskActivityCount(entries []transcript.Entry) (count int, hasTaskTool bool)
 }
 
+// WorkflowSource is an optional adapter capability for agents with a Workflow
+// tool: scripted multi-agent runs whose state lives beside the transcript.
+type WorkflowSource interface {
+	// NewWorkflowTracker follows a transcript's Workflow launches incrementally.
+	NewWorkflowTracker(transcriptPath string) WorkflowTracker
+	// ReadWorkflow returns the run's view. ref carries the launch's resolved
+	// status; rootPath is the session transcript. ok=false: no readable run
+	// state (remote, still pending, or nothing on disk); callers then serve the
+	// ref with empty phases.
+	ReadWorkflow(rootPath string, ref transcript.WorkflowRef) (transcript.WorkflowView, bool, error)
+	// FindWorkflow scans one transcript (session or, with agentID, a subagent
+	// file) for a run id. finished: history read.
+	FindWorkflow(rootPath, agentID, runID string, finished bool) (transcript.WorkflowRef, bool, error)
+}
+
+// WorkflowTracker incrementally follows a transcript's Workflow launches. Not
+// safe for concurrent use.
+type WorkflowTracker interface {
+	// Refresh returns every launch in order with fold-resolved status (live:
+	// unended → "running").
+	Refresh() ([]transcript.WorkflowRef, error)
+}
+
 // Responder answers a pending interaction by an outbound action, for adapters
 // that do not park a blocking hook call (for example an HTTP-service agent).
 // The node type-asserts this on the session's adapter when no parked decision
