@@ -316,6 +316,20 @@ class _TabsControl extends StatefulWidget {
 }
 
 class _TabsControlState extends State<_TabsControl> {
+  // Which control the switch shows; the other one is kept out of focus.
+  bool _iconsShown = false;
+  bool _iconsLaidOut = false;
+
+  void _onShown(bool icons) {
+    _iconsLaidOut = icons;
+    if (icons == _iconsShown) return;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _iconsLaidOut != _iconsShown) {
+        setState(() => _iconsShown = _iconsLaidOut);
+      }
+    });
+  }
+
   @override
   void didUpdateWidget(_TabsControl oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -350,25 +364,72 @@ class _TabsControlState extends State<_TabsControl> {
     final tabs = widget.tabs;
     return _TabsSwitch(
       link: widget.link,
-      labels: _control([
-        for (final label in tabs.labels)
-          Text(
-            label,
-            style: const TextStyle(color: AppColors.text, fontSize: 13),
-          ),
-      ]),
-      icons: _control([
-        for (var i = 0; i < tabs.icons.length; i++)
-          Tooltip(
-            message: tabs.labels[i],
-            child: IconTheme.merge(
-              data: const IconThemeData(color: AppColors.text, size: 16),
-              child: tabs.icons[i],
+      onShown: _onShown,
+      labels: ExcludeFocus(
+        excluding: _iconsShown,
+        child: _control([
+          for (final label in tabs.labels)
+            Text(
+              label,
+              style: const TextStyle(color: AppColors.text, fontSize: 13),
             ),
-          ),
-      ]),
+        ]),
+      ),
+      icons: ExcludeFocus(
+        excluding: !_iconsShown,
+        child: _control([
+          for (var i = 0; i < tabs.icons.length; i++)
+            Tooltip(
+              message: tabs.labels[i],
+              child: IconTheme.merge(
+                data: const IconThemeData(color: AppColors.text, size: 16),
+                child: tabs.icons[i],
+              ),
+            ),
+        ]),
+      ),
     );
   }
+}
+
+/// The middle of a tabbed toolbar row: the row with the tabs control, which
+/// share a [_TabsSwitchLink].
+class _TabbedTitle extends StatefulWidget {
+  const _TabbedTitle({
+    required this.spacing,
+    required this.leading,
+    required this.title,
+    required this.tabs,
+    required this.actions,
+  });
+
+  final double spacing;
+  final Widget? leading;
+  final Widget? title;
+  final ToolbarTabs tabs;
+  final Widget? actions;
+
+  @override
+  State<_TabbedTitle> createState() => _TabbedTitleState();
+}
+
+class _TabbedTitleState extends State<_TabbedTitle> {
+  final _link = _TabsSwitchLink();
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: kMacToolbarHeight,
+    child: _TabbedToolbar(
+      link: _link,
+      spacing: widget.spacing,
+      leading: widget.leading,
+      title: widget.title,
+      tabs: ArgusAppBar._passthrough(
+        _TabsControl(tabs: widget.tabs, link: _link),
+      ),
+      actions: widget.actions,
+    ),
+  );
 }
 
 /// Lets the toolbar row read the width the icons need from the switch, which
@@ -383,21 +444,25 @@ class _TabsSwitchLink {
 class _TabsSwitch extends MultiChildRenderObjectWidget {
   _TabsSwitch({
     required this.link,
+    required this.onShown,
     required Widget labels,
     required Widget icons,
   }) : super(children: [labels, icons]);
 
   final _TabsSwitchLink link;
 
+  /// Called after each layout with whether the icons are shown.
+  final ValueChanged<bool> onShown;
+
   @override
   _RenderTabsSwitch createRenderObject(BuildContext context) =>
-      link.box = _RenderTabsSwitch();
+      link.box = _RenderTabsSwitch(onShown);
 
   @override
   void updateRenderObject(
     BuildContext context,
     _RenderTabsSwitch renderObject,
-  ) => link.box = renderObject;
+  ) => link.box = renderObject..onShown = onShown;
 
   @override
   MultiChildRenderObjectElement createElement() => _TabsSwitchElement(this);
@@ -421,6 +486,10 @@ class _RenderTabsSwitch extends RenderBox
     with
         ContainerRenderObjectMixin<RenderBox, _SwitchParentData>,
         RenderBoxContainerDefaultsMixin<RenderBox, _SwitchParentData> {
+  _RenderTabsSwitch(this.onShown);
+
+  ValueChanged<bool> onShown;
+
   RenderBox? shown;
 
   /// The width of the icons, as of the last layout.
@@ -477,6 +546,7 @@ class _RenderTabsSwitch extends RenderBox
     _labels.layout(constraints.loosen(), parentUsesSize: pick == _labels);
     _icons.layout(constraints.loosen(), parentUsesSize: pick == _icons);
     size = constraints.constrain(pick.size);
+    onShown(pick == _icons);
   }
 
   @override
@@ -757,7 +827,6 @@ class ArgusAppBar extends StatelessWidget implements PreferredSizeWidget {
         AppBarTheme.of(context).backgroundColor ??
         Theme.of(context).colorScheme.surface;
     final tabs = ToolbarTabs.maybeOf(context);
-    final link = _TabsSwitchLink();
     return MacosToolbarPassthroughScope(
       child: _MacToolbar(
         child: ColoredBox(
@@ -788,35 +857,26 @@ class ArgusAppBar extends StatelessWidget implements PreferredSizeWidget {
                     titleSpacing: 0,
                     // Only the title is a header, not the whole row.
                     excludeHeaderSemantics: true,
-                    title: SizedBox(
-                      height: kMacToolbarHeight,
-                      child: _TabbedToolbar(
-                        link: link,
-                        spacing:
-                            titleSpacing ??
-                            AppBarTheme.of(context).titleSpacing ??
-                            NavigationToolbar.kMiddleSpacing,
-                        leading: lead == null ? null : _passthrough(lead),
-                        // The tabs name the page, so a plain text title goes.
-                        title: head == null || head is Text
-                            ? null
-                            : Semantics(
-                                header: true,
-                                child: _passthrough(head),
+                    title: _TabbedTitle(
+                      spacing:
+                          titleSpacing ??
+                          AppBarTheme.of(context).titleSpacing ??
+                          NavigationToolbar.kMiddleSpacing,
+                      leading: lead == null ? null : _passthrough(lead),
+                      // The tabs name the page, so a plain text title goes.
+                      title: head == null || head is Text
+                          ? null
+                          : Semantics(header: true, child: _passthrough(head)),
+                      tabs: tabs,
+                      actions: actions == null || actions!.isEmpty
+                          ? null
+                          : _withActionsIconTheme(
+                              context,
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: actions!.map(_passthrough).toList(),
                               ),
-                        tabs: _passthrough(
-                          _TabsControl(tabs: tabs, link: link),
-                        ),
-                        actions: actions == null || actions!.isEmpty
-                            ? null
-                            : _withActionsIconTheme(
-                                context,
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: actions!.map(_passthrough).toList(),
-                                ),
-                              ),
-                      ),
+                            ),
                     ),
                   ),
           ),

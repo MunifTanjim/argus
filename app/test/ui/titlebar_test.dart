@@ -896,6 +896,109 @@ void main() {
       },
     );
 
+    // The segmented control (shown or not) that has icons, or labels.
+    Element segmentedWith({required bool icons}) => find
+        .byType(CupertinoSlidingSegmentedControl<int>, skipOffstage: false)
+        .evaluate()
+        .singleWhere((e) {
+          var hasTooltip = false;
+          void visit(Element child) {
+            if (child.widget is Tooltip) hasTooltip = true;
+            child.visitChildren(visit);
+          }
+
+          e.visitChildren(visit);
+          return hasTooltip == icons;
+        });
+
+    bool focusIn(Element control) {
+      final focused = FocusManager.instance.primaryFocus?.context;
+      if (focused == null) return false;
+      if (focused == control) return true;
+      var inside = false;
+      focused.visitAncestorElements((e) {
+        inside = e == control;
+        return !inside;
+      });
+      return inside;
+    }
+
+    for (final iconsShown in [false, true]) {
+      testWidgets(
+        'with ${iconsShown ? 'icons' : 'labels'} shown, Tab never focuses the hidden control',
+        (tester) async {
+          _platform(TargetPlatform.macOS);
+          await tester.pumpWidget(
+            tabbed(
+              ArgusAppBar(
+                actions: [
+                  IconButton(icon: const Icon(Icons.add), onPressed: () {}),
+                ],
+              ),
+              labels: iconsShown
+                  ? const ['A rather long first label', 'A rather long second']
+                  : const ['One', 'Two'],
+            ),
+          );
+          await tester.pump();
+          expect(
+            segmentTooltip(iconsShown ? 'A rather long first label' : 'One'),
+            iconsShown ? findsOneWidget : findsNothing,
+          );
+          final hidden = segmentedWith(icons: !iconsShown);
+          final shown = segmentedWith(icons: iconsShown);
+          var reachedShown = false;
+          for (var i = 0; i < 8; i++) {
+            await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+            await tester.pump();
+            expect(focusIn(hidden), isFalse, reason: 'Tab stop $i');
+            if (focusIn(shown)) reachedShown = true;
+          }
+          expect(reachedShown, isTrue);
+        },
+      );
+    }
+
+    testWidgets(
+      'after a title wider than its share grows with the tabs off center, the native rects match',
+      (tester) async {
+        _platform(TargetPlatform.macOS);
+        final title = ValueNotifier('A title wider than reserve');
+        addTearDown(title.dispose);
+        await tester.pumpWidget(
+          tabbed(
+            ArgusAppBar(
+              title: ValueListenableBuilder<String>(
+                valueListenable: title,
+                builder: (_, text, _) => TextButton(
+                  onPressed: () {},
+                  child: Text(text, overflow: TextOverflow.ellipsis),
+                ),
+              ),
+              actions: [
+                IconButton(icon: const Icon(Icons.add), onPressed: () {}),
+              ],
+            ),
+          ),
+        );
+        await _flushPassthrough(tester);
+        final before = tester.getRect(control);
+        expect(
+          before.center.dx,
+          greaterThan(tester.getRect(find.byType(AppBar)).center.dx),
+        );
+        title.value = 'A title wider than reserve, more';
+        await _flushPassthrough(tester);
+        expect(tester.getRect(control), isNot(before));
+        expect(_passthroughRectOf(tester, control), tester.getRect(control));
+        expect(_passthroughRects.values, contains(tester.getRect(control)));
+        expect(
+          _passthroughRects.values.toSet(),
+          _visiblePassthroughRects(tester),
+        );
+      },
+    );
+
     testWidgets('a segment tap calls onSelected with its index', (
       tester,
     ) async {
