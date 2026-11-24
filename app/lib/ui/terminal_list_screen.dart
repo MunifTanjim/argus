@@ -8,6 +8,7 @@ import '../data/session_repository.dart';
 import '../state/control.dart';
 import '../state/grouping.dart';
 import '../state/terminals.dart';
+import '../util/platform.dart';
 import 'node_header.dart';
 import 'shell_drawer.dart';
 import 'terminal_tile.dart';
@@ -68,13 +69,23 @@ class TerminalListScreen extends ConsumerWidget {
       appBar: AppBar(
         leading: shellMenuButton(context),
         title: const Text('Terminals'),
+        actions: [
+          if (isDesktop)
+            IconButton(
+              tooltip: 'New terminal',
+              onPressed: () => _create(context, ref),
+              icon: const Icon(Icons.add),
+            ),
+        ],
       ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: null,
-        tooltip: 'New terminal',
-        onPressed: () => _create(context, ref),
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: isDesktop
+          ? null
+          : FloatingActionButton(
+              heroTag: null,
+              tooltip: 'New terminal',
+              onPressed: () => _create(context, ref),
+              child: const Icon(Icons.add),
+            ),
       body: TerminalListBody(children: rows),
     );
   }

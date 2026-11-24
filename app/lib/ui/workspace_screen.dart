@@ -7,6 +7,7 @@ import '../state/changes.dart';
 import '../state/control.dart';
 import '../state/navigation.dart';
 import '../state/projects.dart';
+import '../util/platform.dart';
 import 'adaptive_nav.dart';
 import 'project_actions.dart';
 import 'session_sections_list.dart';
@@ -45,6 +46,28 @@ class WorkspaceScreen extends ConsumerWidget {
     final tab = !showTerminals && selected == WorkspaceTab.terminals
         ? WorkspaceTab.sessions
         : selected;
+    final create = switch (tab) {
+      WorkspaceTab.sessions => (
+        tooltip: 'New session',
+        onPressed: () => Navigator.of(context).push(
+          spawnRoute(
+            target: SpawnTarget(
+              nodeId: project.nodeId,
+              cwd: workspace.dir,
+              label: '${project.name} · ${workspace.name}',
+            ),
+          ),
+        ),
+      ),
+      WorkspaceTab.terminals when !workspace.isGone => (
+        tooltip: 'New terminal',
+        onPressed: () {
+          final (nodeId, localId, _) = splitCompositeId(workspace.id);
+          createTerminal(context, ref, nodeId, workspaceId: localId);
+        },
+      ),
+      _ => null,
+    };
     return AdaptiveNavScaffold(
       appBar: AppBar(
         leading: shellMenuButton(context),
@@ -55,6 +78,12 @@ class WorkspaceScreen extends ConsumerWidget {
               )
             : _WorkspaceTitle(project: project, workspace: workspace),
         actions: [
+          if (isDesktop && create != null)
+            IconButton(
+              tooltip: create.tooltip,
+              onPressed: create.onPressed,
+              icon: const Icon(Icons.add),
+            ),
           if (tab == WorkspaceTab.sessions) ...const [
             SessionSearchButton(),
             ActiveOnlyButton(),
@@ -101,30 +130,13 @@ class WorkspaceScreen extends ConsumerWidget {
           ),
         },
       ),
-      floatingActionButton: switch (tab) {
-        WorkspaceTab.sessions => FloatingActionButton(
-          tooltip: 'New session',
-          onPressed: () => Navigator.of(context).push(
-            spawnRoute(
-              target: SpawnTarget(
-                nodeId: project.nodeId,
-                cwd: workspace.dir,
-                label: '${project.name} · ${workspace.name}',
-              ),
+      floatingActionButton: isDesktop || create == null
+          ? null
+          : FloatingActionButton(
+              tooltip: create.tooltip,
+              onPressed: create.onPressed,
+              child: const Icon(Icons.add),
             ),
-          ),
-          child: const Icon(Icons.add),
-        ),
-        WorkspaceTab.terminals when !workspace.isGone => FloatingActionButton(
-          tooltip: 'New terminal',
-          onPressed: () {
-            final (nodeId, localId, _) = splitCompositeId(workspace.id);
-            createTerminal(context, ref, nodeId, workspaceId: localId);
-          },
-          child: const Icon(Icons.add),
-        ),
-        _ => null,
-      },
       selectedIndex: tab.index,
       onSelected: (i) {
         ref.read(workspaceTabProvider(workspace.id).notifier).state =

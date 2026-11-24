@@ -6,6 +6,7 @@ import '../state/gateway.dart';
 import '../state/session_filter.dart';
 import '../state/sessions.dart';
 import '../transport/connection.dart';
+import '../util/platform.dart';
 import 'device_identity_screen.dart';
 import 'session_sections_list.dart';
 import 'shell_drawer.dart';
@@ -33,20 +34,28 @@ class SessionListScreen extends ConsumerWidget {
       appBar: AppBar(
         leading: shellMenuButton(context),
         title: const SessionSearchTitle(child: Text('Sessions')),
-        actions: const [
-          SessionSearchButton(),
-          GroupByButton(),
-          ActiveOnlyButton(),
+        actions: [
+          if (isDesktop)
+            IconButton(
+              tooltip: 'New session',
+              onPressed: () => Navigator.of(context).push(spawnRoute()),
+              icon: const Icon(Icons.add),
+            ),
+          const SessionSearchButton(),
+          const GroupByButton(),
+          const ActiveOnlyButton(),
         ],
       ),
       // The home tabs share one route, so their buttons cannot share the
       // default hero tag.
-      floatingActionButton: FloatingActionButton(
-        heroTag: null,
-        tooltip: 'New session',
-        onPressed: () => Navigator.of(context).push(spawnRoute()),
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: isDesktop
+          ? null
+          : FloatingActionButton(
+              heroTag: null,
+              tooltip: 'New session',
+              onPressed: () => Navigator.of(context).push(spawnRoute()),
+              child: const Icon(Icons.add),
+            ),
       body: Column(
         children: [
           if (conn != ConnState.connected)
