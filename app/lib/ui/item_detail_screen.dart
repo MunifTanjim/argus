@@ -81,6 +81,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return Scaffold(
       appBar: AppBar(title: Text(itemTitle(_item, agent: widget.detailRef.agent))),
       body: _loading
@@ -98,10 +99,10 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
                         padding: const EdgeInsets.only(bottom: 8),
                         child: Text(
                           'Failed to load: $_error',
-                          style: const TextStyle(color: AppColors.dim),
+                          style: TextStyle(color: t.textDim),
                         ),
                       ),
-                    toolDetailBody(_item, agent: widget.detailRef.agent),
+                    toolDetailBody(_item, t, agent: widget.detailRef.agent),
                   ],
                 ),
               ),

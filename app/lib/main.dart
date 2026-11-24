@@ -9,15 +9,17 @@ import 'pairing/gateway_store.dart';
 import 'pairing/legacy_migration.dart';
 import 'push/fcm_source.dart';
 import 'push/unifiedpush_background.dart';
+import 'state/appearance.dart';
 import 'state/gateway.dart';
 import 'state/profiles.dart';
 import 'state/push.dart';
+import 'state/theme_provider.dart';
 import 'transport/connection.dart';
 import 'ui/home_shell.dart';
 import 'ui/profiles_screen.dart';
 import 'ui/route_observer.dart';
 import 'ui/sign_out.dart';
-import 'ui/theme.dart';
+import 'ui/theme/scaled_text_scaler.dart';
 import 'ui/unsupported_server_screen.dart';
 
 Future<void> main(List<String> args) async {
@@ -73,7 +75,7 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    migrateLegacyOnce(const FlutterSecureKv()).then((_) async {
+    final restored = migrateLegacyOnce(const FlutterSecureKv()).then((_) async {
       final creds = await restoreActiveCredentials(
         ref.read(profileStoreProvider),
         ref.read(keyLibraryStoreProvider),
@@ -82,7 +84,16 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
       if (creds != null) {
         ref.read(credentialsProvider.notifier).state = creds;
       }
-    }).whenComplete(() {
+    });
+    // Show the first screen only after both credentials and appearance prefs
+    // are ready, so it never flashes the default theme.
+    Future.wait([
+      restored,
+      ref.read(appearancePrefsProvider.notifier).loaded,
+    ]).whenComplete(() async {
+      // Let the loaded theme land on a frame of its own first, so the first
+      // screen starts on it instead of animating from the default.
+      await WidgetsBinding.instance.endOfFrame;
       if (mounted) setState(() => _loaded = true);
     });
   }
@@ -113,10 +124,28 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
     ref.watch(pushControllerProvider);
     popToRootOnSignOut(ref, _navigatorKey);
 
+    final t = ref.watch(argusThemeProvider);
+
     return MaterialApp(
       title: 'argus',
       navigatorKey: _navigatorKey,
-      theme: buildArgusTheme(),
+      theme: t.light,
+      darkTheme: t.dark,
+      themeMode: t.mode,
+      themeAnimationDuration: _loaded ? kThemeAnimationDuration : Duration.zero,
+      // Always wrap, so changing the text size keeps the same widget tree
+      // (and the navigator's focus scope) instead of rebuilding it.
+      builder: (ctx, child) {
+        final os = MediaQuery.textScalerOf(ctx);
+        return MediaQuery(
+          data: MediaQuery.of(ctx).copyWith(
+            textScaler: t.textScale == 1.0
+                ? os
+                : ScaledTextScaler(os, t.textScale),
+          ),
+          child: child!,
+        );
+      },
       navigatorObservers: [appRouteObserver],
       home: !_loaded
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))

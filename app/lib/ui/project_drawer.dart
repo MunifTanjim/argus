@@ -18,8 +18,6 @@ import 'sidebar_sessions_list.dart';
 import 'spawn_dialog.dart';
 import 'theme.dart';
 
-const _amber = Color(0xFFd79921);
-const _green = Color(0xFF689d6a);
 
 class ProjectDrawer extends ConsumerStatefulWidget {
   const ProjectDrawer({super.key});
@@ -109,7 +107,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
     final tab = ref.watch(leftSidebarTabProvider);
 
     return Material(
-      color: AppColors.card,
+      color: context.tokens.surface,
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -279,13 +277,13 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
         decoration: InputDecoration(
           isDense: true,
           filled: true,
-          fillColor: AppColors.canvas,
-          prefixIcon: const Icon(Icons.search, size: 16, color: AppColors.dim),
+          fillColor: context.tokens.canvas,
+          prefixIcon: Icon(Icons.search, size: 16, color: context.tokens.textDim),
           prefixIconConstraints: const BoxConstraints(minWidth: 40),
           hintText: tab == LeftSidebarTab.projects
               ? 'Filter projects'
               : 'Filter sessions',
-          hintStyle: const TextStyle(fontSize: 13, color: AppColors.dim),
+          hintStyle: TextStyle(fontSize: 13, color: context.tokens.textDim),
           contentPadding: const EdgeInsets.symmetric(vertical: 10),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
@@ -306,7 +304,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
         Expanded(
           child: Text(
             'Could not load projects: $error',
-            style: const TextStyle(color: AppColors.error, fontSize: 12),
+            style: TextStyle(color: context.tokens.error, fontSize: 12),
           ),
         ),
         TextButton(onPressed: _refresh, child: const Text('Retry')),
@@ -342,8 +340,8 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
                         r.label.toUpperCase(),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: AppColors.dim,
+                        style: TextStyle(
+                          color: context.tokens.textDim,
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
                           letterSpacing: 0.8,
@@ -354,12 +352,12 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
                     InkWell(
                       borderRadius: BorderRadius.circular(12),
                       onTap: () => _openNode(r.id, r.label),
-                      child: const SizedBox.square(
+                      child: SizedBox.square(
                         dimension: 40,
                         child: Icon(
                           Icons.info_outline,
                           size: 16,
-                          color: AppColors.dim,
+                          color: context.tokens.textDim,
                           semanticLabel: 'Node info',
                         ),
                       ),
@@ -368,7 +366,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
                     Icon(
                       r.folded ? Icons.expand_more : Icons.expand_less,
                       size: 18,
-                      color: AppColors.dim,
+                      color: context.tokens.textDim,
                       semanticLabel: r.folded ? 'expand' : 'collapse',
                     ),
                   ],
@@ -388,36 +386,36 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
               ? Icon(
                   r.folded ? Icons.chevron_right : Icons.expand_more,
                   size: 18,
-                  color: AppColors.dim,
+                  color: context.tokens.textDim,
                 )
               : null,
           title: _title(r),
           titleStyle: TextStyle(
             fontWeight: FontWeight.w600,
-            color: r.hidden ? AppColors.dim : null,
+            color: r.hidden ? context.tokens.textDim : null,
           ),
           titleSuffix: [
             if (r.hidden)
-              const Icon(
+              Icon(
                 Icons.visibility_off_outlined,
                 size: 13,
-                color: AppColors.dim,
+                color: context.tokens.textDim,
                 semanticLabel: 'hidden',
               ),
             if (r.pinned)
-              const Icon(Icons.push_pin, size: 13, color: AppColors.dim),
+              Icon(Icons.push_pin, size: 13, color: context.tokens.textDim),
           ],
           trailing: _trailing([
             if (r.gitError.isNotEmpty)
               InkWell(
                 borderRadius: BorderRadius.circular(12),
                 onTap: () => _showError(r.label, r.gitError),
-                child: const Padding(
-                  padding: EdgeInsets.all(4),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
                   child: Icon(
                     Icons.warning_amber,
                     size: 16,
-                    color: AppColors.error,
+                    color: context.tokens.error,
                     semanticLabel: 'Git error',
                   ),
                 ),
@@ -435,33 +433,33 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
             if (hit != null) showWorkspaceSheet(context, hit.$1, hit.$2);
           },
           leading: r.isMain
-              ? const Icon(
+              ? Icon(
                   Icons.folder_outlined,
                   size: 16,
-                  color: AppColors.dim,
+                  color: context.tokens.textDim,
                   semanticLabel: 'main worktree',
                 )
-              : const GitBranchIcon(size: 16, color: AppColors.dim),
+              : GitBranchIcon(size: 16, color: context.tokens.textDim),
           title: _title(r),
           subtitle: r.detail,
           trailing: _trailing([
             if (removing.contains(r.id))
-              const Text(
+              Text(
                 'removing…',
-                style: TextStyle(color: AppColors.dim, fontSize: 12),
+                style: TextStyle(color: context.tokens.textDim, fontSize: 12),
               ),
             if (r.setup == SetupMark.running)
-              const Icon(
+              Icon(
                 Icons.sync,
                 size: 14,
-                color: _amber,
+                color: context.tokens.busy,
                 semanticLabel: 'setup running',
               ),
             if (r.setup == SetupMark.failed)
-              const Icon(
+              Icon(
                 Icons.error_outline,
                 size: 14,
-                color: AppColors.error,
+                color: context.tokens.error,
                 semanticLabel: 'setup failed',
               ),
             ?_badges(sumActivity(act, r.workspaceIds)),
@@ -497,7 +495,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
   }) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
     child: Material(
-      color: selected ? AppColors.border : Colors.transparent,
+      color: selected ? context.tokens.surfaceRaised : Colors.transparent,
       borderRadius: BorderRadius.circular(8),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -540,8 +538,8 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
                           subtitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: AppColors.link,
+                          style: TextStyle(
+                            color: context.tokens.link,
                             fontSize: 12,
                           ),
                         ),
@@ -568,15 +566,16 @@ class _Badges extends StatelessWidget {
     mainAxisSize: MainAxisSize.min,
     children: [
       if (activity.blocked > 0)
-        _badge('${activity.blocked}', AppColors.blocked),
+        _badge(context, '${activity.blocked}', context.tokens.blocked),
       if (activity.waiting > 0)
-        _badge('${activity.waiting}', AppColors.waiting),
-      if (activity.working > 0) _badge('${activity.working}', _green),
-      if (activity.idle > 0) _badge('${activity.idle}', AppColors.dim),
+        _badge(context, '${activity.waiting}', context.tokens.waiting),
+      if (activity.working > 0)
+        _badge(context, '${activity.working}', context.tokens.workingBadge),
+      if (activity.idle > 0) _badge(context, '${activity.idle}', context.tokens.textDim),
     ],
   );
 
-  Widget _badge(String text, Color color) => Container(
+  Widget _badge(BuildContext context, String text, Color color) => Container(
     margin: const EdgeInsets.only(left: 4),
     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
     decoration: BoxDecoration(
@@ -585,8 +584,8 @@ class _Badges extends StatelessWidget {
     ),
     child: Text(
       text,
-      style: const TextStyle(
-        color: AppColors.canvas,
+      style: TextStyle(
+        color: context.tokens.canvas,
         fontSize: 10,
         fontWeight: FontWeight.w700,
       ),

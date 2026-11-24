@@ -5,22 +5,8 @@ import 'theme.dart';
 
 export '../models/agent.dart' show agentLabel;
 
-Color agentColor(String agent) {
-  switch (agent) {
-    case 'claude':
-      return const Color(0xFFfe8019);
-    case 'codex':
-      return const Color(0xFFb8bb26);
-    case 'antigravity':
-      return const Color(0xFF83a598);
-    case 'opencode':
-      return AppColors.text; // monochrome, matching OpenCode's terminal brand
-    case 'pi':
-      return const Color(0xFFb294bb);
-    default:
-      return AppColors.dim;
-  }
-}
+Color agentColor(String agent, ArgusTokens t) =>
+    readableOn(agentBrandColor(agent), t);
 
 class AgentBadge extends StatelessWidget {
   const AgentBadge({super.key, required this.agent});
@@ -31,7 +17,7 @@ class AgentBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final label = agentLabel(agent);
     if (label.isEmpty) return const SizedBox.shrink();
-    final color = agentColor(agent);
+    final color = agentColor(agent, context.tokens);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
@@ -41,7 +27,7 @@ class AgentBadge extends StatelessWidget {
       child: Text(
         label.toUpperCase(),
         style: TextStyle(
-          fontFamily: 'monospace',
+          fontFamily: monoFamily,
           fontSize: 10,
           fontWeight: FontWeight.w700,
           color: color,

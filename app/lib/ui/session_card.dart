@@ -30,10 +30,10 @@ class SessionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = session;
     final (surface, border) = s.blocked
-        ? (AppColors.blockedSurface, AppColors.blockedBorder)
+        ? (context.tokens.blockedSurface, context.tokens.blockedBorder)
         : s.status == SessionStatus.awaitingInput
-            ? (AppColors.waitingSurface, AppColors.waitingBorder)
-            : (AppColors.card, AppColors.border);
+            ? (context.tokens.waitingSurface, context.tokens.waitingBorder)
+            : (context.tokens.surface, context.tokens.line);
     final title = s.displayTitle;
     final nodeLabel = s.nodeLabel ?? s.nodeId ?? 'local';
 
@@ -48,7 +48,7 @@ class SessionCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: surface,
         border: Border.all(color: border),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(context.tokens.radius),
       ),
       padding: const EdgeInsets.all(12),
       child: Column(
@@ -58,14 +58,14 @@ class SessionCard extends StatelessWidget {
             children: [
               Text(statusGlyph(s.status),
                   style: TextStyle(
-                      fontFamily: 'monospace', color: sessionColor(s))),
+                      fontFamily: monoFamily, color: sessionColor(s, context.tokens))),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        color: AppColors.text, fontWeight: FontWeight.w600)),
+                    style: TextStyle(
+                        color: context.tokens.text, fontWeight: FontWeight.w600)),
               ),
               if (showAgent) ...[
                 const SizedBox(width: 8),
@@ -73,10 +73,10 @@ class SessionCard extends StatelessWidget {
               ],
               if (showNode) ...[
                 const SizedBox(width: 8),
-                const Icon(Icons.dns_outlined, size: 13, color: AppColors.dim),
+                Icon(Icons.dns_outlined, size: 13, color: context.tokens.textDim),
                 const SizedBox(width: 4),
                 Text(nodeLabel,
-                    style: mono.copyWith(color: AppColors.dim, fontSize: 11)),
+                    style: mono.copyWith(color: context.tokens.textDim, fontSize: 11)),
               ],
             ],
           ),
@@ -85,18 +85,18 @@ class SessionCard extends StatelessWidget {
             Text(s.displayName!,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: mono.copyWith(color: AppColors.dim)),
+                style: mono.copyWith(color: context.tokens.textDim)),
           ],
           if ((s.summary?.task ?? s.interaction?.message) != null) ...[
             const SizedBox(height: 4),
             Text(s.summary?.task ?? s.interaction!.message!,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: AppColors.secondary, fontSize: 13)),
+                style: TextStyle(color: context.tokens.textSecondary, fontSize: 13)),
           ],
           if (meta.isNotEmpty) ...[
             const SizedBox(height: 6),
-            Text(meta, style: mono.copyWith(color: AppColors.dim)),
+            Text(meta, style: mono.copyWith(color: context.tokens.textDim)),
           ],
         ],
       ),
@@ -107,7 +107,7 @@ class SessionCard extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(context.tokens.radius),
           onTap: onTap,
           onLongPress: onLongPress,
           child: card,

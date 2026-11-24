@@ -9,12 +9,12 @@ class SectionLabel extends StatelessWidget {
     super.key,
     required this.leading,
     required this.label,
-    this.color = AppColors.dim,
+    this.color,
   });
 
   final Widget leading;
   final String label;
-  final Color color;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) => Row(
@@ -27,7 +27,7 @@ class SectionLabel extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-            color: color,
+            color: color ?? context.tokens.textDim,
             fontSize: 11,
             fontWeight: FontWeight.w600,
             letterSpacing: 0.8,
@@ -56,7 +56,7 @@ class NodeHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final marks = [if (offline) 'offline', if (outdated) 'outdated'];
     return SectionLabel(
-      leading: const Icon(Icons.dns_outlined, size: 14, color: AppColors.dim),
+      leading: Icon(Icons.dns_outlined, size: 14, color: context.tokens.textDim),
       label: marks.isEmpty ? label : '$label (${marks.join(' · ')})',
     );
   }
@@ -75,7 +75,7 @@ class NeedsYouHeader extends StatelessWidget {
     leading: Text(
       statusGlyph(SessionStatus.awaitingInput),
       style: TextStyle(
-        fontFamily: 'monospace',
+        fontFamily: monoFamily,
         fontSize: 12,
         color: color,
       ),

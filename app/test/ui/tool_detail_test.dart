@@ -4,10 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/entry.dart';
 import 'package:argus/ui/tool_detail.dart';
+import 'package:argus/ui/theme.dart';
 import 'package:argus/ui/tool_registry.dart';
 
 Widget _wrap(Entry i) => MaterialApp(
-    home: Scaffold(body: SingleChildScrollView(child: toolDetailBody(i))));
+    home: Scaffold(body: SingleChildScrollView(child: toolDetailBody(i, ArgusTokens.fallback))));
 
 void main() {
   testWidgets('Bash shows command and result', (tester) async {

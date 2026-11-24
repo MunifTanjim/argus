@@ -12,7 +12,7 @@ import 'relative_time.dart';
 import 'responsive.dart';
 import 'theme.dart';
 
-const _mono = TextStyle(fontFamily: 'monospace', fontSize: 13);
+const _mono = TextStyle(fontFamily: monoFamily, fontSize: 13);
 
 /// Git status (grouped Staged / Unstaged / Untracked) above the commit list of
 /// a workspace. Pull down to refresh.
@@ -37,20 +37,21 @@ class ChangesView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final t = context.tokens;
     final async = ref.watch(
       workspaceChangedFilesProvider((source.workspaceId, source.against)),
     );
     return RefreshIndicator(
       onRefresh: () async => refreshChanges(ref, source),
       child: async.when(
-        loading: () => _messageList(null),
-        error: (e, _) => _messageList('Could not load changes:\n$e'),
+        loading: () => _messageList(null, t),
+        error: (e, _) => _messageList('Could not load changes:\n$e', t),
         data: (files) => _body(context, ref, files),
       ),
     );
   }
 
-  Widget _messageList(String? text) => CenteredBody(
+  Widget _messageList(String? text, ArgusTokens t) => CenteredBody(
     child: ListView(
       padding: const EdgeInsets.all(12),
       children: [
@@ -59,13 +60,14 @@ class ChangesView extends ConsumerWidget {
         Center(
           child: text == null
               ? const CircularProgressIndicator()
-              : Text(text, style: const TextStyle(color: AppColors.dim)),
+              : Text(text, style: TextStyle(color: t.textDim)),
         ),
       ],
     ),
   );
 
   Widget _body(BuildContext context, WidgetRef ref, List<ChangedFile> files) {
+    final t = context.tokens;
     final untracked = files.where((f) => f.change == 'untracked').toList();
     final staged = files
         .where((f) => f.change != 'untracked' && f.staged)
@@ -91,7 +93,7 @@ class ChangesView extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text(
                 emptyText,
-                style: const TextStyle(color: AppColors.dim),
+                style: TextStyle(color: t.textDim),
               ),
             ),
           ..._commitsSection(context, ref),
@@ -105,9 +107,10 @@ class ChangesView extends ConsumerWidget {
     String title,
     List<ChangedFile> files,
   ) {
+    final t = context.tokens;
     if (files.isEmpty) return const [];
     return [
-      _sectionHeader('${title.toUpperCase()} (${files.length})'),
+      _sectionHeader('${title.toUpperCase()} (${files.length})', t),
       for (final f in files)
         ChangedFileRow(
           file: f,
@@ -122,22 +125,23 @@ class ChangesView extends ConsumerWidget {
   }
 
   List<Widget> _commitsSection(BuildContext context, WidgetRef ref) {
+    final t = context.tokens;
     final async = ref.watch(workspaceCommitsProvider(source.workspaceId));
     return async.when(
       loading: () => [
-        _sectionHeader(commitsTitle.toUpperCase()),
+        _sectionHeader(commitsTitle.toUpperCase(), t),
         const Padding(
           padding: EdgeInsets.symmetric(vertical: 8),
           child: Center(child: CircularProgressIndicator()),
         ),
       ],
       error: (e, _) => [
-        _sectionHeader(commitsTitle.toUpperCase()),
+        _sectionHeader(commitsTitle.toUpperCase(), t),
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Text(
             'Could not load commits: $e',
-            style: const TextStyle(color: AppColors.dim),
+            style: TextStyle(color: t.textDim),
           ),
         ),
       ],
@@ -146,6 +150,7 @@ class ChangesView extends ConsumerWidget {
         return [
           _sectionHeader(
             '${list.unpushed ? 'UNPUSHED' : commitsTitle.toUpperCase()} (${list.commits.length})',
+            t,
           ),
           for (final c in list.commits) _CommitRow(source: source, commit: c),
           const SizedBox(height: 8),
@@ -154,15 +159,15 @@ class ChangesView extends ConsumerWidget {
     );
   }
 
-  Widget _sectionHeader(String text) => Padding(
+  Widget _sectionHeader(String text, ArgusTokens t) => Padding(
     padding: const EdgeInsets.only(bottom: 8, top: 4),
     child: Text(
       '▌ $text',
-      style: const TextStyle(
-        fontFamily: 'monospace',
+      style: TextStyle(
+        fontFamily: monoFamily,
         fontSize: 12,
         fontWeight: FontWeight.w700,
-        color: AppColors.dim,
+        color: t.textDim,
       ),
     ),
   );
@@ -175,6 +180,7 @@ class _CommitRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final rel = commit.unixSec == 0
         ? ''
         : relativeTimeFrom(
@@ -191,8 +197,8 @@ class _CommitRow extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 6),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         decoration: BoxDecoration(
-          color: AppColors.card,
-          border: Border.all(color: AppColors.border),
+          color: t.surface,
+          border: Border.all(color: t.line),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Column(
@@ -200,7 +206,7 @@ class _CommitRow extends StatelessWidget {
           children: [
             Text(
               commit.subject,
-              style: _mono.copyWith(color: AppColors.text),
+              style: _mono.copyWith(color: t.text),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
@@ -211,7 +217,7 @@ class _CommitRow extends StatelessWidget {
                 Expanded(
                   child: Text(
                     meta,
-                    style: _mono.copyWith(color: AppColors.dim, fontSize: 11),
+                    style: _mono.copyWith(color: t.textDim, fontSize: 11),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -231,13 +237,13 @@ class _CommitRow extends StatelessWidget {
                         Text(
                           commit.short,
                           style: _mono.copyWith(
-                            color: const Color(0xFFd79921),
+                            color: t.commitHash,
                             fontWeight: FontWeight.w700,
                             fontSize: 11,
                           ),
                         ),
                         const SizedBox(width: 4),
-                        const Icon(Icons.copy, size: 12, color: AppColors.dim),
+                        Icon(Icons.copy, size: 12, color: t.textDim),
                       ],
                     ),
                   ),

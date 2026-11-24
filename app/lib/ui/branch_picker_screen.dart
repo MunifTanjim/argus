@@ -76,7 +76,7 @@ class _Mark extends StatelessWidget {
     padding: const EdgeInsets.only(left: 8),
     child: Text(
       text,
-      style: const TextStyle(color: AppColors.dim, fontSize: 12),
+      style: TextStyle(color: context.tokens.textDim, fontSize: 12),
     ),
   );
 }
@@ -94,7 +94,7 @@ class ListNotice extends StatelessWidget {
         Text(
           text,
           textAlign: TextAlign.center,
-          style: const TextStyle(color: AppColors.dim),
+          style: TextStyle(color: context.tokens.textDim),
         ),
         if (onRetry != null)
           TextButton(onPressed: onRetry, child: const Text('Retry')),

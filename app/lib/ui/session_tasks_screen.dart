@@ -8,7 +8,7 @@ import 'responsive.dart';
 import 'shell_drawer.dart';
 import 'theme.dart';
 
-const _mono = TextStyle(fontFamily: 'monospace', fontSize: 13);
+const _mono = TextStyle(fontFamily: monoFamily, fontSize: 13);
 
 /// A live session's Claude Code task list (TaskCreate/TaskUpdate), grouped by
 /// status. The session detail beneath refetches it on tasks.changed pushes.
@@ -61,7 +61,7 @@ class _SessionTasksScreenState extends ConsumerState<SessionTasksScreen> {
           const SizedBox(height: 120),
           Center(
               child:
-                  Text(text, style: const TextStyle(color: AppColors.dim))),
+                  Text(text, style: TextStyle(color: context.tokens.textDim))),
         ],
       );
 
@@ -86,11 +86,11 @@ class _SessionTasksScreenState extends ConsumerState<SessionTasksScreen> {
         padding: const EdgeInsets.all(12),
         children: [
           if (tasks.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 100),
+            Padding(
+              padding: const EdgeInsets.only(top: 100),
               child: Center(
                 child: Text('No tasks for this session.',
-                    style: TextStyle(color: AppColors.dim)),
+                    style: TextStyle(color: context.tokens.textDim)),
               ),
             ),
           ..._section('In Progress', inProgress),
@@ -114,11 +114,11 @@ class _SessionTasksScreenState extends ConsumerState<SessionTasksScreen> {
         padding: const EdgeInsets.only(bottom: 8, top: 4),
         child: Text(
           '▌ $text',
-          style: const TextStyle(
-            fontFamily: 'monospace',
+          style: TextStyle(
+            fontFamily: monoFamily,
             fontSize: 12,
             fontWeight: FontWeight.w700,
-            color: AppColors.dim,
+            color: context.tokens.textDim,
           ),
         ),
       );
@@ -140,8 +140,8 @@ class _TaskRow extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.card,
-        border: Border.all(color: AppColors.border),
+        color: context.tokens.surface,
+        border: Border.all(color: context.tokens.line),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Row(
@@ -150,7 +150,7 @@ class _TaskRow extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 1, right: 8),
             child: Icon(_statusIcon(task.status),
-                size: 16, color: _statusColor(task.status)),
+                size: 16, color: _statusColor(context.tokens, task.status)),
           ),
           Expanded(
             child: Column(
@@ -159,7 +159,7 @@ class _TaskRow extends StatelessWidget {
                 Text(
                   '#${task.id}  $title',
                   style: _mono.copyWith(
-                    color: done ? AppColors.dim : AppColors.text,
+                    color: done ? context.tokens.textDim : context.tokens.text,
                     decoration:
                         done ? TextDecoration.lineThrough : TextDecoration.none,
                   ),
@@ -168,7 +168,7 @@ class _TaskRow extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     task.description,
-                    style: _mono.copyWith(color: AppColors.dim, fontSize: 11),
+                    style: _mono.copyWith(color: context.tokens.textDim, fontSize: 11),
                     maxLines: 4,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -178,7 +178,7 @@ class _TaskRow extends StatelessWidget {
                   Text(
                     'blocked by ${task.blockedBy.map((b) => '#$b').join(', ')}',
                     style: _mono.copyWith(
-                        color: const Color(0xFFfb4934), fontSize: 11),
+                        color: context.tokens.error, fontSize: 11),
                   ),
                 ],
               ],
@@ -202,15 +202,15 @@ class _TaskRow extends StatelessWidget {
     }
   }
 
-  static Color _statusColor(TaskStatus s) {
+  static Color _statusColor(ArgusTokens t, TaskStatus s) {
     switch (s) {
       case TaskStatus.completed:
-        return const Color(0xFF8ec07c); // green
+        return t.taskCompleted;
       case TaskStatus.inProgress:
-        return const Color(0xFFfe8019); // orange (agent color)
+        return t.taskInProgress;
       case TaskStatus.pending:
       case TaskStatus.unknown:
-        return AppColors.dim;
+        return t.textDim;
     }
   }
 }

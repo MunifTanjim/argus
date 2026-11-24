@@ -106,7 +106,10 @@ void main() {
         .widgetList<Icon>(_inHeaders(find.byIcon(Icons.smart_toy_outlined)))
         .map((i) => i.color)
         .toList();
-    expect(colors, [agentColor('claude'), AppColors.dim]);
+    expect(colors, [
+      agentColor('claude', ArgusTokens.fallback),
+      ArgusTokens.fallback.textDim,
+    ]);
   });
 
   testWidgets('status headers lead with the status glyph', (tester) async {

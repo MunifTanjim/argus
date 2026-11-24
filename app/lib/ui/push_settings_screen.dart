@@ -117,15 +117,15 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
   }
 
   Widget _registrationStatus() {
-    const red = Color(0xFFfb4934);
+    final red = context.tokens.error;
     final (icon, color, label) = switch (_registered) {
       true => (
         Icons.check_circle_outline,
-        AppColors.accent,
+        context.tokens.accent,
         'Registered with gateway',
       ),
       false => (Icons.error_outline, red, 'Not registered — retrying'),
-      null => (Icons.hourglass_empty, AppColors.dim, 'Registration pending'),
+      null => (Icons.hourglass_empty, context.tokens.textDim, 'Registration pending'),
     };
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -141,8 +141,8 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
     padding: const EdgeInsets.only(bottom: 8),
     child: Text(
       title.toUpperCase(),
-      style: const TextStyle(
-        color: AppColors.accent,
+      style: TextStyle(
+        color: context.tokens.accent,
         fontSize: 12,
         fontWeight: FontWeight.w700,
       ),
@@ -173,7 +173,7 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
                 title: Text(label),
                 subtitle: Text(
                   subtitle,
-                  style: const TextStyle(color: AppColors.dim, fontSize: 11),
+                  style: TextStyle(color: context.tokens.textDim, fontSize: 11),
                 ),
               ),
           ],
@@ -184,19 +184,19 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
 
   List<Widget> _distributorBody() {
     if (_distributors.isEmpty) {
-      return const [
+      return [
         Text(
           'No distributor detected. On devices with Google Play services the '
           'app\'s built-in distributor should appear automatically; otherwise '
           'install a UnifiedPush distributor (e.g. ntfy).',
-          style: TextStyle(color: AppColors.text, fontSize: 13),
+          style: TextStyle(color: context.tokens.text, fontSize: 13),
         ),
       ];
     }
     return [
-      const Text(
+      Text(
         'Pick the distributor to deliver push:',
-        style: TextStyle(color: AppColors.text, fontSize: 13),
+        style: TextStyle(color: context.tokens.text, fontSize: 13),
       ),
       const SizedBox(height: 4),
       RadioGroup<String>(
@@ -211,7 +211,7 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
                 title: Text(_distributorLabel(d)),
                 subtitle: Text(
                   d,
-                  style: const TextStyle(color: AppColors.dim, fontSize: 11),
+                  style: TextStyle(color: context.tokens.textDim, fontSize: 11),
                 ),
               ),
           ],
@@ -232,7 +232,7 @@ class _PushSettingsScreenState extends ConsumerState<PushSettingsScreen> {
         title: const Text('Pause notifications'),
         subtitle: Text(
           paused ? _pauseStatusLabel() : 'This device receives push notifications.',
-          style: const TextStyle(color: AppColors.dim, fontSize: 11),
+          style: TextStyle(color: context.tokens.textDim, fontSize: 11),
         ),
         onChanged: _onPauseToggle,
       ),

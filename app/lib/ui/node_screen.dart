@@ -126,7 +126,7 @@ class _NodeScreenState extends ConsumerState<NodeScreen> {
   Widget _row(String label, String value) => ListTile(
     contentPadding: EdgeInsets.zero,
     title: Text(label),
-    trailing: Text(value, style: const TextStyle(color: AppColors.secondary)),
+    trailing: Text(value, style: TextStyle(color: context.tokens.textSecondary)),
   );
 
   @override
@@ -170,7 +170,7 @@ class _NodeScreenState extends ConsumerState<NodeScreen> {
                         title: const Text('Keep awake'),
                         subtitle: Text(
                           _awakeLabel(info.wakelock),
-                          style: const TextStyle(color: AppColors.dim, fontSize: 11),
+                          style: TextStyle(color: context.tokens.textDim, fontSize: 11),
                         ),
                         onChanged: _setting ? null : _onToggle,
                       ),
@@ -188,7 +188,7 @@ class _NodeScreenState extends ConsumerState<NodeScreen> {
         Expanded(
           child: Text(
             'Could not load host info: ${actionError(error)}',
-            style: const TextStyle(color: AppColors.error, fontSize: 12),
+            style: TextStyle(color: context.tokens.error, fontSize: 12),
           ),
         ),
         TextButton(onPressed: _fetch, child: const Text('Retry')),

@@ -13,11 +13,6 @@ import 'key_library_screen.dart';
 import 'responsive.dart';
 import 'theme.dart';
 
-// Amber marks a profile whose SSH key is missing (dangling); the row dot
-// otherwise reflects the last connection-test result (red/green) or grey when
-// untested this session.
-const _danglingDot = Color(0xFFd79921);
-
 class ProfilesScreen extends ConsumerWidget {
   const ProfilesScreen({super.key});
 
@@ -50,15 +45,15 @@ class ProfilesScreen extends ConsumerWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const Padding(
-                          padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                           child: Text(
                             '▌ CONNECTIONS',
                             style: TextStyle(
-                              fontFamily: 'monospace',
+                              fontFamily: monoFamily,
                               fontSize: 12,
                               letterSpacing: 1,
-                              color: AppColors.dim,
+                              color: context.tokens.textDim,
                             ),
                           ),
                         ),
@@ -173,31 +168,31 @@ class _LandingHeader extends StatelessWidget {
             alignment: Alignment.topRight,
             child: IconButton(
               key: const Key('profiles-keys'),
-              icon: const Icon(Icons.vpn_key_outlined, color: AppColors.dim),
+              icon: Icon(Icons.vpn_key_outlined, color: context.tokens.textDim),
               tooltip: 'SSH keys',
               onPressed: onKeys,
             ),
           ),
-          const Align(
+          Align(
             alignment: Alignment.topCenter,
             child: Padding(
-              padding: EdgeInsets.fromLTRB(0, 22, 0, 0),
+              padding: const EdgeInsets.fromLTRB(0, 22, 0, 0),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     '◉ argus',
                     style: TextStyle(
-                      fontFamily: 'monospace',
+                      fontFamily: monoFamily,
                       fontSize: 20,
                       letterSpacing: 2,
-                      color: AppColors.accent,
+                      color: context.tokens.accent,
                     ),
                   ),
-                  SizedBox(height: 4),
+                  const SizedBox(height: 4),
                   Text(
                     'watch your agents',
-                    style: TextStyle(fontSize: 12, color: AppColors.dim),
+                    style: TextStyle(fontSize: 12, color: context.tokens.textDim),
                   ),
                 ],
               ),
@@ -225,11 +220,11 @@ class _ConnectionRow extends StatelessWidget {
 
   // amber = needs a key; red = last test failed; green = last test passed;
   // grey = untested this session.
-  Color get _dotColor {
-    if (dangling) return _danglingDot;
-    if (testOk == false) return const Color(0xFFfb4934);
-    if (testOk == true) return AppColors.accent;
-    return AppColors.dim;
+  Color _dotColor(ArgusTokens t) {
+    if (dangling) return t.caution;
+    if (testOk == false) return t.error;
+    if (testOk == true) return t.accent;
+    return t.textDim;
   }
 
   @override
@@ -243,18 +238,18 @@ class _ConnectionRow extends StatelessWidget {
             key: Key('profile-dot-${profile.id}'),
             width: 10,
             height: 10,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: _dotColor),
+            decoration: BoxDecoration(shape: BoxShape.circle, color: _dotColor(context.tokens)),
           ),
         ),
       ),
-      title: Text(profile.name, style: const TextStyle(color: AppColors.text)),
+      title: Text(profile.name, style: TextStyle(color: context.tokens.text)),
       subtitle: Text(
         dangling ? 'needs a key' : (profile.host ?? profile.url ?? ''),
-        style: const TextStyle(color: AppColors.dim),
+        style: TextStyle(color: context.tokens.textDim),
       ),
       trailing: IconButton(
         key: Key('profile-edit-${profile.id}'),
-        icon: const Icon(Icons.edit_outlined, color: AppColors.dim),
+        icon: Icon(Icons.edit_outlined, color: context.tokens.textDim),
         tooltip: 'Edit',
         onPressed: onEdit,
       ),
@@ -276,10 +271,6 @@ class _AddScanButtons extends StatelessWidget {
       children: [
         FilledButton.icon(
           key: const Key('profiles-add'),
-          style: FilledButton.styleFrom(
-            backgroundColor: AppColors.accent,
-            foregroundColor: AppColors.canvas,
-          ),
           onPressed: onAdd,
           icon: const Icon(Icons.add),
           label: const Text('Add connection'),
@@ -315,18 +306,18 @@ class _EmptyConnections extends StatelessWidget {
               height: 64,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                border: Border.all(color: AppColors.border),
+                border: Border.all(color: context.tokens.line),
               ),
-              child: const Icon(Icons.radio_button_unchecked, color: AppColors.dim),
+              child: Icon(Icons.radio_button_unchecked, color: context.tokens.textDim),
             ),
             const SizedBox(height: 16),
-            const Text('No connections yet',
-                style: TextStyle(fontSize: 16, color: AppColors.text)),
+            Text('No connections yet',
+                style: TextStyle(fontSize: 16, color: context.tokens.text)),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               'Add your first argus host to start watching your Claude Code sessions.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.dim, height: 1.4),
+              style: TextStyle(color: context.tokens.textDim, height: 1.4),
             ),
             const SizedBox(height: 24),
             SizedBox(

@@ -17,8 +17,10 @@ import 'theme.dart';
 import 'upgrade_tile.dart';
 import 'voice_screen.dart';
 
-const _monoStyle = TextStyle(fontFamily: 'monospace', color: AppColors.text);
-const _dimStyle = TextStyle(color: AppColors.dim);
+TextStyle _monoStyle(BuildContext context) =>
+    TextStyle(fontFamily: monoFamily, color: context.tokens.text);
+TextStyle _dimStyle(BuildContext context) =>
+    TextStyle(color: context.tokens.textDim);
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -119,15 +121,15 @@ class SettingsScreen extends ConsumerWidget {
                         label: 'Gateway',
                         child: SelectableText(
                           creds?.url ?? '(not paired)',
-                          style: _monoStyle,
+                          style: _monoStyle(context),
                         ),
                       ),
                       const SizedBox(height: 24),
                       ref.watch(serverInfoProvider).maybeWhen(
                             data: (info) =>
-                                info == null ? _unavailable : _serverInfo(info),
-                            loading: () => _versionRow,
-                            orElse: () => _unavailable,
+                                info == null ? _unavailable(context) : _serverInfo(context, info),
+                            loading: () => _versionRow(context),
+                            orElse: () => _unavailable(context),
                           ),
                     ],
                   ),
@@ -187,17 +189,17 @@ String? _sshHostPortOrNull(String? url) {
 }
 
 // Version-row placeholders shared by the loading and failed-fetch states.
-const _versionRow = _LabeledField(
+Widget _versionRow(BuildContext context) => _LabeledField(
   label: 'Server Version',
-  child: Text('…', style: _dimStyle),
+  child: Text('…', style: _dimStyle(context)),
 );
-const _unavailable = _LabeledField(
+Widget _unavailable(BuildContext context) => _LabeledField(
   label: 'Server Version',
-  child: Text('(unavailable)', style: _dimStyle),
+  child: Text('(unavailable)', style: _dimStyle(context)),
 );
 
 /// Renders the server version plus the connected-node list from server.info.
-Widget _serverInfo(ServerInfo info) {
+Widget _serverInfo(BuildContext context, ServerInfo info) {
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -205,7 +207,7 @@ Widget _serverInfo(ServerInfo info) {
         label: 'Server Version',
         child: SelectableText(
           info.version.isEmpty ? '(unknown)' : info.version,
-          style: _monoStyle,
+          style: _monoStyle(context),
         ),
       ),
       UpgradeTile(
@@ -218,12 +220,12 @@ Widget _serverInfo(ServerInfo info) {
       _LabeledField(
         label: 'Nodes',
         child: info.nodes.isEmpty
-            ? const Text('(none)', style: _dimStyle)
+            ? Text('(none)', style: _dimStyle(context))
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   for (final n in info.nodes)
-                    Text(_nodeLine(n), style: _monoStyle),
+                    Text(_nodeLine(n), style: _monoStyle(context)),
                 ],
               ),
       ),
@@ -250,7 +252,7 @@ class _LabeledField extends StatelessWidget {
   Widget build(BuildContext context) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: AppColors.dim, fontSize: 12)),
+          Text(label, style: TextStyle(color: context.tokens.textDim, fontSize: 12)),
           const SizedBox(height: 4),
           child,
         ],

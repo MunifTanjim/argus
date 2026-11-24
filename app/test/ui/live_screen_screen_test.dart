@@ -8,14 +8,17 @@ import 'package:argus/data/terminal_repository.dart';
 import 'package:argus/models/enums.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/models/terminal.dart';
+import 'package:argus/state/appearance.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/terminal_controller.dart';
 import 'package:argus/state/terminal_prefs.dart';
 import 'package:argus/state/terminals.dart';
+import 'package:argus/state/theme_provider.dart';
 import 'package:argus/transport/gateway_client.dart';
 import 'package:argus/transport/connection.dart';
 import 'package:argus/ui/live_emulator.dart';
 import 'package:argus/ui/live_screen_screen.dart';
+import 'package:argus/ui/theme.dart';
 
 class _FakeSession implements TerminalSession {
   _FakeSession(this.sends);
@@ -572,6 +575,39 @@ void main() {
     final cursor = tester.widget<TerminalView>(find.byType(TerminalView)).theme.cursor;
     expect(cursor.a, greaterThan(0));
     expect(cursor.a, lessThan(1));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('theme change recolors an open live screen', (tester) async {
+    final repo = _FakeTerminalRepo();
+    late WidgetRef ref;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [terminalRepositoryProvider.overrideWithValue(repo)],
+      child: Consumer(builder: (context, r, _) {
+        ref = r;
+        final t = r.watch(argusThemeProvider);
+        return MaterialApp(
+          theme: t.light,
+          darkTheme: t.dark,
+          themeMode: ThemeMode.dark,
+          home: LiveScreenScreen(session: _makeSession()),
+        );
+      }),
+    ));
+    await tester.pump();
+    Color? background() => tester.widget<Scaffold>(find.byType(Scaffold)).backgroundColor;
+    expect(background(), gruvboxDark.terminalBg);
+    expect(tester.widget<TerminalView>(find.byType(TerminalView)).theme.background,
+        gruvboxDark.terminalBg);
+
+    ref.read(appearancePrefsProvider.notifier).setPalette(ArgusPaletteId.nord);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500)); // theme animation
+    expect(background(), nord.terminalBg);
+    expect(tester.widget<TerminalView>(find.byType(TerminalView)).theme.background,
+        nord.terminalBg);
+    expect(repo.openCount, 1);
+    expect(repo.lastSessionId, 'test-session-id');
     await tester.pumpWidget(const SizedBox());
   });
 

@@ -76,7 +76,7 @@ class WorkspaceScreen extends ConsumerWidget {
                     child: Text(
                       workspaceActionLabel(a),
                       style: a == WorkspaceAction.forceRemove
-                          ? const TextStyle(color: AppColors.error)
+                          ? TextStyle(color: context.tokens.destructive)
                           : null,
                     ),
                   ),
@@ -220,10 +220,10 @@ class _WorkspaceGone extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(actions: [?shellMenuButton(context)]),
-      body: const Center(
+      body: Center(
         child: Text(
           'This workspace is no longer available.',
-          style: TextStyle(color: AppColors.dim),
+          style: TextStyle(color: context.tokens.textDim),
         ),
       ),
     );
@@ -257,7 +257,7 @@ class _WorkspaceTitle extends StatelessWidget {
           _subtitle,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(color: AppColors.link, fontSize: 12),
+          style: TextStyle(color: context.tokens.link, fontSize: 12),
         ),
       ],
     );

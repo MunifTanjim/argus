@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'theme/build_theme.dart' show monoFamily;
+
 // Material Icons has no git glyphs, so these draw Nerd Font glyphs as text.
 // A const IconData on the terminal font would make release icon tree-shaking
 // subset that font down to these glyphs.
@@ -20,7 +22,7 @@ class NerdIcon extends StatelessWidget {
         child: Text(
           glyph,
           style: TextStyle(
-            fontFamily: 'JetBrainsMonoNerdFontMono',
+            fontFamily: monoFamily,
             fontSize: size,
             height: 1,
             color: color ?? theme.color,

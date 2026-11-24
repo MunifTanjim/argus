@@ -10,11 +10,11 @@ import '../state/pty_keys.dart';
 import '../state/terminal_prefs.dart';
 import '../state/touch_drag_filter.dart';
 import '../util/utf8_stream.dart';
-import 'ansi_palette.dart';
 import 'patched_terminal.dart';
+import 'theme.dart';
 
 // Bundled so terminal glyphs match a desktop terminal regardless of device fonts.
-const _fontFamily = 'JetBrainsMonoNerdFontMono';
+const _fontFamily = monoFamily;
 // NotoSansSymbols2 first so media-control symbols (⏺ ⏵ ⏸ …) render as text, not
 // color emoji; emoji last as a fallback. The rest cover CJK.
 const _fontFamilyFallback = <String>[
@@ -30,49 +30,52 @@ const _fontFamilyFallback = <String>[
 ];
 const _padding = 8.0;
 
-const _terminalTheme = TerminalTheme(
-  // xterm paints the block cursor over its cell; a translucent one keeps the
-  // character under it readable.
-  cursor: Color(0x80CCCCCC),
-  selection: Color(0x40FFFFFF),
-  foreground: Color(0xFFCCCCCC),
-  background: ansiBlack,
-  black: ansiBlack,
-  red: ansiRed,
-  green: ansiGreen,
-  yellow: ansiYellow,
-  blue: ansiBlue,
-  magenta: ansiMagenta,
-  cyan: ansiCyan,
-  white: ansiWhite,
-  brightBlack: ansiBrightBlack,
-  brightRed: ansiBrightRed,
-  brightGreen: ansiBrightGreen,
-  brightYellow: ansiBrightYellow,
-  brightBlue: ansiBrightBlue,
-  brightMagenta: ansiBrightMagenta,
-  brightCyan: ansiBrightCyan,
-  brightWhite: ansiBrightWhite,
-  searchHitBackground: ansiYellow,
-  searchHitBackgroundCurrent: ansiBrightYellow,
-  searchHitForeground: ansiBlack,
-);
+// A new TerminalTheme clears xterm's paint cache, so each tokens object
+// gets one theme, reused across builds.
+final _xtermThemes = Expando<TerminalTheme>();
 
+TerminalTheme _xtermThemeOf(ArgusTokens t) =>
+    _xtermThemes[t] ??= xtermThemeFrom(t);
 
-final _ghosttyTheme = gt.TerminalTheme(
-  palette: gt.ColorPalette(
-    ansiColors: const [
-      ansiBlack, ansiRed, ansiGreen, ansiYellow,
-      ansiBlue, ansiMagenta, ansiCyan, ansiWhite,
-      ansiBrightBlack, ansiBrightRed, ansiBrightGreen, ansiBrightYellow,
-      ansiBrightBlue, ansiBrightMagenta, ansiBrightCyan, ansiBrightWhite,
-    ],
-    background: ansiBlack,
-    foreground: const Color(0xFFCCCCCC),
-  ),
-  fontFamily: _fontFamily,
-  fontFamilyFallback: _fontFamilyFallback,
-);
+TerminalTheme xtermThemeFrom(ArgusTokens t) => TerminalTheme(
+      // xterm paints the block cursor over its cell; a translucent one keeps
+      // the character under it readable.
+      cursor: t.terminalCursor,
+      selection: t.terminalSelection,
+      foreground: t.terminalFg,
+      background: t.terminalBg,
+      black: t.ansi[0],
+      red: t.ansi[1],
+      green: t.ansi[2],
+      yellow: t.ansi[3],
+      blue: t.ansi[4],
+      magenta: t.ansi[5],
+      cyan: t.ansi[6],
+      white: t.ansi[7],
+      brightBlack: t.ansi[8],
+      brightRed: t.ansi[9],
+      brightGreen: t.ansi[10],
+      brightYellow: t.ansi[11],
+      brightBlue: t.ansi[12],
+      brightMagenta: t.ansi[13],
+      brightCyan: t.ansi[14],
+      brightWhite: t.ansi[15],
+      searchHitBackground: t.ansi[3],
+      searchHitBackgroundCurrent: t.ansi[11],
+      searchHitForeground: t.ansi[0],
+    );
+
+gt.TerminalTheme ghosttyThemeFrom(ArgusTokens t, {required double fontSize}) =>
+    gt.TerminalTheme(
+      palette: gt.ColorPalette(
+        ansiColors: t.ansi,
+        background: t.terminalBg,
+        foreground: t.terminalFg,
+      ),
+      fontFamily: _fontFamily,
+      fontFamilyFallback: _fontFamilyFallback,
+      fontSize: fontSize,
+    );
 
 /// What an emulator needs from its live screen.
 class LiveSink {
@@ -115,7 +118,7 @@ abstract class LiveEmulator {
   /// Sends key bar key [name] (a [ptyKeyBytes] name).
   void pressKey(String name, {bool shift, bool alt, bool ctrl});
 
-  Widget view(double fontSize);
+  Widget view(BuildContext context, double fontSize);
 
   void dispose();
 }
@@ -167,9 +170,9 @@ class _XtermEmulator implements LiveEmulator {
           shift: shift, alt: alt, ctrl: ctrl, appCursor: _terminal.cursorKeysMode));
 
   @override
-  Widget view(double fontSize) => TerminalView(
+  Widget view(BuildContext context, double fontSize) => TerminalView(
         _terminal,
-        theme: _terminalTheme,
+        theme: _xtermThemeOf(context.tokens),
         textStyle: TerminalStyle(
           fontSize: fontSize,
           fontFamily: _fontFamily,
@@ -278,12 +281,12 @@ class _GhosttyEmulator implements LiveEmulator {
   }
 
   @override
-  Widget view(double fontSize) {
+  Widget view(BuildContext context, double fontSize) {
     final terminal = gt.TerminalView(
       controller: _controller,
       focusNode: _focusNode,
       showKeyboard: direct,
-      theme: _ghosttyTheme.copyWith(fontSize: fontSize),
+      theme: ghosttyThemeFrom(context.tokens, fontSize: fontSize),
     );
     if (!direct) return terminal;
     return Builder(

@@ -113,6 +113,7 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
   /// choice opens a free-text field prompted by its placeholder. The client only
   /// echoes the chosen value back.
   List<Widget> _serverDecision(Interaction ix, String kind) {
+    final t = context.tokens;
     final tool = ix.toolName ?? '';
     final display = toolMeta(widget.session.agent, tool)?.display ?? '';
     final toolLabel = display.isEmpty ? tool : display;
@@ -124,8 +125,8 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
 
     final detail = <Widget>[
       Text(heading,
-          style: const TextStyle(
-              color: AppColors.secondary, fontWeight: FontWeight.w700)),
+          style: TextStyle(
+              color: t.textSecondary, fontWeight: FontWeight.w700)),
     ];
     if ((ix.message ?? '').isNotEmpty) {
       detail.add(const SizedBox(height: 8));
@@ -143,6 +144,7 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
             toolName: ix.toolName,
             toolInput: ix.toolInput,
           ),
+          t,
           agent: widget.session.agent));
     }
     if ((ix.plan ?? '').isNotEmpty) {
@@ -201,7 +203,6 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
             hintText: reject.placeholder.isNotEmpty
                 ? reject.placeholder
                 : 'Reason (optional)',
-            border: const OutlineInputBorder(),
           ),
         ),
         const SizedBox(height: 12),
@@ -401,10 +402,7 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
       rows.add(
         TextField(
           autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Your answer',
-            border: OutlineInputBorder(),
-          ),
+          decoration: const InputDecoration(labelText: 'Your answer'),
           onChanged: (v) => setState(() => d.custom = v),
         ),
       );
@@ -418,7 +416,6 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
               autofocus: true,
               decoration: InputDecoration(
                 labelText: 'Note',
-                border: const OutlineInputBorder(),
                 suffixIcon: IconButton(
                   tooltip: 'Remove note',
                   icon: const Icon(Icons.close),

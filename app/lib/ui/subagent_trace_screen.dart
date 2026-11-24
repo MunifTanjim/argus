@@ -159,6 +159,7 @@ class _Banner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final failed = state == ConnState.failed;
     final text = switch (state) {
       ConnState.connecting => 'Connecting…',
@@ -169,11 +170,11 @@ class _Banner extends StatelessWidget {
     };
     return Container(
       width: double.infinity,
-      color: failed ? AppColors.errorSurface : AppColors.awaitingSurface,
+      color: failed ? t.errorSurface : t.blockedSurface,
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
       child: Text(text,
           style: TextStyle(
-              color: failed ? AppColors.error : AppColors.secondary,
+              color: failed ? t.error : t.textSecondary,
               fontSize: 12)),
     );
   }

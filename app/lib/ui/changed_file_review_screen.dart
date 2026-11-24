@@ -10,7 +10,6 @@ import 'responsive.dart';
 import 'shell_drawer.dart';
 import 'theme.dart';
 
-const _mono = TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.35);
 
 /// Full-screen review of one changed file as a collapsible unified diff.
 class ChangedFileReviewScreen extends ConsumerStatefulWidget {
@@ -89,37 +88,38 @@ class _ChangedFileReviewScreenState
   }
 
   List<Widget> _body() {
+    final t = context.tokens;
     final header = widget.file.origPath != null
         ? '● ${widget.file.origPath} → ${widget.file.path}'
         : '● ${widget.file.path}';
     final blocks = <Widget>[
       Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: Text(header, style: _mono.copyWith(color: AppColors.dim)),
+        child: Text(header, style: codeMono.copyWith(color: t.textDim)),
       ),
     ];
 
     if (_error != null) {
       blocks.add(Text('Failed to load: $_error',
-          style: const TextStyle(color: AppColors.dim)));
+          style: TextStyle(color: t.textDim)));
       return blocks;
     }
     final d = _diff;
     if (d == null) return blocks;
     if (d.notShown) {
       blocks.add(Text('Not shown — binary or too large.',
-          style: _mono.copyWith(color: AppColors.dim)));
+          style: codeMono.copyWith(color: t.textDim)));
       return blocks;
     }
     if (d.diff.trim().isEmpty) {
       blocks.add(Text('No differences to show.',
-          style: _mono.copyWith(color: AppColors.dim)));
+          style: codeMono.copyWith(color: t.textDim)));
       return blocks;
     }
     // Flexible (not Expanded) so a short diff stays compact under the path
     // header, while a long one caps at the viewport and scrolls its own content.
     blocks.add(
-        Flexible(child: unifiedDiffView(d.diff, lang: widget.file.path)));
+        Flexible(child: unifiedDiffView(d.diff, t, lang: widget.file.path)));
     return blocks;
   }
 }

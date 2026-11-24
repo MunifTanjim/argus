@@ -6,68 +6,14 @@ import '../models/entry.dart';
 import 'code_block.dart';
 import 'edit_diff.dart';
 import 'theme.dart';
+import 'tool_detail_common.dart';
 
-const _red = Color(0xFFfb4934);
-const _mono = TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.35);
-
-Map<String, dynamic> _input(Entry it) {
-  try {
-    return jsonDecode(it.toolInput ?? '') as Map<String, dynamic>;
-  } catch (_) {
-    return const {};
-  }
-}
-
-Widget _label(String text, {bool error = false}) => Padding(
-      padding: const EdgeInsets.only(top: 8, bottom: 4),
-      child: Text(text,
-          style: TextStyle(
-              color: error ? _red : AppColors.secondary,
-              fontWeight: FontWeight.w700,
-              fontSize: 13)),
-    );
-
-Widget _header(String text) => Text(text,
-    style:
-        _mono.copyWith(color: AppColors.secondary, fontWeight: FontWeight.w700));
-
-Widget _comment(String text) =>
-    Text('# $text', style: _mono.copyWith(color: AppColors.dim));
-
-Widget _withResult(List<Widget> head, Entry it, Widget? resultBody) => Column(
+/// [head], then the result under its label when there is one.
+Widget _withResult(List<Widget> head, Entry it, Widget? body, ArgusTokens t) =>
+    Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ...head,
-        if (resultBody != null) ...[
-          _label(it.resultIsError ? 'Error' : 'Result', error: it.resultIsError),
-          resultBody,
-        ],
-      ],
+      children: [...head, toolResult(it, body, t)],
     );
-
-Widget _kvDump(String s) {
-  final rows = <Widget>[];
-  for (final raw in s.split('\n')) {
-    final line = raw.trimRight();
-    if (line.trim().isEmpty) continue;
-    final idx = line.indexOf(':');
-    if (idx > 0) {
-      rows.add(RichText(
-        text: TextSpan(style: _mono, children: [
-          TextSpan(
-              text: line.substring(0, idx + 1),
-              style: _mono.copyWith(color: AppColors.dim)),
-          TextSpan(
-              text: line.substring(idx + 1),
-              style: _mono.copyWith(color: AppColors.text)),
-        ]),
-      ));
-    } else {
-      rows.add(Text(line, style: _mono.copyWith(color: AppColors.text)));
-    }
-  }
-  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
-}
 
 String agyResultBody(String result) {
   final lines = result.split('\n');
@@ -244,12 +190,12 @@ String agyImageResult(String result) {
       .join('\n');
 }
 
-Widget agyRunCommandDetail(Entry it) {
-  final m = _input(it);
+Widget agyRunCommandDetail(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final cmd = toolInputStr(m['CommandLine']);
   final cwd = toolInputStr(m['Cwd']);
   final head = <Widget>[
-    if (cwd.isNotEmpty) _comment(cwd),
+    if (cwd.isNotEmpty) toolComment(cwd, t),
     if (cmd.isNotEmpty)
       codeBlock(cmd, lang: 'bash')
     else if ((it.toolInput ?? '').isNotEmpty)
@@ -259,16 +205,16 @@ Widget agyRunCommandDetail(Entry it) {
   if ((it.result ?? '').isNotEmpty) {
     final r = splitRunCommandResult(it.result!);
     body = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      if (r.head.trim().isNotEmpty) _kvDump(r.head),
+      if (r.head.trim().isNotEmpty) kvDump(r.head, t),
       if (r.output.isNotEmpty) codeBlock(r.output),
       if (!r.hasMarker && r.head.trim().isEmpty) codeBlock(it.result!),
     ]);
   }
-  return _withResult(head, it, body);
+  return _withResult(head, it, body, t);
 }
 
-Widget agyGrepSearchDetail(Entry it) {
-  final m = _input(it);
+Widget agyGrepSearchDetail(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final query = toolInputStr(m['Query']);
   final path = toolInputStr(m['SearchPath']);
   final flags = [
@@ -281,35 +227,34 @@ Widget agyGrepSearchDetail(Entry it) {
         text: TextSpan(children: [
           TextSpan(
               text: '"$query"',
-              style: _mono.copyWith(
-                  color: AppColors.secondary, fontWeight: FontWeight.w700)),
+              style: toolHeaderStyle(t)),
           if (path.isNotEmpty)
             TextSpan(
-                text: ' in $path', style: _mono.copyWith(color: AppColors.dim)),
+                text: ' in $path', style: codeMono.copyWith(color: t.textDim)),
           if (flags.isNotEmpty)
             TextSpan(
                 text: '  (${flags.join(' · ')})',
-                style: _mono.copyWith(color: AppColors.dim)),
+                style: codeMono.copyWith(color: t.textDim)),
         ]),
       ),
   ];
   final rows = grepRows(agyResultBody(it.result ?? ''));
   return _withResult(
-      head, it, rows.isEmpty ? null : codeBlock(rows.join('\n')));
+      head, it, rows.isEmpty ? null : codeBlock(rows.join('\n')), t);
 }
 
-Widget agyListDirDetail(Entry it) {
-  final path = toolInputStr(_input(it)['DirectoryPath']);
+Widget agyListDirDetail(Entry it, ArgusTokens t) {
+  final path = toolInputStr(toolInput(it)['DirectoryPath']);
   final rows = listDirRows(agyResultBody(it.result ?? ''));
   return _withResult(
-    [if (path.isNotEmpty) _header(path)],
+    [if (path.isNotEmpty) toolHeader(path, t)],
     it,
-    rows.isEmpty ? null : codeBlock(rows.join('\n')),
+    rows.isEmpty ? null : codeBlock(rows.join('\n')), t,
   );
 }
 
-Widget agyViewFileDetail(Entry it) {
-  final path = toolInputStr(_input(it)['AbsolutePath']);
+Widget agyViewFileDetail(Entry it, ArgusTokens t) {
+  final path = toolInputStr(toolInput(it)['AbsolutePath']);
   final (:meta, :content) = splitViewFileResult(it.result ?? '');
   Widget? body;
   if (content.isNotEmpty) {
@@ -318,57 +263,54 @@ Widget agyViewFileDetail(Entry it) {
     body = codeBlock(agyResultBody(it.result!));
   }
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    if (path.isNotEmpty) _header(path),
+    if (path.isNotEmpty) toolHeader(path, t),
     if (meta.isNotEmpty)
       Padding(
         padding: const EdgeInsets.only(top: 2),
-        child: Text(meta, style: _mono.copyWith(color: AppColors.dim)),
+        child: Text(meta, style: codeMono.copyWith(color: t.textDim)),
       ),
-    if (body != null) ...[
-      _label(it.resultIsError ? 'Error' : 'Result', error: it.resultIsError),
-      body,
-    ],
+    toolResult(it, body, t),
   ]);
 }
 
-Widget agyWriteToFileDetail(Entry it) {
-  final m = _input(it);
+Widget agyWriteToFileDetail(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final path = toolInputStr(m['TargetFile']);
   final desc = toolInputStr(m['Description']);
   final code = toolInputStr(m['CodeContent']);
   final overwrite = m['Overwrite'] as bool? ?? false;
   final head = <Widget>[
-    if (desc.isNotEmpty) _comment(desc),
+    if (desc.isNotEmpty) toolComment(desc, t),
     if (path.isNotEmpty)
       Text('● $path${overwrite ? '  (overwrite)' : ''}',
-          style: _mono.copyWith(color: AppColors.dim)),
+          style: codeMono.copyWith(color: t.textDim)),
     if (code.isNotEmpty)
-      diffView('', code, lang: path)
+      diffView('', code, t, lang: path)
     else if ((it.toolInput ?? '').isNotEmpty)
       codeBlock(it.toolInput!),
   ];
   final body = (it.result ?? '').isNotEmpty
       ? appMarkdown(stripAgyBoilerplate(agyResultBody(it.result!)))
       : null;
-  return _withResult(head, it, body);
+  return _withResult(head, it, body, t);
 }
 
-Widget agyReplaceFileContentDetail(Entry it) => _replaceDetail(it, multi: false);
-Widget agyMultiReplaceFileContentDetail(Entry it) =>
-    _replaceDetail(it, multi: true);
+Widget agyReplaceFileContentDetail(Entry it, ArgusTokens t) => _replaceDetail(it, t, multi: false);
+Widget agyMultiReplaceFileContentDetail(Entry it, ArgusTokens t) =>
+    _replaceDetail(it, t, multi: true);
 
-Widget _replaceDetail(Entry it, {required bool multi}) {
-  final m = _input(it);
+Widget _replaceDetail(Entry it, ArgusTokens t, {required bool multi}) {
+  final m = toolInput(it);
   final path = toolInputStr(m['TargetFile']);
   final desc = toolInputStr(m['Description']);
   final children = <Widget>[
-    if (desc.isNotEmpty) _comment(desc),
+    if (desc.isNotEmpty) toolComment(desc, t),
   ];
   if (multi) {
     final chunks = (m['ReplacementChunks'] as List?) ?? const [];
     if (path.isNotEmpty) {
       children.add(Text('● $path${chunks.isEmpty ? '' : '  (${chunks.length} edits)'}',
-          style: _mono.copyWith(color: AppColors.dim)));
+          style: codeMono.copyWith(color: t.textDim)));
     }
     for (var i = 0; i < chunks.length; i++) {
       final c = chunks[i] as Map<String, dynamic>;
@@ -376,10 +318,10 @@ Widget _replaceDetail(Entry it, {required bool multi}) {
         padding: const EdgeInsets.only(top: 6, bottom: 2),
         child: Text(
             '─── edit ${i + 1} (lines ${c['StartLine'] ?? 0}–${c['EndLine'] ?? 0}) ───',
-            style: _mono.copyWith(color: AppColors.dim)),
+            style: codeMono.copyWith(color: t.textDim)),
       ));
       children.add(diffView(toolInputStr(c['TargetContent']),
-          toolInputStr(c['ReplacementContent']),
+          toolInputStr(c['ReplacementContent']), t,
           lang: path));
     }
     if (chunks.isEmpty && (it.toolInput ?? '').isNotEmpty) {
@@ -390,12 +332,12 @@ Widget _replaceDetail(Entry it, {required bool multi}) {
     final end = (m['EndLine'] as num?)?.toInt() ?? 0;
     if (path.isNotEmpty) {
       children.add(Text('● $path${start > 0 || end > 0 ? '  (lines $start–$end)' : ''}',
-          style: _mono.copyWith(color: AppColors.dim)));
+          style: codeMono.copyWith(color: t.textDim)));
     }
     final target = toolInputStr(m['TargetContent']);
     final replacement = toolInputStr(m['ReplacementContent']);
     if (target.isNotEmpty || replacement.isNotEmpty) {
-      children.add(diffView(target, replacement, lang: path));
+      children.add(diffView(target, replacement, t, lang: path));
     } else if ((it.toolInput ?? '').isNotEmpty) {
       children.add(codeBlock(it.toolInput!));
     }
@@ -406,12 +348,12 @@ Widget _replaceDetail(Entry it, {required bool multi}) {
     it,
     it.resultIsError && (it.result ?? '').isNotEmpty
         ? codeBlock(agyResultBody(it.result!))
-        : null,
+        : null, t,
   );
 }
 
-Widget agySearchWebDetail(Entry it) {
-  final m = _input(it);
+Widget agySearchWebDetail(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final query = toolInputStr(m['query']);
   final domain = toolInputStr(m['domain']);
   var body = agyResultBody(it.result ?? '');
@@ -424,38 +366,35 @@ Widget agySearchWebDetail(Entry it) {
         text: TextSpan(children: [
           TextSpan(
               text: '"$query"',
-              style: _mono.copyWith(
-                  color: AppColors.secondary, fontWeight: FontWeight.w700)),
+              style: toolHeaderStyle(t)),
           if (domain.isNotEmpty)
             TextSpan(
-                text: '  $domain', style: _mono.copyWith(color: AppColors.dim)),
+                text: '  $domain', style: codeMono.copyWith(color: t.textDim)),
         ]),
       ),
     if (body.isNotEmpty) ...[
-      _label('Result'),
+      toolLabel('Result', t),
       appMarkdown(body),
     ],
   ]);
 }
 
-Widget agyGenerateImageDetail(Entry it) {
-  final m = _input(it);
+Widget agyGenerateImageDetail(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final name = toolInputStr(m['ImageName']);
   final ratio = toolInputStr(m['AspectRatio']);
   final prompt = toolInputStr(m['Prompt']);
   final head = <Widget>[
     if (name.isNotEmpty)
-      Text('$name${ratio.isNotEmpty ? '  ($ratio)' : ''}',
-          style: _mono.copyWith(
-              color: AppColors.secondary, fontWeight: FontWeight.w700)),
-    if (prompt.isNotEmpty) _comment(prompt),
+      toolHeader('$name${ratio.isNotEmpty ? '  ($ratio)' : ''}', t),
+    if (prompt.isNotEmpty) toolComment(prompt, t),
   ];
   final img = agyImageResult(it.result ?? '');
-  return _withResult(head, it, img.isEmpty ? null : codeBlock(img));
+  return _withResult(head, it, img.isEmpty ? null : codeBlock(img), t);
 }
 
-Widget agyDefineSubagentDetail(Entry it) {
-  final m = _input(it);
+Widget agyDefineSubagentDetail(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final name = toolInputStr(m['name']);
   final desc = toolInputStr(m['description']);
   final prompt = toolInputStr(m['system_prompt']);
@@ -466,21 +405,19 @@ Widget agyDefineSubagentDetail(Entry it) {
   ];
   final children = <Widget>[
     if (name.isNotEmpty)
-      Text(name,
-          style: _mono.copyWith(
-              color: AppColors.secondary, fontWeight: FontWeight.w700)),
+      toolHeader(name, t),
     if (desc.isNotEmpty)
       Padding(
         padding: const EdgeInsets.only(top: 2),
-        child: Text(desc, style: _mono.copyWith(color: AppColors.dim)),
+        child: Text(desc, style: codeMono.copyWith(color: t.textDim)),
       ),
     Padding(
       padding: const EdgeInsets.only(top: 2),
       child: Text('tools: ${tools.isEmpty ? 'none' : tools.join(' · ')}',
-          style: _mono.copyWith(color: AppColors.dim)),
+          style: codeMono.copyWith(color: t.textDim)),
     ),
     if (prompt.isNotEmpty) ...[
-      _label('System Prompt'),
+      toolLabel('System Prompt', t),
       appMarkdown(prompt),
     ],
   ];
@@ -489,27 +426,25 @@ Widget agyDefineSubagentDetail(Entry it) {
     it,
     it.resultIsError && (it.result ?? '').isNotEmpty
         ? codeBlock(agyResultBody(it.result!))
-        : null,
+        : null, t,
   );
 }
 
-Widget agyManageSubagentsDetail(Entry it) {
-  final action = toolInputStr(_input(it)['Action']);
+Widget agyManageSubagentsDetail(Entry it, ArgusTokens t) {
+  final action = toolInputStr(toolInput(it)['Action']);
   final body = agyResultBody(it.result ?? '');
   return _withResult(
     [
       if (action.isNotEmpty)
-        Text(action,
-            style: _mono.copyWith(
-                color: AppColors.secondary, fontWeight: FontWeight.w700)),
+        toolHeader(action, t),
     ],
     it,
-    body.isEmpty ? null : appMarkdown(body),
+    body.isEmpty ? null : appMarkdown(body), t,
   );
 }
 
-Widget agyManageTaskDetail(Entry it) {
-  final m = _input(it);
+Widget agyManageTaskDetail(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final action = toolInputStr(m['Action']);
   final taskId = toolInputStr(m['TaskId']);
   final body = stripAgyReminder(agyResultBody(it.result ?? ''));
@@ -520,23 +455,22 @@ Widget agyManageTaskDetail(Entry it) {
           text: TextSpan(children: [
             TextSpan(
                 text: action,
-                style: _mono.copyWith(
-                    color: AppColors.secondary, fontWeight: FontWeight.w700)),
+                style: toolHeaderStyle(t)),
             if (taskId.isNotEmpty)
               TextSpan(
                   text: '  $taskId',
-                  style: _mono.copyWith(color: AppColors.dim)),
+                  style: codeMono.copyWith(color: t.textDim)),
           ]),
         ),
     ],
     it,
-    body.isEmpty ? null : _kvDump(body),
+    body.isEmpty ? null : kvDump(body, t), t,
   );
 }
 
-Widget agyAskQuestionDetail(Entry it) {
-  final qs = (_input(it)['questions'] as List?) ?? const [];
-  if (qs.isEmpty) return _generic(it);
+Widget agyAskQuestionDetail(Entry it, ArgusTokens t) {
+  final qs = (toolInput(it)['questions'] as List?) ?? const [];
+  if (qs.isEmpty) return _generic(it, t);
   final answers = parseAgyAnswers(agyResultBody(it.result ?? ''));
   final blocks = <Widget>[];
   for (var qi = 0; qi < qs.length; qi++) {
@@ -546,11 +480,11 @@ Widget agyAskQuestionDetail(Entry it) {
     final ans = answers[qi] ?? '';
     final children = <Widget>[
       Row(children: [
-        const Icon(Icons.chat_bubble_outline, size: 14, color: AppColors.accent),
+        Icon(Icons.chat_bubble_outline, size: 14, color: t.accent),
         const SizedBox(width: 6),
         Text('Agent is asking',
-            style: _mono.copyWith(
-                color: AppColors.accent, fontWeight: FontWeight.w700)),
+            style: codeMono.copyWith(
+                color: t.accent, fontWeight: FontWeight.w700)),
       ]),
     ];
     if (question.isNotEmpty) children.add(appMarkdown(question));
@@ -561,7 +495,7 @@ Widget agyAskQuestionDetail(Entry it) {
         padding: const EdgeInsets.only(top: 6),
         child: Text('$mark $opt',
             style: TextStyle(
-                color: isChosen ? AppColors.text : AppColors.secondary,
+                color: isChosen ? t.text : t.textSecondary,
                 fontWeight: isChosen ? FontWeight.w700 : FontWeight.w400)),
       ));
     }
@@ -574,8 +508,8 @@ Widget agyAskQuestionDetail(Entry it) {
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: blocks);
 }
 
-Widget agyAskPermissionDetail(Entry it) {
-  final m = _input(it);
+Widget agyAskPermissionDetail(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final action = toolInputStr(m['Action']);
   final target = toolInputStr(m['Target']);
   final reason = toolInputStr(m['Reason']);
@@ -583,35 +517,31 @@ Widget agyAskPermissionDetail(Entry it) {
   return _withResult(
     [
       if (action.isNotEmpty)
-        Text('$action${target.isNotEmpty ? '($target)' : ''}',
-            style: _mono.copyWith(
-                color: AppColors.secondary, fontWeight: FontWeight.w700)),
+        toolHeader('$action${target.isNotEmpty ? '($target)' : ''}', t),
       if (reason.isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(top: 2),
-          child: Text(reason, style: _mono.copyWith(color: AppColors.dim)),
+          child: Text(reason, style: codeMono.copyWith(color: t.textDim)),
         ),
     ],
     it,
-    body.isEmpty ? null : appMarkdown(body),
+    body.isEmpty ? null : appMarkdown(body), t,
   );
 }
 
-Widget agyListPermissionsDetail(Entry it) {
+Widget agyListPermissionsDetail(Entry it, ArgusTokens t) {
   final body = agyResultBody(it.result ?? '');
-  if (body.isEmpty) return _generic(it);
+  if (body.isEmpty) return _generic(it, t);
   return codeBlock(body);
 }
 
-Widget agySendMessageDetail(Entry it) {
-  final m = _input(it);
+Widget agySendMessageDetail(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final message = toolInputStr(m['Message']);
   final recipient = toolInputStr(m['Recipient']);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     if (recipient.isNotEmpty)
-      Text('→ $recipient',
-          style: _mono.copyWith(
-              color: AppColors.secondary, fontWeight: FontWeight.w700)),
+      toolHeader('→ $recipient', t),
     if (message.isNotEmpty)
       appMarkdown(message)
     else if ((it.toolInput ?? '').isNotEmpty)
@@ -619,8 +549,8 @@ Widget agySendMessageDetail(Entry it) {
   ]);
 }
 
-Widget agyScheduleDetail(Entry it) {
-  final m = _input(it);
+Widget agyScheduleDetail(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final duration = toolInputStr(m['DurationSeconds']);
   final prompt = toolInputStr(m['Prompt']);
   final condition = toolInputStr(m['TimerCondition']);
@@ -628,24 +558,13 @@ Widget agyScheduleDetail(Entry it) {
   return _withResult(
     [
       if (duration.isNotEmpty)
-        Text('Timer ${duration}s${condition.isNotEmpty ? '  (condition: $condition)' : ''}',
-            style: _mono.copyWith(
-                color: AppColors.secondary, fontWeight: FontWeight.w700)),
-      if (prompt.isNotEmpty) _comment(prompt),
+        toolHeader('Timer ${duration}s${condition.isNotEmpty ? '  (condition: $condition)' : ''}', t),
+      if (prompt.isNotEmpty) toolComment(prompt, t),
     ],
     it,
-    body.isEmpty ? null : appMarkdown(body),
+    body.isEmpty ? null : appMarkdown(body), t,
   );
 }
 
-Widget _generic(Entry it) =>
-    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      if ((it.toolInput ?? '').isNotEmpty) ...[
-        _label('Input'),
-        codeBlock(it.toolInput!),
-      ],
-      if ((it.result ?? '').isNotEmpty) ...[
-        _label(it.resultIsError ? 'Error' : 'Result', error: it.resultIsError),
-        codeBlock(agyResultBody(it.result!)),
-      ],
-    ]);
+Widget _generic(Entry it, ArgusTokens t) =>
+    toolGeneric(it, t, resultText: agyResultBody);

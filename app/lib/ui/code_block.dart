@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:re_highlight/languages/all.dart';
 import 'package:re_highlight/re_highlight.dart';
-import 'package:re_highlight/styles/all.dart';
 
 import 'external_url.dart';
 import 'markdown_table.dart';
@@ -257,9 +256,7 @@ Widget codeView(String body,
   // Show the box with a dim marker so an empty block still reads as "a block that
   // was empty" rather than a missing render.
   if (body.trim().isEmpty) {
-    return _container(
-        Text('(empty)', style: _codeMono.copyWith(color: AppColors.dim)),
-        selectable: selectable);
+    return _EmptyCodeBlock(selectable: selectable);
   }
   return _CodeBlock(
       body: body,
@@ -269,6 +266,19 @@ Widget codeView(String body,
       selectable: selectable,
       lineNumbers: lineNumbers,
       prettyJson: prettyJson);
+}
+
+class _EmptyCodeBlock extends StatelessWidget {
+  const _EmptyCodeBlock({required this.selectable});
+  final bool selectable;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return _container(
+        Text('(empty)', style: _codeMono(t).copyWith(color: t.textDim)), t,
+        selectable: selectable);
+  }
 }
 
 class _CodeBlock extends StatefulWidget {
@@ -300,6 +310,8 @@ class _CodeBlockState extends State<_CodeBlock> {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
+    final codeMono = _codeMono(t);
     final pretty = widget.prettyJson ? _prettyJson(widget.body) : null;
     final source = pretty ?? widget.body;
     // An unknown fence language (or any highlighter hiccup) must not break the
@@ -307,17 +319,17 @@ class _CodeBlockState extends State<_CodeBlock> {
     TextSpan span;
     String? detected;
     if (_plain) {
-      span = TextSpan(text: source, style: _codeMono);
+      span = TextSpan(text: source, style: codeMono);
     } else {
       try {
         final result = _highlight.highlightAuto(
             source, _candidates(pretty != null ? 'json' : widget.lang));
         detected = result.language;
-        final renderer = TextSpanRenderer(_codeMono, _codeTheme);
+        final renderer = TextSpanRenderer(codeMono, _codeTheme(t));
         result.render(renderer);
-        span = renderer.span ?? TextSpan(text: source, style: _codeMono);
+        span = renderer.span ?? TextSpan(text: source, style: codeMono);
       } catch (_) {
-        span = TextSpan(text: source, style: _codeMono);
+        span = TextSpan(text: source, style: codeMono);
       }
     }
     final label =
@@ -332,14 +344,14 @@ class _CodeBlockState extends State<_CodeBlock> {
       width: double.infinity,
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
-        color: AppColors.canvas,
+        color: t.canvas,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: t.line),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _header(label),
+          _header(label, t),
           Padding(
             padding: const EdgeInsets.all(10),
             child: widget.selectable
@@ -357,7 +369,9 @@ class _CodeBlockState extends State<_CodeBlock> {
           scrollDirection: Axis.horizontal, child: content);
 
   Widget _numbered(List<List<CodeRun>> lines) {
+    final t = context.tokens;
     final gutterWidth = lines.length.toString().length * 9.0;
+    final gutter = _codeMono(t).copyWith(color: t.textDim);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -369,7 +383,7 @@ class _CodeBlockState extends State<_CodeBlock> {
                 width: gutterWidth,
                 child: Text('${i + 1}',
                     textAlign: TextAlign.right,
-                    style: _codeMono.copyWith(color: AppColors.dim)),
+                    style: gutter),
               ),
               const SizedBox(width: 8),
               // In wrap mode the line needs a bounded width to wrap into; when
@@ -383,7 +397,7 @@ class _CodeBlockState extends State<_CodeBlock> {
 
   Widget _lineText(List<CodeRun> runs) => Text.rich(
         TextSpan(
-          style: _codeMono,
+          style: _codeMono(context.tokens),
           // A blank line still needs a glyph so its row keeps the line height.
           children: runs.isEmpty
               ? const [TextSpan(text: ' ')]
@@ -392,20 +406,21 @@ class _CodeBlockState extends State<_CodeBlock> {
         softWrap: _wrap,
       );
 
-  Widget _header(String label) => Container(
+  Widget _header(String label, ArgusTokens t) => Container(
         padding: const EdgeInsets.only(left: 10, right: 2),
-        decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: AppColors.border)),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: t.line)),
         ),
         child: Row(
           children: [
             Expanded(
               child: Text(label,
                   style:
-                      _codeMono.copyWith(color: AppColors.dim, fontSize: 11)),
+                      _codeMono(t).copyWith(color: t.textDim, fontSize: 11)),
             ),
             if (widget.lineNumberToggle)
               codeBarButton(
+                t,
                 icon: Icons.format_list_numbered,
                 active: _lineNumbers,
                 tooltip:
@@ -413,18 +428,21 @@ class _CodeBlockState extends State<_CodeBlock> {
                 onTap: () => setState(() => _lineNumbers = !_lineNumbers),
               ),
             codeBarButton(
+              t,
               icon: Icons.format_color_reset,
               active: _plain,
               tooltip: _plain ? 'Enable highlight' : 'Disable highlight',
               onTap: () => setState(() => _plain = !_plain),
             ),
             codeBarButton(
+              t,
               icon: Icons.wrap_text,
               active: _wrap,
               tooltip: _wrap ? 'Disable wrap' : 'Wrap lines',
               onTap: () => setState(() => _wrap = !_wrap),
             ),
             codeBarButton(
+              t,
               icon: Icons.copy,
               tooltip: 'Copy',
               onTap: () => copyToClipboard(context, widget.body),
@@ -443,14 +461,15 @@ class CodeRun {
 
 /// Highlights [source] into per-line styled runs aligned to `source.split('\n')`,
 /// falling back to one unstyled run per line on any highlighter error.
-List<List<CodeRun>> highlightLines(String source, {String? lang}) {
+List<List<CodeRun>> highlightLines(String source, ArgusTokens t,
+    {String? lang}) {
   List<List<CodeRun>> plain() => [
         for (final l in source.split('\n')) [if (l.isNotEmpty) CodeRun(l, null)]
       ];
   if (source.isEmpty) return const <List<CodeRun>>[];
   try {
     final result = _highlight.highlightAuto(source, _candidates(lang));
-    final renderer = TextSpanRenderer(_codeMono, _codeTheme);
+    final renderer = TextSpanRenderer(_codeMono(t), _codeTheme(t));
     result.render(renderer);
     final span = renderer.span;
     if (span == null) return plain();
@@ -486,7 +505,8 @@ List<List<CodeRun>> _spanLines(InlineSpan span) {
 }
 
 /// Compact icon button for code/diff header bars and inline copy affordances.
-Widget codeBarButton({
+Widget codeBarButton(
+  ArgusTokens t, {
   required IconData icon,
   required String tooltip,
   required VoidCallback onTap,
@@ -494,7 +514,7 @@ Widget codeBarButton({
 }) =>
     IconButton(
       icon: Icon(icon, size: 16),
-      color: active ? AppColors.accent : AppColors.dim,
+      color: active ? t.accent : t.textDim,
       tooltip: tooltip,
       visualDensity: VisualDensity.compact,
       padding: const EdgeInsets.all(6),
@@ -525,7 +545,7 @@ void showLinkActions(BuildContext context, String url) {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Text(url,
-                  style: const TextStyle(color: AppColors.dim, fontSize: 13),
+                  style: TextStyle(color: sheetCtx.tokens.textDim, fontSize: 13),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis),
             ),
@@ -553,7 +573,7 @@ void _showSnack(BuildContext context, String message) {
   ));
 }
 
-Widget _container(Widget child, {bool selectable = true}) {
+Widget _container(Widget child, ArgusTokens t, {bool selectable = true}) {
   final inner =
       SingleChildScrollView(scrollDirection: Axis.horizontal, child: child);
   return Container(
@@ -561,9 +581,9 @@ Widget _container(Widget child, {bool selectable = true}) {
     margin: const EdgeInsets.symmetric(vertical: 4),
     padding: const EdgeInsets.all(10),
     decoration: BoxDecoration(
-      color: AppColors.canvas,
+      color: t.canvas,
       borderRadius: BorderRadius.circular(6),
-      border: Border.all(color: AppColors.border),
+      border: Border.all(color: t.line),
     ),
     child: selectable ? SelectionArea(child: inner) : inner,
   );
@@ -573,17 +593,68 @@ Widget _container(Widget child, {bool selectable = true}) {
 final Highlight _highlight = Highlight()
   ..registerLanguages(builtinAllLanguages);
 
-// Gruvbox-dark theme to match the app palette, with a safe fallback.
-final Map<String, TextStyle> _codeTheme = _resolveTheme();
+/// Maps each highlight scope to a token, with the gruvbox-dark theme's
+/// grouping of scopes by color.
+// Kept per tokens object: a highlight builds the theme once per call, and the
+// tokens change only with the appearance.
+final _codeThemes = Expando<Map<String, TextStyle>>();
+final _codeMonos = Expando<TextStyle>();
 
-Map<String, TextStyle> _resolveTheme() {
-  final t = builtinAllThemes['base16-gruvbox-dark-medium'] ??
-      builtinAllThemes['atom-one-dark'];
-  return t is Map<String, TextStyle> ? t : const <String, TextStyle>{};
+Map<String, TextStyle> _codeTheme(ArgusTokens t) =>
+    _codeThemes[t] ??= _buildCodeTheme(t);
+
+Map<String, TextStyle> _buildCodeTheme(ArgusTokens t) {
+  TextStyle c(Color color) => TextStyle(color: color);
+  return {
+    'comment': c(t.syntaxComment),
+    'tag': c(t.syntaxTag),
+    'subst': c(t.textSecondary),
+    'punctuation': c(t.textSecondary),
+    'operator': c(t.textSecondary),
+    'bullet': c(t.syntaxVariable),
+    'variable': c(t.syntaxVariable),
+    'template-variable': c(t.syntaxVariable),
+    'selector-tag': c(t.syntaxVariable),
+    'name': c(t.syntaxVariable),
+    'deletion': c(t.syntaxVariable),
+    'symbol': c(t.syntaxNumber),
+    'number': c(t.syntaxNumber),
+    'link': c(t.syntaxNumber),
+    'attr': c(t.syntaxNumber),
+    'variable.constant_': c(t.syntaxNumber),
+    'literal': c(t.syntaxNumber),
+    'title': c(t.syntaxTitle),
+    'class-title': c(t.syntaxTitle),
+    'title.class_': c(t.syntaxTitle),
+    'strong': TextStyle(fontWeight: FontWeight.bold, color: t.syntaxTitle),
+    'code': c(t.syntaxString),
+    'addition': c(t.syntaxString),
+    'title.class_.inherited__': c(t.syntaxString),
+    'string': c(t.syntaxString),
+    'built_in': c(t.syntaxBuiltIn),
+    'doctag': c(t.syntaxBuiltIn),
+    'quote': c(t.syntaxBuiltIn),
+    'keyword.hljs-atrule': c(t.syntaxBuiltIn),
+    'regexp': c(t.syntaxBuiltIn),
+    'function-title': c(t.syntaxFunction),
+    'attribute': c(t.syntaxFunction),
+    '.ruby-property': c(t.syntaxFunction),
+    'title.function_': c(t.syntaxFunction),
+    'section': c(t.syntaxFunction),
+    'type': c(t.syntaxKeyword),
+    'template-tag': c(t.syntaxKeyword),
+    '.diff-meta': c(t.syntaxKeyword),
+    'keyword': c(t.syntaxKeyword),
+    'emphasis': TextStyle(color: t.syntaxKeyword, fontStyle: FontStyle.italic),
+    'meta': c(t.syntaxMeta),
+    'meta-keyword':
+        TextStyle(color: t.syntaxMeta, fontWeight: FontWeight.bold),
+    'meta-string': c(t.syntaxMeta),
+  };
 }
 
-const _codeMono = TextStyle(
-    fontFamily: 'monospace', fontSize: 12, height: 1.35, color: AppColors.text);
+TextStyle _codeMono(ArgusTokens t) =>
+    _codeMonos[t] ??= codeMono.copyWith(color: t.text);
 
 /// Candidate languages for highlightAuto. A known fence language narrows it to
 /// one grammar; otherwise a small set covering the languages we see most.

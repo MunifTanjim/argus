@@ -250,9 +250,9 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
               children: [
                 Text(statusGlyph(live.status),
                     style: TextStyle(
-                        fontFamily: 'monospace',
+                        fontFamily: monoFamily,
                         fontSize: 16,
-                        color: sessionColor(live))),
+                        color: sessionColor(live, context.tokens))),
                 const SizedBox(width: 8),
                 Flexible(
                     child: Text(title,
@@ -285,7 +285,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
               Text(live.displayName!,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: mono.copyWith(color: AppColors.dim)),
+                  style: mono.copyWith(color: context.tokens.textDim)),
           ],
         ),
         actions: [
@@ -455,11 +455,11 @@ class _Banner extends StatelessWidget {
     };
     return Container(
       width: double.infinity,
-      color: failed ? AppColors.errorSurface : AppColors.awaitingSurface,
+      color: failed ? context.tokens.errorSurface : context.tokens.blockedSurface,
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
       child: Text(text,
           style: TextStyle(
-              color: failed ? AppColors.error : AppColors.secondary,
+              color: failed ? context.tokens.error : context.tokens.textSecondary,
               fontSize: 12)),
     );
   }
@@ -470,25 +470,25 @@ class _StartingNotice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return Center(
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: 32),
+        padding: const EdgeInsets.symmetric(horizontal: 32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.hourglass_empty,
-                size: 48, color: AppColors.secondary),
-            SizedBox(height: 16),
-            Text(
+                size: 48, color: context.tokens.textSecondary),
+            const SizedBox(height: 16),
+            const Text(
               'Session is starting or waiting at a startup prompt.',
               textAlign: TextAlign.center,
               style: TextStyle(fontWeight: FontWeight.w600),
             ),
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             Text(
               'Tap the terminal icon to open the live screen and continue.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.secondary),
+              style: TextStyle(color: context.tokens.textSecondary),
             ),
           ],
         ),

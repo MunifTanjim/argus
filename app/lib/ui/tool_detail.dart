@@ -6,47 +6,21 @@ import '../models/entry.dart';
 import 'code_block.dart';
 import 'edit_diff.dart';
 import 'theme.dart';
+import 'tool_detail_common.dart';
 import 'tool_registry.dart';
 
-const _red = Color(0xFFfb4934);
-const _mono = TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.35);
-
-Map<String, dynamic> _input(Entry it) {
-  try {
-    return jsonDecode(it.toolInput ?? '') as Map<String, dynamic>;
-  } catch (_) {
-    return const {};
-  }
-}
-
-Widget _label(String text, {bool error = false}) => Padding(
-      padding: const EdgeInsets.only(top: 8, bottom: 4),
-      child: Text(text,
-          style: TextStyle(
-              color: error ? _red : AppColors.secondary,
-              fontWeight: FontWeight.w700,
-              fontSize: 13)),
-    );
-
-Widget _header(String text) => Text(text,
-    style:
-        _mono.copyWith(color: AppColors.secondary, fontWeight: FontWeight.w700));
-
-Widget _resultSection(Entry it, {bool wrap = false, String? lang}) {
+Widget _resultSection(Entry it, ArgusTokens t, {bool wrap = false, String? lang}) {
   if ((it.result ?? '').isEmpty) return const SizedBox.shrink();
-  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    _label(it.resultIsError ? 'Error' : 'Result', error: it.resultIsError),
-    codeBlock(it.result!, wrap: wrap, lang: lang),
-  ]);
+  return toolResult(it, codeBlock(it.result!, wrap: wrap, lang: lang), t);
 }
 
 /// Renders [agent]'s tool entry. The name-keyed renderers below apply only to
 /// tools the agent registers, so another agent's same-named tool stays generic.
-Widget toolDetailBody(Entry item, {String? agent}) {
+Widget toolDetailBody(Entry item, ArgusTokens t, {String? agent}) {
   final meta = toolMeta(agent, item.toolName);
   final detail = meta?.detail;
-  if (detail != null) return detail(item);
-  if (meta == null) return _generic(item);
+  if (detail != null) return detail(item, t);
+  if (meta == null) return toolGeneric(item, t);
   switch (item.toolName) {
     // opencode names are lowercase; they share these renderers with the other
     // agents, and the extractors below read both key shapes.
@@ -57,88 +31,77 @@ Widget toolDetailBody(Entry item, {String? agent}) {
     case 'edit':
     case 'write':
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        editDiffView(item),
+        editDiffView(item, t),
         // Edit results echo the changed file region; wrap so long lines stay
         // readable without horizontal scrolling.
-        _resultSection(item, wrap: true),
+        _resultSection(item, t, wrap: true),
       ]);
     case 'Bash':
     case 'bash':
     case 'shell':
-      return _bash(item);
+      return _bash(item, t);
     case 'execute':
-      return _execute(item);
+      return _execute(item, t);
     case 'Read':
     case 'NotebookRead':
     case 'read':
-      return _read(item);
+      return _read(item, t);
     case 'Grep':
     case 'grep':
-      return _grep(item);
+      return _grep(item, t);
     case 'Glob':
     case 'LS':
     case 'glob':
-      return _glob(item);
+      return _glob(item, t);
     case 'WebFetch':
     case 'WebSearch':
     case 'webfetch':
     case 'websearch':
-      return _web(item);
+      return _web(item, t);
     case 'TodoWrite':
     case 'todowrite':
-      return _todo(item);
+      return _todo(item, t);
     case 'AskUserQuestion':
     case 'question':
-      return _askUserQuestion(item);
+      return _askUserQuestion(item, t);
     case 'EnterPlanMode':
-      return _generic(item, resultLang: 'markdown');
+      return toolGeneric(item, t, resultLang: 'markdown');
     case 'ExitPlanMode':
-      return _exitPlanMode(item);
+      return _exitPlanMode(item, t);
     case 'Skill':
     case 'skill':
-      return _skill(item);
+      return _skill(item, t);
     default:
-      return _generic(item);
+      return toolGeneric(item, t);
   }
 }
-
-Widget _generic(Entry it, {String? resultLang}) =>
-    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      if ((it.toolInput ?? '').isNotEmpty) ...[
-        _label('Input'),
-        codeBlock(it.toolInput!),
-      ],
-      _resultSection(it, lang: resultLang),
-    ]);
 
 // ExitPlanMode input carries a markdown `plan` and its `planFilePath`; the result
 // is the approval/rejection text. Render the plan (and result) as real markdown
 // rather than raw JSON / a highlighted code box.
-Widget _exitPlanMode(Entry it) {
-  final m = _input(it);
+Widget _exitPlanMode(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final plan = toolInputStr(m['plan']);
   final planFilePath = toolInputStr(m['planFilePath']);
   final result = it.result ?? '';
   final hasStructured = plan.isNotEmpty || planFilePath.isNotEmpty;
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     if (planFilePath.isNotEmpty) ...[
-      _label('Plan file'),
+      toolLabel('Plan file', t),
       SelectableText(planFilePath,
-          style: _mono.copyWith(color: AppColors.secondary)),
+          style: codeMono.copyWith(color: t.textSecondary)),
     ],
     if (plan.isNotEmpty) ...[
-      _label('Plan'),
+      toolLabel('Plan', t),
       _CollapsibleMarkdown(plan),
     ],
     // Unknown/empty input shape (e.g. `{}`): fall back so nothing is dropped.
     if (!hasStructured && (it.toolInput ?? '').isNotEmpty) ...[
-      _label('Input'),
+      toolLabel('Input', t),
       codeBlock(it.toolInput!),
     ],
-    if (result.isNotEmpty) ...[
-      _label(it.resultIsError ? 'Error' : 'Result', error: it.resultIsError),
-      appMarkdown(result),
-    ],
+    if (result.isNotEmpty)
+      toolResult(it, appMarkdown(result), t),
   ]);
 }
 
@@ -159,6 +122,7 @@ class _CollapsibleMarkdownState extends State<_CollapsibleMarkdown> {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final md = appMarkdown(widget.data);
     final lines = '\n'.allMatches(widget.data).length + 1;
     final long = lines > 12 || widget.data.length > 600;
@@ -187,8 +151,8 @@ class _CollapsibleMarkdownState extends State<_CollapsibleMarkdown> {
         child: Padding(
           padding: const EdgeInsets.only(top: 6),
           child: Text(_expanded ? 'Show less' : 'Show more',
-              style: const TextStyle(
-                  color: AppColors.accent,
+              style: TextStyle(
+                  color: t.accent,
                   fontWeight: FontWeight.w700,
                   fontSize: 13)),
         ),
@@ -197,61 +161,59 @@ class _CollapsibleMarkdownState extends State<_CollapsibleMarkdown> {
   }
 }
 
-Widget _skill(Entry it) {
+Widget _skill(Entry it, ArgusTokens t) {
   // Claude uses `skill`; opencode uses `id`.
-  final m = _input(it);
+  final m = toolInput(it);
   final name = toolInputStr(m['skill'] ?? m['id']);
   final result = it.result ?? '';
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    _label('Skill'),
+    toolLabel('Skill', t),
     if (name.isNotEmpty)
-      _header(name)
+      toolHeader(name, t)
     else if ((it.toolInput ?? '').isNotEmpty)
       codeBlock(it.toolInput!),
-    if (result.isNotEmpty) ...[
-      _label(it.resultIsError ? 'Error' : 'Result', error: it.resultIsError),
+    if (result.isNotEmpty)
       // The loaded skill body is markdown — render it, don't show the source.
-      appMarkdown(result),
-    ],
+      toolResult(it, appMarkdown(result), t),
   ]);
 }
 
-Widget _bash(Entry it) {
-  final m = _input(it);
+Widget _bash(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final desc = toolInputStr(m['description']), cmd = toolInputStr(m['command']);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     if (desc.isNotEmpty)
-      Text('# $desc', style: _mono.copyWith(color: AppColors.dim)),
+      toolComment(desc, t),
     // Commands are frequently multi-line (heredocs, `&&` chains) — a bash code
     // block gives highlighting, wrap, and copy for free.
     if (cmd.isNotEmpty)
       codeBlock(cmd, lang: 'bash')
     else if ((it.toolInput ?? '').isNotEmpty)
       codeBlock(it.toolInput!),
-    _resultSection(it),
+    _resultSection(it, t),
   ]);
 }
 
 // opencode's `execute` runs code, not a shell command (unlike `bash`/`shell`),
 // so its input is under `code`.
-Widget _execute(Entry it) {
-  final m = _input(it);
+Widget _execute(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final code = toolInputStr(m['code']);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     if (code.isNotEmpty)
       codeBlock(code, lang: 'javascript')
     else if ((it.toolInput ?? '').isNotEmpty)
       codeBlock(it.toolInput!),
-    _resultSection(it),
+    _resultSection(it, t),
   ]);
 }
 
-Widget _read(Entry it) {
+Widget _read(Entry it, ArgusTokens t) {
   // Claude uses `file_path`; opencode uses `path`.
-  final m = _input(it);
+  final m = toolInput(it);
   final path = toolInputStr(m['file_path'] ?? m['path']);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    if (path.isNotEmpty) _header(path),
+    if (path.isNotEmpty) toolHeader(path, t),
     // Prefer the file extension; fall back to auto-detection when unknown.
     // Read output is already `cat -n` numbered — no need for our own gutter.
     if ((it.result ?? '').isNotEmpty)
@@ -260,64 +222,62 @@ Widget _read(Entry it) {
   ]);
 }
 
-Widget _grep(Entry it) {
-  final m = _input(it);
+Widget _grep(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   // Claude uses `glob`; opencode uses `include`.
   var scope = toolInputStr(m['glob'] ?? m['include']);
   final path = toolInputStr(m['path']);
   if (path.isNotEmpty) scope = scope.isEmpty ? path : '$scope $path';
   final head = '"${toolInputStr(m['pattern'])}"${scope.isEmpty ? '' : ' in $scope'}';
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    _header(head),
+    toolHeader(head, t),
     if ((it.result ?? '').isNotEmpty) codeBlock(it.result!),
   ]);
 }
 
-Widget _glob(Entry it) {
-  final m = _input(it);
+Widget _glob(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final head = toolInputStr(m['pattern']).isNotEmpty ? toolInputStr(m['pattern']) : toolInputStr(m['path']);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    if (head.isNotEmpty) _header(head),
+    if (head.isNotEmpty) toolHeader(head, t),
     if ((it.result ?? '').isNotEmpty) codeBlock(it.result!),
   ]);
 }
 
-Widget _web(Entry it) {
-  final m = _input(it);
+Widget _web(Entry it, ArgusTokens t) {
+  final m = toolInput(it);
   final url = toolInputStr(m['url']);
   final query = toolInputStr(m['query']);
   final prompt = toolInputStr(m['prompt']);
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    if (url.isNotEmpty) ...[_label('URL'), _header(url)],
-    if (query.isNotEmpty) ...[_label('Query'), _header(query)],
+    if (url.isNotEmpty) ...[toolLabel('URL', t), toolHeader(url, t)],
+    if (query.isNotEmpty) ...[toolLabel('Query', t), toolHeader(query, t)],
     if (prompt.isNotEmpty) ...[
-      _label('Prompt'),
-      Text(prompt, style: _mono.copyWith(color: AppColors.dim)),
+      toolLabel('Prompt', t),
+      Text(prompt, style: codeMono.copyWith(color: t.textDim)),
     ],
-    if ((it.result ?? '').isNotEmpty) ...[
-      _label(it.resultIsError ? 'Error' : 'Result', error: it.resultIsError),
+    if ((it.result ?? '').isNotEmpty)
       // Web results come back as markdown — render them, don't show the source.
-      appMarkdown(it.result!),
-    ],
+      toolResult(it, appMarkdown(it.result!), t),
   ]);
 }
 
-Widget _todo(Entry it) {
-  final todos = (_input(it)['todos'] as List?) ?? const [];
-  if (todos.isEmpty) return _generic(it);
+Widget _todo(Entry it, ArgusTokens t) {
+  final todos = (toolInput(it)['todos'] as List?) ?? const [];
+  if (todos.isEmpty) return toolGeneric(it, t);
   final rows = <Widget>[];
-  for (final t in todos.cast<Map<String, dynamic>>()) {
-    final status = toolInputStr(t['status']);
-    var glyph = '☐', text = toolInputStr(t['content']);
+  for (final todo in todos.cast<Map<String, dynamic>>()) {
+    final status = toolInputStr(todo['status']);
+    var glyph = '☐', text = toolInputStr(todo['content']);
     if (status == 'completed') {
       glyph = '☑';
     } else if (status == 'in_progress') {
       glyph = '◐';
-      if (toolInputStr(t['activeForm']).isNotEmpty) text = toolInputStr(t['activeForm']);
+      if (toolInputStr(todo['activeForm']).isNotEmpty) text = toolInputStr(todo['activeForm']);
     }
     rows.add(Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Text('$glyph $text', style: _mono.copyWith(color: AppColors.text)),
+      child: Text('$glyph $text', style: codeMono.copyWith(color: t.text)),
     ));
   }
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
@@ -351,8 +311,8 @@ Map<String, String> answeredAnswers(String result, List<String> questions) {
   return out;
 }
 
-Widget _askUserQuestion(Entry it) {
-  final qs = (_input(it)['questions'] as List?) ?? const [];
+Widget _askUserQuestion(Entry it, ArgusTokens t) {
+  final qs = (toolInput(it)['questions'] as List?) ?? const [];
   final answers = answeredAnswers(it.result ?? '', [
     for (final q in qs.whereType<Map<String, dynamic>>())
       toolInputStr(q['question']),
@@ -362,7 +322,7 @@ Widget _askUserQuestion(Entry it) {
       (q) => (
             picks: (answers[toolInputStr(q['question'])] ?? '').split(', '),
             note: '',
-          ));
+          ), t);
 }
 
 /// Renders a questions tool's input. [answer] returns a question's picked
@@ -371,9 +331,9 @@ Widget _askUserQuestion(Entry it) {
 Widget questionsDetail(
     Entry it,
     ({List<String> picks, String note}) Function(Map<String, dynamic> q)
-        answer) {
-  final qs = (_input(it)['questions'] as List?) ?? const [];
-  if (qs.isEmpty) return _generic(it);
+        answer, ArgusTokens t) {
+  final qs = (toolInput(it)['questions'] as List?) ?? const [];
+  if (qs.isEmpty) return toolGeneric(it, t);
   final blocks = <Widget>[];
   for (final q in qs.cast<Map<String, dynamic>>()) {
     final question = toolInputStr(q['question']);
@@ -384,8 +344,8 @@ Widget questionsDetail(
     final children = <Widget>[];
     if (toolInputStr(q['header']).isNotEmpty) {
       children.add(Text(toolInputStr(q['header']).toUpperCase(),
-          style: _mono.copyWith(
-              color: AppColors.accent, fontWeight: FontWeight.w700)));
+          style: codeMono.copyWith(
+              color: t.accent, fontWeight: FontWeight.w700)));
     }
     if (question.isNotEmpty) children.add(appMarkdown(question));
     for (final opt
@@ -398,14 +358,14 @@ Widget questionsDetail(
         padding: const EdgeInsets.only(top: 6),
         child: Text('$mark $label',
             style: TextStyle(
-                color: isChosen ? AppColors.text : AppColors.secondary,
+                color: isChosen ? t.text : t.textSecondary,
                 fontWeight: isChosen ? FontWeight.w700 : FontWeight.w400)),
       ));
       if (toolInputStr(opt['description']).isNotEmpty) {
         children.add(Padding(
           padding: const EdgeInsets.only(left: 20, top: 2),
           child: Text(toolInputStr(opt['description']),
-              style: const TextStyle(color: AppColors.dim, fontSize: 13)),
+              style: TextStyle(color: t.textDim, fontSize: 13)),
         ));
       }
       if (toolInputStr(opt['preview']).isNotEmpty) {
@@ -419,16 +379,16 @@ Widget questionsDetail(
       children.add(Padding(
         padding: const EdgeInsets.only(top: 6),
         child: Text('Answer: $custom',
-            style: const TextStyle(
-                color: AppColors.secondary, fontWeight: FontWeight.w700)),
+            style: TextStyle(
+                color: t.textSecondary, fontWeight: FontWeight.w700)),
       ));
     }
     if (a.note.isNotEmpty) {
       children.add(Padding(
         padding: const EdgeInsets.only(top: 6),
         child: Text('Note: ${a.note}',
-            style: const TextStyle(
-                color: AppColors.secondary, fontWeight: FontWeight.w700)),
+            style: TextStyle(
+                color: t.textSecondary, fontWeight: FontWeight.w700)),
       ));
     }
     blocks.add(Padding(
@@ -438,7 +398,7 @@ Widget questionsDetail(
     ));
   }
   // The agent rejected the call (e.g. malformed arguments): say why.
-  if (it.resultIsError) blocks.add(_resultSection(it, wrap: true));
+  if (it.resultIsError) blocks.add(_resultSection(it, t, wrap: true));
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: blocks);
 }
 
@@ -453,26 +413,16 @@ String? mcpDisplayName(String name) {
 }
 
 /// Renders an MCP tool call's top-level arguments as key/value lines.
-Widget mcpDetail(Entry it) {
-  final args = _input(it);
+Widget mcpDetail(Entry it, ArgusTokens t) {
+  final args = toolInput(it);
   final keys = args.keys.toList()..sort();
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     if (keys.isNotEmpty)
       for (final k in keys)
-        RichText(
-          text: TextSpan(style: _mono, children: [
-            TextSpan(
-                text: '$k: ',
-                style: _mono.copyWith(
-                    color: AppColors.secondary, fontWeight: FontWeight.w700)),
-            TextSpan(
-                text:
-                    args[k] is String ? args[k] as String : jsonEncode(args[k]),
-                style: _mono.copyWith(color: AppColors.text)),
-          ]),
-        )
+        toolHeadline('$k: ',
+            args[k] is String ? args[k] as String : jsonEncode(args[k]), t)
     else if ((it.toolInput ?? '').isNotEmpty)
       codeBlock(it.toolInput!),
-    _resultSection(it),
+    _resultSection(it, t),
   ]);
 }

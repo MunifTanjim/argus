@@ -78,36 +78,37 @@ typedef ModelPart = ({String text, Color color});
 
 /// The model line's parts: model, effort, usage, cost, each left out when
 /// unknown. The first [base] are the model and effort.
-({List<ModelPart> parts, int base}) modelParts(Summary? s) {
+({List<ModelPart> parts, int base}) modelParts(
+    Summary? s, ArgusTokens t) {
   if (s == null) return (parts: const <ModelPart>[], base: 0);
   final parts = <ModelPart>[
     if ((s.modelName ?? '').isNotEmpty)
-      (text: s.modelName!, color: hexColor(s.modelColor) ?? AppColors.dim),
-    if ((s.effort ?? '').isNotEmpty) (text: s.effort!, color: AppColors.dim),
+      (text: s.modelName!, color: hexColor(s.modelColor) ?? t.textDim),
+    if ((s.effort ?? '').isNotEmpty) (text: s.effort!, color: t.textDim),
   ];
   final base = parts.length;
   if (s.hasContext) {
     final pct = fmtPct(s.contextPct);
     parts.add((
       text: s.tokens > 0 ? '${fmtTokens(s.tokens)} ($pct)' : pct,
-      color: contextColor(s.contextPct)
+      color: contextColor(s.contextPct, t)
     ));
   } else if (s.tokens > 0) {
-    parts.add((text: fmtTokens(s.tokens), color: AppColors.dim));
+    parts.add((text: fmtTokens(s.tokens), color: t.textDim));
   }
   if (s.hasCost) {
     parts.add(
-        (text: '\$${s.costUsd.toStringAsFixed(2)}', color: AppColors.dim));
+        (text: '\$${s.costUsd.toStringAsFixed(2)}', color: t.textDim));
   }
   return (parts: parts, base: base);
 }
 
 /// The first [n] of [parts].
-TextSpan modelLine(List<ModelPart> parts, int n) {
-  const dim = TextStyle(color: AppColors.dim);
+TextSpan modelLine(List<ModelPart> parts, int n, ArgusTokens t) {
+  final dim = TextStyle(color: t.textDim);
   return TextSpan(children: [
     for (var i = 0; i < n; i++) ...[
-      if (i > 0) const TextSpan(text: ' · ', style: dim),
+      if (i > 0) TextSpan(text: ' · ', style: dim),
       TextSpan(text: parts[i].text, style: TextStyle(color: parts[i].color)),
     ],
   ]);
@@ -445,25 +446,25 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
         final t? => TextSpan(text: t),
         null => null,
       },
-      bg: alert ? AppColors.awaitingSurface : AppColors.canvas,
+      bg: alert ? context.tokens.blockedSurface : context.tokens.canvas,
       lineColor: alert
-          ? AppColors.awaitingBorder
+          ? context.tokens.blockedBorder
           : blocked
-              ? AppColors.blocked
-              : AppColors.border,
-      labelColor: showPanel ? AppColors.blocked : AppColors.dim,
+              ? context.tokens.blocked
+              : context.tokens.line,
+      labelColor: showPanel ? context.tokens.blocked : context.tokens.textDim,
       trailing: showPanel
           ? IconButton(
               tooltip: _collapsed ? 'Expand' : 'Collapse',
               visualDensity: VisualDensity.compact,
-              color: AppColors.blocked,
+              color: context.tokens.blocked,
               icon: Icon(_collapsed ? Icons.expand_less : Icons.expand_more),
               onPressed: _toggle,
             )
           : null,
     );
     return Material(
-      color: AppColors.canvas,
+      color: context.tokens.canvas,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -489,7 +490,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     final style = Theme.of(context)
         .textTheme
         .bodySmall
-        ?.copyWith(color: AppColors.dim);
+        ?.copyWith(color: context.tokens.textDim);
     Widget line(String text) =>
         Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
     return Padding(
@@ -526,7 +527,10 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
                     onChanged: _onChanged,
                     decoration: InputDecoration(
                       hintText: 'Reply',
-                      border: const OutlineInputBorder(),
+                      border: OutlineInputBorder(
+                        borderRadius:
+                            BorderRadius.circular(context.tokens.radius),
+                      ),
                       isDense: true,
                       suffixIcon: suffixIcon,
                     ),
@@ -582,11 +586,11 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(text,
-                style: const TextStyle(
-                    color: AppColors.secondary, fontWeight: FontWeight.bold)),
+                style: TextStyle(
+                    color: context.tokens.textSecondary, fontWeight: FontWeight.bold)),
             const SizedBox(height: 2),
-            const Text("argus can't send input to this session",
-                style: TextStyle(color: AppColors.secondary, fontSize: 12)),
+            Text("argus can't send input to this session",
+                style: TextStyle(color: context.tokens.textSecondary, fontSize: 12)),
           ],
         ),
       );
@@ -607,14 +611,14 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
           constraints: const BoxConstraints(minWidth: _countTapWidth),
           child: Center(
             child: ColoredBox(
-              color: AppColors.canvas,
+              color: context.tokens.canvas,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: _countPad),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(icon, size: _countIcon, color: AppColors.dim),
+                  Icon(icon, size: _countIcon, color: context.tokens.textDim),
                   const SizedBox(width: _countGap),
                   Text('$n',
-                      style: mono.copyWith(color: AppColors.dim)),
+                      style: mono.copyWith(color: context.tokens.textDim)),
                 ]),
               ),
             ),
@@ -640,7 +644,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   /// right. As the TUI's bottom rule does, it drops cost, usage, the counts,
   /// effort, then the model, to fit without truncating.
   Widget _modelRule(Session s, {bool blocked = false}) {
-    final (:parts, :base) = modelParts(s.summary);
+    final (:parts, :base) = modelParts(s.summary, context.tokens);
     final counts = [
       if (s.subagents.isNotEmpty) (s.subagents.length, _subagentCount(s)),
       if (s.shells.isNotEmpty) (s.shells.length, _shellCount(s)),
@@ -666,12 +670,12 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
         if (k == 0 && n == 0) return true;
         final label = n == 0
             ? 0
-            : _textWidth(context, modelLine(parts, n)) + 2 * _rulePad;
+            : _textWidth(context, modelLine(parts, n, context.tokens)) + 2 * _rulePad;
         return countsWidth(context, k) + label <= room;
       }, orElse: () => (0, 0));
       return _rule(
-        lineColor: blocked ? AppColors.blocked : AppColors.border,
-        label: n == 0 ? null : modelLine(parts, n),
+        lineColor: blocked ? context.tokens.blocked : context.tokens.line,
+        label: n == 0 ? null : modelLine(parts, n, context.tokens),
         leading: k == 0
             ? null
             : Row(
@@ -687,9 +691,13 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
       {InlineSpan? label,
       Widget? leading,
       Widget? trailing,
-      Color bg = AppColors.canvas,
-      Color lineColor = AppColors.border,
-      Color labelColor = AppColors.dim}) {
+      Color? bg,
+      Color? lineColor,
+      Color? labelColor}) {
+    final t = context.tokens;
+    bg ??= t.canvas;
+    lineColor ??= t.line;
+    labelColor ??= t.textDim;
     final line = Divider(height: 1, color: lineColor);
     final style = mono.copyWith(color: labelColor);
     return Container(

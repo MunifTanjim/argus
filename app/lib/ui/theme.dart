@@ -1,78 +1,15 @@
 import 'package:flutter/material.dart';
 
-/// Gruvbox-dark visual tokens (see docs/superpowers/specs/2026-06-20-argus-mobile-design.md).
-class AppColors {
-  AppColors._();
+import 'theme/build_theme.dart' show monoFamily;
 
-  static const canvas = Color(0xFF1d2021); // bg0_h
-  static const card = Color(0xFF282828);
-  static const border = Color(0xFF3c3836);
-  static const text = Color(0xFFebdbb2);
-  static const secondary = Color(0xFFd5c4a1);
-  static const dim = Color(0xFF928374);
-  static const accent = Color(0xFF8ec07c); // aqua — non-status chrome
-  static const awaitingSurface = Color(0xFF32281d);
-  static const awaitingBorder = Color(0xFF7c5f1e);
-  static const blocked = Color(0xFFfabd2f); // gruvbox yellow — blocked on a prompt
-  static const blockedSurface = awaitingSurface;
-  static const blockedBorder = awaitingBorder;
-  static const waiting = Color(0xFF83a598); // gruvbox blue — finished its turn
-  static const waitingSurface = Color(0xFF1f2b2c);
-  static const waitingBorder = Color(0xFF45707a);
-  static const error = Color(
-    0xFFfb4934,
-  ); // gruvbox red — fatal connection state
-  static const errorSurface = Color(0xFF3c1f1d);
-  static const notice = Color(0xFFfabd2f); // gruvbox yellow — prompt notices
-  static const link = Color(
-    0xFF83a598,
-  ); // gruvbox blue — branches, paths, hunk headers
-}
+export 'theme/brand_colors.dart';
+export 'theme/build_theme.dart';
+export 'theme/context.dart';
+export 'theme/palette.dart';
+export 'theme/palettes.dart';
+export 'theme/tokens.dart';
 
-const mono = TextStyle(fontFamily: 'monospace', fontSize: 12);
+const mono = TextStyle(fontFamily: monoFamily, fontSize: 12);
 
-Color teamColor(String? name) {
-  switch (name) {
-    case 'blue':
-      return const Color(0xFF83a598);
-    case 'green':
-      return const Color(0xFFb8bb26);
-    case 'red':
-      return const Color(0xFFfb4934);
-    case 'yellow':
-      return const Color(0xFFfabd2f);
-    case 'purple':
-      return const Color(0xFFd3869b);
-    case 'cyan':
-      return const Color(0xFF8ec07c);
-    case 'orange':
-      return const Color(0xFFfe8019);
-    case 'pink':
-      return const Color(0xFFf7a1b0);
-    default:
-      return AppColors.accent;
-  }
-}
-
-ThemeData buildArgusTheme() {
-  final scheme =
-      ColorScheme.fromSeed(
-        seedColor: AppColors.accent,
-        brightness: Brightness.dark,
-      ).copyWith(
-        primary: AppColors.accent,
-        surface: AppColors.card,
-        onSurface: AppColors.text,
-      );
-  return ThemeData(
-    useMaterial3: true,
-    brightness: Brightness.dark,
-    colorScheme: scheme,
-    scaffoldBackgroundColor: AppColors.canvas,
-    appBarTheme: const AppBarTheme(centerTitle: false),
-    textTheme: Typography.whiteMountainView.apply(
-      bodyColor: AppColors.text,
-      displayColor: AppColors.text,
-    ),
-  );
-}
+/// Code, diff, and tool output text.
+const codeMono = TextStyle(fontFamily: monoFamily, fontSize: 12, height: 1.35);

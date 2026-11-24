@@ -464,7 +464,7 @@ class _DictationState extends ConsumerState<_Dictation> {
 
   @override
   Widget build(BuildContext context) {
-    const dim = TextStyle(color: AppColors.dim, fontSize: 12);
+    final dim = TextStyle(color: context.tokens.textDim, fontSize: 12);
     WidgetsBinding.instance.addPostFrameCallback(_alignMic);
 
     final error = Theme.of(context).colorScheme.error;
@@ -515,7 +515,7 @@ class _DictationState extends ConsumerState<_Dictation> {
                     ),
                     child: Icon(
                       Icons.mic,
-                      color: _cancelArmed ? AppColors.dim : error,
+                      color: _cancelArmed ? context.tokens.textDim : error,
                     ),
                   ),
                 _Phase.recording => Icon(Icons.stop_circle, color: error),
@@ -538,7 +538,7 @@ class _DictationState extends ConsumerState<_Dictation> {
             Text(
               formatClock(_clock.elapsed),
               key: const Key('voice-clock'),
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              style: const TextStyle(fontFamily: monoFamily, fontSize: 12),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -706,7 +706,7 @@ class _LockHint extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = Color.lerp(AppColors.dim, AppColors.accent, progress);
+    final color = Color.lerp(context.tokens.textDim, context.tokens.accent, progress);
     return Center(
       child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
@@ -723,7 +723,7 @@ class _LockHint extends StatelessWidget {
                     heightFactor: progress,
                     widthFactor: 1,
                     child: ColoredBox(
-                      color: AppColors.accent.withValues(alpha: 0.3),
+                      color: context.tokens.accent.withValues(alpha: 0.3),
                     ),
                   ),
                 ),
@@ -765,7 +765,7 @@ class _SlideHint extends StatelessWidget {
         shaderCallback: (bounds) => LinearGradient(
           begin: Alignment.centerRight,
           end: Alignment.centerLeft,
-          colors: [color, color, AppColors.dim, AppColors.dim],
+          colors: [color, color, context.tokens.textDim, context.tokens.textDim],
           stops: [0, progress, progress, 1],
         ).createShader(bounds),
         child: const Row(
@@ -795,14 +795,15 @@ class LevelMeter extends StatelessWidget {
   @override
   Widget build(BuildContext context) => CustomPaint(
         size: const Size.fromHeight(16),
-        painter: _MeterPainter(levels),
+        painter: _MeterPainter(levels, context.tokens.textSecondary),
       );
 }
 
 class _MeterPainter extends CustomPainter {
-  _MeterPainter(this.levels);
+  _MeterPainter(this.levels, this.color);
 
   final List<double> levels;
+  final Color color;
 
   static const _barWidth = 3.0;
   static const _barPitch = 5.0;
@@ -815,7 +816,7 @@ class _MeterPainter extends CustomPainter {
         : levels;
     // Left-pad so the bars scroll in from the right as audio arrives.
     final pad = barCount - shown.length;
-    final paint = Paint()..color = AppColors.secondary;
+    final paint = Paint()..color = color;
     for (var i = 0; i < barCount; i++) {
       final h = 2 + (size.height - 2) * (i < pad ? 0.0 : shown[i - pad]);
       canvas.drawRRect(

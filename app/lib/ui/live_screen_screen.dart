@@ -17,6 +17,7 @@ import '../state/terminals.dart';
 import '../transport/connection.dart';
 import '../util/sync_frames.dart';
 import 'live_emulator.dart';
+import 'theme.dart';
 
 
 class LiveScreenScreen extends ConsumerStatefulWidget {
@@ -233,7 +234,7 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
             ),
         ],
       ),
-      backgroundColor: Colors.black,
+      backgroundColor: context.tokens.terminalBg,
       body: Column(
         children: [
           Expanded(
@@ -244,7 +245,7 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
               onPointerCancel: _onPointerUp,
               child: ValueListenableBuilder<double>(
                 valueListenable: _fontSize,
-                builder: (context, fontSize, _) => _emulator.view(fontSize),
+                builder: (context, fontSize, _) => _emulator.view(context, fontSize),
               ),
             ),
           ),
@@ -386,7 +387,7 @@ class _InputBarState extends State<_InputBar> {
                   Expanded(
                     child: TextField(
                       controller: widget.controller,
-                      style: const TextStyle(fontFamily: 'monospace'),
+                      style: const TextStyle(fontFamily: monoFamily),
                       minLines: 1,
                       maxLines: 3,
                       onChanged: (v) {
@@ -399,9 +400,10 @@ class _InputBarState extends State<_InputBar> {
                       },
                       decoration: const InputDecoration(
                         isDense: true,
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 8,
+                        ),
                       ),
                     ),
                   ),
@@ -428,19 +430,16 @@ class _InputBarState extends State<_InputBar> {
       );
 
   // Compact terminal-like keycaps.
-  static const _keycapFill = Color(0xFF2A2A2A);
-  static const _keycapBorder = Color(0xFF444444);
-  static const _keycapText = Color(0xFFDDDDDD);
-  static const _armedFill = Color(0xFF3B82F6);
-  static const _btnStyle = TextStyle(fontFamily: 'monospace', fontSize: 11);
+  static const _btnStyle = TextStyle(fontFamily: monoFamily, fontSize: 11);
 
-  ButtonStyle _capStyle({required bool active}) => OutlinedButton.styleFrom(
+  ButtonStyle _capStyle(ArgusTokens t, {required bool active}) =>
+      OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
         minimumSize: const Size(0, 28),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        backgroundColor: active ? _armedFill : _keycapFill,
-        foregroundColor: active ? Colors.white : _keycapText,
-        side: BorderSide(color: active ? _armedFill : _keycapBorder),
+        backgroundColor: active ? t.keycapArmed : t.keycapFill,
+        foregroundColor: active ? t.keycapArmedText : t.keycapText,
+        side: BorderSide(color: active ? t.keycapArmed : t.keycapBorder),
         shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.all(Radius.circular(6))),
       );
@@ -456,7 +455,7 @@ class _InputBarState extends State<_InputBar> {
         message: tooltip,
         preferBelow: false,
         child: OutlinedButton(
-          style: _capStyle(active: active),
+          style: _capStyle(context.tokens, active: active),
           onPressed: onPressed,
           child: child,
         ),

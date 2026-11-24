@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/ui/edit_diff.dart';
+import 'package:argus/ui/theme.dart';
 
 // One full-context hunk from prefixed lines (' ' context, '-' old, '+' new).
 String _ud(List<String> lines) {
@@ -15,7 +16,7 @@ List<String> _ctx(String prefix, int n) =>
 // The diff scrolls its own content and pins its header, so it needs a
 // bounded-height parent (the Scaffold body) rather than an outer scroll view.
 Widget _wrap(String diff) => MaterialApp(
-      home: Scaffold(body: unifiedDiffView(diff)),
+      home: Scaffold(body: unifiedDiffView(diff, ArgusTokens.fallback)),
     );
 
 // Mirrors the review screen: a static line above a Flexible diff, so a short
@@ -25,7 +26,7 @@ Widget _screen(String diff) => MaterialApp(
         body: Column(
           children: [
             const Text('header'),
-            Flexible(child: unifiedDiffView(diff)),
+            Flexible(child: unifiedDiffView(diff, ArgusTokens.fallback)),
           ],
         ),
       ),

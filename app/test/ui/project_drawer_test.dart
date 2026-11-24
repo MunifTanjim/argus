@@ -382,7 +382,7 @@ void main() {
     await tester.pump();
     expect(find.byIcon(Icons.visibility_off_outlined), findsOneWidget);
     final name = tester.widget<Text>(find.text('secret'));
-    expect(name.style?.color, AppColors.dim);
+    expect(name.style?.color, ArgusTokens.fallback.textDim);
     expect(find.text('old (gone)'), findsOneWidget);
   });
 

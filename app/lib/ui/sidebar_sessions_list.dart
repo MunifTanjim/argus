@@ -52,7 +52,7 @@ class SidebarSessionsList extends ConsumerWidget {
                     : ws != null
                     ? 'no live sessions in this workspace'
                     : 'no live sessions',
-                style: const TextStyle(color: AppColors.dim),
+                style: TextStyle(color: context.tokens.textDim),
               ),
             ),
           ],
@@ -70,7 +70,7 @@ class SidebarSessionsList extends ConsumerWidget {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
               child: Text(
                 g.section.title,
-                style: const TextStyle(color: AppColors.dim, fontSize: 12),
+                style: TextStyle(color: context.tokens.textDim, fontSize: 12),
               ),
             ),
             for (final s in g.sessions)
@@ -149,7 +149,7 @@ class SidebarSessionsList extends ConsumerWidget {
                         width: 104,
                         child: Text(
                           label,
-                          style: const TextStyle(color: AppColors.dim),
+                          style: TextStyle(color: context.tokens.textDim),
                         ),
                       ),
                       Expanded(child: SelectableText(value)),
@@ -201,7 +201,7 @@ class _SessionRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
       child: Material(
-        color: selected ? AppColors.border : Colors.transparent,
+        color: selected ? context.tokens.surfaceRaised : Colors.transparent,
         borderRadius: BorderRadius.circular(8),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -218,8 +218,8 @@ class _SessionRow extends StatelessWidget {
                     dim ? '○' : statusGlyph(s.status),
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontFamily: 'monospace',
-                      color: dim ? AppColors.border : sessionColor(s),
+                      fontFamily: monoFamily,
+                      color: dim ? context.tokens.textDim : sessionColor(s, context.tokens),
                     ),
                   ),
                 ),
@@ -236,7 +236,7 @@ class _SessionRow extends StatelessWidget {
                           fontWeight: selected
                               ? FontWeight.w700
                               : FontWeight.w500,
-                          color: dim ? AppColors.dim : null,
+                          color: dim ? context.tokens.textDim : null,
                         ),
                       ),
                       if (place.isNotEmpty)
@@ -244,8 +244,8 @@ class _SessionRow extends StatelessWidget {
                           place,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: AppColors.dim,
+                          style: TextStyle(
+                            color: context.tokens.textDim,
                             fontSize: 12,
                           ),
                         ),

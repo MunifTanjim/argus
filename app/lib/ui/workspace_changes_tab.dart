@@ -20,10 +20,10 @@ class WorkspaceChangesTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (!project.isGit) {
-      return const Center(
+      return Center(
         child: Text(
           'Not a git repository.',
-          style: TextStyle(color: AppColors.dim),
+          style: TextStyle(color: context.tokens.textDim),
         ),
       );
     }

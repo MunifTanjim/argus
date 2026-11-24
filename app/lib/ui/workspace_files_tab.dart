@@ -26,7 +26,7 @@ class WorkspaceFilesTab extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _breadcrumb(ref, path),
+        _breadcrumb(context, ref, path),
         const Divider(height: 1),
         Expanded(
           child: RefreshIndicator(
@@ -39,7 +39,7 @@ class WorkspaceFilesTab extends ConsumerWidget {
                 children: [
                   Text(
                     'Could not open this folder:\n$e',
-                    style: const TextStyle(color: AppColors.dim),
+                    style: TextStyle(color: context.tokens.textDim),
                   ),
                   const SizedBox(height: 8),
                   Align(
@@ -67,16 +67,16 @@ class WorkspaceFilesTab extends ConsumerWidget {
     );
   }
 
-  Widget _breadcrumb(WidgetRef ref, String path) {
+  Widget _breadcrumb(BuildContext context, WidgetRef ref, String path) {
     final parts = path.isEmpty ? const <String>[] : path.split('/');
     final crumbs = <Widget>[
-      _crumb(workspace.name, () => _go(ref, ''), key: const Key('files-root')),
+      _crumb(context, workspace.name, () => _go(ref, ''), key: const Key('files-root')),
     ];
     for (var i = 0; i < parts.length; i++) {
       final to = parts.sublist(0, i + 1).join('/');
       crumbs
-        ..add(const Text(' / ', style: TextStyle(color: AppColors.dim)))
-        ..add(_crumb(parts[i], () => _go(ref, to)));
+        ..add(Text(' / ', style: TextStyle(color: context.tokens.textDim)))
+        ..add(_crumb(context, parts[i], () => _go(ref, to)));
     }
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -85,7 +85,7 @@ class WorkspaceFilesTab extends ConsumerWidget {
     );
   }
 
-  Widget _crumb(String label, VoidCallback onTap, {Key? key}) => InkWell(
+  Widget _crumb(BuildContext context, String label, VoidCallback onTap, {Key? key}) => InkWell(
     key: key,
     onTap: onTap,
     borderRadius: BorderRadius.circular(4),
@@ -93,7 +93,7 @@ class WorkspaceFilesTab extends ConsumerWidget {
       constraints: const BoxConstraints(minHeight: 40),
       padding: const EdgeInsets.symmetric(horizontal: 6),
       alignment: Alignment.center,
-      child: Text(label, style: const TextStyle(color: AppColors.link)),
+      child: Text(label, style: TextStyle(color: context.tokens.link)),
     ),
   );
 
@@ -108,7 +108,7 @@ class WorkspaceFilesTab extends ConsumerWidget {
       trailing: e.symlink
           ? Text(
               '→ ${e.target}',
-              style: const TextStyle(color: AppColors.dim, fontSize: 11),
+              style: TextStyle(color: context.tokens.textDim, fontSize: 11),
             )
           : null,
       onTap: () => e.isDir

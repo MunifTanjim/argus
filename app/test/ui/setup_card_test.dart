@@ -49,7 +49,7 @@ void main() {
     final head = tester.widget<Text>(
       find.text('Setup failed (exit 2) · make deps'),
     );
-    expect(head.style?.color, AppColors.error);
+    expect(head.style?.color, ArgusTokens.fallback.error);
     expect(find.text('a'), findsOneWidget);
     expect(find.text('b'), findsOneWidget);
     await tester.tap(find.text('Run again'));
