@@ -194,9 +194,7 @@ class _DesktopShortcutsState extends State<DesktopShortcuts> {
     }
     if (_isToggleSidebar(k)) {
       // Over a terminal, _onEarlyKey has taken it already.
-      return liveTerminalHasFocus() || textInputHasFocus()
-          ? null
-          : widget.onToggleSidebar;
+      return liveTerminalHasFocus() ? null : widget.onToggleSidebar;
     }
     if (kb.isMetaPressed || kb.isControlPressed || kb.isAltPressed) return null;
     final shift = kb.isShiftPressed;

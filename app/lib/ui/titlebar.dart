@@ -320,16 +320,16 @@ class _TabsControl extends StatefulWidget {
 }
 
 class _TabsControlState extends State<_TabsControl> {
-  // Which control the switch shows; the other one is kept out of focus.
-  bool _iconsShown = false;
-  bool _iconsLaidOut = false;
+  // Which control the switch shows; the others are kept out of focus.
+  _TabsShown _shown = _TabsShown.labels;
+  _TabsShown _laidOut = _TabsShown.labels;
 
-  void _onShown(bool icons) {
-    _iconsLaidOut = icons;
-    if (icons == _iconsShown) return;
+  void _onShown(_TabsShown shown) {
+    _laidOut = shown;
+    if (shown == _shown) return;
     SchedulerBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _iconsLaidOut != _iconsShown) {
-        setState(() => _iconsShown = _iconsLaidOut);
+      if (mounted && _laidOut != _shown) {
+        setState(() => _shown = _laidOut);
       }
     });
   }
@@ -370,7 +370,7 @@ class _TabsControlState extends State<_TabsControl> {
       link: widget.link,
       onShown: _onShown,
       labels: ExcludeFocus(
-        excluding: _iconsShown,
+        excluding: _shown != _TabsShown.labels,
         child: _control([
           for (final label in tabs.labels)
             Text(
@@ -380,7 +380,7 @@ class _TabsControlState extends State<_TabsControl> {
         ]),
       ),
       icons: ExcludeFocus(
-        excluding: !_iconsShown,
+        excluding: _shown != _TabsShown.icons,
         child: _control([
           for (var i = 0; i < tabs.icons.length; i++)
             Tooltip(
@@ -442,9 +442,14 @@ class _TabsSwitchLink {
   _RenderTabsSwitch? box;
 }
 
-/// Shows [labels] where it fits whole in the width given, else [icons]. The
-/// other one is laid out but neither painted nor hit, and is offstage to
-/// finders and semantics.
+/// Which control a [_TabsSwitch] shows.
+enum _TabsShown { labels, icons, none }
+
+/// Shows [labels] where it fits whole in the width given, else [icons] where
+/// they fit whole, else nothing (0 wide; the tabs stay reachable by ⌘1–⌘4
+/// and the View menu). A control not shown is neither painted nor hit, and
+/// is offstage to finders and semantics; one that does not fit is not laid
+/// out, as the segmented control cannot lay out below its minimum width.
 class _TabsSwitch extends MultiChildRenderObjectWidget {
   _TabsSwitch({
     required this.link,
@@ -455,8 +460,8 @@ class _TabsSwitch extends MultiChildRenderObjectWidget {
 
   final _TabsSwitchLink link;
 
-  /// Called after each layout with whether the icons are shown.
-  final ValueChanged<bool> onShown;
+  /// Called after each layout with the control shown.
+  final ValueChanged<_TabsShown> onShown;
 
   @override
   _RenderTabsSwitch createRenderObject(BuildContext context) =>
@@ -492,7 +497,7 @@ class _RenderTabsSwitch extends RenderBox
         RenderBoxContainerDefaultsMixin<RenderBox, _SwitchParentData> {
   _RenderTabsSwitch(this.onShown);
 
-  ValueChanged<bool> onShown;
+  ValueChanged<_TabsShown> onShown;
 
   RenderBox? shown;
 
@@ -509,10 +514,12 @@ class _RenderTabsSwitch extends RenderBox
     }
   }
 
-  RenderBox _pick(BoxConstraints constraints) =>
-      _labels.getMaxIntrinsicWidth(double.infinity) <= constraints.maxWidth
-      ? _labels
-      : _icons;
+  RenderBox? _pick(BoxConstraints constraints) {
+    final width = constraints.maxWidth;
+    if (_labels.getMaxIntrinsicWidth(double.infinity) <= width) return _labels;
+    if (_icons.getMaxIntrinsicWidth(double.infinity) <= width) return _icons;
+    return null;
+  }
 
   @override
   double computeMinIntrinsicWidth(double height) =>
@@ -535,9 +542,12 @@ class _RenderTabsSwitch extends RenderBox
   );
 
   @override
-  Size computeDryLayout(BoxConstraints constraints) => constraints.constrain(
-    _pick(constraints).getDryLayout(constraints.loosen()),
-  );
+  Size computeDryLayout(BoxConstraints constraints) {
+    final pick = _pick(constraints);
+    return constraints.constrain(
+      pick?.getDryLayout(constraints.loosen()) ?? Size.zero,
+    );
+  }
 
   @override
   void performLayout() {
@@ -547,19 +557,31 @@ class _RenderTabsSwitch extends RenderBox
       shown = pick;
       markNeedsSemanticsUpdate();
     }
-    _labels.layout(constraints.loosen(), parentUsesSize: pick == _labels);
-    _icons.layout(constraints.loosen(), parentUsesSize: pick == _icons);
-    size = constraints.constrain(pick.size);
-    onShown(pick == _icons);
+    // The segmented control cannot lay out under its minimum width, so
+    // nothing is laid out where even the icons do not fit.
+    final loose = constraints.loosen();
+    if (pick != null) {
+      _labels.layout(loose, parentUsesSize: pick == _labels);
+      _icons.layout(loose, parentUsesSize: pick == _icons);
+    }
+    size = constraints.constrain(pick?.size ?? Size.zero);
+    onShown(
+      pick == _labels
+          ? _TabsShown.labels
+          : pick == _icons
+          ? _TabsShown.icons
+          : _TabsShown.none,
+    );
   }
 
   @override
-  void paint(PaintingContext context, Offset offset) =>
-      context.paintChild(shown!, offset);
+  void paint(PaintingContext context, Offset offset) {
+    if (shown case final shown?) context.paintChild(shown, offset);
+  }
 
   @override
   bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
-      shown!.hitTest(result, position: position);
+      shown?.hitTest(result, position: position) ?? false;
 
   @override
   void visitChildrenForSemantics(RenderObjectVisitor visitor) {

@@ -381,13 +381,19 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final body = wide
         ? Row(
             children: [
-              if (panel) ...[
-                SizedBox(
+              // Kept while hidden, so its scroll position and search text
+              // survive; hidden, it takes no width, focus, semantics, or
+              // passthrough.
+              Visibility(
+                key: const ValueKey('shell-panel'),
+                visible: panel,
+                maintainState: true,
+                child: SizedBox(
                   width: kSidePanelWidth,
                   child: ProjectDrawer(color: translucent ? kSidebarTint : null),
                 ),
-                const VerticalDivider(width: 1),
-              ],
+              ),
+              if (panel) const VerticalDivider(width: 1),
               Expanded(key: const ValueKey('shell-main-area'), child: mainArea),
             ],
           )

@@ -1007,15 +1007,10 @@ void main() {
       final c = await _shell(tester, fullScreen: mac());
       expect(find.byTooltip('Projects'), findsNothing);
       expect(find.byIcon(Icons.menu), findsNothing);
-      // Switched in the wide layout, then narrowed (but wide enough for the
-      // workspace toolbar).
-      tester.view.physicalSize = const Size(1000, 900);
-      await tester.pumpAndSettle();
       c.read(scopeProvider.notifier).state = 'A:w2';
       await tester.pumpAndSettle();
-      tester.view.physicalSize = const Size(600, 900);
-      await tester.pumpAndSettle();
       expect(find.byType(WorkspaceScreen), findsOneWidget);
+      expect(tester.takeException(), isNull);
       expect(find.byTooltip('Projects'), findsNothing);
       c.read(sessionsProvider.notifier).replaceAll([_session('s2', workspaceId: 'A:w2')]);
       c.read(pendingOpenSessionProvider.notifier).state = const PendingOpen('s2');
@@ -1024,6 +1019,69 @@ void main() {
       expect(find.byTooltip('Projects'), findsNothing);
       expect(find.byIcon(Icons.menu), findsNothing);
     });
+
+    for (final width in [400.0, 480.0, 500.0, 520.0]) {
+      testWidgets(
+          'macOS workspace at ${width.toInt()} px: no exception; the tabs control is fully visible or absent',
+          (tester) async {
+        final c = await _shell(tester, width: width, fullScreen: mac());
+        c.read(scopeProvider.notifier).state = 'A:w2';
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        final control = find.descendant(
+            of: find.byType(WorkspaceScreen),
+            matching: find.byType(CupertinoSlidingSegmentedControl<int>));
+        if (control.evaluate().isEmpty) return;
+        final rect = tester.getRect(control);
+        final bar = tester.getRect(barOf(WorkspaceScreen));
+        expect(rect.left, greaterThanOrEqualTo(bar.left));
+        expect(rect.right, lessThanOrEqualTo(bar.right));
+        final buttons = find.descendant(
+            of: barOf(WorkspaceScreen), matching: find.byType(IconButton));
+        for (final e in buttons.evaluate()) {
+          final button = tester.getRect(find.byElementPredicate((x) => x == e));
+          expect(button.overlaps(rect), isFalse, reason: '${e.widget}');
+        }
+      });
+    }
+
+    testWidgets('macOS: the side panel keeps its search text through hide and show',
+        (tester) async {
+      await _shell(tester, width: 1000, fullScreen: mac());
+      final search = find.descendant(of: panel, matching: find.byType(TextField));
+      await tester.enterText(search, 'regis');
+      await tester.pump();
+      await tapToggle(tester);
+      expect(panel, findsNothing);
+      expect(find.byType(ProjectDrawer, skipOffstage: false), findsOneWidget);
+      await tapToggle(tester);
+      expect(tester.widget<TextField>(search).controller!.text, 'regis');
+    });
+
+    for (final wide in [true, false]) {
+      testWidgets(
+          'macOS full screen ${wide ? 'wide' : 'narrow'}: the toggle\'s passthrough rect is (4, 12, 32, 40), also after the sidebar toggles',
+          (tester) async {
+        _passthroughRects.clear();
+        final fullScreen = mac();
+        await _shell(tester, width: wide ? 1000 : 400, fullScreen: fullScreen);
+        fullScreen.value = true;
+        await flush(tester);
+        const rect = Rect.fromLTRB(4, 12, 32, 40);
+        expect(_passthroughRects.values, contains(rect));
+        expect(_passthroughRects.values.toSet(), visible(tester));
+        await tester.tap(toggle);
+        await flush(tester);
+        expect(_passthroughRects.values, contains(rect));
+        expect(_passthroughRects.values.toSet(), visible(tester));
+        // The hidden panel passes nothing through.
+        if (wide) {
+          expect(
+              _passthroughRects.values.where((r) => r.left < kSidePanelWidth && r != rect),
+              isEmpty);
+        }
+      });
+    }
 
     testWidgets('macOS full screen: the toggle is at x = 4', (tester) async {
       final fullScreen = mac();
@@ -1084,7 +1142,7 @@ void main() {
     });
 
     testWidgets(
-        '⌃⌘S toggles the sidebar; it does nothing while a TextField has focus; View › Hide Sidebar toggles it',
+        '⌃⌘S toggles the sidebar, also while a TextField has focus; View › Hide Sidebar toggles it',
         (tester) async {
       mac();
       _mockMenuChannel(tester);
@@ -1094,8 +1152,11 @@ void main() {
       await ctrlCmdS(tester);
       expect(panel, findsOneWidget);
 
+      // A focused text field does not stop it.
       await tester.tap(find.descendant(of: panel, matching: find.byType(TextField)));
       await tester.pump();
+      await ctrlCmdS(tester);
+      expect(panel, findsNothing);
       await ctrlCmdS(tester);
       expect(panel, findsOneWidget);
       FocusManager.instance.primaryFocus?.unfocus();

@@ -248,14 +248,20 @@ void main() {
     expect(calls.log, ['sidebar']);
   });
 
-  testWidgets('⌃⌘S does nothing while a TextField has focus', (tester) async {
+  testWidgets(
+      '⌃⌘S toggles the sidebar while a TextField has focus, and the field keeps its text',
+      (tester) async {
     _platform(TargetPlatform.macOS);
+    final text = TextEditingController(text: 'abc');
+    addTearDown(text.dispose);
     final calls =
-        await _pump(tester, const TextField(autofocus: true));
+        await _pump(tester, TextField(controller: text, autofocus: true));
     await tester.pump();
     expect(textInputHasFocus(), isTrue);
-    expect(await _ctrlCmd(tester, LogicalKeyboardKey.keyS), isFalse);
-    expect(calls.log, isEmpty);
+    expect(await _ctrlCmd(tester, LogicalKeyboardKey.keyS), isTrue);
+    expect(calls.log, ['sidebar']);
+    expect(text.text, 'abc');
+    expect(textInputHasFocus(), isTrue);
   });
 
   testWidgets('on linux, ⌃⌘S and Ctrl+S are not bound', (tester) async {
