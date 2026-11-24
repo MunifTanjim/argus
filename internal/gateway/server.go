@@ -498,7 +498,7 @@ func (s *Server) buildClientServer() *api.Server {
 		}
 		s.relayMu.Unlock()
 		if nodePeer == nil {
-			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown node: " + p.NodeID}
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgUnknownNode + ": " + p.NodeID}
 		}
 		if open >= maxChannelsPerClient {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "too many open channels for this client"}
@@ -700,7 +700,7 @@ func (s *Server) openNodeChannel(openerID string, opener *api.Peer, targetID str
 	}
 	if target == nil {
 		s.relayMu.Unlock()
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown node: " + targetID}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgUnknownNode + ": " + targetID}
 	}
 	if open >= maxChannelsPerNode {
 		s.relayMu.Unlock()

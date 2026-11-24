@@ -11,6 +11,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/e2e"
+	"github.com/MunifTanjim/argus/internal/invite"
 )
 
 // chanState is one live E2E channel this node terminates (one client <-> this node).
@@ -29,6 +30,12 @@ type chanState struct {
 	// that node's roster key.
 	opener  string
 	demoted atomic.Bool // a key mismatch for opener was logged
+	// invite is the invite ID an invite channel was keyed by; nil otherwise. An
+	// invite channel serves one lock.inviteRedeem request, then closes.
+	invite        []byte
+	invitePending bool        // the invite was pending at handshake; counts toward maxInviteChannels
+	inviteUsed    atomic.Bool // the one request arrived
+	inviteIdle    *time.Timer // closes the channel if the request never arrives
 }
 
 // decryptWedgeWarnAfter is the run of consecutive decrypt failures that signals a
@@ -36,6 +43,13 @@ type chanState struct {
 // failed decrypt is dropped without advancing the nonce — only a genuine mid-stream
 // frame loss sustains it.
 const decryptWedgeWarnAfter = 8
+
+// maxInviteChannels bounds open channels for pending invites; any invite has at
+// most one open channel, and a new handshake replaces one that has not sent its
+// request. inviteIdleTimeout closes one that never does.
+const maxInviteChannels = 8
+
+var inviteIdleTimeout = invite.ChannelIdleTimeout
 
 // wedgeWarn reports true only on the tick the counter first hits the threshold, so a sustained wedge logs once.
 func wedgeWarn(n *int) bool {
@@ -179,6 +193,10 @@ func (r *relayResponder) onFrame(_ *api.Peer, f api.RelayFrame) {
 		r.handshake(peer, f)
 		return
 	}
+	if f.Method == api.MethodE2EInviteHandshake {
+		r.inviteHandshake(peer, f)
+		return
+	}
 	cs := r.lookup(f.Route.ChanID)
 	if cs == nil {
 		if r.d.e2ee {
@@ -188,6 +206,19 @@ func (r *relayResponder) onFrame(_ *api.Peer, f api.RelayFrame) {
 	}
 	if f.ID != nil && f.Method != "" {
 		params, err := cs.ch.OpenParams(f)
+		if cs.invite != nil {
+			// A record that does not open means the client lacks the invite
+			// secret; only the first request is served.
+			if err != nil {
+				r.closeChanIf(f.Route.ChanID, cs)
+				return
+			}
+			if cs.inviteUsed.Swap(true) {
+				return
+			}
+			go r.serve(cs, f.Enc, f.ID, f.Method, params)
+			return
+		}
 		if err != nil {
 			// undecryptable (tamper/desync): drop. A sustained run means the channel
 			// is likely wedged; the client re-handshakes a fresh channel.
@@ -264,6 +295,77 @@ func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
 	r.startStream(f.Route.ChanID, cs, cn)
 }
 
+// inviteHandshake runs the Noise IKpsk2 responder for an invite channel, keyed by
+// the invite secret named in msg1. Any failure is dropped without a reply. The
+// client is not yet authorized, so the locked-mode check does not apply; the
+// channel serves only lock.inviteRedeem and gets no registry stream.
+func (r *relayResponder) inviteHandshake(peer *api.Peer, f api.RelayFrame) {
+	chanID := f.Route.ChanID
+	store := r.d.invites
+	if store == nil || r.d.rejectsChannels() {
+		return
+	}
+	msg1, err := api.HandshakeFromFrame(f)
+	if err != nil {
+		return
+	}
+	sess, clientStatic, id, msg2, err := e2e.RespondInvite(r.static, api.ChannelPrologue(r.d.id, chanID), msg1, store.Secret)
+	if err != nil {
+		r.d.log.Debug("invite handshake failed", "chan", chanID, "err", err)
+		return
+	}
+	base, cancel := context.WithCancel(context.Background())
+	// A non-pending invite still gets a channel so its redeem can report why,
+	// but it must not take a slot from pending invites.
+	cs := &chanState{ch: api.NewChannel(chanID, sess), cancel: cancel, clientStatic: append([]byte(nil), clientStatic...), invite: id, invitePending: store.Pending(id)}
+	cs.ctx = api.WithNotifier(base, &channelNotifier{r: r, cs: cs})
+	r.mu.Lock()
+	// An older channel for this invite that has not sent its request has not
+	// proven the secret: knowing the invite ID is enough to open one. It is
+	// replaced rather than allowed to block the redeem; Consume still allows
+	// only one use.
+	open, busy, stale := 0, false, ""
+	for cid, c := range r.chans {
+		if c.invite == nil || !bytes.Equal(c.invite, id) {
+			if c.invitePending {
+				open++
+			}
+			continue
+		}
+		if c.inviteUsed.Load() {
+			busy = true
+		} else {
+			stale = cid
+		}
+	}
+	_, exists := r.chans[chanID]
+	if exists || busy || (cs.invitePending && open >= maxInviteChannels) {
+		r.mu.Unlock()
+		cancel()
+		r.d.log.Debug("invite channel dropped", "chan", chanID, "duplicate", exists, "same_invite", busy, "open", open)
+		return
+	}
+	r.chans[chanID] = cs
+	cs.inviteIdle = time.AfterFunc(inviteIdleTimeout, func() {
+		if !cs.inviteUsed.Load() {
+			r.closeChanIf(chanID, cs)
+		}
+	})
+	r.mu.Unlock()
+	if stale != "" {
+		r.d.log.Debug("invite channel replaced", "chan", stale, "by", chanID)
+		r.closeChan(stale)
+	}
+	frame, err := api.MarshalInviteHandshakeFrame(chanID, msg2)
+	if err != nil {
+		r.closeChan(chanID)
+		return
+	}
+	if err := peer.SendRawFrame(api.EncodingJSON, frame); err != nil {
+		r.closeChan(chanID)
+	}
+}
+
 // startStream streams the registry and connection broadcasts to a client
 // channel. A channel a node opened gets neither, even while channelPeer serves
 // it as a client channel: its opener only makes calls.
@@ -306,7 +408,11 @@ func (r *relayResponder) createPlain(chanID string) *chanState {
 // channel in the request's encoding.
 func (r *relayResponder) serve(cs *chanState, enc api.Encoding, id *json.RawMessage, method string, params []byte) {
 	ctx, dispatch := cs.ctx, r.dispatch
-	if p := r.channelPeer(cs); p != "" {
+	if cs.invite != nil {
+		// Runs last, after the response is on the wire.
+		defer r.closeChanIf(cs.ch.ID(), cs)
+		dispatch = r.d.inviteDispatch(cs.invite, cs.clientStatic)
+	} else if p := r.channelPeer(cs); p != "" {
 		ctx, dispatch = withPeerNode(ctx, p), r.peerDispatch
 	}
 	raw, rpcErr := api.Serve(ctx, dispatch, enc, method, params)
@@ -330,6 +436,9 @@ func (r *relayResponder) closeAll() {
 	var stops []func()
 	for id, cs := range r.chans {
 		cs.cancel()
+		if cs.inviteIdle != nil {
+			cs.inviteIdle.Stop()
+		}
 		if cs.stopStream != nil {
 			stops = append(stops, cs.stopStream)
 		}
@@ -348,15 +457,29 @@ func (r *relayResponder) closeChan(chanID string) {
 	delete(r.chans, chanID)
 	delete(r.peerOpened, chanID) // relay.closed before the first frame
 	var stop func()
+	var idle *time.Timer
 	if cs != nil {
-		stop = cs.stopStream
+		stop, idle = cs.stopStream, cs.inviteIdle
 	}
 	r.mu.Unlock()
+	if idle != nil {
+		idle.Stop()
+	}
 	if cs != nil {
 		cs.cancel()
 	}
 	if stop != nil {
 		stop()
+	}
+}
+
+// closeChanIf closes chanID only while it is still cs.
+func (r *relayResponder) closeChanIf(chanID string, cs *chanState) {
+	r.mu.Lock()
+	live := r.chans[chanID] == cs
+	r.mu.Unlock()
+	if live {
+		r.closeChan(chanID)
 	}
 }
 
@@ -389,6 +512,9 @@ func (r *relayResponder) reevaluate() {
 	}
 	var live []ent
 	for id, cs := range r.chans {
+		if cs.invite != nil {
+			continue // unauthorized by design; closes after its one request
+		}
 		live = append(live, ent{id, cs.clientStatic})
 	}
 	r.mu.Unlock()

@@ -109,4 +109,7 @@ func (d *Node) registerHandlers(srv *api.Server) {
 	srv.Handle(api.MethodLockRevokeSignerStart, d.handleLockRevokeSignerStart)
 	srv.Handle(api.MethodLockRevokeSignerCosign, d.handleLockRevokeSignerCosign)
 	srv.Handle(api.MethodLockRevokeSignerFinish, d.handleLockRevokeSignerFinish)
+	srv.Handle(api.MethodLockInviteCreate, d.handleLockInviteCreate)
+	srv.Handle(api.MethodLockInviteList, d.handleLockInviteList)
+	srv.Handle(api.MethodLockInviteRevoke, d.handleLockInviteRevoke)
 }

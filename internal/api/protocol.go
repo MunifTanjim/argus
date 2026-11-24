@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/bundle"
 	"github.com/MunifTanjim/argus/internal/transcript"
@@ -176,6 +177,10 @@ const (
 	MethodLockRevokeSignerStart  = "lock.revokeSignerStart"  // request: LockRevokeSignerStartParams; result: LockRevokeSignerBlobResult
 	MethodLockRevokeSignerCosign = "lock.revokeSignerCosign" // request: LockRevokeSignerCosignParams; result: LockRevokeSignerBlobResult
 	MethodLockRevokeSignerFinish = "lock.revokeSignerFinish" // request: LockRevokeSignerFinishParams; result: LockRevokeSignerFinishResult
+	MethodLockInviteCreate       = "lock.inviteCreate"       // request: LockInviteCreateParams; result: LockInviteCreateResult
+	MethodLockInviteList         = "lock.inviteList"         // request: no params; result: LockInviteListResult
+	MethodLockInviteRevoke       = "lock.inviteRevoke"       // request: LockInviteRevokeParams; result: nil
+	MethodLockInviteRedeem       = "lock.inviteRedeem"       // invite channel only; request: LockInviteRedeemParams; result: LockInviteRedeemResult
 )
 
 // WorkspaceNode is one git worktree (or a plain project's single directory) in
@@ -1207,6 +1212,9 @@ type TerminalRenameParams struct {
 	Name       string `json:"name"`
 }
 
+// ErrMsgUnknownNode prefixes the gateway's error for a node it does not know.
+const ErrMsgUnknownNode = "unknown node"
+
 type RelayOpenParams struct {
 	NodeID string `json:"node_id"`
 }
@@ -1376,6 +1384,57 @@ type LockRevokeSignerFinishParams struct {
 }
 
 type LockRevokeSignerFinishResult struct {
+	Tip []byte `json:"tip"`
+}
+
+// Issuer-side refusals of invite creation and redemption; the CLI recognizes
+// them to explain a failed accept.
+const (
+	ErrMsgLockedModeOff = "locked mode not enabled"
+	ErrMsgNotSigner     = "this node is not a trusted signer; run on a signer node"
+	ErrMsgNoSignerKey   = "node has no signer key"
+	ErrMsgInvitesOff    = "invites unavailable on this node"
+)
+
+type LockInviteCreateParams struct {
+	TTLSeconds int64 `json:"ttl_seconds"`
+}
+
+// LockInviteCreateResult carries everything needed to build an invite blob.
+type LockInviteCreateResult struct {
+	InviteID       []byte    `json:"invite_id"`
+	Secret         []byte    `json:"secret"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	NodeID         string    `json:"node_id"`
+	IdentityPubKey []byte    `json:"identity_pubkey"`
+	Genesis        []byte    `json:"genesis"`
+}
+
+// LockInviteInfo describes one invite; it never includes the secret.
+type LockInviteInfo struct {
+	ID        []byte     `json:"id"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	State     string     `json:"state"` // pending|used|revoked|expired
+	UsedAt    *time.Time `json:"used_at,omitempty"`
+	Keys      [][]byte   `json:"keys,omitempty"`
+}
+
+type LockInviteListResult struct {
+	Invites []LockInviteInfo `json:"invites"`
+}
+
+type LockInviteRevokeParams struct {
+	ID []byte `json:"id"`
+}
+
+// LockInviteRedeemParams authorizes the invite channel's client key plus at most
+// one extra key.
+type LockInviteRedeemParams struct {
+	ExtraKeys [][]byte `json:"extra_keys,omitempty"`
+}
+
+type LockInviteRedeemResult struct {
 	Tip []byte `json:"tip"`
 }
 

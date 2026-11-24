@@ -52,11 +52,39 @@ func LoadOrCreateIdentity(path string) (KeyPair, error) {
 // ceiling (noise.MaxMsgLen) minus the 16-byte Poly1305 tag.
 const maxChunk = noise.MaxMsgLen - 16
 
+// ErrUnknownInvite is returned by RespondInvite when the lookup rejects the
+// invite payload carried in msg1.
+var ErrUnknownInvite = errors.New("e2e: unknown invite")
+
+// pskMode selects plain IK or IKpsk2 (PSK mixed at placement 2).
+type pskMode bool
+
+const (
+	noPSK pskMode = false
+	psk2  pskMode = true
+)
+
+func (m pskMode) pattern() string {
+	if m == psk2 {
+		return "IKpsk2"
+	}
+	return "IK"
+}
+
+func (m pskMode) role(role string) string {
+	if m == psk2 {
+		return "invite " + role
+	}
+	return role
+}
+
 // newHandshake builds the Noise IK handshake state shared by both roles. peerStatic
 // is the responder's known static key for the initiator, and nil for the responder
-// (which learns the initiator's static from msg1).
-func newHandshake(static KeyPair, prologue, peerStatic []byte, initiator bool) (*noise.HandshakeState, error) {
-	return noise.NewHandshakeState(noise.Config{
+// (which learns the initiator's static from msg1). For psk2 the caller sets the
+// key with SetPresharedKey: the initiator up front, the responder once the invite
+// is looked up.
+func newHandshake(static KeyPair, prologue, peerStatic []byte, initiator bool, mode pskMode) (*noise.HandshakeState, error) {
+	cfg := noise.Config{
 		CipherSuite:   suite,
 		Random:        rand.Reader,
 		Pattern:       noise.HandshakeIK,
@@ -64,7 +92,11 @@ func newHandshake(static KeyPair, prologue, peerStatic []byte, initiator bool) (
 		Prologue:      prologue,
 		StaticKeypair: noise.DHKey{Private: static.Private, Public: static.Public},
 		PeerStatic:    peerStatic,
-	})
+	}
+	if mode == psk2 {
+		cfg.PresharedKeyPlacement = 2
+	}
+	return noise.NewHandshakeState(cfg)
 }
 
 // Initiator holds the client-side handshake state between NewInitiator and Finish.
@@ -75,16 +107,30 @@ type Initiator struct {
 // NewInitiator starts a Noise IK handshake as the initiator (client). peerPublic
 // is the responder's (node's) static public key, learned from the roster.
 func NewInitiator(static KeyPair, peerPublic, prologue []byte) (*Initiator, []byte, error) {
-	hs, err := newHandshake(static, prologue, peerPublic, true)
-	if err != nil {
-		return nil, nil, fmt.Errorf("e2e: new initiator: %w", err)
+	return initiate(static, peerPublic, prologue, noPSK, nil, nil)
+}
+
+// NewInviteInitiator starts a Noise IKpsk2 handshake as the initiator. psk is the
+// invite secret and payload (the invite ID) is carried in msg1 for the responder
+// to look up the matching psk.
+func NewInviteInitiator(static KeyPair, peerPublic, prologue, psk, payload []byte) (*Initiator, []byte, error) {
+	return initiate(static, peerPublic, prologue, psk2, psk, payload)
+}
+
+func initiate(static KeyPair, peerPublic, prologue []byte, mode pskMode, psk, payload []byte) (*Initiator, []byte, error) {
+	hs, err := newHandshake(static, prologue, peerPublic, true, mode)
+	if err == nil && mode == psk2 {
+		err = hs.SetPresharedKey(psk)
 	}
-	msg1, cs0, cs1, err := hs.WriteMessage(nil, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("e2e: new %s: %w", mode.role("initiator"), err)
+	}
+	msg1, cs0, cs1, err := hs.WriteMessage(nil, payload)
 	if err != nil {
 		return nil, nil, fmt.Errorf("e2e: write msg1: %w", err)
 	}
 	if cs0 != nil || cs1 != nil {
-		return nil, nil, errors.New("e2e: IK handshake completed after one message")
+		return nil, nil, fmt.Errorf("e2e: %s handshake completed after one message", mode.pattern())
 	}
 	return &Initiator{hs: hs}, msg1, nil
 }
@@ -105,25 +151,51 @@ func (i *Initiator) Finish(msg2 []byte) (*Session, error) {
 // initiator's msg1 and returns the completed Session, the initiator's authenticated
 // static public key (for locked-mode authorization), and msg2 to send back.
 func Respond(static KeyPair, prologue, msg1 []byte) (*Session, []byte, []byte, error) {
-	hs, err := newHandshake(static, prologue, nil, false)
+	sess, clientStatic, _, msg2, err := respond(static, prologue, msg1, noPSK, nil)
+	return sess, clientStatic, msg2, err
+}
+
+// RespondInvite runs the responder side of a Noise IKpsk2 handshake. It reads msg1,
+// passes the msg1 payload (invite ID) to lookup to obtain the psk, and returns
+// ErrUnknownInvite without writing msg2 when lookup reports !ok. A wrong psk is
+// detected by the initiator when it reads msg2.
+func RespondInvite(static KeyPair, prologue, msg1 []byte, lookup func(payload []byte) (psk []byte, ok bool)) (sess *Session, clientStatic, payload, msg2 []byte, err error) {
+	return respond(static, prologue, msg1, psk2, lookup)
+}
+
+// respond reads msg1 and writes msg2; for psk2, lookup maps the msg1 payload to
+// the psk.
+func respond(static KeyPair, prologue, msg1 []byte, mode pskMode, lookup func([]byte) ([]byte, bool)) (*Session, []byte, []byte, []byte, error) {
+	hs, err := newHandshake(static, prologue, nil, false, mode)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("e2e: new responder: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("e2e: new %s: %w", mode.role("responder"), err)
 	}
-	if _, cs0, cs1, err := hs.ReadMessage(nil, msg1); err != nil {
-		return nil, nil, nil, fmt.Errorf("e2e: read msg1: %w", err)
-	} else if cs0 != nil || cs1 != nil {
-		return nil, nil, nil, errors.New("e2e: handshake completed after msg1")
+	payload, cs0, cs1, err := hs.ReadMessage(nil, msg1)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("e2e: read msg1: %w", err)
+	}
+	if cs0 != nil || cs1 != nil {
+		return nil, nil, nil, nil, errors.New("e2e: handshake completed after msg1")
+	}
+	if mode == psk2 {
+		psk, ok := lookup(payload)
+		if !ok {
+			return nil, nil, nil, nil, ErrUnknownInvite
+		}
+		if err := hs.SetPresharedKey(psk); err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("e2e: set invite psk: %w", err)
+		}
 	}
 	clientStatic := hs.PeerStatic() // authenticated initiator static (IK transmits it in msg1)
 	msg2, cs0, cs1, err := hs.WriteMessage(nil, nil)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("e2e: write msg2: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("e2e: write msg2: %w", err)
 	}
 	if cs0 == nil || cs1 == nil {
-		return nil, nil, nil, errors.New("e2e: handshake incomplete after msg2")
+		return nil, nil, nil, nil, errors.New("e2e: handshake incomplete after msg2")
 	}
 	// Responder: cs0 decrypts from peer, cs1 encrypts to peer (swapped vs initiator).
-	return &Session{enc: cs1, dec: cs0}, clientStatic, msg2, nil
+	return &Session{enc: cs1, dec: cs0}, clientStatic, payload, msg2, nil
 }
 
 // Session is an established E2E channel: enc encrypts outbound messages, dec

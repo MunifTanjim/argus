@@ -23,6 +23,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/forge"
 	"github.com/MunifTanjim/argus/internal/host"
+	"github.com/MunifTanjim/argus/internal/invite"
 	"github.com/MunifTanjim/argus/internal/mcphttp"
 	"github.com/MunifTanjim/argus/internal/orch"
 	"github.com/MunifTanjim/argus/internal/procwalk"
@@ -57,6 +58,7 @@ type Node struct {
 	identity       e2e.KeyPair // node's Noise static keypair (E2E channel responder)
 	identityPubB64 string      // base64 public half, announced to the gateway
 	e2ee           bool
+	invites        *invite.Store // issuer-side invite store; nil when unavailable
 
 	signer       trustlog.SignerKey // node's Ed25519 signer keypair (locked-mode trust log); zero when unset
 	signerPubB64 string             // base64 public half, announced to the gateway roster
@@ -330,6 +332,9 @@ func (d *Node) SetIdentityKey(kp e2e.KeyPair) {
 	d.identity = kp
 	d.identityPubB64 = base64.StdEncoding.EncodeToString(kp.Public)
 }
+
+// SetInviteStore enables lock invite management. Call before Run.
+func (d *Node) SetInviteStore(s *invite.Store) { d.invites = s }
 
 // SetE2EE toggles the blind-relay uplink; default false uses the plaintext uplink. Call before ConnectGateway.
 func (d *Node) SetE2EE(enabled bool) { d.e2ee = enabled }

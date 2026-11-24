@@ -70,6 +70,41 @@ node channels. It opens them as soon as `lock sign` authorizes it, with no resta
 A node with `argus lock local-disable` accepts any device, so an unauthorized
 device still reaches that node.
 
+### Invite a Machine
+
+An invite joins a new machine to the locked network in one step. It sets up
+the machine's gateway connection, pins it, and authorizes both its node and
+its TUI.
+
+```sh
+# on a signer node:
+argus lock invite [--ttl <dur>] [--url <gateway-url>]
+
+# on the new machine:
+argus lock invite accept [--force] <invite>
+
+# on the signer node, to audit or cancel:
+argus lock invite list
+argus lock invite revoke <id>
+```
+
+- An invite works for one machine, once. It expires after `--ttl`. The default
+  is 1 hour, and the longest is 30 days.
+- `--url` sets the gateway address the new machine uses. The default is this
+  node's `gateway.url`. If that is a localhost or loopback address, the
+  command refuses and asks for `--url`.
+- The signer node that created the invite must be running when the new machine
+  accepts it. It authorizes the machine at that moment.
+- Keep the invite secret, like the token. It carries the token, and anyone who
+  has it can join until it is used, expires, or is revoked.
+- `accept` writes `gateway.url`, `e2ee.enabled`, and `token` (if the invite
+  carries one) to the config. It refuses if the config already sets a
+  different value, or if the machine is pinned to another trust log. Pass
+  `--force` to overwrite the config values. `--force` does not override a pin
+  to another trust log.
+- After `accept`, run `argus start` on the new machine, or restart it if it is
+  already running.
+
 ### Key Formats
 
 Every value you copy between machines is 32 bytes with a prefix that names its kind:
@@ -98,8 +133,8 @@ A **pin** ties a device to one trust log. Pin every device you rely on.
 - Already know the genesis? `argus lock pin gen:<hex>` skips the prompt.
 - `lock.genesis:` in the config pins at boot, outranks the pin file, and is the only
   pin that holds without the gateway's cooperation.
-- `lock init` auto-pins the machine it runs on (its node and its TUI). Pin every
-  other device yourself.
+- `lock init` auto-pins the machine it runs on (its node and its TUI), and so
+  does `lock invite accept`. Pin every other device yourself.
 
 ### Recover
 

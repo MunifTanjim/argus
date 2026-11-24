@@ -212,12 +212,8 @@ func configPin(cfg *config.Config) ([]byte, error) {
 }
 
 func guardPin(cfg *config.Config, genesis []byte) error {
-	cfgGenesis, err := configPin(cfg)
-	if err != nil {
+	if err := guardConfigPin(cfg, genesis); err != nil {
 		return err
-	}
-	if cfgGenesis != nil && !bytes.Equal(cfgGenesis, genesis) {
-		return configPinConflict(cfgGenesis)
 	}
 	cur, err := clientPinFile().Load()
 	if err != nil {
@@ -227,6 +223,17 @@ func guardPin(cfg *config.Config, genesis []byte) error {
 		return nil
 	}
 	return existingPinConflict(cur)
+}
+
+func guardConfigPin(cfg *config.Config, genesis []byte) error {
+	cfgGenesis, err := configPin(cfg)
+	if err != nil {
+		return err
+	}
+	if cfgGenesis != nil && !bytes.Equal(cfgGenesis, genesis) {
+		return configPinConflict(cfgGenesis)
+	}
+	return nil
 }
 
 // A chain disabled network-wide enforces nothing and can never be re-enabled, so the

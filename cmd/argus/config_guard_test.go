@@ -22,7 +22,7 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"bin":              true, // `hooks install` only; not a node/client setting
 		"count":            true, // `ping` only
 		"interval":         true, // `ping` only
-		"url":              true, // `pair` only: QR base-URL override
+		"url":              true, // `pair` (QR base-URL override) and `lock invite` (gateway URL in the invite)
 		"timeout":          true, // `pair` only: device-connect wait
 		"agent":            true, // `hook` only: selects the adapter, not a config key
 		"detach":           true, // `spawn` only: per-invocation background spawn, not a config key
@@ -32,7 +32,7 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"json":             true, // `project list` only: output format, not a node/client setting
 		"source":           true, // `workspace create` only: what the name argument is
 		"target":           true, // `workspace create` only: per-workspace target branch
-		"force":            true, // `workspace remove` only: must never be config-backed — a stored true would discard changes silently
+		"force":            true, // `workspace remove` and `lock invite accept`: must never be config-backed — a stored true would discard changes silently
 		"wait":             true, // `workspace create/setup` only: per-invocation wait
 		"gen-disablements": true, // `lock init` only: one-shot count, not a persistent config key
 		"confirm":          true, // `lock init` only: must never be config-backed — a stored true would silently re-arm the destructive path
@@ -53,6 +53,7 @@ func TestFlagsAreMappedToConfigKeys(t *testing.T) {
 		"option":           true, // `session respond` only: per-invocation answer
 		"answer":           true, // `session respond` only: per-invocation answer
 		"last":             true, // `session transcript` only: per-invocation entry count
+		"ttl":              true, // `lock invite` only: per-invocation invite lifetime
 	}
 
 	seen := map[string]bool{}

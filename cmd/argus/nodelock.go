@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/e2e"
+	"github.com/MunifTanjim/argus/internal/invite"
 	"github.com/MunifTanjim/argus/internal/node"
 	"github.com/MunifTanjim/argus/internal/trustpin"
 )
@@ -30,6 +32,12 @@ func configureNodeLock(d *node.Node, cfg *config.Config, log *slog.Logger) error
 		log.Warn("signer key load failed; locked mode unavailable", "err", serr)
 	} else {
 		d.SetSignerKey(sk)
+	}
+
+	if is, ierr := invite.OpenStore(config.GetStatePath("lock-invites.json"), time.Now); ierr != nil {
+		log.Warn("invite store open failed; invites unavailable", "err", ierr)
+	} else {
+		d.SetInviteStore(is)
 	}
 
 	pin, perr := trustpin.Resolve(cfg.Lock.Genesis, nodePinFile())

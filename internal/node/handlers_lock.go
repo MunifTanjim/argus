@@ -71,7 +71,7 @@ func (d *Node) handleLockInit(_ context.Context, params json.RawMessage) (any, e
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode already enabled"}
 	}
 	if len(d.signer.Public) != ed25519.PublicKeySize || len(d.signer.Private) != ed25519.PrivateKeySize {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "node has no signer key"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgNoSignerKey}
 	}
 	if d.trustPath == "" {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "trust state path not configured"}
@@ -155,16 +155,26 @@ func (d *Node) handleLockRevoke(_ context.Context, params json.RawMessage) (any,
 	return d.lockDevice(params, false)
 }
 
-func (d *Node) lockDevice(params json.RawMessage, authorize bool) (any, error) {
+// requireSigner returns the trust store when locked mode is on and this node
+// holds a trusted signer key.
+func (d *Node) requireSigner() (*trustlog.SyncStore, *api.RPCError) {
 	st := d.trust.Load()
 	if st == nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgLockedModeOff}
 	}
 	if !st.SignerTrusted(d.signer.Public) {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "this node is not a trusted signer; run on a signer node"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgNotSigner}
 	}
 	if len(d.signer.Private) != ed25519.PrivateKeySize {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "node has no signer key"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgNoSignerKey}
+	}
+	return st, nil
+}
+
+func (d *Node) lockDevice(params json.RawMessage, authorize bool) (any, error) {
+	st, rerr := d.requireSigner()
+	if rerr != nil {
+		return nil, rerr
 	}
 	p, err := api.Decode[api.LockDeviceParams](params)
 	if err != nil {
@@ -183,13 +193,19 @@ func (d *Node) lockDevice(params json.RawMessage, authorize bool) (any, error) {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "append: " + err.Error()}
 	}
 	if changed {
-		if werr := d.persistTrust(); werr != nil {
-			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
-		}
-		d.reevaluateTrustChannels()
-		d.announceTrustChange()
+		d.afterTrustChange()
 	}
 	return api.LockDeviceResult{Tip: st.Tip(), Changed: changed}, nil
+}
+
+// afterTrustChange persists the chain, drops channels it no longer authorizes,
+// and pushes it to the gateway after a local append.
+func (d *Node) afterTrustChange() {
+	if werr := d.persistTrust(); werr != nil {
+		d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
+	}
+	d.reevaluateTrustChannels()
+	d.announceTrustChange()
 }
 
 // handleLockAddSigner adds a trusted signer (lock.addSigner). Idempotent.
@@ -205,13 +221,13 @@ func (d *Node) handleLockRemoveSigner(_ context.Context, params json.RawMessage)
 func (d *Node) lockSigner(params json.RawMessage, add bool) (any, error) {
 	st := d.trust.Load()
 	if st == nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgLockedModeOff}
 	}
 	if !st.SignerTrusted(d.signer.Public) {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "this node is not a trusted signer; run on a signer node"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgNotSigner}
 	}
 	if len(d.signer.Private) != ed25519.PrivateKeySize {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "node has no signer key"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgNoSignerKey}
 	}
 	p, err := api.Decode[api.LockSignerParams](params)
 	if err != nil {
@@ -230,11 +246,7 @@ func (d *Node) lockSigner(params json.RawMessage, add bool) (any, error) {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "append: " + err.Error()}
 	}
 	if changed {
-		if werr := d.persistTrust(); werr != nil {
-			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
-		}
-		d.reevaluateTrustChannels()
-		d.announceTrustChange()
+		d.afterTrustChange()
 	}
 	return api.LockDeviceResult{Tip: st.Tip(), Changed: changed}, nil
 }
@@ -244,10 +256,10 @@ func (d *Node) lockSigner(params json.RawMessage, add bool) (any, error) {
 func (d *Node) handleLockDisable(_ context.Context, params json.RawMessage) (any, error) {
 	st := d.trust.Load()
 	if st == nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgLockedModeOff}
 	}
 	if len(d.signer.Private) != ed25519.PrivateKeySize {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "node has no signer key"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgNoSignerKey}
 	}
 	p, err := api.Decode[api.LockDisableParams](params)
 	if err != nil {
@@ -258,11 +270,7 @@ func (d *Node) handleLockDisable(_ context.Context, params json.RawMessage) (any
 		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "disable: " + derr.Error()}
 	}
 	if changed {
-		if werr := d.persistTrust(); werr != nil {
-			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
-		}
-		d.reevaluateTrustChannels()
-		d.announceTrustChange()
+		d.afterTrustChange()
 	}
 	return api.LockDisableResult{Tip: st.Tip(), Disabled: st.Disabled()}, nil
 }
@@ -301,13 +309,13 @@ func (d *Node) handleLockLocalDisable(_ context.Context, _ json.RawMessage) (any
 func (d *Node) handleLockRevokeSignerStart(_ context.Context, params json.RawMessage) (any, error) {
 	st := d.trust.Load()
 	if st == nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgLockedModeOff}
 	}
 	if len(d.signer.Private) != ed25519.PrivateKeySize {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "node has no signer key"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgNoSignerKey}
 	}
 	if !st.SignerTrusted(d.signer.Public) {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "this node is not a trusted signer; run on a signer node"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgNotSigner}
 	}
 	p, err := api.Decode[api.LockRevokeSignerStartParams](params)
 	if err != nil {
@@ -330,13 +338,13 @@ func (d *Node) handleLockRevokeSignerStart(_ context.Context, params json.RawMes
 func (d *Node) handleLockRevokeSignerCosign(_ context.Context, params json.RawMessage) (any, error) {
 	st := d.trust.Load()
 	if st == nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgLockedModeOff}
 	}
 	if len(d.signer.Private) != ed25519.PrivateKeySize {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "node has no signer key"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgNoSignerKey}
 	}
 	if !st.SignerTrusted(d.signer.Public) {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "this node is not a trusted signer; run on a signer node"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgNotSigner}
 	}
 	p, err := api.Decode[api.LockRevokeSignerCosignParams](params)
 	if err != nil {
@@ -360,13 +368,13 @@ func (d *Node) handleLockRevokeSignerCosign(_ context.Context, params json.RawMe
 func (d *Node) handleLockRevokeSignerFinish(_ context.Context, params json.RawMessage) (any, error) {
 	st := d.trust.Load()
 	if st == nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgLockedModeOff}
 	}
 	if len(d.signer.Private) != ed25519.PrivateKeySize {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "node has no signer key"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgNoSignerKey}
 	}
 	if !st.SignerTrusted(d.signer.Public) {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "this node is not a trusted signer; run on a signer node"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgNotSigner}
 	}
 	p, err := api.Decode[api.LockRevokeSignerFinishParams](params)
 	if err != nil {
@@ -399,11 +407,7 @@ func (d *Node) handleLockRevokeSignerFinish(_ context.Context, params json.RawMe
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "revocation did not take effect (finalized chain lost fork-choice); re-run --finish"}
 	}
 	if changed {
-		if werr := d.persistTrust(); werr != nil {
-			d.log.Warn("persisting trust-log chain failed", "path", d.trustPath, "err", werr)
-		}
-		d.reevaluateTrustChannels()
-		d.announceTrustChange()
+		d.afterTrustChange()
 	}
 	return api.LockRevokeSignerFinishResult{Tip: st.Tip()}, nil
 }
@@ -449,7 +453,7 @@ func (d *Node) handleLockStatus(_ context.Context, _ json.RawMessage) (any, erro
 func (d *Node) handleLockLog(_ context.Context, _ json.RawMessage) (any, error) {
 	st := d.trust.Load()
 	if st == nil {
-		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "locked mode not enabled"}
+		return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: api.ErrMsgLockedModeOff}
 	}
 	entries, log, err := loadCurrentLog(st)
 	if err != nil {
