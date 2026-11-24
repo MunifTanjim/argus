@@ -16,6 +16,7 @@ import '../state/terminal_prefs.dart';
 import '../state/terminals.dart';
 import 'adaptive_nav.dart';
 import 'desktop_shortcuts.dart';
+import 'mac_menu_bar.dart';
 import 'history_screen.dart';
 import 'project_drawer.dart';
 import 'quick_switcher.dart';
@@ -63,15 +64,15 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _openPending());
   }
 
-  // Deep-link a tapped notification's session. Keep the request until its
-  // session is actually known, so a cold-launch tap opens once the list is
-  // fetched rather than being dropped while the list is still empty.
   @override
   void dispose() {
     if (_route case final route?) _strip?.hide(route);
     super.dispose();
   }
 
+  // Deep-link a tapped notification's session. Keep the request until its
+  // session is actually known, so a cold-launch tap opens once the list is
+  // fetched rather than being dropped while the list is still empty.
   void _openPending() {
     if (!mounted) return;
     final pending = ref.read(pendingOpenSessionProvider);
@@ -228,6 +229,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     }
   }
 
+  void _spawn() =>
+      Navigator.of(context, rootNavigator: true).push(spawnRoute());
+
+  void _settings() => Navigator.of(context, rootNavigator: true)
+      .push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+
   bool _onNavigation() {
     final can = _nav?.key.currentState?.canPop() ?? false;
     if (can != _canPop) setState(() => _canPop = can);
@@ -296,41 +303,47 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       child: ShellDrawerScope(
         openDrawer: wide ? null : () => _drawerKey.currentState?.open(),
         closeDrawer: wide ? null : () => _drawerKey.currentState?.close(),
-        child: DesktopShortcuts(
+        child: MacMenuBar(
           onBack: _back,
-          onSpawn: () =>
-              Navigator.of(context, rootNavigator: true).push(spawnRoute()),
-          onSettings: () => Navigator.of(context, rootNavigator: true).push(
-              MaterialPageRoute(builder: (_) => const SettingsScreen())),
+          onSpawn: _spawn,
+          onSettings: _settings,
           onQuickSwitcher: () => showQuickSwitcher(context),
           onShortcutSheet: () => showShortcutSheet(context),
-          child: Scaffold(
-            backgroundColor: translucent ? Colors.transparent : null,
-            body: wide
-                ? Row(
-                    children: [
-                      SizedBox(
-                        width: kSidePanelWidth,
-                        child: ProjectDrawer(color: translucent ? kSidebarTint : null),
-                      ),
-                      const VerticalDivider(width: 1),
-                      Expanded(
-                        child: translucent
-                            ? ColoredBox(
-                                key: const ValueKey('shell-main'),
-                                color: AppColors.canvas,
-                                child: main,
-                              )
-                            : main,
-                      ),
-                    ],
-                  )
-                : ModalShellDrawer(
-                    key: _drawerKey,
-                    width: min(screenWidth - 56, kDrawerMaxWidth),
-                    drawer: const ProjectDrawer(),
-                    child: main,
-                  ),
+          onSelectTab: selectVisibleTab,
+          child: DesktopShortcuts(
+            onBack: _back,
+            onSpawn: _spawn,
+            onSettings: _settings,
+            onQuickSwitcher: () => showQuickSwitcher(context),
+            onShortcutSheet: () => showShortcutSheet(context),
+            child: Scaffold(
+              backgroundColor: translucent ? Colors.transparent : null,
+              body: wide
+                  ? Row(
+                      children: [
+                        SizedBox(
+                          width: kSidePanelWidth,
+                          child: ProjectDrawer(color: translucent ? kSidebarTint : null),
+                        ),
+                        const VerticalDivider(width: 1),
+                        Expanded(
+                          child: translucent
+                              ? ColoredBox(
+                                  key: const ValueKey('shell-main'),
+                                  color: AppColors.canvas,
+                                  child: main,
+                                )
+                              : main,
+                        ),
+                      ],
+                    )
+                  : ModalShellDrawer(
+                      key: _drawerKey,
+                      width: min(screenWidth - 56, kDrawerMaxWidth),
+                      drawer: const ProjectDrawer(),
+                      child: main,
+                    ),
+            ),
           ),
         ),
       ),
