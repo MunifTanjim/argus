@@ -3,6 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/ui/theme.dart';
 
+double _contrast(Color a, Color b) {
+  final la = a.computeLuminance(), lb = b.computeLuminance();
+  final (hi, lo) = la > lb ? (la, lb) : (lb, la);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
 void main() {
   test('palette exposes gruvbox tokens', () {
     expect(AppColors.canvas, const Color(0xFF1d2021));
@@ -33,6 +39,7 @@ void main() {
         expect(t.appBarTheme.toolbarHeight, isNull);
         expect(t.snackBarTheme.behavior, isNull);
         expect(t.listTileTheme.dense, isNull);
+        expect(t.snackBarTheme, const SnackBarThemeData());
       });
     }
   });
@@ -128,6 +135,17 @@ void main() {
           );
           expect(t.popupMenuTheme.textStyle!.fontSize, 13);
           expect(t.scrollbarTheme.thickness!.resolve({}), 6);
+        });
+
+        test('snackbar text and action are readable on its background', () {
+          final bg = t.snackBarTheme.backgroundColor!;
+          expect(bg, AppColors.card);
+          final text = t.snackBarTheme.contentTextStyle!.color!;
+          expect(text, AppColors.text);
+          expect(_contrast(text, bg), greaterThanOrEqualTo(4.5));
+          final action = t.snackBarTheme.actionTextColor!;
+          expect(action, AppColors.accent);
+          expect(_contrast(action, bg), greaterThanOrEqualTo(4.5));
         });
       });
     }

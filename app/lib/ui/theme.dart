@@ -178,7 +178,11 @@ ThemeData _desktopTheme(TargetPlatform platform, ColorScheme scheme) {
       behavior: SnackBarBehavior.floating,
       width: 360,
       shape: dialogShape,
-      contentTextStyle: merged.bodyMedium,
+      // M3 defaults to the light inverseSurface, under which the cream text
+      // is unreadable.
+      backgroundColor: AppColors.card,
+      contentTextStyle: merged.bodyMedium!.copyWith(color: AppColors.text),
+      actionTextColor: AppColors.accent,
     ),
     dialogTheme: DialogThemeData(
       shape: dialogShape,
