@@ -18,6 +18,7 @@ import 'package:argus/ui/interaction_panel.dart';
 import 'package:argus/ui/prompt_completion.dart';
 import 'package:argus/ui/session_composer.dart';
 import 'package:argus/ui/theme.dart';
+import 'package:argus/ui/titlebar.dart';
 import '../support/fake_session_repository.dart';
 
 class _Recording extends FakeSessionRepository {
@@ -871,6 +872,35 @@ void main() {
       expect(menu.height, greaterThan(0));
       expect(menu.top, greaterThanOrEqualTo(0));
       expect(menu.bottom, lessThanOrEqualTo(field.top));
+    });
+
+    testWidgets('macOS: the menu stays below the toolbar row', (t) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final repo = _Completing([
+        for (var i = 0; i < 20; i++)
+          PromptCompletion(name: 'cmd$i', description: ''),
+      ]);
+      await t.pumpWidget(UncontrolledProviderScope(
+        container: ProviderContainer(
+            overrides: [sessionRepositoryProvider.overrideWithValue(repo)]),
+        child: MaterialApp(
+          home: Scaffold(
+            body: Padding(
+              padding: const EdgeInsets.only(top: 200),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: SessionComposer(session: _s()),
+              ),
+            ),
+          ),
+        ),
+      ));
+      await t.enterText(find.byType(TextField), '/');
+      await t.pumpAndSettle();
+      final menu = t.getRect(find.byType(PromptMenu));
+      expect(menu.height, greaterThan(0));
+      expect(menu.top, greaterThanOrEqualTo(kMacToolbarHeight));
     });
 
     testWidgets('Enter with the menu closed neither selects nor sends',

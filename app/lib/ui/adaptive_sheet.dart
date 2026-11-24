@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'responsive.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 
 /// One entry of an action menu shown by [showActionMenu].
 class ActionItem<T> {
@@ -70,7 +72,18 @@ Future<T?> showSidePanel<T>(
         child: SizedBox(
           width: _sidePanelWidth,
           height: double.infinity,
-          child: SafeArea(child: builder(ctx)),
+          child: SafeArea(
+            // On macOS the panel starts below the toolbar row, where clicks
+            // drag the window and a wheel does not scroll.
+            child: defaultTargetPlatform == TargetPlatform.macOS
+                ? Column(
+                    children: [
+                      const TitlebarSpacer(),
+                      Expanded(child: builder(ctx)),
+                    ],
+                  )
+                : builder(ctx),
+          ),
         ),
       ),
     ),

@@ -1,8 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:argus/ui/adaptive_nav.dart';
+import 'package:argus/ui/titlebar.dart';
+import 'package:macos_window_utils/macos_window_utils.dart';
 
 const _destinations = [
   AdaptiveNavDestination(icon: Icon(Icons.forum_outlined), label: 'One'),
@@ -32,7 +35,16 @@ Future<void> _pump(
   await tester.pumpWidget(app);
 }
 
+const _windowChannel = MethodChannel('macos_window_utils/window_manipulator');
+
 void main() {
+  setUpAll(() async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(_windowChannel, (call) async => true);
+    await WindowManipulator.initialize();
+  });
+
   testWidgets('shows a bottom NavigationBar on iOS at 1200 px', (tester) async {
     await _pump(tester, TargetPlatform.iOS, 1200, _scaffold([]));
     expect(find.byType(NavigationBar), findsOneWidget);
@@ -90,5 +102,22 @@ void main() {
     expect(selectVisibleTab(2), isFalse);
     expect(selectVisibleTab(-1), isFalse);
     expect(taps, isEmpty);
+  });
+
+  testWidgets('macOS: the rail top gap is a TitlebarSpacer of 52 px', (
+    tester,
+  ) async {
+    await _pump(tester, TargetPlatform.macOS, 1200, _scaffold([]));
+    final spacer = find.descendant(
+      of: find.byType(Scaffold),
+      matching: find.byType(TitlebarSpacer),
+    );
+    expect(spacer, findsOneWidget);
+    expect(tester.getSize(spacer).height, kMacToolbarHeight);
+    expect(tester.getTopLeft(spacer).dy, 0);
+    expect(
+      tester.getTopLeft(find.byType(NavigationRail)).dy,
+      kMacToolbarHeight,
+    );
   });
 }

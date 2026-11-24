@@ -85,9 +85,13 @@ class _AdaptiveNavScaffoldState extends State<AdaptiveNavScaffold> {
           ? Row(
               children: [
                 underToolbar
-                    ? Padding(
-                        padding: const EdgeInsets.only(top: kMacToolbarHeight),
-                        child: rail,
+                    ? IntrinsicWidth(
+                        child: Column(
+                          children: [
+                            const TitlebarSpacer(),
+                            Expanded(child: rail),
+                          ],
+                        ),
                       )
                     : rail,
                 const VerticalDivider(width: 1),

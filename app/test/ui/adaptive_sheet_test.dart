@@ -1,9 +1,12 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:argus/ui/adaptive_sheet.dart';
 import 'package:argus/ui/theme.dart';
+import 'package:argus/ui/titlebar.dart';
+import 'package:macos_window_utils/macos_window_utils.dart';
 
 const _items = [
   ActionItem<String>(value: 'a', label: 'Alpha', icon: Icon(Icons.add)),
@@ -57,7 +60,16 @@ Future<_Result> _open(
   return r;
 }
 
+const _windowChannel = MethodChannel('macos_window_utils/window_manipulator');
+
 void main() {
+  setUpAll(() async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(_windowChannel, (call) async => true);
+    await WindowManipulator.initialize();
+  });
+
   testWidgets('iOS at 1200 px opens a bottom sheet', (tester) async {
     await _open(tester, TargetPlatform.iOS);
     expect(find.byType(BottomSheet), findsOneWidget);
@@ -208,6 +220,21 @@ void main() {
         expect(panel.height, 800);
       },
     );
+
+    testWidgets('macOS: the panel content starts below the toolbar row', (
+      tester,
+    ) async {
+      await openPanel(tester, TargetPlatform.macOS);
+      expect(
+        tester.getTopLeft(find.text('PANEL')).dy,
+        greaterThanOrEqualTo(kMacToolbarHeight),
+      );
+    });
+
+    testWidgets('Linux: the panel content starts at the top', (tester) async {
+      await openPanel(tester, TargetPlatform.linux);
+      expect(tester.getTopLeft(find.text('PANEL')).dy, lessThan(kMacToolbarHeight));
+    });
 
     testWidgets('a click on the scrim closes the panel', (tester) async {
       await openPanel(tester, TargetPlatform.macOS);

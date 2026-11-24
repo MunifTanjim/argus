@@ -67,7 +67,7 @@ class _Moved extends ChangeNotifier {
 
 class _TitlebarScopeState extends State<TitlebarScope> {
   final _moved = _Moved();
-  _FullScreenDelegate? _delegate;
+  FullScreenDelegate? _delegate;
   NSWindowDelegateHandle? _handle;
 
   ValueListenable<bool>? get _fullScreen => widget.fullScreen ?? _delegate;
@@ -76,7 +76,7 @@ class _TitlebarScopeState extends State<TitlebarScope> {
   void initState() {
     super.initState();
     if (_isMac && widget.fullScreen == null) {
-      _delegate = _FullScreenDelegate();
+      _delegate = FullScreenDelegate();
       _handle = WindowManipulator.addNSWindowDelegate(_delegate!);
       // The window can start in full screen, before any delegate event.
       WindowManipulator.isWindowFullscreened().then((full) {
@@ -199,7 +199,8 @@ class _TitlebarRoutes extends InheritedWidget {
       routes != oldWidget.routes || moved != oldWidget.moved;
 }
 
-class _FullScreenDelegate extends NSWindowDelegate
+@visibleForTesting
+class FullScreenDelegate extends NSWindowDelegate
     implements ValueListenable<bool> {
   final _value = ValueNotifier(false);
   bool _hadEvent = false;
@@ -224,6 +225,13 @@ class _FullScreenDelegate extends NSWindowDelegate
   void windowWillEnterFullScreen() {
     _hadEvent = true;
     _value.value = true;
+  }
+
+  // The traffic lights come back as the exit starts.
+  @override
+  void windowWillExitFullScreen() {
+    _hadEvent = true;
+    _value.value = false;
   }
 
   @override

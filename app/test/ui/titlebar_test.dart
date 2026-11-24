@@ -276,6 +276,32 @@ void main() {
       },
     );
 
+    group('window delegate events', () {
+      late FullScreenDelegate delegate;
+      setUp(() => delegate = FullScreenDelegate());
+      tearDown(() => delegate.dispose());
+
+      test('the inset is restored when the window starts exiting full screen',
+          () {
+        delegate.windowWillEnterFullScreen();
+        expect(delegate.value, isTrue);
+        delegate.windowWillExitFullScreen();
+        expect(delegate.value, isFalse);
+      });
+
+      test('a full-screen state seeded late does not override an event', () {
+        delegate.windowWillEnterFullScreen();
+        delegate.seed(false);
+        expect(delegate.value, isTrue);
+      });
+
+      test('the exit still ends outside full screen', () {
+        delegate.windowWillEnterFullScreen();
+        delegate.windowDidExitFullScreen();
+        expect(delegate.value, isFalse);
+      });
+    });
+
     testWidgets('left is 0 on Linux', (tester) async {
       _platform(TargetPlatform.linux);
       final left = await pumpScope(tester, fullScreen: _fullScreen());

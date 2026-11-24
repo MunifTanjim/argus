@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -21,6 +22,7 @@ import 'prompt_completion.dart';
 import 'running_shells_sheet.dart';
 import 'running_subagents_sheet.dart';
 import 'theme.dart';
+import 'titlebar.dart';
 import 'usage_format.dart';
 import 'voice_input_field.dart';
 
@@ -592,7 +594,12 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     if (items.isEmpty) return const SizedBox.shrink();
     final top =
         MatrixUtils.transformPoint(info.childPaintTransform, Offset.zero);
-    final room = top.dy - 4 - _menuMargin;
+    // On macOS the menu stays below the toolbar row, where a click would
+    // reach the window instead of a row.
+    final ceiling = defaultTargetPlatform == TargetPlatform.macOS
+        ? kMacToolbarHeight
+        : _menuMargin;
+    final room = top.dy - 4 - ceiling;
     if (room <= 0) return const SizedBox.shrink();
     return Stack(children: [
       Positioned(
