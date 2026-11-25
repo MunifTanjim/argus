@@ -178,8 +178,9 @@ func (c *ctx) openRow(id string) { c.actions = append(c.actions, action{kind: ac
 // unfolds the rows above id, then the main pane opens the row.
 func (c *ctx) goToRow(id string) { c.actions = append(c.actions, action{kind: actGoToRow, id: id}) }
 
-// leaveSession takes the live session off the main pane and shows its
-// workspace ws, whatever view opened the session.
+// leaveSession takes the live session off the main pane and shows a view that
+// lists it: Home or its workspace ws under it, else ws, else Home. ws is empty
+// for a session with no workspace.
 func (c *ctx) leaveSession(ws string) {
 	c.actions = append(c.actions, action{kind: actLeaveSession, id: ws})
 }
@@ -306,19 +307,39 @@ func (m *model) apply(c *ctx) tea.Cmd {
 			m.left.tree.revealRow(a.id)
 			cmds = append(cmds, m.openRow(a.id))
 		case actLeaveSession:
-			// The workspace view right under the session keeps its cursor.
+			// Back pops to the view under the session if that view lists it:
+			// Home, or the session's workspace. A session with no listed
+			// workspace also pops to a view that is not a tree row's pane.
+			var under component
 			if n := len(m.main); n > 1 {
-				if w, ok := m.main[n-2].(workspaceComp); ok && w.ws == a.id {
-					cmds = append(cmds, m.popMain(c))
-					break
-				}
+				under = m.main[n-2]
 			}
-			if listed := m.listedWorkspaces(); listed != nil && !listed[a.id] {
+			listed := m.listedWorkspaces()
+			noWS := a.id == "" || listed != nil && !listed[a.id]
+			pop := noWS && under != nil && !isRowPane(under)
+			switch u := under.(type) {
+			case homeComp:
+				pop = true
+			case workspaceComp:
+				pop = pop || u.ws == a.id
+			}
+			if pop {
 				cmds = append(cmds, m.popMain(c))
 				break
 			}
-			m.left.tree.revealRow(a.id)
-			cmds = append(cmds, m.resetMain(func() component { return workspaceComp{ws: a.id} }))
+			// Else show the session's workspace, or a fresh Home for a session
+			// with no listed workspace. openRow(homeRowID) does not fit: it
+			// skips a live session that already maps to the Home row, and
+			// restores the view Home remembers, which can be this session.
+			root := func() component { return workspaceComp{ws: a.id} }
+			if noWS {
+				home := m.homePane()
+				m.left.tree.cursor = 0
+				root = func() component { return home }
+			} else {
+				m.left.tree.revealRow(a.id)
+			}
+			cmds = append(cmds, m.resetMain(root))
 			m.focused = mainPane
 		case actFocusTree:
 			m.focusTree()

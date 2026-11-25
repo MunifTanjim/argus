@@ -269,8 +269,8 @@ func (m tview) liveKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.historyView == histDetail {
 			return m.detailBack()
 		}
-		if ws := m.c.m.sessions[m.sessionID].WorkspaceID; ws != "" {
-			m.c.leaveSession(ws)
+		if s, ok := m.c.m.sessions[m.sessionID]; ok {
+			m.c.leaveSession(s.WorkspaceID)
 		} else {
 			m.c.back()
 		}

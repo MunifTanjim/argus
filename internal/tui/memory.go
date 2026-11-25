@@ -248,8 +248,11 @@ func (m model) homePane() homeComp {
 	return m.memory.home.home
 }
 
-func (m model) onRowPane() bool {
-	switch b := m.baseComp().(type) {
+func (m model) onRowPane() bool { return isRowPane(m.baseComp()) }
+
+// isRowPane reports whether comp is the pane of a tree row other than Home.
+func isRowPane(comp component) bool {
+	switch b := comp.(type) {
 	case workspaceComp, summaryComp:
 		return true
 	case terminalsComp:

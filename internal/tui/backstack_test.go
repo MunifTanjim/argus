@@ -8,6 +8,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/logbuf"
+	"github.com/MunifTanjim/argus/internal/session"
 )
 
 func assertView(t *testing.T, step string, m model, want shownView) {
@@ -35,10 +36,7 @@ func TestBackStackHomeSessionScreen(t *testing.T) {
 	assertView(t, "^]", m, viewSession)
 
 	m = pressKeys(m, keyMsg("esc"))
-	assertView(t, "<Esc>", m, viewTree)
-	if ws := paneOf(m).ws; ws != "n1:w1" {
-		t.Errorf("<Esc>: workspace = %q, want n1:w1", ws)
-	}
+	assertView(t, "<Esc>", m, viewHome)
 }
 
 func TestBackStackWorkspaceSession(t *testing.T) {
@@ -53,10 +51,19 @@ func TestBackStackWorkspaceSession(t *testing.T) {
 	assertView(t, "<Esc>", m, viewTree)
 }
 
+// Back from a session opened over Home returns to Home.
+func TestBackStackSessionOverHomeReturnsHome(t *testing.T) {
+	m := openLive(homeTestModel(), "n1:s2")
+	m = pressKeys(m, keyMsg("esc"))
+	assertBackHome(t, m)
+}
+
 // Back from a session opened over another view, as the sidebar sessions list
 // does, opens the session's workspace and selects its tree row.
-func TestBackStackSessionOverHomeOpensItsWorkspace(t *testing.T) {
-	m := openLive(homeTestModel(), "n1:s2")
+func TestBackStackSessionOverAnotherViewOpensItsWorkspace(t *testing.T) {
+	m := homeTestModel()
+	m.openRow("n1:w1")
+	m = openLive(m, "n1:s2")
 	m = pressKeys(m, keyMsg("esc"))
 	assertView(t, "<Esc>", m, viewTree)
 	if ws := paneOf(m).ws; ws != "n1:w2" || len(m.main) != 1 {
@@ -70,8 +77,9 @@ func TestBackStackSessionOverHomeOpensItsWorkspace(t *testing.T) {
 	}
 }
 
-// Back from a session whose workspace left the tree is a plain back.
-func TestBackStackSessionOfARemovedWorkspaceGoesBack(t *testing.T) {
+// Back from a session whose workspace left the tree goes to Home, as the
+// workspace under it does not list the session.
+func TestBackStackSessionOfARemovedWorkspaceGoesHome(t *testing.T) {
 	m := homeTestModel()
 	m.openRow("n1:w1")
 	m = openLive(m, "n1:s2")
@@ -82,9 +90,46 @@ func TestBackStackSessionOfARemovedWorkspaceGoesBack(t *testing.T) {
 	}
 	m.left.tree.data, m.left.tree.loaded = data, true
 	m = pressKeys(m, keyMsg("esc"))
-	assertView(t, "<Esc>", m, viewTree)
-	if ws := paneOf(m).ws; ws != "n1:w1" || len(m.main) != 1 {
-		t.Errorf("<Esc>: workspace = %q stack = %d, want only n1:w1", ws, len(m.main))
+	assertBackHome(t, m)
+}
+
+// Back from a session with no workspace, opened over a workspace, goes to Home.
+func TestBackStackSessionWithNoWorkspaceGoesHome(t *testing.T) {
+	m := homeTestModel()
+	m.sessions["n1:s9"] = session.Session{ID: "n1:s9", Repo: "repo"}
+	m.openRow("n1:w1")
+	m = openLive(m, "n1:s9")
+	m = pressKeys(m, keyMsg("esc"))
+	assertBackHome(t, m)
+	if e := m.memory.home; e.view != homeSessions || e.session != "" {
+		t.Errorf("<Esc>: Home remembers %v %q, want the sessions list", e.view, e.session)
+	}
+}
+
+// Back from a session with no workspace, opened over a view that is not a tree
+// row's pane, is a plain back.
+func TestBackStackSessionWithNoWorkspaceOverHistoryGoesBack(t *testing.T) {
+	m := withView(homeTestModel(), viewHistoryProjects)
+	m.sessions["n1:s9"] = session.Session{ID: "n1:s9", Repo: "repo"}
+	m = openLive(m, "n1:s9")
+	m = pressKeys(m, keyMsg("esc"))
+	assertView(t, "<Esc>", m, viewHistoryProjects)
+}
+
+func assertBackHome(t *testing.T, m model) {
+	t.Helper()
+	assertView(t, "<Esc>", m, viewHome)
+	if len(m.main) != 1 {
+		t.Errorf("<Esc>: stack = %d, want only Home", len(m.main))
+	}
+	if got := m.mainRow(); got != homeRowID {
+		t.Errorf("<Esc>: main row = %q, want Home", got)
+	}
+	if m.left.tree.cursor != 0 {
+		t.Errorf("<Esc>: tree cursor = %d, want the Home row", m.left.tree.cursor)
+	}
+	if m.focused != mainPane {
+		t.Errorf("<Esc>: focus = %v, want the main pane", m.focused)
 	}
 }
 
@@ -184,7 +229,7 @@ func TestPanesKeepTheirCursorOnTheWayBack(t *testing.T) {
 	}{
 		{"Home to History and back", home, func(m model) model { return typeKeys(m, "gt") }, func(m model) model { return typeKeys(m, "gT") }, homeCursor},
 		{"Home to Logs and back", home, func(m model) model { return typeKeys(m, "gT") }, func(m model) model { return typeKeys(m, "gt") }, homeCursor},
-		{"Home to a session and back", home, func(m model) model { return pressKeys(m, keyMsg("enter")) }, func(m model) model { return goHome(pressKeys(m, keyMsg("esc"))) }, homeCursor},
+		{"Home to a session and back", home, func(m model) model { return pressKeys(m, keyMsg("enter")) }, func(m model) model { return pressKeys(m, keyMsg("esc")) }, homeCursor},
 		{"workspace pane to a session and back", pane, func(m model) model { return pressKeys(m, keyMsg("enter")) }, func(m model) model { return pressKeys(m, keyMsg("esc")) }, paneCursor},
 	}
 	for _, tc := range cases {
