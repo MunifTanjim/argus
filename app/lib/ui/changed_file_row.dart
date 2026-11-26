@@ -25,7 +25,7 @@ class _UnstagedBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       decoration: BoxDecoration(
         border: Border.all(color: t.changeModified),
-        borderRadius: BorderRadius.circular(3),
+        borderRadius: BorderRadius.circular(t.radiusSmall),
       ),
       child: Text('unstaged',
           style: TextStyle(
@@ -54,7 +54,7 @@ class ChangedFileRow extends StatelessWidget {
         decoration: BoxDecoration(
           color: t.surface,
           border: Border.all(color: t.line),
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(t.radius),
         ),
         child: Row(
           children: [

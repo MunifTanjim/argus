@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:argus/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,12 +16,6 @@ const _all = [
   kanagawaWave,
   kanagawaLotus,
 ];
-
-double _contrast(Color a, Color b) {
-  final la = a.computeLuminance();
-  final lb = b.computeLuminance();
-  return (math.max(la, lb) + 0.05) / (math.min(la, lb) + 0.05);
-}
 
 void main() {
   test('paletteFor returns every variant', () {
@@ -78,37 +70,5 @@ void main() {
       expect(accentColor(p, AccentChoice.blue), p.blue);
       expect(accentColor(p, AccentChoice.purple), p.purple);
     }
-  });
-
-  test('contrast report (informational)', () {
-    final rows = <String>[
-      '${'palette'.padRight(18)} ${'token'.padRight(14)} canvas  surface',
-    ];
-    for (final p in _all) {
-      final t = ArgusTokens.from(p);
-      final tokens = {
-        'text': t.text,
-        'textSecondary': t.textSecondary,
-        'textDim': t.textDim,
-        'blocked': t.blocked,
-        'waiting': t.waiting,
-        'working': t.working,
-        'error': t.error,
-      };
-      for (final MapEntry(:key, :value) in tokens.entries) {
-        final onCanvas = _contrast(value, t.canvas);
-        final onSurface = _contrast(value, t.surface);
-        for (final r in [onCanvas, onSurface]) {
-          expect(r.isFinite && r >= 1, isTrue, reason: '${p.name} $key');
-        }
-        rows.add(
-          '${p.name.padRight(18)} ${key.padRight(14)} '
-          '${onCanvas.toStringAsFixed(2).padLeft(6)}  '
-          '${onSurface.toStringAsFixed(2).padLeft(7)}',
-        );
-      }
-    }
-    // ignore: avoid_print
-    print(rows.join('\n'));
   });
 }

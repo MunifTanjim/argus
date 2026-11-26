@@ -82,7 +82,7 @@ class SidebarFilterBar extends StatelessWidget {
                             },
                           ),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(18),
+                      borderRadius: BorderRadius.circular(t.radius),
                       borderSide: BorderSide.none,
                     ),
                   ),

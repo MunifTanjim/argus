@@ -725,7 +725,7 @@ class _LockHint extends StatelessWidget {
     final color = Color.lerp(context.tokens.textDim, context.tokens.accent, progress);
     return Center(
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(context.tokens.radius),
         child: ColoredBox(
           color: Theme.of(context).colorScheme.surfaceContainerHighest,
           child: Stack(

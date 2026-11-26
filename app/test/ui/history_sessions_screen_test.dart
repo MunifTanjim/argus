@@ -341,7 +341,9 @@ void main() {
       (tester) async {
     await _pumpSessions(tester, [_session('a', title: 'A')]);
 
-    await tester.tap(find.byKey(const Key('history-title')));
+    await tester.tap(find.descendant(
+        of: find.byKey(const Key('history-title')),
+        matching: find.byType(InkWell)));
     await tester.pumpAndSettle();
 
     expect(find.text('/home/user/project'), findsOneWidget);
@@ -367,7 +369,9 @@ void main() {
       ),
     );
     await _pumpSessions(tester, [_session('a', title: 'A')]);
-    await tester.tap(find.byKey(const Key('history-title')));
+    await tester.tap(find.descendant(
+        of: find.byKey(const Key('history-title')),
+        matching: find.byType(InkWell)));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('/home/user/project'));

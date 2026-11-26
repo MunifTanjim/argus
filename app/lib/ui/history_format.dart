@@ -61,13 +61,6 @@ String compactDuration(int ms) {
   return m == 0 ? '${s ~/ 3600}h' : '${s ~/ 3600}h ${m}m';
 }
 
-/// "950", "48.2k", "1.3M".
-String compactCount(int n) {
-  if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
-  if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}k';
-  return '$n';
-}
-
 final _home = RegExp(r'^/(Users|home)/[^/]+');
 
 /// [cwd] with the home folder as "~" and the middle cut when more than three

@@ -8,41 +8,6 @@ import 'relative_time.dart';
 import 'theme.dart';
 import 'usage_format.dart';
 
-/// A history app bar title that opens details on tap, like the live session's
-/// compact title. The trailing `▾` says a tap opens them.
-class HistoryTitle extends StatelessWidget {
-  const HistoryTitle({super.key, required this.text, required this.onTap});
-
-  final String text;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: InkWell(
-        key: const Key('history-title'),
-        borderRadius: BorderRadius.circular(t.radius),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Flexible(
-                child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis),
-              ),
-              const SizedBox(width: 2),
-              Icon(Icons.expand_more, size: 18, color: t.textDim),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// The first non-empty label, or null.
 String? firstLabel(Iterable<String?> labels) =>
     labels.firstWhere((l) => l?.isNotEmpty ?? false, orElse: () => null);

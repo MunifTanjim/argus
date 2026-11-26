@@ -11,6 +11,8 @@ import '../state/sessions.dart';
 import '../state/spawn_view_model.dart';
 import 'relative_time.dart';
 import 'theme.dart';
+import 'usage_format.dart';
+import 'top_bar.dart';
 import 'voice_input_field.dart';
 
 /// A fixed place to spawn in, such as a workspace: the dialog hides its node
@@ -41,7 +43,7 @@ class SpawnDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('New session')),
+        appBar: const TopBar(title: Text('New session')),
         body: SafeArea(child: SpawnDialogBody(target: target)),
       );
 }
@@ -662,7 +664,7 @@ class _ChoiceScreenState extends State<_ChoiceScreen> {
     final shown = widget.choices.where(_matches).toList();
     final footer = widget.footer;
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
+      appBar: TopBar(title: Text(widget.title)),
       body: SafeArea(
         top: false,
         child: Column(
@@ -694,10 +696,5 @@ class _ChoiceScreenState extends State<_ChoiceScreen> {
   }
 }
 
-Color _hexColor(BuildContext context, String hex) {
-  final h = hex.startsWith('#') ? hex.substring(1) : hex;
-  final v = int.tryParse(h, radix: 16);
-  if (v == null || h.length != 6) return context.tokens.textDim;
-  // The mask applies full alpha to the parsed user hex.
-  return Color(0xFF000000 | v);
-}
+Color _hexColor(BuildContext context, String hex) =>
+    modelColor(hex, context.tokens);

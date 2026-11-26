@@ -7,8 +7,8 @@ import '../state/changes.dart';
 import '../state/workspace.dart';
 import 'edit_diff.dart';
 import 'responsive.dart';
-import 'shell_drawer.dart';
 import 'theme.dart';
+import 'top_bar.dart';
 
 
 /// Full-screen review of one changed file as a collapsible unified diff.
@@ -69,7 +69,7 @@ class _ChangedFileReviewScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_fileName), actions: [?shellMenuButton(context)]),
+      appBar: TopBar(title: Text(_fileName)),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : SafeArea(

@@ -244,7 +244,7 @@ class _ArgusCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: t.surface,
         border: Border.all(color: k.color),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(t.radius),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -573,7 +573,7 @@ class _EventCard extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8),
       child: InkWell(
         onTap: hasDetail ? onToggle : null,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(t.radius),
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.all(12),

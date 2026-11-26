@@ -12,6 +12,7 @@ import 'history_format.dart';
 import 'resume_action.dart';
 import 'session_composer.dart' show dockPadding;
 import 'theme.dart';
+import 'top_bar.dart';
 import 'transcript_feed.dart';
 
 class HistoryTranscriptScreen extends ConsumerStatefulWidget {
@@ -82,8 +83,9 @@ class _HistoryTranscriptScreenState
         !ref.watch(outdatedNodeIdsProvider
             .select((ids) => ids.contains(widget.session.nodeId)));
     return Scaffold(
-      appBar: AppBar(
-        title: HistoryTitle(
+      appBar: TopBar(
+        title: TopBarTitle(
+          key: const Key('history-title'),
           text: widget.session.displayTitle,
           onTap: () => showHistorySessionDetails(
               context, widget.session, widget.project),
@@ -150,7 +152,7 @@ class _ResumeBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final radius = BorderRadius.circular(t.radius + 4);
+    final radius = BorderRadius.circular(t.radiusLarge);
     final where = [
       if (machine?.isNotEmpty ?? false) machine!,
       shortenPath(cwd),

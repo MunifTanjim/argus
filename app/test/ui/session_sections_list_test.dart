@@ -134,31 +134,14 @@ void main() {
   Finder rowDividers() => find.descendant(
       of: find.byType(SessionCard), matching: find.byType(Divider));
 
-  for (final style in [StatusStyle.stripe, StatusStyle.dot]) {
-    testWidgets('comfortable ${style.name} rows have a gap and no divider',
-        (tester) async {
-      await _pump(tester, GroupBy.host, [_s('mac:%1'), _s('mac:%2')],
-          prefs: AppearancePrefs(
-              statusStyle: style, density: AppDensity.comfortable));
-      expect(rowGap(tester), 8);
-      expect(rowDividers(), findsNothing);
-    });
-
-    testWidgets('compact ${style.name} rows touch, split by a divider',
-        (tester) async {
-      await _pump(tester, GroupBy.host, [_s('mac:%1'), _s('mac:%2')],
-          prefs: AppearancePrefs(statusStyle: style));
-      expect(rowGap(tester), 0);
-      expect(rowDividers(), findsNWidgets(2));
-    });
-  }
-
-  testWidgets('filled cards keep their gap in both densities', (tester) async {
-    for (final density in AppDensity.values) {
-      await _pump(tester, GroupBy.host, [_s('mac:%1'), _s('mac:%2')],
-          prefs: AppearancePrefs(
-              statusStyle: StatusStyle.filled, density: density));
-      expect(rowGap(tester), 8, reason: density.name);
+  testWidgets('cards have a gap and no divider in every style', (tester) async {
+    for (final style in StatusStyle.values) {
+      await _pump(tester, GroupBy.host, [
+        _s('mac:%1'),
+        _s('mac:%2'),
+      ], prefs: AppearancePrefs(statusStyle: style));
+      expect(rowGap(tester), 8, reason: style.name);
+      expect(rowDividers(), findsNothing, reason: style.name);
     }
   });
 

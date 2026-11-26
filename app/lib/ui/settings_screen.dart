@@ -15,6 +15,7 @@ import 'terminal_settings_screen.dart';
 import 'responsive.dart';
 import 'sign_out.dart';
 import 'theme.dart';
+import 'top_bar.dart';
 import 'upgrade_tile.dart';
 import 'voice_screen.dart';
 
@@ -35,7 +36,7 @@ class SettingsScreen extends ConsumerWidget {
     // must not crash the settings screen render.
     final sshHostPortValue = _sshHostPortOrNull(creds?.url);
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: const TopBar(title: Text('Settings')),
       body: SafeArea(
         top: false,
         child: CenteredBody(
@@ -234,7 +235,7 @@ Widget _serverInfo(BuildContext context, ServerInfo info) {
 /// A node line; a tap opens the node's info screen.
 Widget _nodeRow(BuildContext context, NodeRef n) => InkWell(
   key: Key('settings-node-${n.id}'),
-  borderRadius: BorderRadius.circular(8),
+  borderRadius: BorderRadius.circular(context.tokens.radius),
   onTap: () => Navigator.of(context).push(
     MaterialPageRoute(
       builder: (_) => NodeScreen(nodeId: n.id, label: n.label),

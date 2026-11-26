@@ -12,6 +12,8 @@ import '../state/status_filter.dart';
 import '../transport/connection.dart';
 import 'agent_badge.dart';
 import 'blocked_card.dart';
+import 'card_layout.dart';
+import 'filter_title.dart';
 import 'nerd_icon.dart';
 import 'node_header.dart';
 import 'responsive.dart';
@@ -48,13 +50,9 @@ class SessionSectionsList extends ConsumerWidget {
     SessionSection section,
     bool multiAgent,
   ) => s.blocked
-      // Rows without a gap touch; the bordered card needs one below it.
-      ? Padding(
-          padding: EdgeInsets.only(bottom: context.tokens.rowGap == 0 ? 8 : 0),
-          child: BlockedCard(
-            session: s,
-            showNode: section.showNode,
-          ),
+      ? BlockedCard(
+          session: s,
+          showNode: section.showNode,
         )
       : SessionCard(
           session: s,
@@ -126,7 +124,7 @@ class SessionSectionsList extends ConsumerWidget {
             _SectionHeader(section: section),
             for (final s in section.sessions)
               Padding(
-                padding: EdgeInsets.only(bottom: context.tokens.rowGap),
+                padding: const EdgeInsets.only(bottom: kCardGap),
                 child: _buildCard(context, s, section, multiAgent),
               ),
             const SizedBox(height: 8),
@@ -173,13 +171,12 @@ class SessionSearchButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (ref.watch(sessionSearchProvider) != null) {
-      return const SizedBox.shrink();
-    }
-    return IconButton(
-      icon: const Icon(Icons.search),
+    final search = ref.read(sessionSearchProvider.notifier);
+    return FilterButton(
+      query: ref.watch(sessionSearchProvider),
       tooltip: 'Filter sessions',
-      onPressed: () => ref.read(sessionSearchProvider.notifier).open(),
+      onOpen: search.open,
+      onClose: search.close,
     );
   }
 }
@@ -210,20 +207,10 @@ class _SessionSearchTitleState extends ConsumerState<SessionSearchTitle> {
       _controller.clear();
       return widget.child;
     }
-    final search = ref.read(sessionSearchProvider.notifier);
-    return TextField(
+    return FilterField(
       controller: _controller,
-      autofocus: true,
-      decoration: InputDecoration(
-        hintText: 'Filter sessions',
-        border: InputBorder.none,
-        suffixIcon: IconButton(
-          icon: const Icon(Icons.close),
-          tooltip: 'Clear filter',
-          onPressed: search.close,
-        ),
-      ),
-      onChanged: search.set,
+      hint: 'Filter sessions',
+      onChanged: ref.read(sessionSearchProvider.notifier).set,
     );
   }
 }
@@ -280,13 +267,10 @@ class _SectionHeader extends ConsumerWidget {
         size: 14,
         color: tint(agentColor(first.agent, context.tokens)),
       ),
-      SectionIcon.status => Text(
-        statusGlyph(first.status),
-        style: TextStyle(
-          fontFamily: monoFamily,
-          fontSize: 12,
-          color: statusColor(first.status, context.tokens),
-        ),
+      SectionIcon.status => StatusMark(
+        status: first.status,
+        color: statusColor(first.status, context.tokens),
+        fontSize: 12,
       ),
       SectionIcon.needsYou || SectionIcon.host => const SizedBox.shrink(),
     };

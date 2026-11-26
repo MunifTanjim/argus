@@ -14,7 +14,6 @@ ThemeData buildArgusTheme({
 }) {
   final t = ArgusTokens.from(
     palette,
-    density: prefs.density,
     statusStyle: prefs.statusStyle,
     radius: prefs.radius.value,
     accent: accentColor(palette, prefs.accent),
@@ -55,10 +54,7 @@ ThemeData buildArgusTheme({
     colorScheme: scheme,
     scaffoldBackgroundColor: t.canvas,
     fontFamily: fontFamily,
-    visualDensity: switch (prefs.density) {
-      AppDensity.compact => VisualDensity.compact,
-      AppDensity.comfortable => VisualDensity.standard,
-    },
+    visualDensity: VisualDensity.compact,
     cardTheme: CardThemeData(shape: shape),
     dialogTheme: DialogThemeData(shape: shape),
     bottomSheetTheme: BottomSheetThemeData(shape: shape),
@@ -76,6 +72,29 @@ ThemeData buildArgusTheme({
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(shape: shape),
+    ),
+    segmentedButtonTheme: SegmentedButtonThemeData(
+      style: SegmentedButton.styleFrom(shape: shape),
+    ),
+    popupMenuTheme: PopupMenuThemeData(shape: shape),
+    menuTheme: MenuThemeData(
+      style: MenuStyle(shape: WidgetStatePropertyAll(shape)),
+    ),
+    dropdownMenuTheme: DropdownMenuThemeData(
+      menuStyle: MenuStyle(shape: WidgetStatePropertyAll(shape)),
+    ),
+    chipTheme: ChipThemeData(shape: shape),
+    // A large surface, so its corners run 4 wider, as the composer's do.
+    floatingActionButtonTheme: FloatingActionButtonThemeData(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(t.radiusLarge),
+      ),
+    ),
+    tooltipTheme: TooltipThemeData(
+      decoration: BoxDecoration(
+        color: t.text,
+        borderRadius: BorderRadius.circular(t.radiusSmall),
+      ),
     ),
     appBarTheme: AppBarTheme(
       centerTitle: false,

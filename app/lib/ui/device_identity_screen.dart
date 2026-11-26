@@ -9,6 +9,7 @@ import '../state/device_identity.dart';
 import '../state/gateway.dart';
 import 'responsive.dart';
 import 'theme.dart';
+import 'top_bar.dart';
 
 /// Spells a 32-byte key as keyfmt does on the CLI: prefix + lowercase hex (see
 /// internal/keyfmt). This is what `argus lock status` prints and `argus lock
@@ -35,7 +36,7 @@ class DeviceIdentityScreen extends ConsumerWidget {
     final enrollExpanded = isAwaiting || !summary.connected;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Device Trust')),
+      appBar: const TopBar(title: Text('Device Trust')),
       body: SafeArea(
         top: false,
         child: CenteredBody(
@@ -235,7 +236,7 @@ class _EquivocationBanner extends StatelessWidget {
     return Card(
       color: context.tokens.blockedSurface,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(context.tokens.radius),
         side: BorderSide(color: context.tokens.blockedBorder),
       ),
       child: Padding(

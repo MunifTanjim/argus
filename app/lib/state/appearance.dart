@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../pairing/gateway_store.dart';
 import '../ui/theme/palettes.dart' show AccentChoice, ArgusPaletteId;
-import '../ui/theme/tokens.dart' show AppDensity, StatusStyle;
+import '../ui/theme/tokens.dart' show StatusStyle;
 
 export '../ui/theme/palettes.dart' show AccentChoice;
 
@@ -20,7 +20,13 @@ enum CornerRadius {
   final double value;
 }
 
-const textScaleSteps = [0.9, 1.0, 1.15, 1.3];
+/// The text size range, in 5% steps.
+const textScaleMin = 0.8;
+const textScaleMax = 1.5;
+const textScaleDivisions = 14;
+
+/// [v] on the nearest 5% step, so the stored value prints cleanly.
+double snapTextScale(double v) => (v * 20).round() / 20;
 
 /// Persisted appearance preferences. A value object so more options can be
 /// added without changing the provider type.
@@ -28,7 +34,6 @@ class AppearancePrefs {
   final ArgusPaletteId palette;
   final ThemeMode mode;
   final AccentChoice accent;
-  final AppDensity density;
   final InterfaceFont font;
   final double textScale;
   final CornerRadius radius;
@@ -41,7 +46,6 @@ class AppearancePrefs {
     this.palette = ArgusPaletteId.gruvbox,
     this.mode = ThemeMode.dark,
     this.accent = AccentChoice.paletteDefault,
-    this.density = AppDensity.compact,
     this.font = InterfaceFont.sans,
     this.textScale = 1.0,
     this.radius = CornerRadius.medium,
@@ -53,7 +57,6 @@ class AppearancePrefs {
     ArgusPaletteId? palette,
     ThemeMode? mode,
     AccentChoice? accent,
-    AppDensity? density,
     InterfaceFont? font,
     double? textScale,
     CornerRadius? radius,
@@ -63,7 +66,6 @@ class AppearancePrefs {
     palette: palette ?? this.palette,
     mode: mode ?? this.mode,
     accent: accent ?? this.accent,
-    density: density ?? this.density,
     font: font ?? this.font,
     textScale: textScale ?? this.textScale,
     radius: radius ?? this.radius,
@@ -81,7 +83,6 @@ class AppearanceStore {
   static const _paletteKey = 'appearance.palette';
   static const _modeKey = 'appearance.mode';
   static const _accentKey = 'appearance.accent';
-  static const _densityKey = 'appearance.density';
   static const _fontKey = 'appearance.font';
   static const _textScaleKey = 'appearance.textScale';
   static const _radiusKey = 'appearance.radius';
@@ -97,7 +98,9 @@ class AppearanceStore {
 
   static double _scaleOr(String? raw, double fallback) {
     final v = double.tryParse(raw ?? '');
-    return v != null && textScaleSteps.contains(v) ? v : fallback;
+    return v != null && v >= textScaleMin && v <= textScaleMax
+        ? snapTextScale(v)
+        : fallback;
   }
 
   // The first screen waits for this load, so the keys are read together.
@@ -108,7 +111,6 @@ class AppearanceStore {
       mode,
       accent,
       font,
-      density,
       textScale,
       radius,
       statusStyle,
@@ -118,7 +120,6 @@ class AppearanceStore {
       _kv.read(_modeKey),
       _kv.read(_accentKey),
       _kv.read(_fontKey),
-      _kv.read(_densityKey),
       _kv.read(_textScaleKey),
       _kv.read(_radiusKey),
       _kv.read(_statusStyleKey),
@@ -128,7 +129,6 @@ class AppearanceStore {
       palette: _enumOr(ArgusPaletteId.values, palette, d.palette),
       mode: _enumOr(ThemeMode.values, mode, d.mode),
       accent: _enumOr(AccentChoice.values, accent, d.accent),
-      density: _enumOr(AppDensity.values, density, d.density),
       font: _enumOr(InterfaceFont.values, font, d.font),
       textScale: _scaleOr(textScale, d.textScale),
       radius: _enumOr(CornerRadius.values, radius, d.radius),
@@ -140,7 +140,6 @@ class AppearanceStore {
   Future<void> setPalette(ArgusPaletteId v) => _kv.write(_paletteKey, v.name);
   Future<void> setMode(ThemeMode v) => _kv.write(_modeKey, v.name);
   Future<void> setAccent(AccentChoice v) => _kv.write(_accentKey, v.name);
-  Future<void> setDensity(AppDensity v) => _kv.write(_densityKey, v.name);
   Future<void> setFont(InterfaceFont v) => _kv.write(_fontKey, v.name);
   Future<void> setTextScale(double v) => _kv.write(_textScaleKey, v.toString());
   Future<void> setRadius(CornerRadius v) => _kv.write(_radiusKey, v.name);
@@ -157,7 +156,6 @@ enum _Pref {
   palette,
   mode,
   accent,
-  density,
   font,
   textScale,
   radius,
@@ -192,7 +190,6 @@ class AppearanceController extends Notifier<AppearancePrefs> {
         palette: t(_Pref.palette) ? c.palette : l.palette,
         mode: t(_Pref.mode) ? c.mode : l.mode,
         accent: t(_Pref.accent) ? c.accent : l.accent,
-        density: t(_Pref.density) ? c.density : l.density,
         font: t(_Pref.font) ? c.font : l.font,
         textScale: t(_Pref.textScale) ? c.textScale : l.textScale,
         radius: t(_Pref.radius) ? c.radius : l.radius,
@@ -235,12 +232,6 @@ class AppearanceController extends Notifier<AppearancePrefs> {
     _touched.add(_Pref.accent);
     state = state.copyWith(accent: v);
     return _persist((s) => s.setAccent(v));
-  }
-
-  Future<void> setDensity(AppDensity v) {
-    _touched.add(_Pref.density);
-    state = state.copyWith(density: v);
-    return _persist((s) => s.setDensity(v));
   }
 
   Future<void> setFont(InterfaceFont v) {

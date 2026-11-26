@@ -1,13 +1,10 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/session.dart';
 import '../state/appearance.dart';
 import 'responsive.dart';
-import 'session_card.dart';
 import 'theme.dart';
+import 'top_bar.dart';
 
 const _paletteNames = {
   ArgusPaletteId.gruvbox: 'Gruvbox',
@@ -18,29 +15,6 @@ const _paletteNames = {
   ArgusPaletteId.kanagawa: 'Kanagawa',
 };
 
-const _tmux =
-    '"tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"}';
-
-Session _sample(String json) =>
-    Session.fromJson(jsonDecode(json) as Map<String, dynamic>);
-
-final _sampleSessions = [
-  _sample(
-    '{"id":"p:%1","agent":"claude","status":"awaiting_input","source":"hooked",$_tmux,'
-    '"repo":"api-server","name":"auth-refactor",'
-    '"interaction":{"kind":"permission","tool_name":"Bash","message":"Run: npm test"},'
-    '"summary":{"model_name":"Opus","task":"Fix the login flow"}}',
-  ),
-  _sample(
-    '{"id":"p:%2","agent":"claude","status":"awaiting_input","source":"hooked",$_tmux,'
-    '"repo":"web-app","summary":{"model_name":"Sonnet","task":"Review the changes"}}',
-  ),
-  _sample(
-    '{"id":"p:%3","agent":"codex","status":"working","source":"hooked",$_tmux,'
-    '"repo":"docs","summary":{"model_name":"GPT-5","task":"Update the README"}}',
-  ),
-];
-
 class AppearanceScreen extends ConsumerWidget {
   const AppearanceScreen({super.key});
 
@@ -50,28 +24,15 @@ class AppearanceScreen extends ConsumerWidget {
     final c = ref.read(appearancePrefsProvider.notifier);
     final brightness = Theme.of(context).brightness;
     final palette = paletteFor(prefs.palette, brightness);
-    final previewTheme = buildArgusTheme(palette: palette, prefs: prefs);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Appearance')),
+      appBar: const TopBar(title: Text('Appearance')),
       body: SafeArea(
         top: false,
         child: CenteredBody(
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 8),
             children: [
-              Theme(
-                data: previewTheme,
-                child: Container(
-                  key: const Key('appearance-preview'),
-                  color: previewTheme.scaffoldBackgroundColor,
-                  child: Column(
-                    children: [
-                      for (final s in _sampleSessions) SessionCard(session: s),
-                    ],
-                  ),
-                ),
-              ),
               const _Heading('Theme'),
               const _Label('Palette'),
               for (final id in ArgusPaletteId.values)
@@ -98,22 +59,9 @@ class AppearanceScreen extends ConsumerWidget {
                 onChanged: c.setAccent,
               ),
               const _Heading('Layout'),
-              const _Label('Density'),
-              _Segments<AppDensity>(
-                value: prefs.density,
-                onChanged: c.setDensity,
-                options: const {
-                  AppDensity.compact: 'Compact',
-                  AppDensity.comfortable: 'Comfortable',
-                },
-              ),
-              const _Label('Text size'),
-              _Segments<double>(
+              _TextScaleSlider(
                 value: prefs.textScale,
                 onChanged: c.setTextScale,
-                options: {
-                  for (final s in textScaleSteps) s: '${(s * 100).round()}%',
-                },
               ),
               const _Label('Corner radius'),
               _Segments<CornerRadius>(
@@ -130,8 +78,8 @@ class AppearanceScreen extends ConsumerWidget {
                 value: prefs.statusStyle,
                 onChanged: c.setStatusStyle,
                 options: const {
-                  StatusStyle.stripe: 'Stripe',
                   StatusStyle.dot: 'Dot',
+                  StatusStyle.stripe: 'Stripe',
                   StatusStyle.filled: 'Filled',
                 },
               ),
@@ -186,6 +134,53 @@ class _Label extends StatelessWidget {
     padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
     child: Text(text, style: Theme.of(context).textTheme.labelLarge),
   );
+}
+
+/// Shows the size while dragging and applies it on release, so the layout
+/// does not resize under the finger.
+class _TextScaleSlider extends StatefulWidget {
+  const _TextScaleSlider({required this.value, required this.onChanged});
+  final double value;
+  final ValueChanged<double> onChanged;
+
+  @override
+  State<_TextScaleSlider> createState() => _TextScaleSliderState();
+}
+
+class _TextScaleSliderState extends State<_TextScaleSlider> {
+  double? _drag;
+
+  @override
+  Widget build(BuildContext context) {
+    final v = _drag ?? widget.value.clamp(textScaleMin, textScaleMax);
+    final style = Theme.of(context).textTheme.labelLarge;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Row(
+            children: [
+              Expanded(child: Text('Text size', style: style)),
+              Text('${(v * 100).round()}%', style: style),
+            ],
+          ),
+        ),
+        Slider(
+          key: const Key('text-scale-slider'),
+          min: textScaleMin,
+          max: textScaleMax,
+          divisions: textScaleDivisions,
+          value: v,
+          onChanged: (x) => setState(() => _drag = snapTextScale(x)),
+          onChangeEnd: (x) {
+            setState(() => _drag = null);
+            widget.onChanged(snapTextScale(x));
+          },
+        ),
+      ],
+    );
+  }
 }
 
 class _Segments<T> extends StatelessWidget {

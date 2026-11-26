@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/enums.dart';
 import 'card_layout.dart';
-import 'status_style.dart';
+import 'session_card.dart' show StatusMark;
 import 'theme.dart';
 
 /// The text style of a section label, shared by the foldable group headers.
@@ -76,13 +76,10 @@ class NeedsYouHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SectionLabel(
-    leading: Text(
-      statusGlyph(SessionStatus.awaitingInput),
-      style: TextStyle(
-        fontFamily: monoFamily,
-        fontSize: 12,
-        color: color,
-      ),
+    leading: StatusMark(
+      status: SessionStatus.awaitingInput,
+      color: color,
+      fontSize: 12,
     ),
     label: label,
     color: color,

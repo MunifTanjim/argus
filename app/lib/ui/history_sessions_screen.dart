@@ -12,6 +12,7 @@ import 'history_format.dart';
 import 'history_transcript_screen.dart';
 import 'responsive.dart';
 import 'theme.dart';
+import 'top_bar.dart';
 
 class HistorySessionsScreen extends ConsumerStatefulWidget {
   const HistorySessionsScreen({super.key, required this.project});
@@ -85,13 +86,13 @@ class _HistorySessionsScreenState extends ConsumerState<HistorySessionsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
+      appBar: TopBar(
         title: FilterTitle(
           query: _query,
           hint: 'Filter sessions',
           onChanged: (q) => setState(() => _query = q),
-          onClose: () => setState(() => _query = null),
-          child: HistoryTitle(
+          child: TopBarTitle(
+            key: const Key('history-title'),
             text: widget.project.label,
             onTap: () => showHistoryProjectDetails(context, widget.project),
           ),
@@ -101,6 +102,7 @@ class _HistorySessionsScreenState extends ConsumerState<HistorySessionsScreen> {
             query: _query,
             tooltip: 'Filter sessions',
             onOpen: () => setState(() => _query = ''),
+            onClose: () => setState(() => _query = null),
           ),
         ],
       ),

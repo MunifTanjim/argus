@@ -10,8 +10,8 @@ import '../state/sessions.dart';
 import '../state/tool_detail.dart';
 import '../state/transcript_controller.dart';
 import '../transport/connection.dart';
-import 'shell_drawer.dart';
 import 'theme.dart';
+import 'top_bar.dart';
 import 'transcript_feed.dart';
 
 class SubagentTraceScreen extends ConsumerStatefulWidget {
@@ -78,7 +78,7 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
 
     if (_inline) {
       return Scaffold(
-        appBar: AppBar(title: Text(title), actions: [?shellMenuButton(context)]),
+        appBar: TopBar(title: Text(title)),
         body: SafeArea(
           top: false, // AppBar insets top; bottom clears the system nav bar.
           child: TranscriptFeed(
@@ -91,7 +91,7 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
 
     if (_isHistory) {
       return Scaffold(
-        appBar: AppBar(title: Text(title), actions: [?shellMenuButton(context)]),
+        appBar: TopBar(title: Text(title)),
         body: SafeArea(
           top: false, // AppBar insets top; bottom clears the system nav bar.
           child: FutureBuilder<Result<List<Entry>>>(
@@ -136,7 +136,7 @@ class _SubagentTraceScreenState extends ConsumerState<SubagentTraceScreen> {
     final connError = ref.watch(connErrorProvider);
 
     return Scaffold(
-      appBar: AppBar(title: Text(title), actions: [?shellMenuButton(context)]),
+      appBar: TopBar(title: Text(title)),
       body: SafeArea(
         top: false, // AppBar insets top; bottom clears the system nav bar.
         child: Column(

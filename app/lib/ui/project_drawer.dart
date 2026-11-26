@@ -192,7 +192,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
   Widget _tab(String label, LeftSidebarTab value, LeftSidebarTab current) {
     final on = value == current;
     return InkWell(
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(context.tokens.radiusSmall),
       onTap: () => ref.read(leftSidebarTabProvider.notifier).set(value),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
@@ -332,7 +332,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
           trailing: _trailing([
             if (r.gitError.isNotEmpty)
               InkWell(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(context.tokens.radius),
                 onTap: () => _showError(r.label, r.gitError),
                 child: Padding(
                   padding: const EdgeInsets.all(4),
@@ -423,16 +423,11 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
       overflow: TextOverflow.ellipsis,
       style: const TextStyle(fontSize: 14).merge(titleStyle),
     );
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-      child: Material(
-        color: selected ? context.tokens.surfaceRaised : Colors.transparent,
-        borderRadius: BorderRadius.circular(context.tokens.radius),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          onLongPress: onLongPress,
-          child: ConstrainedBox(
+    return SidebarRowFrame(
+      selected: selected,
+      onTap: onTap,
+      onLongPress: onLongPress,
+      child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 40),
             child: Padding(
               padding: EdgeInsets.fromLTRB(8 + indent, 4, 8, 4),
@@ -508,8 +503,6 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
               ),
             ),
           ),
-        ),
-      ),
     );
   }
 

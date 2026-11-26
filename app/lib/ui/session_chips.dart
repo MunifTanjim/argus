@@ -165,7 +165,7 @@ class _Chip extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.tokens;
     final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(t.radius),
       side: BorderSide(color: t.line),
     );
     return Material(

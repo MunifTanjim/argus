@@ -256,7 +256,8 @@ void main() {
       final feed =
           tester.widget<CustomScrollView>(find.byType(CustomScrollView));
       final before = feed.controller!.offset;
-      await tester.tap(find.byType(SessionTitle));
+      await tester.tap(find.descendant(
+          of: find.byType(SessionTitle), matching: find.byType(InkWell)));
       await tester.pumpAndSettle();
       final sheet = find.byType(BottomSheet);
       expect(sheet, findsOneWidget);
@@ -270,7 +271,10 @@ void main() {
       await tester.pumpWidget(_app(_baseOverrides(),
           session: _s(name: 'auth-refactor')));
       await tester.pump();
-      await tester.tap(find.byType(SessionTitle), warnIfMissed: false);
+      await tester.tap(
+          find.descendant(
+              of: find.byType(SessionTitle), matching: find.byType(InkWell)),
+          warnIfMissed: false);
       await tester.pumpAndSettle();
       expect(find.byType(BottomSheet), findsNothing);
     });

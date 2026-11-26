@@ -44,7 +44,6 @@ void main() {
     expect(p.palette, ArgusPaletteId.gruvbox);
     expect(p.mode, ThemeMode.dark);
     expect(p.accent, AccentChoice.paletteDefault);
-    expect(p.density, AppDensity.compact);
     expect(p.font, InterfaceFont.sans);
     expect(p.textScale, 1.0);
     expect(p.radius, CornerRadius.medium);
@@ -66,7 +65,6 @@ void main() {
     await n.setPalette(ArgusPaletteId.catppuccin);
     await n.setMode(ThemeMode.light);
     await n.setAccent(AccentChoice.blue);
-    await n.setDensity(AppDensity.comfortable);
     await n.setFont(InterfaceFont.mono);
     await n.setTextScale(1.15);
     await n.setRadius(CornerRadius.rounded);
@@ -77,7 +75,6 @@ void main() {
       'appearance.palette': 'catppuccin',
       'appearance.mode': 'light',
       'appearance.accent': 'blue',
-      'appearance.density': 'comfortable',
       'appearance.font': 'mono',
       'appearance.textScale': '1.15',
       'appearance.radius': 'rounded',
@@ -96,7 +93,6 @@ void main() {
         'appearance.palette': 'tokyoNight',
         'appearance.mode': 'system',
         'appearance.accent': 'purple',
-        'appearance.density': 'comfortable',
         'appearance.font': 'mono',
         'appearance.textScale': '1.3',
         'appearance.radius': 'sharp',
@@ -107,7 +103,6 @@ void main() {
     expect(p.palette, ArgusPaletteId.tokyoNight);
     expect(p.mode, ThemeMode.system);
     expect(p.accent, AccentChoice.purple);
-    expect(p.density, AppDensity.comfortable);
     expect(p.font, InterfaceFont.mono);
     expect(p.textScale, 1.3);
     expect(p.radius, CornerRadius.sharp);
@@ -128,9 +123,16 @@ void main() {
     expect(p.mode, ThemeMode.light);
   });
 
-  test('textScale not in steps falls back to 1.0', () async {
-    final kv = _FakeKv()..m['appearance.textScale'] = '1.7';
-    expect((await AppearanceStore(kv).load()).textScale, 1.0);
+  test('textScale out of range falls back to 1.0', () async {
+    for (final raw in ['1.7', '0.5']) {
+      final kv = _FakeKv()..m['appearance.textScale'] = raw;
+      expect((await AppearanceStore(kv).load()).textScale, 1.0, reason: raw);
+    }
+  });
+
+  test('textScale in range snaps to a 5% step', () async {
+    final kv = _FakeKv()..m['appearance.textScale'] = '1.12';
+    expect((await AppearanceStore(kv).load()).textScale, 1.1);
   });
 
   test('loaded completes after hydrate', () async {
@@ -153,7 +155,7 @@ void main() {
     final kv = _GatedKv(gate)
       ..m.addAll({
         'appearance.palette': 'catppuccin',
-        'appearance.density': 'comfortable',
+        'appearance.font': 'mono',
       });
     final c = _container(kv);
     addTearDown(c.dispose);
@@ -164,7 +166,7 @@ void main() {
     await n.loaded;
     final s = c.read(appearancePrefsProvider);
     expect(s.palette, ArgusPaletteId.nord);
-    expect(s.density, AppDensity.comfortable);
+    expect(s.font, InterfaceFont.mono);
     expect(kv.m['appearance.palette'], 'nord');
   });
 }

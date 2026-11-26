@@ -13,6 +13,7 @@ import 'shell_drawer.dart';
 import 'spawn_dialog.dart';
 import 'terminal_tile.dart';
 import 'theme.dart';
+import 'top_bar.dart';
 import 'workspace_changes_tab.dart';
 import 'workspace_files_tab.dart';
 import 'workspace_sessions_tab.dart';
@@ -46,7 +47,7 @@ class WorkspaceScreen extends ConsumerWidget {
         ? WorkspaceTab.sessions
         : selected;
     return Scaffold(
-      appBar: AppBar(
+      appBar: TopBar(
         leading: shellMenuButton(context),
         automaticallyImplyLeading: false,
         title: tab == WorkspaceTab.sessions
@@ -169,10 +170,9 @@ class WorkspaceChangesScreen extends ConsumerWidget {
     if (hit == null) return const _WorkspaceGone();
     final (project, workspace) = hit;
     return Scaffold(
-      appBar: AppBar(
+      appBar: TopBar(
         title: _WorkspaceTitle(project: project, workspace: workspace),
         actions: [
-          ?shellMenuButton(context),
           if (project.isGit) _RefreshChanges(workspace: workspace),
         ],
       ),
@@ -199,9 +199,8 @@ class WorkspaceFilesScreen extends ConsumerWidget {
     if (hit == null) return const _WorkspaceGone();
     final (project, workspace) = hit;
     return Scaffold(
-      appBar: AppBar(
+      appBar: TopBar(
         title: _WorkspaceTitle(project: project, workspace: workspace),
-        actions: [?shellMenuButton(context)],
       ),
       body: SafeArea(
         top: false,
@@ -217,7 +216,7 @@ class _WorkspaceGone extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(actions: [?shellMenuButton(context)]),
+      appBar: const TopBar(),
       body: Center(
         child: Text(
           'This workspace is no longer available.',
@@ -234,35 +233,15 @@ class _WorkspaceTitle extends StatelessWidget {
   final ProjectNode project;
   final WorkspaceNode workspace;
 
-  String get _at => workspaceAt(workspace);
-
-  String get _subtitle => [project.name, if (_at.isNotEmpty) _at].join(' · ');
-
   // As the session view's title: the full details in a sheet, here with the
   // workspace's actions, the same sheet as a long press in the drawer.
-  void _showDetails(BuildContext context) =>
-      showWorkspaceSheet(context, project, workspace);
-
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(context.tokens.radius),
-      onTap: () => _showDetails(context),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(workspace.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-            Text(
-              _subtitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: context.tokens.link, fontSize: 12),
-            ),
-          ],
-        ),
-      ),
+    final at = workspaceAt(workspace);
+    return TopBarTitle(
+      text: workspace.name,
+      subtitle: [project.name, if (at.isNotEmpty) at].join(' · '),
+      onTap: () => showWorkspaceSheet(context, project, workspace),
     );
   }
 }

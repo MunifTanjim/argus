@@ -245,7 +245,7 @@ class _CollapsibleDiffState extends State<_CollapsibleDiff> {
       decoration: BoxDecoration(
         color: t.surface,
         border: Border.all(color: t.line),
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(t.radius),
       ),
       child: Column(
         // min so the box shrinks to its content; the Flexible below caps it.
@@ -450,7 +450,7 @@ class _DiffBoxState extends State<_DiffBox> {
       decoration: BoxDecoration(
         color: t.surface,
         border: Border.all(color: t.line),
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(t.radius),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

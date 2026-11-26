@@ -18,6 +18,7 @@ import '../transport/connection.dart';
 import '../util/sync_frames.dart';
 import 'live_emulator.dart';
 import 'theme.dart';
+import 'top_bar.dart';
 
 
 class LiveScreenScreen extends ConsumerStatefulWidget {
@@ -223,7 +224,7 @@ class _LiveScreenScreenState extends ConsumerState<LiveScreenScreen> {
               if (s.workspaceId == t.workspaceId) s,
           ];
     return Scaffold(
-      appBar: AppBar(
+      appBar: TopBar(
         title: Text(title),
         actions: [
           if (siblings.length > 1)
@@ -440,8 +441,8 @@ class _InputBarState extends State<_InputBar> {
         backgroundColor: active ? t.keycapArmed : t.keycapFill,
         foregroundColor: active ? t.keycapArmedText : t.keycapText,
         side: BorderSide(color: active ? t.keycapArmed : t.keycapBorder),
-        shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(6))),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(t.radius)),
       );
 
   // Icon color/size inherit from the button's foreground (active vs idle).

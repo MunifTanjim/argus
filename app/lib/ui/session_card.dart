@@ -4,19 +4,21 @@ import '../models/enums.dart';
 import '../models/session.dart';
 import 'agent_badge.dart';
 import 'card_layout.dart';
+import 'node_header.dart' show NodeName;
 import 'relative_time.dart';
 import 'status_style.dart';
 import 'theme.dart';
 import 'usage_format.dart';
 
 class SessionCard extends StatelessWidget {
-  const SessionCard(
-      {super.key,
-      required this.session,
-      this.onTap,
-      this.onLongPress,
-      this.showNode = false,
-      this.showAgent = false});
+  const SessionCard({
+    super.key,
+    required this.session,
+    this.onTap,
+    this.onLongPress,
+    this.showNode = false,
+    this.showAgent = false,
+  });
 
   final Session session;
   final VoidCallback? onTap;
@@ -35,76 +37,59 @@ class SessionCard extends StatelessWidget {
       return _buildQuiet(context);
     }
     final s = session;
-    final (surface, border) = s.blocked
-        ? (context.tokens.blockedSurface, context.tokens.blockedBorder)
-        : s.status == SessionStatus.awaitingInput
-            ? (context.tokens.waitingSurface, context.tokens.waitingBorder)
-            : (context.tokens.surface, context.tokens.line);
-    final nodeLabel = s.nodeLabel ?? s.nodeId ?? 'local';
-
-
-    final card = Container(
-      decoration: BoxDecoration(
-        color: surface,
-        border: Border.all(color: border),
+    final (surface, border) = s.status == SessionStatus.awaitingInput
+        ? (context.tokens.waitingSurface, context.tokens.waitingBorder)
+        : (context.tokens.surface, context.tokens.line);
+    final meta = sessionMetaParts(s, context.tokens, agent: false);
+    return StatusCardFrame(
+      session: s,
+      color: sessionColor(s, context.tokens),
+      surface: surface,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(context.tokens.radius),
+        side: BorderSide(color: border),
       ),
-      // The border is 1 px wide and sits inside the inset.
-      padding: const EdgeInsets.fromLTRB(kCardInset - 1, 12, 12, 12),
+      onTap: onTap,
+      onLongPress: onLongPress,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SessionHeader(
             session: s,
-            mark: Text(statusGlyph(s.status),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontFamily: monoFamily,
-                    color: sessionColor(s, context.tokens))),
+            mark: StatusMark(
+              status: s.status,
+              color: sessionColor(s, context.tokens),
+            ),
             style: TextStyle(
-                color: context.tokens.text,
-                fontSize: 14,
-                fontWeight: FontWeight.w600),
+              color: context.tokens.text,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
             trailing: [
               if (showAgent) ...[
                 const SizedBox(width: 8),
                 AgentBadge(agent: s.agent),
               ],
-              if (showNode) ...[
-                const SizedBox(width: 8),
-                Icon(Icons.dns_outlined, size: 13, color: context.tokens.textDim),
-                const SizedBox(width: 4),
-                Text(nodeLabel,
-                    style: mono.copyWith(color: context.tokens.textDim, fontSize: 11)),
-              ],
+              if (showNode) ...cardNode(s, context.tokens),
             ],
           ),
           if ((s.summary?.task ?? s.interaction?.message) != null) ...[
             const SizedBox(height: 4),
-            Text(s.summary?.task ?? s.interaction!.message!,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: context.tokens.textSecondary, fontSize: 13)),
+            Text(
+              s.summary?.task ?? s.interaction!.message!,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: context.tokens.textSecondary,
+                fontSize: 13,
+              ),
+            ),
           ],
-          if (sessionMetaParts(s, context.tokens, agent: false).isNotEmpty) ...[
+          if (meta.isNotEmpty) ...[
             const SizedBox(height: 6),
-            _metaLine(s, context.tokens,
-                agent: false, sep: '  ·  ', style: mono),
+            _metaLine(meta, context.tokens, sep: '  ·  ', style: mono),
           ],
         ],
-      ),
-    );
-
-    return Opacity(
-      opacity: s.offline ? 0.5 : 1,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(context.tokens.radius),
-          onTap: onTap,
-          onLongPress: onLongPress,
-          child: card,
-        ),
       ),
     );
   }
@@ -112,124 +97,150 @@ class SessionCard extends StatelessWidget {
   Widget _buildQuiet(BuildContext context) {
     final s = session;
     final t = context.tokens;
-    final style = t.statusStyle;
     final color = sessionColor(s, t);
-    final dim = s.status == SessionStatus.idle ||
+    final dim =
+        s.status == SessionStatus.idle ||
         s.status == SessionStatus.dead ||
         s.status == SessionStatus.discovered;
-    final vPad = t.density == AppDensity.compact ? 9.0 : 13.0;
-    final time = relativeTime(s.summary?.lastActivity ??
-        s.statusSince?.toIso8601String());
-    final task = s.summary?.task ?? (s.blocked ? null : s.interaction?.message);
-    final nodeLabel = s.nodeLabel ?? s.nodeId ?? 'local';
+    final task = s.summary?.task ?? s.interaction?.message;
 
-    final body = Padding(
-      // The stripe takes 3 px of the inset.
-      padding: EdgeInsets.fromLTRB(
-          style == StatusStyle.stripe ? kCardInset - 3 : kCardInset,
-          vPad,
-          12,
-          vPad),
+    // Cards sit on the surface color so they stand out from the canvas.
+    return StatusCardFrame(
+      session: s,
+      color: color,
+      surface: t.surface,
+      vPad: 9,
+      onTap: onTap,
+      onLongPress: onLongPress,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SessionHeader(
             session: s,
-            mark: style == StatusStyle.dot
-                ? Center(
-                    child: Container(
-                      key: const Key('status-dot'),
-                      width: 7,
-                      height: 7,
-                      decoration:
-                          BoxDecoration(color: color, shape: BoxShape.circle),
-                    ),
-                  )
-                : Text(statusGlyph(s.status),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontFamily: monoFamily, color: color)),
+            mark: StatusMark(status: s.status, color: color),
             style: mono.copyWith(
-                color: dim ? t.textDim : t.text,
-                fontSize: 13,
-                fontWeight: FontWeight.w500),
+              color: dim ? t.textDim : t.text,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+            // No agent badge: the meta line leads with the agent.
             trailing: [
-              if (showAgent) ...[
-                const SizedBox(width: 8),
-                AgentBadge(agent: s.agent),
-              ],
-              if (showNode) ...[
-                const SizedBox(width: 8),
-                Icon(Icons.dns_outlined, size: 13, color: t.textDim),
-                const SizedBox(width: 4),
-                Text(nodeLabel, style: mono.copyWith(color: t.textDim, fontSize: 11)),
-              ],
-              if (time.isNotEmpty) ...[
-                const SizedBox(width: 8),
-                Text(time, style: mono.copyWith(color: t.textDim, fontSize: 11)),
-              ],
+              ...cardTime(s, t),
+              if (showNode) ...cardNode(s, t),
             ],
           ),
           if (task != null) ...[
             const SizedBox(height: 3),
-            Text(task,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: t.textDim, fontSize: 12)),
-          ],
-          const SizedBox(height: 3),
-          _metaLine(s, t,
-              agent: true, sep: ' · ', style: mono.copyWith(fontSize: 11)),
-          if (s.blocked && s.interaction?.message != null) ...[
-            const SizedBox(height: 8),
-            Container(
-              key: const Key('blocked-prompt'),
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-              decoration: BoxDecoration(
-                color: Color.alphaBlend(t.blocked.withValues(alpha: 0.1), t.canvas),
-                border: Border(left: BorderSide(color: t.blocked, width: 2)),
-              ),
-              child: Text(s.interaction!.message!,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: mono.copyWith(color: t.text, fontSize: 12)),
+            Text(
+              task,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: t.textDim, fontSize: 12),
             ),
           ],
+          const SizedBox(height: 3),
+          _metaLine(
+            sessionMetaParts(s, t, agent: true),
+            t,
+            sep: ' · ',
+            style: mono.copyWith(fontSize: 11),
+          ),
         ],
       ),
     );
+  }
+}
 
-    final row = style == StatusStyle.stripe
-        ? IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Container(key: const Key('status-stripe'), width: 3, color: color),
-                Expanded(child: body),
-              ],
-            ),
-          )
-        : body;
+/// The time since a card's session last moved, for a card header's trailing
+/// slot. Empty when the time is unknown.
+List<Widget> cardTime(Session s, ArgusTokens t) {
+  final time = relativeTime(
+    s.summary?.lastActivity ?? s.statusSince?.toIso8601String(),
+  );
+  if (time.isEmpty) return const [];
+  return [
+    const SizedBox(width: 8),
+    Text(time, style: mono.copyWith(color: t.textDim, fontSize: 11)),
+  ];
+}
 
-    // Rows sit on the surface color so they stand out from the canvas. Rows
-    // with a gap between them are rounded; touching rows stay square.
-    final radius = t.rowGap == 0 ? null : BorderRadius.circular(t.radius);
+/// A card session's node with the node icon, for a card header's trailing
+/// slot. A long name ellipsizes.
+List<Widget> cardNode(Session s, ArgusTokens t) => [
+  const SizedBox(width: 8),
+  Flexible(child: NodeName(s.nodeLabel ?? s.nodeId ?? 'local')),
+];
+
+/// The frame of a session or blocked card in every status style: a [color]
+/// stripe in the stripe style, the inset, dimming for an offline session, and
+/// the tap target.
+class StatusCardFrame extends StatelessWidget {
+  const StatusCardFrame({
+    super.key,
+    required this.session,
+    required this.color,
+    required this.surface,
+    required this.child,
+    this.shape,
+    this.vPad = 12,
+    this.onTap,
+    this.onLongPress,
+  });
+
+  final Session session;
+  final Color color;
+  final Color surface;
+
+  /// The card's shape. Null is a rounded rectangle at the theme radius.
+  final ShapeBorder? shape;
+  final double vPad;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final stripe = t.statusStyle == StatusStyle.stripe;
+    final body = Padding(
+      // The stripe takes 3 px of the inset.
+      padding: EdgeInsets.fromLTRB(
+        stripe ? kCardInset - 3 : kCardInset,
+        vPad,
+        12,
+        vPad,
+      ),
+      child: child,
+    );
     return Opacity(
-      opacity: s.offline ? 0.5 : 1,
+      opacity: session.offline ? 0.5 : 1,
       child: Material(
-        color: t.surface,
-        borderRadius: radius,
-        clipBehavior: radius == null ? Clip.none : Clip.antiAlias,
+        color: surface,
+        shape: shape,
+        borderRadius: shape == null ? BorderRadius.circular(t.radius) : null,
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
           onLongPress: onLongPress,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              row,
-              if (t.rowGap == 0) Divider(height: 1, thickness: 1, color: t.line),
-            ],
-          ),
+          // A positioned stripe takes the body's height without the extra
+          // layout pass of IntrinsicHeight.
+          child: stripe
+              ? Stack(
+                  children: [
+                    Padding(padding: const EdgeInsets.only(left: 3), child: body),
+                    Positioned(
+                      left: 0,
+                      top: 0,
+                      bottom: 0,
+                      width: 3,
+                      child: Container(
+                        key: const Key('status-stripe'),
+                        color: color,
+                      ),
+                    ),
+                  ],
+                )
+              : body,
         ),
       ),
     );
@@ -239,37 +250,61 @@ class SessionCard extends StatelessWidget {
 /// The parts of a card's meta line, each with its color: the model in its own
 /// color (readable on the palette), the context in its threshold color, and
 /// the rest dim. Quiet rows lead with the agent.
-List<(String, Color)> sessionMetaParts(Session s, ArgusTokens t,
-    {required bool agent}) {
+List<(String, Color)> sessionMetaParts(
+  Session s,
+  ArgusTokens t, {
+  required bool agent,
+}) {
   final sum = s.summary;
   return [
     if (agent) (agentLabel(s.agent), t.textDim),
     if (sum?.modelName != null)
-      (
-        sum!.modelName!,
-        readableOn(hexColor(sum.modelColor) ?? t.textDim, t),
-      ),
+      (sum!.modelName!, modelColor(sum.modelColor, t)),
     if (sum?.hasContext ?? false)
       (fmtContextPct(sum!.contextPct), contextColor(sum.contextPct, t)),
-    if ((sum?.tokens ?? 0) > 0) ('${sum!.tokens} tok', t.textDim),
+    if ((sum?.tokens ?? 0) > 0) ('${fmtTokens(sum!.tokens)} tok', t.textDim),
   ];
 }
 
-Widget _metaLine(Session s, ArgusTokens t,
-    {required bool agent, required String sep, required TextStyle style}) {
-  final parts = sessionMetaParts(s, t, agent: agent);
+Widget _metaLine(
+  List<(String, Color)> parts,
+  ArgusTokens t, {
+  required String sep,
+  required TextStyle style,
+}) {
   return Text.rich(
     TextSpan(
       style: style.copyWith(color: t.textDim),
-      children: [
-        for (final (i, (text, color)) in parts.indexed) ...[
-          if (i > 0) TextSpan(text: sep),
-          TextSpan(text: text, style: TextStyle(color: color)),
-        ],
-      ],
+      children: [metaSpan(parts, t, sep: sep)],
     ),
     maxLines: 1,
     overflow: TextOverflow.ellipsis,
+  );
+}
+
+/// A card's status mark: the status glyph, in every status style. Shared by
+/// session and blocked cards so the marks match.
+class StatusMark extends StatelessWidget {
+  const StatusMark({
+    super.key,
+    required this.status,
+    required this.color,
+    this.fontSize,
+    this.glyph,
+  });
+
+  final SessionStatus status;
+  final Color color;
+  final double? fontSize;
+
+  /// Replaces the status glyph, such as the offline mark.
+  final String? glyph;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    glyph ?? statusGlyph(status),
+    textAlign: TextAlign.center,
+    style: TextStyle(fontFamily: monoFamily, color: color, fontSize: fontSize),
   );
 }
 
@@ -301,14 +336,14 @@ class SessionHeader extends StatelessWidget {
         SizedBox(width: kLeadWidth, child: mark),
         const SizedBox(width: kLeadGap),
         Expanded(
-          child: name == null
-              ? Text(session.displayTitle,
-                  maxLines: 1, overflow: TextOverflow.ellipsis, style: style)
-              : Text(session.displayTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: mono.copyWith(
-                      color: context.tokens.textDim, fontSize: 11)),
+          child: Text(
+            session.displayTitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: name == null
+                ? style
+                : mono.copyWith(color: context.tokens.textDim, fontSize: 11),
+          ),
         ),
         ...trailing,
       ],

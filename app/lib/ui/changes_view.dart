@@ -199,7 +199,7 @@ class _CommitRow extends StatelessWidget {
         decoration: BoxDecoration(
           color: t.surface,
           border: Border.all(color: t.line),
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(t.radius),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -225,7 +225,7 @@ class _CommitRow extends StatelessWidget {
                 // trigger the row's navigation.
                 InkWell(
                   onTap: () => copyToClipboard(context, commit.sha),
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(t.radiusSmall),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 4,
