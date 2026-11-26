@@ -6,11 +6,13 @@ import '../state/gateway.dart';
 import '../state/history_view_model.dart';
 import '../transport/connection.dart';
 import 'filter_title.dart';
+import 'history_details.dart';
+import 'history_format.dart';
+import 'history_group_header.dart';
 import 'history_sessions_screen.dart';
-import 'node_header.dart';
-import 'relative_time.dart';
 import 'responsive.dart';
 import 'shell_drawer.dart';
+import 'theme.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
@@ -67,37 +69,59 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   }
 }
 
-class _ProjectList extends StatelessWidget {
+class _ProjectList extends StatefulWidget {
   const _ProjectList({required this.projects, required this.query});
 
   final List<HistoryProject> projects;
   final String query;
 
   @override
+  State<_ProjectList> createState() => _ProjectListState();
+}
+
+class _ProjectListState extends State<_ProjectList> {
+  /// Group keys (node ids, '' for no node) whose projects are hidden.
+  final _folded = <String>{};
+
+  void _toggle(String key) => setState(() {
+        if (!_folded.remove(key)) _folded.add(key);
+      });
+
+  @override
   Widget build(BuildContext context) {
-    if (projects.isEmpty) {
+    if (widget.projects.isEmpty) {
       return ListView(
         children: const [Center(child: Text('No past sessions found.'))],
       );
     }
 
+    final query = widget.query;
     final shown =
-        projects.where((p) => matchesHistoryProject(p, query)).toList();
+        widget.projects.where((p) => matchesHistoryProject(p, query)).toList();
     if (shown.isEmpty) {
       return ListView(
         children: const [Center(child: Text('No projects match.'))],
       );
     }
 
-    final rows = _groupByNode(shown);
+    // A filter shows every match, folded or not.
+    final folded = query.isEmpty ? _folded : const <String>{};
+    final rows = _groupByNode(shown, folded);
     return CenteredBody(
       child: ListView.builder(
         itemCount: rows.length,
         itemBuilder: (context, index) {
           final row = rows[index];
           return switch (row) {
-            _NodeHeader(:final label) => _NodeHeaderTile(label: label),
-            _ProjectEntry(:final project) => _ProjectCard(
+            _NodeHeader() => HistoryGroupHeader(
+              key: Key('history-node-${row.key}'),
+              icon: Icons.dns_outlined,
+              label: row.label,
+              count: row.count,
+              folded: row.folded,
+              onTap: () => _toggle(row.key),
+            ),
+            _ProjectEntry(:final project) => _ProjectRow(
               project: project,
               onTap: () => Navigator.push(
                 context,
@@ -118,8 +142,11 @@ class _ProjectList extends StatelessWidget {
 sealed class _Row {}
 
 class _NodeHeader extends _Row {
-  _NodeHeader(this.label);
+  _NodeHeader(this.key, this.label, this.count, {required this.folded});
+  final String key;
   final String label;
+  final int count;
+  final bool folded;
 }
 
 class _ProjectEntry extends _Row {
@@ -129,8 +156,9 @@ class _ProjectEntry extends _Row {
 
 /// Groups a recency-sorted project list by origin node: groups appear in
 /// first-occurrence (newest-activity) order, recency order preserved within
-/// each, every group led by a header row.
-List<_Row> _groupByNode(List<HistoryProject> projects) {
+/// each, every group led by a header row. A group whose key is in [folded]
+/// keeps only its header.
+List<_Row> _groupByNode(List<HistoryProject> projects, Set<String> folded) {
   final order = <String>[];
   final buckets = <String, List<HistoryProject>>{};
   for (final p in projects) {
@@ -141,56 +169,89 @@ List<_Row> _groupByNode(List<HistoryProject> projects) {
   final rows = <_Row>[];
   for (final key in order) {
     final group = buckets[key]!;
-    rows.add(_NodeHeader(_nodeLabel(group.first)));
-    rows.addAll(group.map(_ProjectEntry.new));
+    final isFolded = folded.contains(key);
+    rows.add(_NodeHeader(key, _nodeLabel(group.first), group.length,
+        folded: isFolded));
+    if (!isFolded) rows.addAll(group.map(_ProjectEntry.new));
   }
   return rows;
 }
 
 /// The human name for a project's origin node, falling back to the node id and
 /// then a local placeholder (direct node connections carry no node info).
-String _nodeLabel(HistoryProject p) {
-  final label = p.nodeLabel;
-  if (label != null && label.isNotEmpty) return label;
-  final id = p.nodeId;
-  if (id != null && id.isNotEmpty) return id;
-  return 'This machine';
-}
+String _nodeLabel(HistoryProject p) =>
+    firstLabel([p.nodeLabel, p.nodeId]) ?? 'This machine';
 
-class _NodeHeaderTile extends StatelessWidget {
-  const _NodeHeaderTile({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-      child: NodeHeader(label: label),
-    );
-  }
-}
-
-class _ProjectCard extends StatelessWidget {
-  const _ProjectCard({required this.project, required this.onTap});
+class _ProjectRow extends StatelessWidget {
+  const _ProjectRow({required this.project, required this.onTap});
 
   final HistoryProject project;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final subtitleParts = <String>[
-      '${project.sessionCount} sessions',
-      if (project.cwd.isNotEmpty) project.cwd,
-      if (project.lastActivity.isNotEmpty) relativeTime(project.lastActivity),
-    ];
-
-    // The node is named by the group header above; the card shows only its own
-    // label, counts and path.
+    final t = context.tokens;
+    final n = project.sessionCount;
+    final ago = shortAgo(project.lastActivity);
+    final count = n == 1 ? '1 session' : '$n sessions';
+    // The node is named by the group header above. The path stays on the row:
+    // worktrees and subfolders of one repo share its label.
     return ListTile(
-      title: Text(project.label),
-      subtitle: Text(subtitleParts.join(' · ')),
+      title: Row(
+        children: [
+          Expanded(
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    project.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (project.missing) ...[
+                  const SizedBox(width: 6),
+                  _MissingLabel(
+                      key: Key('history-missing-${project.projectDir}')),
+                ],
+              ],
+            ),
+          ),
+          if (ago.isNotEmpty) ...[
+            const SizedBox(width: 8),
+            Text(ago, style: TextStyle(fontSize: 11, color: t.textDim)),
+          ],
+        ],
+      ),
+      subtitle: Text(
+        project.cwd.isEmpty ? count : '$count · ${shortenPath(project.cwd)}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
       onTap: onTap,
+      onLongPress: project.cwd.isEmpty
+          ? null
+          : () => showHistoryProjectDetails(context, project),
+    );
+  }
+}
+
+class _MissingLabel extends StatelessWidget {
+  const _MissingLabel({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      decoration: BoxDecoration(
+        border: Border.all(color: t.line),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        'missing',
+        style: TextStyle(fontSize: 10.5, color: t.textDim),
+      ),
     );
   }
 }

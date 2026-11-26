@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/enums.dart';
 import '../data/transcript_repository.dart';
+import '../models/enums.dart';
 import '../models/project.dart';
 import '../models/session.dart';
 import '../push/notifications.dart';
@@ -18,6 +18,7 @@ import '../state/tool_detail.dart';
 import '../state/transcript_controller.dart';
 import '../transport/connection.dart';
 import '../transport/jsonrpc.dart';
+import 'details_header.dart';
 import 'live_screen_screen.dart';
 import 'project_actions.dart';
 import 'route_observer.dart';
@@ -188,18 +189,14 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
   // The large header's details, for when it is far above in the transcript.
   // The sheet follows the live session; the transcript keeps its place.
   void _showDetails() {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (_) => Consumer(
-        builder: (context, ref, _) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: SessionViewHeader(
-              session: ref.watch(sessionsProvider)[_sid] ?? widget.session,
-              showDivider: false,
-            ),
-          ),
+    showDetailsSheet(
+      context,
+      (_) => Consumer(
+        builder: (context, ref, _) => SessionViewHeader(
+          session:
+              ref.watch(sessionsProvider.select((m) => m[_sid])) ??
+              widget.session,
+          wrap: true,
         ),
       ),
     );

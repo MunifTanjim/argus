@@ -70,16 +70,34 @@ HistoryProject _project() => const HistoryProject(
       lastActivity: '',
     );
 
-HistorySession _session(String id, {String? title, int turnCount = 0}) =>
+HistorySession _session(
+  String id, {
+  String? title,
+  String? firstMessage,
+  int turnCount = 0,
+  int durationMs = 0,
+  String lastActivity = '',
+  String agent = '',
+}) =>
     HistorySession(
       sessionId: id,
       title: title,
+      firstMessage: firstMessage,
       transcriptPath: '/path/to/$id',
-      lastActivity: '',
+      lastActivity: lastActivity,
       tokens: 0,
       turnCount: turnCount,
-      durationMs: 0,
+      durationMs: durationMs,
+      agent: agent,
     );
+
+Future<void> _pumpSessions(
+    WidgetTester tester, List<HistorySession> items) async {
+  await tester.pumpWidget(_app(_FakeHistoryRepository(
+      [HistorySessionPage(items: items, hasMore: false)])));
+  await tester.pump();
+  await tester.pump();
+}
 
 Widget _app(HistoryRepository repo) => ProviderScope(
       overrides: [historyRepositoryProvider.overrideWithValue(repo)],
@@ -240,5 +258,152 @@ void main() {
     await tester.pump();
 
     expect(find.text('No sessions match.'), findsOneWidget);
+  });
+
+  testWidgets('groups sessions under day headers', (tester) async {
+    final now = DateTime.now();
+    await _pumpSessions(tester, [
+      _session('a', title: 'Today work', lastActivity: now.toIso8601String()),
+      _session('b',
+          title: 'Older work',
+          lastActivity:
+              now.subtract(const Duration(days: 1)).toIso8601String()),
+    ]);
+
+    expect(find.text('TODAY'), findsOneWidget);
+    expect(find.text('YESTERDAY'), findsOneWidget);
+  });
+
+  testWidgets('shows turns and duration in the meta line', (tester) async {
+    await _pumpSessions(tester, [
+      _session('a', title: 'A', turnCount: 12, durationMs: 34 * 60000),
+    ]);
+
+    expect(find.text('12 turns · 34m'), findsOneWidget);
+  });
+
+  testWidgets('names the agent only when the project mixes agents',
+      (tester) async {
+    await _pumpSessions(tester, [
+      _session('a', title: 'A', turnCount: 1, agent: 'claude'),
+      _session('b', title: 'B', turnCount: 1, agent: 'codex'),
+    ]);
+
+    expect(find.text('1 turn · Claude'), findsOneWidget);
+    expect(find.text('1 turn · Codex'), findsOneWidget);
+  });
+
+  testWidgets('leaves the agent out when every session has the same agent',
+      (tester) async {
+    await _pumpSessions(tester, [
+      _session('a', title: 'A', turnCount: 2, agent: 'claude'),
+    ]);
+
+    expect(find.text('2 turns'), findsOneWidget);
+  });
+
+  testWidgets('falls back to the first message with a quote mark',
+      (tester) async {
+    await _pumpSessions(tester, [
+      _session('sess-1', firstMessage: 'check the e2e nodes'),
+    ]);
+
+    expect(find.textContaining('“check the e2e nodes'), findsOneWidget);
+    expect(find.text('sess-1'), findsNothing);
+  });
+
+  testWidgets('puts sessions with no time under a no-date header',
+      (tester) async {
+    await _pumpSessions(tester, [
+      _session('a',
+          title: 'Dated', lastActivity: DateTime.now().toIso8601String()),
+      _session('b', title: 'A Session'),
+    ]);
+
+    expect(find.text('A Session'), findsOneWidget);
+    expect(find.text('TODAY'), findsOneWidget);
+    expect(find.text('NO DATE'), findsOneWidget);
+    expect(
+        tester.getTopLeft(find.text('NO DATE')).dy,
+        lessThan(tester.getTopLeft(find.text('A Session')).dy));
+  });
+
+  testWidgets('shows no meta line when there is nothing to say',
+      (tester) async {
+    await _pumpSessions(tester, [_session('a', title: 'A Session')]);
+
+    expect(find.textContaining('turn'), findsNothing);
+    expect(find.textContaining(' · '), findsNothing);
+  });
+
+  testWidgets('tapping the project name opens the project details',
+      (tester) async {
+    await _pumpSessions(tester, [_session('a', title: 'A')]);
+
+    await tester.tap(find.byKey(const Key('history-title')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('/home/user/project'), findsOneWidget);
+    expect(find.textContaining('2 sessions'), findsOneWidget);
+  });
+
+  testWidgets('tapping a day header folds and unfolds that day',
+      (tester) async {
+    final now = DateTime.now();
+    await _pumpSessions(tester, [
+      _session('a', title: 'Today work', lastActivity: now.toIso8601String()),
+      _session('b',
+          title: 'Older work',
+          lastActivity:
+              now.subtract(const Duration(days: 1)).toIso8601String()),
+    ]);
+
+    await tester.tap(find.byKey(const Key('history-day-Today')));
+    await tester.pump();
+    expect(find.text('Today work'), findsNothing);
+    expect(find.text('Older work'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('history-day-Today')));
+    await tester.pump();
+    expect(find.text('Today work'), findsOneWidget);
+  });
+
+  testWidgets('an active filter shows matches inside folded days',
+      (tester) async {
+    await _pumpSessions(tester, [
+      _session('a',
+          title: 'Today work', lastActivity: DateTime.now().toIso8601String()),
+    ]);
+
+    await tester.tap(find.byKey(const Key('history-day-Today')));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Filter sessions'));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'work');
+    await tester.pump();
+
+    expect(find.text('Today work'), findsOneWidget);
+  });
+
+  testWidgets('day headers have no node icon', (tester) async {
+    await _pumpSessions(tester, [
+      _session('a', title: 'A', lastActivity: DateTime.now().toIso8601String()),
+    ]);
+
+    expect(find.byIcon(Icons.dns_outlined), findsNothing);
+    expect(find.byKey(const Key('history-day-Today')), findsOneWidget);
+  });
+
+  testWidgets('day header label sits in the middle of its tap area',
+      (tester) async {
+    await _pumpSessions(tester, [
+      _session('a', title: 'A', lastActivity: DateTime.now().toIso8601String()),
+    ]);
+
+    final area = tester.getRect(find.descendant(
+        of: find.byKey(const Key('history-day-Today')),
+        matching: find.byType(InkWell)));
+    final label = tester.getRect(find.text('TODAY'));
+    expect(label.center.dy, closeTo(area.center.dy, 0.5));
   });
 }

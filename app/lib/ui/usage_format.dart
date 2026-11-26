@@ -19,6 +19,10 @@ Color contextColor(double pct, ArgusTokens t) {
   return t.success;
 }
 
+/// A model's own color, readable on the palette; dim when unknown.
+Color modelColor(String? hex, ArgusTokens t) =>
+    readableOn(hexColor(hex) ?? t.textDim, t);
+
 Color? hexColor(String? hex) {
   if (hex == null || hex.length != 7 || !hex.startsWith('#')) return null;
   final v = int.tryParse(hex.substring(1), radix: 16);
