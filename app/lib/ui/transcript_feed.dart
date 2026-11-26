@@ -10,6 +10,7 @@ import '../state/tool_detail.dart';
 import 'entry_row.dart';
 import 'prompt_scrollbar.dart';
 import 'responsive.dart';
+import 'run_summary.dart';
 import 'theme.dart';
 import 'tool_registry.dart';
 
@@ -20,33 +21,65 @@ sealed class FeedRow {
 }
 
 class EntryFeedRow extends FeedRow {
-  const EntryFeedRow(this.entry);
+  const EntryFeedRow(this.entry, {this.showModel = true});
   final Entry entry;
+
+  /// False for a turn footer whose model is the previous footer's; it hides
+  /// the model, so a model switch stands out.
+  final bool showModel;
+}
+
+/// Run summaries kept across rebuilds. Each delta makes new rows, but a run
+/// whose entries are the same objects keeps its summary.
+class RunSummaryCache {
+  RunSummaryCache({this.agent});
+  final String? agent;
+  final _byKey = <String, (List<Entry>, RunSummary)>{};
+
+  RunSummary of(String key, List<Entry> entries) {
+    final hit = _byKey[key];
+    if (hit != null && _same(hit.$1, entries)) return hit.$2;
+    final summary = summarizeRun(entries, agent: agent);
+    _byKey[key] = (entries, summary);
+    return summary;
+  }
+
+  static bool _same(List<Entry> a, List<Entry> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (!identical(a[i], b[i])) return false;
+    }
+    return true;
+  }
 }
 
 /// A collapsed run.
 class RunSummaryFeedRow extends FeedRow {
-  const RunSummaryFeedRow(this.key, this.thinking, this.tools);
+  RunSummaryFeedRow(this.key, this.entries, this._summaries);
 
   /// The run's first entry id: stable as the run grows, since entries are
   /// append-only.
   final String key;
-  final int thinking;
-  final int tools;
+
+  /// The entries the summary counts; a live run's newest tool is left out.
+  final List<Entry> entries;
+  final RunSummaryCache _summaries;
+
+  /// Made on the first build of the row.
+  late final RunSummary summary = _summaries.of(key, entries);
 }
 
 /// The header ([top]) or footer control row of an expanded run.
 class RunEdgeFeedRow extends FeedRow {
-  const RunEdgeFeedRow(
-    this.key,
-    this.thinking,
-    this.tools, {
-    required this.top,
-  });
+  RunEdgeFeedRow(this.key, this.entries, this._summaries, {required this.top});
+
   final String key;
-  final int thinking;
-  final int tools;
+  final List<Entry> entries;
   final bool top;
+  final RunSummaryCache _summaries;
+
+  /// Made on the first build of the row.
+  late final RunSummary summary = _summaries.of(key, entries);
 }
 
 /// A subagent spawn (not an agent-ref op like wait_agent) stands alone so it
@@ -59,18 +92,32 @@ bool _isSpawn(Entry e) =>
 bool _inRun(Entry e) =>
     e.kind == EntryKind.thinking || (e.isToolCall && !_isSpawn(e));
 
-/// Folds each maximal run of thinking/tool entries.
+/// Folds each maximal run of thinking/tool entries. When [live] (the session
+/// is working), the newest run's last tool stays out of its fold, so what runs
+/// now is in view. [summaries] keeps run summaries across calls.
 List<FeedRow> groupEntries(
   List<Entry> entries, {
   required bool verbose,
   Map<String, bool> overrides = const {},
+  bool live = false,
+  RunSummaryCache? summaries,
 }) {
+  final cache = summaries ?? RunSummaryCache();
   final rows = <FeedRow>[];
+  String? lastModel;
   var i = 0;
   while (i < entries.length) {
     final e = entries[i];
     if (!_inRun(e)) {
-      rows.add(EntryFeedRow(e));
+      var showModel = true;
+      if (e.kind == EntryKind.turnEnd) {
+        final model = e.modelName;
+        if (model != null && model.isNotEmpty) {
+          showModel = model != lastModel;
+          lastModel = model;
+        }
+      }
+      rows.add(EntryFeedRow(e, showModel: showModel));
       i++;
       continue;
     }
@@ -79,41 +126,24 @@ List<FeedRow> groupEntries(
       run.add(entries[i++]);
     }
     final key = run.first.id;
-    final thinking = run.where((e) => e.kind == EntryKind.thinking).length;
-    final tools = run.length - thinking;
     if (overrides[key] ?? verbose) {
-      rows.add(RunEdgeFeedRow(key, thinking, tools, top: true));
+      rows.add(RunEdgeFeedRow(key, run, cache, top: true));
       for (final e in run) {
         rows.add(EntryFeedRow(e));
       }
-      rows.add(RunEdgeFeedRow(key, thinking, tools, top: false));
+      rows.add(RunEdgeFeedRow(key, run, cache, top: false));
+    } else if (live && i == entries.length && run.last.isToolCall) {
+      final folded = run.sublist(0, run.length - 1);
+      if (folded.isNotEmpty) {
+        rows.add(RunSummaryFeedRow(key, folded, cache));
+      }
+      rows.add(EntryFeedRow(run.last));
     } else {
-      rows.add(RunSummaryFeedRow(key, thinking, tools));
+      rows.add(RunSummaryFeedRow(key, run, cache));
     }
   }
   return rows;
 }
-
-/// Screen-reader label for a run summary.
-String _runLabel(int thinking, int tools) => [
-  if (thinking > 0) '$thinking thinking',
-  if (tools > 0) '$tools ${tools == 1 ? 'tool' : 'tools'}',
-].join(', ');
-
-TextStyle _runStyle(ArgusTokens t) =>
-    TextStyle(fontFamily: monoFamily, fontSize: 11, color: t.textDim);
-
-List<Widget> _runCounts(int thinking, int tools, ArgusTokens t) => [
-  if (thinking > 0) ...[
-    Icon(Icons.lightbulb, size: 12, color: t.thinking),
-    Text(' $thinking', style: _runStyle(t)),
-  ],
-  if (thinking > 0 && tools > 0) Text(' · ', style: _runStyle(t)),
-  if (tools > 0) ...[
-    Icon(Icons.build, size: 12, color: t.toolCall),
-    Text(' $tools', style: _runStyle(t)),
-  ],
-];
 
 /// Used by both the session detail and subagent trace screens.
 ///
@@ -128,6 +158,10 @@ class TranscriptFeed extends ConsumerStatefulWidget {
     required this.entries,
     this.emptyText = 'No transcript yet.',
     this.stickToBottom = true,
+    this.header,
+    this.onHeaderVisible,
+    this.bottomInset = 0,
+    this.live = false,
   });
 
   /// Addresses the transcript so tool rows can fetch their bodies on demand.
@@ -135,6 +169,18 @@ class TranscriptFeed extends ConsumerStatefulWidget {
   final List<Entry> entries;
   final String emptyText;
   final bool stickToBottom;
+
+  /// Shown above the first row and scrolled with the rows.
+  final Widget? header;
+
+  /// Called when [header] scrolls out of view (false) or back (true).
+  final ValueChanged<bool>? onHeaderVisible;
+
+  /// Room below the last row for what floats over the feed's bottom edge.
+  final double bottomInset;
+
+  /// The session is working: the newest tool stays out of its fold.
+  final bool live;
 
   @override
   ConsumerState<TranscriptFeed> createState() => TranscriptFeedState();
@@ -201,6 +247,8 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
   List<FeedRow> _rows = const [];
   List<Entry>? _rowsEntries;
   bool? _rowsVerbose;
+  bool? _rowsLive;
+  RunSummaryCache? _summaries;
 
   // Whether the view is currently tailing the bottom. Starts true so a freshly
   // opened feed lands on the newest content.
@@ -210,9 +258,24 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
   // overscroll/settle doesn't disable tailing.
   static const double _bottomSlack = 24;
 
+  static const double _pad = 12;
+
+  final _headerKey = GlobalKey();
+  bool? _headerShown;
+
+  /// Checks the header after the next frame, when the rows under it change.
+  void _syncHeaderLater() {
+    if (widget.header == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncHeader();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
+    _syncHeaderLater();
+    _sc.addListener(_syncHeader);
     if (widget.stickToBottom) {
       _sc.addListener(_onScroll);
       WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToBottom());
@@ -223,6 +286,24 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
     if (!_sc.hasClients) return;
     final p = _sc.position;
     _following = p.pixels >= p.maxScrollExtent - _bottomSlack;
+  }
+
+  // Reports when the scroll offset passes the header's bottom edge.
+  void _syncHeader() {
+    final report = widget.onHeaderVisible;
+    if (report == null || widget.header == null) return;
+    final bool shown;
+    if (widget.entries.isEmpty) {
+      // The empty state shows the header at the top, unscrolled.
+      shown = true;
+    } else {
+      final box = _headerKey.currentContext?.findRenderObject() as RenderBox?;
+      if (!_sc.hasClients || box == null || !box.hasSize) return;
+      shown = _sc.position.pixels < box.size.height + _pad;
+    }
+    if (shown == _headerShown) return;
+    _headerShown = shown;
+    report(shown);
   }
 
   /// Scrolls down until the expanded run's bottom row shows, then back to its
@@ -261,16 +342,25 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
   void _jumpToBottom() {
     if (!_sc.hasClients) return;
     _sc.jumpTo(_sc.position.maxScrollExtent);
+    _syncHeader();
   }
 
   @override
   void didUpdateWidget(TranscriptFeed oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // New transcript data arrived (each delta yields a new list). Tail to the
+    if (!identical(widget.entries, oldWidget.entries) ||
+        widget.header != oldWidget.header ||
+        widget.bottomInset != oldWidget.bottomInset) {
+      _syncHeaderLater();
+    }
+    // New transcript data arrived (each delta yields a new list), the room
+    // below the last row changed, or the live row came or went. Tail to the
     // bottom only if the user was already there.
     if (widget.stickToBottom &&
         _following &&
-        !identical(widget.entries, oldWidget.entries)) {
+        (!identical(widget.entries, oldWidget.entries) ||
+            widget.bottomInset != oldWidget.bottomInset ||
+            widget.live != oldWidget.live)) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToBottom());
     }
   }
@@ -286,18 +376,21 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
   Widget build(BuildContext context) {
     final t = context.tokens;
     final controller = widget.stickToBottom ? _sc : null;
+    final header = widget.header;
     if (widget.entries.isEmpty) {
       // No width cap on the empty state: a single centred line gains nothing
       // from it.
       return ListView(
         controller: controller,
         children: [
+          if (header != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(_pad, _pad, _pad, 0),
+              child: header,
+            ),
           const SizedBox(height: 120),
           Center(
-            child: Text(
-              widget.emptyText,
-              style: TextStyle(color: t.textDim),
-            ),
+            child: Text(widget.emptyText, style: TextStyle(color: t.textDim)),
           ),
         ],
       );
@@ -305,13 +398,22 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
     final verbose = ref.watch(
       appearancePrefsProvider.select((p) => p.verboseTranscript),
     );
-    if (!identical(_rowsEntries, widget.entries) || _rowsVerbose != verbose) {
+    if (!identical(_rowsEntries, widget.entries) ||
+        _rowsVerbose != verbose ||
+        _rowsLive != widget.live) {
       _rowsEntries = widget.entries;
       _rowsVerbose = verbose;
+      _rowsLive = widget.live;
+      final agent = widget.detailRef.agent;
+      if (_summaries?.agent != agent) {
+        _summaries = RunSummaryCache(agent: agent);
+      }
       _rows = groupEntries(
         widget.entries,
         verbose: verbose,
         overrides: _overrides,
+        live: widget.live,
+        summaries: _summaries,
       );
     }
     final rows = _rows;
@@ -320,45 +422,58 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
         rows: rows,
         listController: _lc,
         scrollController: _sc,
-        child: SuperListView.builder(
+        child: CustomScrollView(
           controller: _sc,
-          listController: _lc,
-          padding: const EdgeInsets.all(12),
-          itemCount: rows.length,
-          itemBuilder: (_, i) => switch (rows[i]) {
-            EntryFeedRow(:final entry) => EntryRow(
-              key: ValueKey(entry.id),
-              detailRef: widget.detailRef,
-              entry: entry,
-              expanded: _expanded.contains(entry.id),
-              onToggle: () => setState(() {
-                if (!_expanded.remove(entry.id)) _expanded.add(entry.id);
-              }),
+          slivers: [
+            if (header != null)
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(_pad, _pad, _pad, 0),
+                sliver: SliverToBoxAdapter(
+                  child: KeyedSubtree(key: _headerKey, child: header),
+                ),
+              ),
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                _pad,
+                _pad,
+                _pad,
+                _pad + widget.bottomInset,
+              ),
+              sliver: SuperSliverList.builder(
+                listController: _lc,
+                // As SuperListView does: build the cache area at once, so extents settle.
+                delayPopulatingCacheArea: false,
+                itemCount: rows.length,
+                itemBuilder: (_, i) => switch (rows[i]) {
+                  EntryFeedRow(:final entry, :final showModel) => EntryRow(
+                    key: ValueKey(entry.id),
+                    detailRef: widget.detailRef,
+                    entry: entry,
+                    showModel: showModel,
+                    expanded: _expanded.contains(entry.id),
+                    onToggle: () => setState(() {
+                      if (!_expanded.remove(entry.id)) _expanded.add(entry.id);
+                    }),
+                  ),
+                  RunSummaryFeedRow(:final key, :final summary) => _runToggle(
+                    ValueKey('run:$key'),
+                    key,
+                    true,
+                    Icons.chevron_right,
+                    summary,
+                  ),
+                  RunEdgeFeedRow(:final key, :final summary, :final top) =>
+                    _runToggle(
+                      ValueKey('${top ? 'run-top' : 'run-bottom'}:$key'),
+                      key,
+                      false,
+                      top ? Icons.expand_more : Icons.expand_less,
+                      summary,
+                    ),
+                },
+              ),
             ),
-            RunSummaryFeedRow(:final key, :final thinking, :final tools) =>
-              _runToggle(
-                ValueKey('run:$key'),
-                key,
-                true,
-                Icons.chevron_right,
-                thinking,
-                tools,
-              ),
-            RunEdgeFeedRow(
-              :final key,
-              :final thinking,
-              :final tools,
-              :final top,
-            ) =>
-              _runToggle(
-                ValueKey('${top ? 'run-top' : 'run-bottom'}:$key'),
-                key,
-                false,
-                top ? Icons.expand_more : Icons.expand_less,
-                thinking,
-                tools,
-              ),
-          },
+          ],
         ),
       ),
     );
@@ -369,11 +484,15 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
     String runKey,
     bool expand,
     IconData chevron,
-    int thinking,
-    int tools,
+    RunSummary summary,
   ) {
     final t = context.tokens;
-    final label = _runLabel(thinking, tools);
+    final label = summary.label;
+    final style = TextStyle(
+      fontFamily: monoFamily,
+      fontSize: 11,
+      color: t.textDim,
+    );
     return Align(
       alignment: Alignment.centerLeft,
       child: Semantics(
@@ -397,7 +516,32 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
               children: [
                 Icon(chevron, size: 16, color: t.textDim),
                 const SizedBox(width: 8),
-                ..._runCounts(thinking, tools, t),
+                // Pairs wrap, not overflow: a run of every kind is wider
+                // than a narrow phone.
+                Flexible(
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 2,
+                    children: [
+                      for (final (icon, n) in [
+                        if (summary.thinking > 0)
+                          (Icons.lightbulb_outline, summary.thinking),
+                        for (final (g, n) in summary.groups)
+                          (runGroupIcon(g), n),
+                        if (summary.failed > 0)
+                          (Icons.error_outline, summary.failed),
+                      ])
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(icon, size: 12, color: t.textDim),
+                            const SizedBox(width: 2),
+                            Text('$n', style: style),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),

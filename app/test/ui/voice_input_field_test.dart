@@ -99,12 +99,14 @@ Widget _host(
   _Engines? engines,
   _FakePacks? packs,
   bool statusBelow = false,
+  EdgeInsets? micInset,
   ScrollController? scroll,
   double scrollTop = 300,
 }) {
   final field = VoiceInputField(
     controller: c,
     statusBelow: statusBelow,
+    micInset: micInset,
     field: (suffixIcon) => TextField(
       key: _field,
       controller: c,
@@ -244,6 +246,19 @@ void main() {
       expect(mic.right, closeTo(field.right, 0.5));
     });
 
+    testWidgets('a mic inset pins the mic away from the last line',
+        (tester) async {
+      final c = TextEditingController(text: 'one\ntwo\nthree');
+      addTearDown(c.dispose);
+      await tester.pumpWidget(_host(await _enabled(), c,
+          micInset: const EdgeInsets.only(right: 56, bottom: 4)));
+      await tester.pumpAndSettle();
+      final mic = tester.getRect(find.byKey(_mic));
+      final field = tester.getRect(find.byKey(_field));
+      expect(mic.right, closeTo(field.right - 56, 0.5));
+      expect(mic.bottom, closeTo(field.bottom - 4, 0.5));
+    });
+
     for (final text in ['one', 'one\ntwo\nthree']) {
       testWidgets(
           'the mic is centered on the last line of '
@@ -275,6 +290,7 @@ void main() {
     Future<_Engines> pumpHost(
       WidgetTester tester, {
       bool statusBelow = false,
+      EdgeInsets? micInset,
     }) async {
       final engines = _Engines();
       final c = TextEditingController();
@@ -284,6 +300,7 @@ void main() {
         c,
         engines: engines,
         statusBelow: statusBelow,
+        micInset: micInset,
       ));
       await tester.pumpAndSettle();
       return engines;
@@ -452,6 +469,25 @@ void main() {
         lessThanOrEqualTo(600),
       );
       await hold.up();
+    });
+
+    testWidgets('with a mic inset, the lock hint and trash can sit over the mic',
+        (tester) async {
+      await pumpHost(tester,
+          micInset: const EdgeInsets.only(right: 54, bottom: 4));
+      final hold = await tester.startGesture(tester.getCenter(find.byKey(_mic)));
+      await tester.pump();
+      final mic = tester.getRect(find.byKey(_mic));
+      final hint = tester.getRect(find.byKey(const Key('voice-lock-hint')));
+      expect(hint.center.dx, closeTo(mic.center.dx, 0.5));
+      await hold.moveBy(const Offset(0, -100)); // lock: hands-free
+      await tester.pump();
+      final trash = tester.getRect(find.byKey(const Key('voice-cancel')));
+      expect(trash.center.dx, closeTo(mic.center.dx, 0.5));
+      await hold.up();
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('voice-cancel')));
+      await tester.pumpAndSettle();
     });
 
     testWidgets('with the status row below, the lock is below too',

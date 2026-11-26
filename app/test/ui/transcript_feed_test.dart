@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/entry.dart';
 import 'package:argus/state/tool_detail.dart';
 import 'package:argus/ui/transcript_feed.dart';
-import 'package:super_sliver_list/super_sliver_list.dart';
 
 List<Entry> _chunks(int n) => [
       for (var i = 0; i < n; i++)
@@ -21,9 +20,154 @@ Widget _feed(List<Entry> chunks) => ProviderScope(
     );
 
 ScrollController _controller(WidgetTester tester) =>
-    tester.widget<SuperListView>(find.byType(SuperListView)).controller!;
+    tester.widget<CustomScrollView>(find.byType(CustomScrollView)).controller!;
 
 void main() {
+  testWidgets('a turn footer shows the model only when it changes',
+      (tester) async {
+    await tester.pumpWidget(const ProviderScope(
+        child: MaterialApp(
+            home: Scaffold(
+                body: TranscriptFeed(
+                    detailRef: ToolDetailRef.live('s'),
+                    stickToBottom: false,
+                    entries: [
+          Entry(id: 'u1', kind: EntryKind.user, text: 'one'),
+          Entry(id: 'n1', kind: EntryKind.turnEnd, modelName: 'Model A', durationMs: 1000),
+          Entry(id: 'u2', kind: EntryKind.user, text: 'two'),
+          Entry(id: 'n2', kind: EntryKind.turnEnd, modelName: 'Model A', durationMs: 2000),
+          Entry(id: 'u3', kind: EntryKind.user, text: 'three'),
+          Entry(id: 'n3', kind: EntryKind.turnEnd, modelName: 'Model B', durationMs: 3000),
+        ])))));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Model A'), findsOneWidget);
+    expect(find.textContaining('Model B'), findsOneWidget);
+    expect(find.textContaining('2.0s'), findsOneWidget); // the second footer stays
+  });
+
+  testWidgets('a feed that empties reports the header as visible',
+      (tester) async {
+    final seen = <bool>[];
+    Widget feed(List<Entry> entries) => ProviderScope(
+        child: MaterialApp(
+            home: Scaffold(
+                body: TranscriptFeed(
+                    key: const ValueKey('feed'),
+                    detailRef: const ToolDetailRef.live('s'),
+                    entries: entries,
+                    header: const SizedBox(height: 80, child: Text('HEADER')),
+                    onHeaderVisible: seen.add))));
+    await tester.pumpWidget(feed(_chunks(50)));
+    await tester.pumpAndSettle();
+    expect(seen.last, isFalse);
+    await tester.pumpWidget(feed(const []));
+    await tester.pumpAndSettle();
+    expect(seen.last, isTrue);
+  });
+
+  testWidgets('a following feed tails the live row when work starts',
+      (tester) async {
+    final entries = [
+      ..._chunks(50),
+      const Entry(id: 'a', kind: EntryKind.tool, toolName: 'ZZAlpha'),
+      const Entry(id: 'b', kind: EntryKind.tool, toolName: 'ZZBeta'),
+    ];
+    Widget feed(bool live) => ProviderScope(
+        child: MaterialApp(
+            home: Scaffold(
+                body: TranscriptFeed(
+                    key: const ValueKey('feed'),
+                    detailRef: const ToolDetailRef.live('s'),
+                    entries: entries,
+                    live: live))));
+    await tester.pumpWidget(feed(false));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(feed(true));
+    await tester.pumpAndSettle();
+    final p = _controller(tester).position;
+    expect(p.pixels, closeTo(p.maxScrollExtent, 1));
+    expect(find.text('ZZBeta').hitTestable(), findsOneWidget);
+  });
+
+  testWidgets('a bottom inset adds room below the last row', (tester) async {
+    Widget feed(double inset) => ProviderScope(
+        child: MaterialApp(
+            home: Scaffold(
+                body: TranscriptFeed(
+                    key: const ValueKey('feed'),
+                    detailRef: const ToolDetailRef.live('s'),
+                    entries: _chunks(50),
+                    bottomInset: inset))));
+    await tester.pumpWidget(feed(0));
+    await tester.pumpAndSettle();
+    final without = _controller(tester).position.maxScrollExtent;
+    await tester.pumpWidget(feed(100));
+    await tester.pumpAndSettle();
+    expect(_controller(tester).position.maxScrollExtent,
+        closeTo(without + 100, 1));
+  });
+
+  testWidgets('a feed at the bottom stays there when the inset grows',
+      (tester) async {
+    Widget feed(double inset) => ProviderScope(
+        child: MaterialApp(
+            home: Scaffold(
+                body: TranscriptFeed(
+                    key: const ValueKey('feed'),
+                    detailRef: const ToolDetailRef.live('s'),
+                    entries: _chunks(50),
+                    bottomInset: inset))));
+    await tester.pumpWidget(feed(0));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(feed(100));
+    await tester.pumpAndSettle();
+    final p = _controller(tester).position;
+    expect(p.pixels, closeTo(p.maxScrollExtent, 1));
+  });
+
+  testWidgets('a header shows above the first row', (tester) async {
+    await tester.pumpWidget(ProviderScope(
+        child: MaterialApp(
+            home: Scaffold(
+                body: TranscriptFeed(
+                    detailRef: const ToolDetailRef.live('s'),
+                    entries: _chunks(2),
+                    header: const Text('HEADER'))))));
+    expect(
+        tester.getTopLeft(find.text('HEADER')).dy,
+        lessThan(
+            tester.getTopLeft(find.textContaining('message number 0')).dy));
+  });
+
+  testWidgets('header visibility follows the scroll offset', (tester) async {
+    final seen = <bool>[];
+    await tester.pumpWidget(ProviderScope(
+        child: MaterialApp(
+            home: Scaffold(
+                body: TranscriptFeed(
+                    detailRef: const ToolDetailRef.live('s'),
+                    entries: _chunks(50),
+                    header: const SizedBox(height: 80, child: Text('HEADER')),
+                    onHeaderVisible: seen.add)))));
+    await tester.pumpAndSettle();
+    expect(seen.last, isFalse); // opens at the bottom
+    _controller(tester).jumpTo(0);
+    await tester.pump();
+    expect(seen.last, isTrue);
+  });
+
+  testWidgets('the empty state shows the header', (tester) async {
+    await tester.pumpWidget(const ProviderScope(
+        child: MaterialApp(
+            home: Scaffold(
+                body: TranscriptFeed(
+                    detailRef: ToolDetailRef.live('s'),
+                    entries: [],
+                    header: Text('HEADER'))))));
+    expect(find.text('HEADER'), findsOneWidget);
+    expect(find.textContaining('No transcript'), findsOneWidget);
+  });
+
   testWidgets('renders chunks', (tester) async {
     await tester.pumpWidget(const ProviderScope(
         child: MaterialApp(
@@ -102,11 +246,14 @@ void main() {
     c.jumpTo(c.position.maxScrollExtent / 2);
     await tester.pump();
     final bottom = c.offset + 500;
+    debugPrint("DBG start off=${c.offset} max=${c.position.maxScrollExtent}");
 
     await tester.pumpWidget(sized(200)); // the keyboard opens
     expect(c.offset + 200, closeTo(bottom, 1));
 
+    debugPrint("DBG after shrink off=${c.offset} max=${c.position.maxScrollExtent}");
     await tester.pumpWidget(sized(500)); // the keyboard closes
+    debugPrint("DBG after grow off=${c.offset} max=${c.position.maxScrollExtent}");
     expect(c.offset + 500, closeTo(bottom, 1));
   });
 

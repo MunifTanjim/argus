@@ -23,8 +23,8 @@ import 'project_actions.dart';
 import 'route_observer.dart';
 import 'session_actions.dart';
 import 'session_composer.dart';
-import 'session_tasks_screen.dart';
-import 'status_style.dart';
+import 'session_chips.dart';
+import 'session_view_header.dart';
 import 'theme.dart';
 import 'transcript_feed.dart';
 import 'workspace_screen.dart';
@@ -65,6 +65,11 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
   StreamSubscription<RpcMessage>? _tasksSub;
   RouteObserver<PageRoute<dynamic>>? _observer;
   final _feedKey = GlobalKey<TranscriptFeedState>();
+  // The large header is on screen; the app bar title stays hidden. A notifier,
+  // so a change rebuilds only the title and not the transcript.
+  final _headerVisible = ValueNotifier(true);
+  // The chip row's height; the transcript makes this much room under it.
+  double _chipsHeight = 0;
 
   String get _sid => widget.session.id;
 
@@ -168,6 +173,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     _releaseActive();
     _sub?.dispose();
     _tasksSub?.cancel();
+    _headerVisible.dispose();
     super.dispose();
   }
 
@@ -177,6 +183,43 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     Navigator.of(context).popUntil((r) => r.isFirst);
     ref.read(rememberedSessionsProvider.notifier).clear(workspaceId);
     ref.read(scopeProvider.notifier).state = workspaceId;
+  }
+
+  // The large header's details, for when it is far above in the transcript.
+  // The sheet follows the live session; the transcript keeps its place.
+  void _showDetails() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (_) => Consumer(
+        builder: (context, ref, _) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: SessionViewHeader(
+              session: ref.watch(sessionsProvider)[_sid] ?? widget.session,
+              showDivider: false,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // The large header over a state with no feed; it stays in view, so the app
+  // bar title stays hidden.
+  Widget _withHeader(Session live, Widget body) {
+    if (!_headerVisible.value) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _headerVisible.value = true;
+      });
+    }
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+        child: SessionViewHeader(session: live),
+      ),
+      Expanded(child: body),
+    ]);
   }
 
   @override
@@ -212,7 +255,8 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     );
 
     final s = widget.session;
-    final live = ref.watch(sessionsProvider)[_sid] ?? s;
+    // Rebuild for this session's updates only, not every session's.
+    final live = ref.watch(sessionsProvider.select((m) => m[_sid])) ?? s;
     // A node older than the app's minimum may not understand our requests.
     final outdated = ref.watch(
         outdatedNodeIdsProvider.select((ids) => ids.contains(live.nodeId)));
@@ -230,9 +274,6 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     final st = ref.watch(transcriptProvider(_openKey ?? _cacheKey(live)));
     final conn = ref.watch(connStateProvider);
     final connError = ref.watch(connErrorProvider);
-    final title = live.displayTitle;
-    final tasks = ref.watch(tasksProvider(_sid));
-    final hasTasks = !tasks.hasError && (tasks.value?.isNotEmpty ?? false);
     final wsId = live.workspaceId;
     final hasWorkspace = wsId != null &&
         wsId.isNotEmpty &&
@@ -242,51 +283,30 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
-        title: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text(statusGlyph(live.status),
-                    style: TextStyle(
-                        fontFamily: monoFamily,
-                        fontSize: 16,
-                        color: sessionColor(live, context.tokens))),
-                const SizedBox(width: 8),
-                Flexible(
-                    child: Text(title,
-                        maxLines: 1, overflow: TextOverflow.ellipsis)),
-                if (live.branch?.isNotEmpty ?? false)
-                  Tooltip(
-                    message: live.branch!,
-                    triggerMode: TooltipTriggerMode.tap,
-                    child: const Padding(
-                      padding: EdgeInsets.only(left: 8),
-                      child: Icon(Icons.commit, size: 18),
-                    ),
-                  ),
-                const Spacer(),
-                if (live.frontend != FrontendKind.tmux)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: Chip(
-                      label: Text(live.frontend.name),
-                      padding: EdgeInsets.zero,
-                      labelPadding:
-                          const EdgeInsets.symmetric(horizontal: 6),
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
-              ],
+        // The large header at the top of the transcript holds the details;
+        // this one-line title shows once that header scrolls away.
+        // Hidden, it takes no taps; shown, a tap opens the details in place.
+        title: ValueListenableBuilder(
+          valueListenable: _headerVisible,
+          builder: (_, headerVisible, title) => IgnorePointer(
+            ignoring: headerVisible,
+            child: AnimatedOpacity(
+              opacity: headerVisible ? 0 : 1,
+              duration: const Duration(milliseconds: 150),
+              child: title,
             ),
-            if (live.displayName != null)
-              Text(live.displayName!,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: mono.copyWith(color: context.tokens.textDim)),
-          ],
+          ),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(context.tokens.radius),
+              onTap: _showDetails,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: SessionTitle(session: live),
+              ),
+            ),
+          ),
         ),
         actions: [
           IconButton(
@@ -303,13 +323,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
           PopupMenuButton<String>(
             position: PopupMenuPosition.under,
             onSelected: (value) async {
-              if (value == 'tasks') {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => SessionTasksScreen(session: live),
-                  ),
-                );
-              } else if (value == 'workspace' && hasWorkspace) {
+              if (value == 'workspace' && hasWorkspace) {
                 _showWorkspace(wsId);
               } else if (value == 'changes' && hasWorkspace) {
                 Navigator.of(context).push(
@@ -333,15 +347,6 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
               }
             },
             itemBuilder: (_) => [
-              if (hasTasks)
-                const PopupMenuItem<String>(
-                  value: 'tasks',
-                  child: ListTile(
-                    leading: Icon(Icons.checklist),
-                    title: Text('Tasks'),
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                ),
               if (hasWorkspace) ...const [
                 PopupMenuItem<String>(
                   value: 'workspace',
@@ -406,17 +411,60 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                 builder: (context, box) => Column(
                   children: [
                     Expanded(
-                      // Spinner until the first snapshot arrives; error stops it.
-                      child: switch (live.status) {
-                        SessionStatus.starting => const _StartingNotice(),
-                        _ when !st.loaded && st.error == null =>
-                          const Center(child: CircularProgressIndicator()),
-                        _ => TranscriptFeed(
-                            key: _feedKey,
-                            detailRef:
-                                ToolDetailRef.live(_sid, agent: live.agent),
-                            entries: st.entries),
-                      },
+                      // The chips float over the transcript's bottom edge, so
+                      // the transcript shows around them.
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            // Spinner until the first snapshot arrives; error
+                            // stops it.
+                            child: switch (live.status) {
+                              SessionStatus.starting => _withHeader(
+                                live,
+                                const _StartingNotice(),
+                              ),
+                              _ when !st.loaded && st.error == null =>
+                                _withHeader(
+                                  live,
+                                  const Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                ),
+                              _ => TranscriptFeed(
+                                key: _feedKey,
+                                detailRef: ToolDetailRef.live(
+                                  _sid,
+                                  agent: live.agent,
+                                ),
+                                entries: st.entries,
+                                bottomInset: _chipsHeight,
+                                live: live.status == SessionStatus.working,
+                                header: SessionViewHeader(session: live),
+                                onHeaderVisible: (v) =>
+                                    _headerVisible.value = v,
+                              ),
+                            },
+                          ),
+                          // Not tied to the composer: a dead session's tasks
+                          // and changes stay one tap away.
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: SessionChips(
+                              session: live,
+                              workspaceId: hasWorkspace ? wsId : null,
+                              bottom: !_gone &&
+                                      live.status != SessionStatus.dead
+                                  ? 0
+                                  : 6,
+                              onHeight: (h) {
+                                if (mounted) setState(() => _chipsHeight = h);
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     if (!_gone && live.status != SessionStatus.dead)
                       ConstrainedBox(

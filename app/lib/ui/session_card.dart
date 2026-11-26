@@ -86,7 +86,7 @@ class SessionCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: context.tokens.textSecondary, fontSize: 13)),
           ],
-          if (_metaParts(s, context.tokens, agent: false).isNotEmpty) ...[
+          if (sessionMetaParts(s, context.tokens, agent: false).isNotEmpty) ...[
             const SizedBox(height: 6),
             _metaLine(s, context.tokens,
                 agent: false, sep: '  ·  ', style: mono),
@@ -239,7 +239,7 @@ class SessionCard extends StatelessWidget {
 /// The parts of a card's meta line, each with its color: the model in its own
 /// color (readable on the palette), the context in its threshold color, and
 /// the rest dim. Quiet rows lead with the agent.
-List<(String, Color)> _metaParts(Session s, ArgusTokens t,
+List<(String, Color)> sessionMetaParts(Session s, ArgusTokens t,
     {required bool agent}) {
   final sum = s.summary;
   return [
@@ -250,14 +250,14 @@ List<(String, Color)> _metaParts(Session s, ArgusTokens t,
         readableOn(hexColor(sum.modelColor) ?? t.textDim, t),
       ),
     if (sum?.hasContext ?? false)
-      ('${sum!.contextPct.round()}% ctx', contextColor(sum.contextPct, t)),
+      (fmtContextPct(sum!.contextPct), contextColor(sum.contextPct, t)),
     if ((sum?.tokens ?? 0) > 0) ('${sum!.tokens} tok', t.textDim),
   ];
 }
 
 Widget _metaLine(Session s, ArgusTokens t,
     {required bool agent, required String sep, required TextStyle style}) {
-  final parts = _metaParts(s, t, agent: agent);
+  final parts = sessionMetaParts(s, t, agent: agent);
   return Text.rich(
     TextSpan(
       style: style.copyWith(color: t.textDim),

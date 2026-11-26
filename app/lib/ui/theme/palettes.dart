@@ -73,7 +73,6 @@ const ArgusPalette gruvboxDark = ArgusPalette(
     busy: _gruvboxNeutralYellow,
     workingBadge: Color(0xFF689d6a), // neutral aqua
     thinking: _gruvboxNeutralYellow,
-    toolCall: Color(0xFF458588), // neutral blue
     changeModified: _gruvboxNeutralYellow,
     commitHash: _gruvboxNeutralYellow,
     syntaxComment: Color(0xFF665c54),

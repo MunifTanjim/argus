@@ -23,8 +23,8 @@ import 'package:argus/state/transcript.dart';
 import 'package:argus/state/transcript_controller.dart';
 import 'package:argus/ui/session_composer.dart';
 import 'package:argus/ui/session_detail_screen.dart';
+import 'package:argus/ui/session_view_header.dart';
 import 'package:argus/ui/workspace_screen.dart';
-import 'package:super_sliver_list/super_sliver_list.dart';
 import '../support/fake_gateway_client.dart';
 import '../support/fake_session_repository.dart';
 
@@ -53,11 +53,14 @@ Session _s({
   String? workspaceId,
   String? nodeId,
   bool offline = false,
+  String status = 'working',
+  Map<String, dynamic>? interaction,
 }) =>
     Session.fromJson({
       'id': 'mac:%1',
       'agent': 't',
-      'status': 'working',
+      'status': status,
+      'interaction': ?interaction,
       'source': 'hooked',
       'frontend': 'tmux',
       'tmux': {
@@ -183,6 +186,11 @@ List<Override> _baseOverrides() => [
           .overrideWith(() => _SeededTranscript(const [])),
     ];
 
+double _titleOpacity(WidgetTester tester) => tester
+    .widget<AnimatedOpacity>(find.ancestor(
+        of: find.byType(SessionTitle), matching: find.byType(AnimatedOpacity)))
+    .opacity;
+
 void main() {
   testWidgets('renders chunk feed from the store', (tester) async {
     await tester.pumpWidget(_app([
@@ -205,15 +213,67 @@ void main() {
     expect(find.textContaining('No transcript'), findsOneWidget);
   });
 
-  testWidgets('shows the session name as an AppBar subtitle', (tester) async {
-    await tester.pumpWidget(ProviderScope(
-      overrides: _baseOverrides(),
-      child:
-          MaterialApp(home: SessionDetailScreen(session: _s(name: 'auth-refactor'))),
-    ));
-    await tester.pump();
-    expect(find.text('argus'), findsOneWidget);
-    expect(find.text('auth-refactor'), findsOneWidget);
+  for (final (status, shown) in [('working', true), ('idle', false)]) {
+    testWidgets('a $status session ${shown ? 'shows' : 'folds'} its newest tool',
+        (tester) async {
+      await tester.pumpWidget(_app([
+        gatewayProvider.overrideWithValue(null),
+        transcriptProvider('mac:%1').overrideWith(() => _SeededTranscript(const [
+              Entry(id: 'u', kind: EntryKind.user, text: 'go'),
+              Entry(id: 'a', kind: EntryKind.tool, toolName: 'ZZAlpha'),
+              Entry(id: 'b', kind: EntryKind.tool, toolName: 'ZZBeta'),
+            ])),
+      ], session: _s(status: status)));
+      await tester.pumpAndSettle();
+      expect(find.text('ZZBeta'), shown ? findsOneWidget : findsNothing);
+    });
+  }
+
+  group('session details sheet', () {
+    List<Override> deep() => [
+          gatewayProvider.overrideWithValue(null),
+          transcriptProvider('mac:%1').overrideWith(() => _SeededTranscript([
+                for (var i = 0; i < 50; i++)
+                  Entry(id: 'u$i', kind: EntryKind.user, text: 'message $i'),
+              ])),
+        ];
+
+    testWidgets('the compact title shows that it opens', (tester) async {
+      await tester.pumpWidget(_app(deep(), session: _s(name: 'auth-refactor')));
+      await tester.pumpAndSettle();
+      expect(
+          find.descendant(
+              of: find.byType(SessionTitle),
+              matching: find.byIcon(Icons.expand_more)),
+          findsOneWidget);
+    });
+
+    testWidgets('a tap on the compact title opens the details in place',
+        (tester) async {
+      await tester.pumpWidget(_app(deep(),
+          session: _s(name: 'auth-refactor', branch: 'feat/auth')));
+      await tester.pumpAndSettle();
+      final feed =
+          tester.widget<CustomScrollView>(find.byType(CustomScrollView));
+      final before = feed.controller!.offset;
+      await tester.tap(find.byType(SessionTitle));
+      await tester.pumpAndSettle();
+      final sheet = find.byType(BottomSheet);
+      expect(sheet, findsOneWidget);
+      expect(
+          find.descendant(of: sheet, matching: find.textContaining('⎇ feat/auth')),
+          findsOneWidget);
+      expect(feed.controller!.offset, before);
+    });
+
+    testWidgets('the hidden title does not open the sheet', (tester) async {
+      await tester.pumpWidget(_app(_baseOverrides(),
+          session: _s(name: 'auth-refactor')));
+      await tester.pump();
+      await tester.tap(find.byType(SessionTitle), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(find.byType(BottomSheet), findsNothing);
+    });
   });
 
   testWidgets('shows terminal icon button in AppBar', (tester) async {
@@ -226,19 +286,34 @@ void main() {
     expect(find.byIcon(Icons.terminal), findsOneWidget);
   });
 
-  testWidgets('shows branch icon with branch name tooltip when set',
-      (tester) async {
+  testWidgets('the large header shows in the empty transcript', (tester) async {
     await tester.pumpWidget(_app(_baseOverrides(),
-        session: _s(branch: 'feat/session-git-branch')));
+        session: _s(name: 'auth-refactor', branch: 'feat/auth')));
     await tester.pump();
-    expect(find.byIcon(Icons.commit), findsOneWidget);
-    expect(find.byTooltip('feat/session-git-branch'), findsOneWidget);
+    expect(find.byType(SessionViewHeader), findsOneWidget);
+    expect(find.text('argus'), findsOneWidget);
+    expect(find.textContaining('⎇ feat/auth'), findsOneWidget);
   });
 
-  testWidgets('no branch icon when branch is absent', (tester) async {
-    await tester.pumpWidget(_app(_baseOverrides()));
+  testWidgets('the compact title is hidden while the large header shows',
+      (tester) async {
+    await tester.pumpWidget(
+        _app(_baseOverrides(), session: _s(name: 'auth-refactor')));
     await tester.pump();
-    expect(find.byIcon(Icons.commit), findsNothing);
+    expect(_titleOpacity(tester), 0);
+  });
+
+  testWidgets('the compact title shows once the header scrolls away',
+      (tester) async {
+    await tester.pumpWidget(_app([
+      gatewayProvider.overrideWithValue(null),
+      transcriptProvider('mac:%1').overrideWith(() => _SeededTranscript([
+            for (var i = 0; i < 50; i++)
+              Entry(id: 'u$i', kind: EntryKind.user, text: 'message $i'),
+          ])),
+    ], session: _s(name: 'auth-refactor')));
+    await tester.pumpAndSettle();
+    expect(_titleOpacity(tester), 1);
   });
 
   testWidgets('shows Changes and Files when the workspace is in the tree',
@@ -373,7 +448,7 @@ void main() {
     expect(find.text('This workspace is no longer available.'), findsOneWidget);
   });
 
-  group('Tasks item', () {
+  group('Tasks chip', () {
     late List<Map<String, dynamic>> tasks;
     late FakeGatewayClient client;
 
@@ -397,9 +472,85 @@ void main() {
     testWidgets('is hidden when the list is empty', (tester) async {
       await tester.pumpWidget(app());
       await tester.pump();
+      expect(find.byKey(const Key('chip-tasks')), findsNothing);
+      expect(taskCalls(), 1);
+    });
+
+    testWidgets('a prompt dragged to full height leaves room for the chips',
+        (tester) async {
+      tester.view.physicalSize = const Size(400, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      tasks = [
+        {'id': '1', 'subject': 'write tests', 'status': 'pending'},
+      ];
+      final plan = List.generate(100, (i) => 'Step $i').join('\n\n');
+      await tester.pumpWidget(_app([
+        gatewayProvider.overrideWithValue(_Manager(client)),
+        transcriptProvider('mac:%1')
+            .overrideWith(() => _SeededTranscript(const [])),
+        transcriptRepositoryProvider.overrideWithValue(_RecordingRepo()),
+      ],
+          session: _s(
+              status: 'awaiting_input',
+              interaction: {'kind': 'plan', 'plan': plan})));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('chip-tasks')), findsOneWidget);
+      await tester.drag(find.text('Plan review').first, const Offset(0, -1000));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the chips float over the bottom of the transcript',
+        (tester) async {
+      tasks = [
+        {'id': '1', 'subject': 'write tests', 'status': 'pending'},
+      ];
+      await tester.pumpWidget(_app([
+        gatewayProvider.overrideWithValue(_Manager(client)),
+        transcriptProvider('mac:%1').overrideWith(() => _SeededTranscript([
+              for (var i = 0; i < 50; i++)
+                Entry(id: 'u$i', kind: EntryKind.user, text: 'message $i'),
+            ])),
+        transcriptRepositoryProvider.overrideWithValue(_RecordingRepo()),
+      ]));
+      await tester.pumpAndSettle();
+      final chips = tester.getRect(find.byKey(const Key('chip-tasks')));
+      final feed = tester.getRect(find.byType(CustomScrollView));
+      expect(chips.bottom, lessThanOrEqualTo(feed.bottom));
+      expect(chips.top, greaterThan(feed.top));
+      // The last row scrolls clear of the chips.
+      expect(tester.getRect(find.textContaining('message 49')).bottom,
+          lessThanOrEqualTo(chips.top));
+    });
+
+    testWidgets('the ⋮ menu has no Tasks item', (tester) async {
+      tasks = [
+        {'id': '1', 'subject': 'write tests', 'status': 'pending'},
+      ];
+      await tester.pumpWidget(app());
+      await tester.pump();
       await _openMenu(tester);
       expect(find.text('Tasks'), findsNothing);
-      expect(taskCalls(), 1);
+    });
+
+    testWidgets('a dead session keeps the chips and drops the composer',
+        (tester) async {
+      tasks = [
+        {'id': '1', 'subject': 'write tests', 'status': 'pending'},
+      ];
+      await tester.pumpWidget(_app([
+        gatewayProvider.overrideWithValue(_Manager(client)),
+        transcriptProvider('mac:%1')
+            .overrideWith(() => _SeededTranscript(const [])),
+        transcriptRepositoryProvider.overrideWithValue(_RecordingRepo()),
+      ], session: _s(status: 'dead')));
+      await tester.pumpAndSettle();
+      expect(find.byType(SessionComposer), findsNothing);
+      expect(find.byKey(const Key('chip-tasks')), findsOneWidget);
+      // Clear of the screen edge when no composer sits under the chips.
+      expect(tester.getRect(find.byKey(const Key('chip-tasks'))).bottom,
+          lessThanOrEqualTo(tester.getRect(find.byType(Scaffold)).bottom - 6));
     });
 
     testWidgets('is shown when the list is non-empty', (tester) async {
@@ -407,9 +558,8 @@ void main() {
         {'id': '1', 'subject': 'write tests', 'status': 'pending'},
       ];
       await tester.pumpWidget(app());
-      await tester.pump();
-      await _openMenu(tester);
-      expect(find.text('Tasks'), findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('chip-tasks')), findsOneWidget);
     });
 
     testWidgets('appears after tasks.changed fills the list', (tester) async {
@@ -426,8 +576,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(taskCalls(), 2);
 
-      await _openMenu(tester);
-      expect(find.text('Tasks'), findsOneWidget);
+      expect(find.byKey(const Key('chip-tasks')), findsOneWidget);
     });
   });
 
@@ -730,9 +879,11 @@ void main() {
     await tester.pump();
     expect(find.textContaining('startup prompt'), findsOneWidget);
     expect(find.text('Starting…'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'early');
+    await tester.pump();
     expect(find.byTooltip('Wait for idle to send'), findsOneWidget);
     final send = tester
-        .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.send));
+        .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.arrow_upward));
     expect(send.onPressed, isNull);
   });
 
@@ -763,13 +914,14 @@ void main() {
     await tester.pumpAndSettle();
 
     final c = tester
-        .widget<SuperListView>(find.byType(SuperListView))
+        .widget<CustomScrollView>(find.byType(CustomScrollView))
         .controller!;
     c.jumpTo(c.position.maxScrollExtent - c.position.viewportDimension / 4);
     await tester.pump();
 
     await tester.enterText(find.byType(TextField), 'next task');
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200)); // the box grows
     await tester.tap(find.byTooltip('Send'));
     await tester.pumpAndSettle();
     expect(c.offset, closeTo(c.position.maxScrollExtent, 1));
