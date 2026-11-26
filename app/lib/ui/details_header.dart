@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'code_block.dart';
 import 'node_header.dart';
 import 'theme.dart';
 import 'usage_format.dart';
@@ -106,4 +107,40 @@ Future<void> showDetailsSheet(BuildContext context, WidgetBuilder builder) {
       ),
     ),
   );
+}
+
+/// A details sheet's full path; a tap closes the [sheet] and copies the path.
+class DetailsPathRow extends StatelessWidget {
+  const DetailsPathRow({super.key, required this.path, required this.sheet});
+
+  final String path;
+
+  /// The sheet's own context, closed before the copy.
+  final BuildContext sheet;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return InkWell(
+      borderRadius: BorderRadius.circular(t.radius),
+      // Copies while the sheet is still mounted; the notice shows on the
+      // screen under it.
+      onTap: () {
+        copyToClipboard(sheet, path);
+        Navigator.of(sheet).pop();
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(path, style: mono.copyWith(color: t.textSecondary)),
+            ),
+            const SizedBox(width: 8),
+            Icon(Icons.copy, size: 16, color: t.textDim),
+          ],
+        ),
+      ),
+    );
+  }
 }

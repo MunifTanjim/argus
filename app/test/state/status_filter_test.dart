@@ -45,18 +45,19 @@ void main() {
     expect(tileCounts(const []).values, everyElement(0));
   });
 
-  test('toggle sets and clears', () {
+  test('toggle adds and removes; scopes are separate', () {
     final c = ProviderContainer();
     addTearDown(c.dispose);
-    final n = c.read(statusFilterProvider.notifier);
-    n.toggle(TileStatus.waiting);
-    expect(c.read(statusFilterProvider), TileStatus.waiting);
-    n.toggle(TileStatus.blocked);
-    expect(c.read(statusFilterProvider), TileStatus.blocked);
-    n.toggle(TileStatus.blocked);
-    expect(c.read(statusFilterProvider), isNull);
-    n.toggle(TileStatus.working);
-    n.clear();
-    expect(c.read(statusFilterProvider), isNull);
+    final home = c.read(statusFilterProvider(homeStatusScope).notifier);
+    expect(c.read(statusFilterProvider(homeStatusScope)), isEmpty);
+    home.toggle(TileStatus.waiting);
+    home.toggle(TileStatus.blocked);
+    expect(c.read(statusFilterProvider(homeStatusScope)),
+        {TileStatus.waiting, TileStatus.blocked});
+    home.toggle(TileStatus.waiting);
+    expect(c.read(statusFilterProvider(homeStatusScope)), {TileStatus.blocked});
+    expect(c.read(statusFilterProvider('mac:ws1')), isEmpty);
+    home.clear();
+    expect(c.read(statusFilterProvider(homeStatusScope)), isEmpty);
   });
 }

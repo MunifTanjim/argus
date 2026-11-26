@@ -7,12 +7,6 @@ import 'package:argus/state/session_filter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-Session _s(String status) => Session.fromJson(
-  jsonDecode(
-    '{"id":"n:1","agent":"t","status":"$status","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"r"}',
-  ),
-);
-
 class _FakeKv implements SecureKv {
   _FakeKv(this.m);
   final Map<String, String> m;
@@ -26,21 +20,13 @@ class _FakeKv implements SecureKv {
 
 ProviderContainer _groupContainer(_FakeKv kv) {
   final c = ProviderContainer(
-      overrides: [groupByStoreProvider.overrideWithValue(GroupByStore(kv))]);
+    overrides: [groupByStoreProvider.overrideWithValue(GroupByStore(kv))],
+  );
   addTearDown(c.dispose);
   return c;
 }
 
 void main() {
-  test('active sessions are the running and awaiting ones', () {
-    for (final st in ['discovered', 'starting', 'working', 'awaiting_input']) {
-      expect(isActiveSession(_s(st)), isTrue, reason: st);
-    }
-    for (final st in ['idle', 'dead', 'unknown']) {
-      expect(isActiveSession(_s(st)), isFalse, reason: st);
-    }
-  });
-
   test('a query matches the fields that the card shows', () {
     final s = Session.fromJson(
       jsonDecode(
@@ -67,14 +53,6 @@ void main() {
     expect(c.read(sessionSearchProvider), isNull);
   });
 
-  test('starts on all and toggles', () {
-    final c = ProviderContainer();
-    addTearDown(c.dispose);
-    expect(c.read(activeOnlyProvider), isFalse);
-    c.read(activeOnlyProvider.notifier).toggle();
-    expect(c.read(activeOnlyProvider), isTrue);
-  });
-
   group('group-by', () {
     test('status by default; a choice is saved', () async {
       final kv = _FakeKv({});
@@ -93,8 +71,9 @@ void main() {
     });
 
     test('an unknown stored value falls back to status', () async {
-      final g =
-          await GroupByStore(_FakeKv({'sessions.groupBy': 'folder'})).load();
+      final g = await GroupByStore(
+        _FakeKv({'sessions.groupBy': 'folder'}),
+      ).load();
       expect(g, GroupBy.status);
     });
 
@@ -103,7 +82,9 @@ void main() {
     });
 
     test('a saved host value still wins', () async {
-      final g = await GroupByStore(_FakeKv({'sessions.groupBy': 'host'})).load();
+      final g = await GroupByStore(
+        _FakeKv({'sessions.groupBy': 'host'}),
+      ).load();
       expect(g, GroupBy.host);
     });
 

@@ -1,20 +1,26 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:argus/models/changes.dart';
 import 'package:argus/models/project.dart';
+import 'package:argus/models/session.dart';
 import 'package:argus/models/terminal.dart';
 import 'package:argus/models/workspace_files.dart';
 import 'package:argus/state/control.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/grouping.dart';
 import 'package:argus/state/navigation.dart';
+import 'package:argus/state/sessions.dart';
+import 'package:argus/state/status_filter.dart';
 import 'package:argus/state/terminals.dart';
 import 'package:argus/state/terminals_api.dart';
 import 'package:argus/state/workspace.dart';
 import 'package:argus/transport/connection.dart';
 import 'package:argus/transport/gateway_client.dart';
+import 'package:argus/ui/details_header.dart';
 import 'package:argus/ui/file_view_screen.dart';
 import 'package:argus/ui/session_sections_list.dart';
+import 'package:argus/ui/status_tiles.dart';
 import 'package:argus/ui/workspace_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -33,6 +39,34 @@ const _project = ProjectNode(
   nodeId: 'A',
   workspaces: [_ws],
 );
+
+Session _session(String id, String status, String name) => Session.fromJson(
+  jsonDecode(
+        jsonEncode({
+          'id': id,
+          'agent': 'claude',
+          'status': status,
+          'source': 'hooked',
+          'tmux': {
+            'server': 'argus',
+            'pane_id': '%1',
+            'session_name': 's',
+            'window_index': 0,
+            'current_path': '/p',
+          },
+          'name': name,
+          'workspace_id': _ws.id,
+        }),
+      )
+      as Map<String, dynamic>,
+);
+
+class _SeededSessions extends SessionsNotifier {
+  _SeededSessions(this._seed);
+  final List<Session> _seed;
+  @override
+  Map<String, Session> build() => {for (final s in _seed) s.id: s};
+}
 
 Future<ProviderContainer> _pump(
   WidgetTester tester, {
@@ -111,19 +145,19 @@ class _Terminals extends TerminalsNotifier {
   var loads = 0;
   @override
   TerminalsState build() => const TerminalsState(
-        loaded: true,
-        terminals: [
-          NodeTerminal(id: 'A:@1', nodeId: 'A', command: 'zsh', cwd: '~'),
-          NodeTerminal(
-            id: 'A:@2',
-            nodeId: 'A',
-            name: 'build',
-            command: 'make',
-            cwd: '~/src/argus',
-            workspaceId: 'A:w2',
-          ),
-        ],
-      );
+    loaded: true,
+    terminals: [
+      NodeTerminal(id: 'A:@1', nodeId: 'A', command: 'zsh', cwd: '~'),
+      NodeTerminal(
+        id: 'A:@2',
+        nodeId: 'A',
+        name: 'build',
+        command: 'make',
+        cwd: '~/src/argus',
+        workspaceId: 'A:w2',
+      ),
+    ],
+  );
   @override
   Future<void> load(GatewayClient? client) async => loads++;
 }
@@ -164,6 +198,19 @@ void main() {
     expect(find.text('argus · feat/registry → main'), findsOneWidget);
     expect(find.text('No sessions in this workspace.'), findsOneWidget);
     expect(find.byTooltip('New session'), findsOneWidget);
+  });
+
+  testWidgets('a tap on the header opens the workspace details sheet', (
+    tester,
+  ) async {
+    await _pump(tester);
+    await tester.tap(find.text('argus · feat/registry → main'));
+    await tester.pumpAndSettle();
+    final header = tester.widget<DetailsHeader>(find.byType(DetailsHeader));
+    expect(header.label, 'argus');
+    expect(header.title, 'registry');
+    expect(header.meta.map((m) => m.$1), ['feat/registry → main']);
+    expect(find.text('/src/argus/.worktrees/registry'), findsOneWidget);
   });
 
   testWidgets('terminals tab lists the workspace terminals and spawns there', (
@@ -323,6 +370,49 @@ void main() {
     expect(find.byType(ReconnectBanner), findsNothing);
   });
 
+  testWidgets('sessions tab groups sessions by status', (tester) async {
+    await _pump(tester);
+    final list = tester.widget<SessionSectionsList>(
+      find.byType(SessionSectionsList),
+    );
+    expect(list.groupBy, GroupBy.status);
+  });
+
+  testWidgets('sessions tab shows the status tiles', (tester) async {
+    await _pump(tester);
+    expect(find.byType(StatusTiles), findsOneWidget);
+    expect(tester.widget<StatusTiles>(find.byType(StatusTiles)).scope, _ws.id);
+  });
+
+  testWidgets('sessions tab has no active-only button', (tester) async {
+    await _pump(tester);
+    expect(find.byTooltip('Show active sessions'), findsNothing);
+  });
+
+  testWidgets('workspace filter is separate from the home filter', (
+    tester,
+  ) async {
+    final c = await _pump(
+      tester,
+      overrides: [
+        sessionsProvider.overrideWith(
+          () => _SeededSessions([_session('A:%1', 'idle', 'reconnect-banner')]),
+        ),
+      ],
+    );
+    c
+        .read(statusFilterProvider(homeStatusScope).notifier)
+        .toggle(TileStatus.working);
+    await tester.pump();
+    expect(find.text('reconnect-banner'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('tile-blocked')));
+    await tester.pump();
+    expect(find.text('reconnect-banner'), findsNothing);
+    expect(c.read(statusFilterProvider(_ws.id)), {TileStatus.blocked});
+    expect(c.read(statusFilterProvider(homeStatusScope)), {TileStatus.working});
+  });
+
   testWidgets('files: a failed folder shows the error with Retry', (
     tester,
   ) async {
@@ -397,7 +487,13 @@ void main() {
         workspaceCommitsProvider(_ws.id).overrideWith(
           (ref) async => const CommitList(
             commits: [
-              Commit(sha: 's1', short: 's1', subject: 'x', author: 'me', unixSec: 0),
+              Commit(
+                sha: 's1',
+                short: 's1',
+                subject: 'x',
+                author: 'me',
+                unixSec: 0,
+              ),
             ],
           ),
         ),
@@ -428,9 +524,10 @@ void main() {
     final c = ProviderContainer(
       overrides: [
         gatewayProvider.overrideWithValue(null),
-        workspaceChangedFilesProvider(
-          (_ws.id, ''),
-        ).overrideWith((ref) => pending.future),
+        workspaceChangedFilesProvider((
+          _ws.id,
+          '',
+        )).overrideWith((ref) => pending.future),
         workspaceCommitsProvider(
           _ws.id,
         ).overrideWith((ref) async => const CommitList()),

@@ -1,8 +1,11 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/project.dart';
 import '../state/gateway.dart';
+import '../transport/connection.dart';
 import '../state/left_sidebar.dart';
 import '../state/navigation.dart';
 import '../state/project_tree.dart';
@@ -10,14 +13,16 @@ import '../state/projects.dart';
 import '../state/projects_api.dart';
 import '../state/sessions.dart';
 import 'nerd_icon.dart';
-import 'node_screen.dart';
 import 'project_actions.dart';
+import 'session_sections_list.dart';
 import 'settings_screen.dart';
 import 'shell_drawer.dart';
+import 'fold_header.dart';
+import 'sidebar_filter_bar.dart';
 import 'sidebar_sessions_list.dart';
 import 'spawn_dialog.dart';
+import 'text_measure.dart';
 import 'theme.dart';
-
 
 class ProjectDrawer extends ConsumerStatefulWidget {
   const ProjectDrawer({super.key});
@@ -72,15 +77,6 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
     ).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
   }
 
-  void _openNode(String nodeId, String label) {
-    _close();
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => NodeScreen(nodeId: nodeId, label: label),
-      ),
-    );
-  }
-
   void _showError(String name, String error) => showDialog<void>(
     context: context,
     builder: (ctx) => AlertDialog(
@@ -105,6 +101,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
     final act = workspaceActivity(sessions);
     final rows = buildTreeRows(projects.projects, view);
     final tab = ref.watch(leftSidebarTabProvider);
+    final conn = ref.watch(connStateProvider);
 
     return Material(
       color: context.tokens.surface,
@@ -112,9 +109,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _header(view),
-            _tabs(tab),
-            _search(tab),
+            _header(tab),
             Expanded(
               child: tab == LeftSidebarTab.sessions
                   ? SidebarSessionsList(onOpen: _close)
@@ -158,144 +153,120 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
                       ),
                     ),
             ),
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.only(top: 6, bottom: 10),
-              child: _row(
-                onTap: _openSettings,
-                leading: const Icon(Icons.settings_outlined, size: 18),
-                title: 'Settings',
+            if (conn == ConnState.connected)
+              const Divider(height: 1)
+            else
+              ReconnectBanner(
+                state: conn,
+                message: ref.watch(connErrorProvider),
               ),
-            ),
+            _filterBar(tab, view),
           ],
         ),
       ),
     );
   }
 
-  Widget _header(TreeView view) => Padding(
+  Widget _header(LeftSidebarTab tab) => Padding(
     padding: const EdgeInsets.fromLTRB(16, 8, 4, 4),
     child: Row(
       children: [
-        const Expanded(
-          child: Text(
-            'Argus',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-          ),
-        ),
-        if (ref.watch(leftSidebarTabProvider) == LeftSidebarTab.sessions) ...[
-          _workspaceOnlyToggle(),
-          IconButton(
-            tooltip: 'New session',
-            icon: const Icon(Icons.add),
-            onPressed: _newSession,
-          ),
-        ] else
-          PopupMenuButton<String>(
-            tooltip: 'Tree options',
-            onSelected: (v) {
-              final notifier = ref.read(treeViewProvider.notifier);
-              switch (v) {
-                case 'hidden':
-                  notifier.toggleHidden();
-                case 'gone':
-                  notifier.toggleGone();
-                default:
-                  _refresh();
-              }
-            },
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                value: 'hidden',
-                child: _menuToggle('Show hidden', view.showHidden),
-              ),
-              PopupMenuItem(
-                value: 'gone',
-                child: _menuToggle('Show gone', view.showGone),
-              ),
-              const PopupMenuItem(value: 'refresh', child: Text('Refresh')),
+        Expanded(
+          child: Row(
+            children: [
+              Flexible(child: _tab('Projects', LeftSidebarTab.projects, tab)),
+              const SizedBox(width: 16),
+              Flexible(child: _tab('Sessions', LeftSidebarTab.sessions, tab)),
             ],
           ),
+        ),
+        IconButton(
+          tooltip: 'New session',
+          icon: const Icon(Icons.add),
+          onPressed: _newSession,
+        ),
       ],
     ),
   );
 
-  Widget _workspaceOnlyToggle() {
-    final ws = ref.watch(shownWorkspaceProvider);
-    final on = ref.watch(sidebarSessionsWorkspaceFilterProvider) != null;
-    return IconButton(
-      tooltip: 'This workspace only',
-      isSelected: on,
-      icon: const Icon(Icons.filter_alt_outlined),
-      selectedIcon: const Icon(Icons.filter_alt),
-      onPressed: ws == null
-          ? null
-          : () =>
-                ref.read(sidebarSessionsWorkspaceOnlyProvider.notifier).state =
-                    !on,
+  Widget _tab(String label, LeftSidebarTab value, LeftSidebarTab current) {
+    final on = value == current;
+    return InkWell(
+      borderRadius: BorderRadius.circular(4),
+      onTap: () => ref.read(leftSidebarTabProvider.notifier).set(value),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Container(
+          padding: const EdgeInsets.only(bottom: 2),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                width: 2,
+                color: on ? context.tokens.text : Colors.transparent,
+              ),
+            ),
+          ),
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: on ? FontWeight.w700 : FontWeight.w500,
+              color: on ? null : context.tokens.textDim,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
-  // The menu item takes the tap; the checkbox only shows the state.
-  Widget _menuToggle(String label, bool on) => Row(
-    children: [
-      Expanded(child: Text(label)),
-      const SizedBox(width: 16),
-      IgnorePointer(
-        child: Checkbox(
-          value: on,
-          onChanged: (_) {},
-          visualDensity: VisualDensity.compact,
-          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        ),
-      ),
-    ],
-  );
-
-  Widget _tabs(LeftSidebarTab tab) => Padding(
-    padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-    child: SegmentedButton<LeftSidebarTab>(
-      showSelectedIcon: false,
-      segments: const [
-        ButtonSegment(value: LeftSidebarTab.projects, label: Text('Projects')),
-        ButtonSegment(value: LeftSidebarTab.sessions, label: Text('Sessions')),
-      ],
-      selected: {tab},
-      onSelectionChanged: (s) =>
-          ref.read(leftSidebarTabProvider.notifier).set(s.first),
-    ),
-  );
-
-  Widget _search(LeftSidebarTab tab) => Padding(
-    padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
-    child: SizedBox(
-      height: 36,
-      child: TextField(
-        key: ValueKey(tab),
-        controller: tab == LeftSidebarTab.projects ? _filter : _sessionsFilter,
-        style: const TextStyle(fontSize: 13),
-        decoration: InputDecoration(
-          isDense: true,
-          filled: true,
-          fillColor: context.tokens.canvas,
-          prefixIcon: Icon(Icons.search, size: 16, color: context.tokens.textDim),
-          prefixIconConstraints: const BoxConstraints(minWidth: 40),
-          hintText: tab == LeftSidebarTab.projects
-              ? 'Filter projects'
-              : 'Filter sessions',
-          hintStyle: TextStyle(fontSize: 13, color: context.tokens.textDim),
-          contentPadding: const EdgeInsets.symmetric(vertical: 10),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: BorderSide.none,
-          ),
-        ),
-        onChanged: tab == LeftSidebarTab.projects
-            ? ref.read(treeViewProvider.notifier).setFilter
-            : (q) => ref.read(sidebarSessionsFilterProvider.notifier).state = q,
-      ),
-    ),
-  );
+  Widget _filterBar(LeftSidebarTab tab, TreeView view) {
+    final projectsTab = tab == LeftSidebarTab.projects;
+    final wsOnly = ref.watch(sidebarSessionsWorkspaceFilterProvider) != null;
+    return SidebarFilterBar(
+      key: ValueKey(tab),
+      controller: projectsTab ? _filter : _sessionsFilter,
+      hintText: projectsTab ? 'Filter projects' : 'Filter sessions',
+      onChanged: projectsTab
+          ? ref.read(treeViewProvider.notifier).setFilter
+          : (q) => ref.read(sidebarSessionsFilterProvider.notifier).state = q,
+      options: projectsTab
+          ? [
+              CheckboxMenuButton(
+                value: view.showHidden,
+                onChanged: (_) =>
+                    ref.read(treeViewProvider.notifier).toggleHidden(),
+                child: const Text('Show hidden'),
+              ),
+              CheckboxMenuButton(
+                value: view.showGone,
+                onChanged: (_) =>
+                    ref.read(treeViewProvider.notifier).toggleGone(),
+                child: const Text('Show gone'),
+              ),
+              MenuItemButton(onPressed: _refresh, child: const Text('Refresh')),
+            ]
+          : [
+              CheckboxMenuButton(
+                value: wsOnly,
+                onChanged: ref.watch(shownWorkspaceProvider) == null
+                    ? null
+                    : (_) =>
+                          ref
+                                  .read(
+                                    sidebarSessionsWorkspaceOnlyProvider
+                                        .notifier,
+                                  )
+                                  .state =
+                              !wsOnly,
+                child: const Text('This workspace only'),
+              ),
+            ],
+      optionsActive: projectsTab ? view.showHidden || view.showGone : wsOnly,
+      onSettings: _openSettings,
+    );
+  }
 
   Widget _errorRow(String error) => Padding(
     padding: const EdgeInsets.all(12),
@@ -321,59 +292,12 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
   ) {
     switch (r.kind) {
       case TreeRowKind.node:
-        final badges = r.folded
-            ? _badges(sumActivity(act, r.workspaceIds))
-            : null;
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(8, 10, 8, 0),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: () => ref.read(treeViewProvider.notifier).toggleFold(r.id),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 32),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        r.label.toUpperCase(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: context.tokens.textDim,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.8,
-                        ),
-                      ),
-                    ),
-                    if (badges != null) ...[badges, const SizedBox(width: 8)],
-                    InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () => _openNode(r.id, r.label),
-                      child: SizedBox.square(
-                        dimension: 40,
-                        child: Icon(
-                          Icons.info_outline,
-                          size: 16,
-                          color: context.tokens.textDim,
-                          semanticLabel: 'Node info',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Icon(
-                      r.folded ? Icons.expand_more : Icons.expand_less,
-                      size: 18,
-                      color: context.tokens.textDim,
-                      semanticLabel: r.folded ? 'expand' : 'collapse',
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+        return FoldHeader(
+          inset: true,
+          label: r.label,
+          folded: r.folded,
+          onTap: () => ref.read(treeViewProvider.notifier).toggleFold(r.id),
+          activity: sumActivity(act, r.workspaceIds),
         );
       case TreeRowKind.project:
         return _row(
@@ -441,7 +365,7 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
                 )
               : GitBranchIcon(size: 16, color: context.tokens.textDim),
           title: _title(r),
-          subtitle: r.detail,
+          detail: r.detail != r.label ? r.detail : null,
           trailing: _trailing([
             if (removing.contains(r.id))
               Text(
@@ -474,12 +398,12 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
       ? null
       : Row(mainAxisSize: MainAxisSize.min, children: children);
 
-  Widget? _badges(Activity a) =>
-      a.live > 0 ? _Badges(a) : null;
+  Widget? _badges(Activity a) => a.live > 0 ? ActivityBadges(a) : null;
 
   // The leading icon column plus its gap. A workspace is indented by one
   // column, so its icon sits under its project's name.
-  static const _col = 32.0;
+  static const _col = 24.0;
+  static const _icon = 18.0;
 
   Widget _row({
     required String title,
@@ -488,107 +412,124 @@ class _ProjectDrawerState extends ConsumerState<ProjectDrawer> {
     Widget? leading,
     TextStyle? titleStyle,
     List<Widget> titleSuffix = const [],
-    String? subtitle,
+    String? detail,
     Widget? trailing,
     bool selected = false,
     double indent = 0,
-  }) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-    child: Material(
-      color: selected ? context.tokens.surfaceRaised : Colors.transparent,
-      borderRadius: BorderRadius.circular(8),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(minHeight: subtitle == null ? 40 : 52),
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(8 + indent, 4, 8, 4),
-            child: Row(
-              children: [
-                SizedBox(width: 24, child: Center(child: leading)),
-                const SizedBox(width: _col - 24),
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 14,
-                              ).merge(titleStyle),
-                            ),
-                          ),
-                          for (final w in titleSuffix) ...[
-                            const SizedBox(width: 6),
-                            w,
-                          ],
-                        ],
-                      ),
-                      if (subtitle != null) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: context.tokens.link,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ],
+  }) {
+    final titleText = Text(
+      title,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(fontSize: 14).merge(titleStyle),
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      child: Material(
+        color: selected ? context.tokens.surfaceRaised : Colors.transparent,
+        borderRadius: BorderRadius.circular(context.tokens.radius),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          onLongPress: onLongPress,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 40),
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(8 + indent, 4, 8, 4),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: _icon,
+                    child: Center(child: leading),
                   ),
-                ),
-                if (trailing != null) ...[const SizedBox(width: 8), trailing],
-              ],
+                  const SizedBox(width: _col - _icon),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (detail == null)
+                          Row(
+                            children: [
+                              Flexible(child: titleText),
+                              for (final w in titleSuffix) ...[
+                                const SizedBox(width: 6),
+                                w,
+                              ],
+                            ],
+                          )
+                        else
+                          LayoutBuilder(
+                            builder: (context, box) {
+                              final detailStyle = TextStyle(
+                                color: context.tokens.textDim,
+                                fontSize: 12,
+                                fontFamily: monoFamily,
+                              );
+                              // The name takes the width it needs and the
+                              // branch the rest. When both do not fit, the
+                              // name keeps 60% of the line.
+                              final detailWidth = _detailWidth(
+                                context,
+                                detail,
+                                detailStyle,
+                              );
+                              final nameMax = math.max(
+                                box.maxWidth * 0.6,
+                                box.maxWidth - _detailGap - detailWidth,
+                              );
+                              return Row(
+                                children: [
+                                  ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      maxWidth: nameMax,
+                                    ),
+                                    child: titleText,
+                                  ),
+                                  const SizedBox(width: _detailGap),
+                                  Expanded(
+                                    child: Text(
+                                      detail,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.right,
+                                      style: detailStyle,
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (trailing != null) ...[const SizedBox(width: 8), trailing],
+                ],
+              ),
             ),
           ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
-class _Badges extends StatelessWidget {
-  const _Badges(this.activity);
-  final Activity activity;
+  static const _detailGap = 8.0;
 
-  @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      if (activity.blocked > 0)
-        _badge(context, '${activity.blocked}', context.tokens.blocked),
-      if (activity.waiting > 0)
-        _badge(context, '${activity.waiting}', context.tokens.waiting),
-      if (activity.working > 0)
-        _badge(context, '${activity.working}', context.tokens.workingBadge),
-      if (activity.idle > 0) _badge(context, '${activity.idle}', context.tokens.textDim),
-    ],
-  );
+  // Branch widths by text, for the text scale in [_widthsScaler]. The drawer
+  // rebuilds on every session update; the branches seldom change.
+  final _detailWidths = <String, double>{};
+  TextScaler? _widthsScaler;
 
-  Widget _badge(BuildContext context, String text, Color color) => Container(
-    margin: const EdgeInsets.only(left: 4),
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-    decoration: BoxDecoration(
-      color: color,
-      borderRadius: BorderRadius.circular(8),
-    ),
-    child: Text(
-      text,
-      style: TextStyle(
-        color: context.tokens.canvas,
-        fontSize: 10,
-        fontWeight: FontWeight.w700,
-      ),
-    ),
-  );
+  double _detailWidth(BuildContext context, String detail, TextStyle style) {
+    final scaler = MediaQuery.textScalerOf(context);
+    if (scaler != _widthsScaler) {
+      _detailWidths.clear();
+      _widthsScaler = scaler;
+    }
+    return _detailWidths[detail] ??= measureText(
+      context,
+      TextSpan(text: detail),
+      style,
+    ).width;
+  }
 }

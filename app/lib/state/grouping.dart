@@ -230,9 +230,7 @@ List<SessionSection> buildSections(
       .toList()
     ..sort((a, b) {
       final c = Session.compareBlocked(a, b);
-      if (c != 0) return c;
-      final h = _host(a).compareTo(_host(b));
-      return h != 0 ? h : a.id.compareTo(b.id);
+      return c != 0 ? c : Session.compareActivity(a, b);
     });
 
   final groups = <String, _Group>{};
@@ -274,7 +272,7 @@ List<SessionSection> buildSections(
         other: g.rank == _rankOther,
         showNode: multiNode && !g.namesHost,
         offline: g.sessions.every((s) => s.offline),
-        sessions: g.sessions..sort((a, b) => a.id.compareTo(b.id)),
+        sessions: g.sessions..sort(Session.compareActivity),
       ),
   ];
 }

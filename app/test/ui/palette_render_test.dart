@@ -2,6 +2,7 @@ import 'package:argus/pairing/gateway_store.dart';
 import 'package:argus/state/appearance.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/grouping.dart';
+import 'package:argus/state/status_filter.dart';
 import 'package:argus/ui/appearance_screen.dart';
 import 'package:argus/ui/blocked_card.dart';
 import 'package:argus/ui/session_sections_list.dart';
@@ -70,12 +71,15 @@ void main() {
             Scaffold(
               body: Column(
                 children: [
-                  StatusTiles(sessions: homeFixtureSessions),
+                  StatusTiles(
+                    sessions: homeFixtureSessions,
+                    scope: homeStatusScope,
+                  ),
                   Expanded(
                     child: SessionSectionsList(
                       sessions: homeFixtureSessions,
                       groupBy: GroupBy.status,
-                      applyStatusFilter: true,
+                      statusScope: homeStatusScope,
                     ),
                   ),
                 ],
@@ -91,9 +95,7 @@ void main() {
         await _render(
           tester,
           p,
-          Scaffold(
-            body: BlockedCard(session: blocked, showNode: true),
-          ),
+          Scaffold(body: BlockedCard(session: blocked, showNode: true)),
         );
         expect(find.text('flutter test'), findsOneWidget);
       });

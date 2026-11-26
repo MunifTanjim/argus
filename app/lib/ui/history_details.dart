@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../models/history.dart';
 import 'agent_badge.dart';
-import 'code_block.dart';
 import 'details_header.dart';
 import 'history_format.dart';
 import 'theme.dart';
@@ -128,28 +127,7 @@ Future<void> showHistoryProjectDetails(BuildContext context, HistoryProject p) {
         ),
         if (p.cwd.isNotEmpty) ...[
           const SizedBox(height: 12),
-          InkWell(
-            borderRadius: BorderRadius.circular(t.radius),
-            onTap: () {
-              Navigator.of(sheet).pop();
-              copyToClipboard(context, p.cwd);
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      p.cwd,
-                      style: mono.copyWith(color: t.textSecondary),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(Icons.copy, size: 16, color: t.textDim),
-                ],
-              ),
-            ),
-          ),
+          DetailsPathRow(path: p.cwd, sheet: sheet),
         ],
       ],
     ),

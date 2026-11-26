@@ -8,6 +8,7 @@ import '../state/sessions.dart';
 import '../transport/connection.dart';
 import 'device_identity_screen.dart';
 import 'session_sections_list.dart';
+import '../state/status_filter.dart';
 import 'status_tiles.dart';
 import 'shell_drawer.dart';
 import 'spawn_dialog.dart';
@@ -34,11 +35,7 @@ class SessionListScreen extends ConsumerWidget {
       appBar: AppBar(
         leading: shellMenuButton(context),
         title: const SessionSearchTitle(child: Text('Sessions')),
-        actions: const [
-          SessionSearchButton(),
-          GroupByButton(),
-          ActiveOnlyButton(),
-        ],
+        actions: const [SessionSearchButton(), GroupByButton()],
       ),
       // The home tabs share one route, so their buttons cannot share the
       // default hero tag.
@@ -58,14 +55,14 @@ class SessionListScreen extends ConsumerWidget {
                 MaterialPageRoute(builder: (_) => const DeviceIdentityScreen()),
               ),
             ),
-          StatusTiles(sessions: sessions),
+          StatusTiles(sessions: sessions, scope: homeStatusScope),
           Expanded(
             child: RefreshIndicator(
               onRefresh: () => _refresh(ref),
               child: SessionSectionsList(
                 sessions: sessions,
                 groupBy: ref.watch(groupByProvider),
-                applyStatusFilter: true,
+                statusScope: homeStatusScope,
                 emptyText: unauthorized
                     ? 'Sessions appear after this device is authorized.'
                     : 'No sessions.',

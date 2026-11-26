@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:argus/models/session.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/grouping.dart';
+import 'package:argus/state/session_filter.dart';
 import 'package:argus/state/status_filter.dart';
 import 'package:argus/ui/blocked_card.dart';
 import 'package:argus/ui/session_card.dart';
@@ -39,12 +40,12 @@ Widget _app(List<Session> sessions, {GroupBy by = GroupBy.host, bool filter = tr
         home: Scaffold(
           body: Column(
             children: [
-              StatusTiles(sessions: sessions),
+              StatusTiles(sessions: sessions, scope: homeStatusScope),
               Expanded(
                 child: SessionSectionsList(
                   sessions: sessions,
                   groupBy: by,
-                  applyStatusFilter: filter,
+                  statusScope: filter ? homeStatusScope : null,
                 ),
               ),
             ],
@@ -60,47 +61,107 @@ final _cards =
 ProviderContainer _container(WidgetTester tester) =>
     ProviderScope.containerOf(tester.element(find.byType(StatusTiles)));
 
+Set<TileStatus> _home(WidgetTester tester) =>
+    _container(tester).read(statusFilterProvider(homeStatusScope));
+
+Future<void> _tap(WidgetTester tester, String key) async {
+  await tester.tap(find.byKey(Key(key)));
+  await tester.pump();
+}
+
 void main() {
   testWidgets('tapping a tile filters the list and tapping again clears it',
       (tester) async {
     await tester.pumpWidget(_app([_blocked, _working, _idle]));
     expect(_cards, findsNWidgets(3));
 
-    await tester.tap(find.byKey(const Key('tile-working')));
-    await tester.pump();
+    await _tap(tester, 'tile-working');
     expect(_cards, findsOneWidget);
-    expect(_container(tester).read(statusFilterProvider), TileStatus.working);
+    expect(_home(tester), {TileStatus.working});
 
-    await tester.tap(find.byKey(const Key('tile-working')));
-    await tester.pump();
+    await _tap(tester, 'tile-working');
     expect(_cards, findsNWidgets(3));
   });
 
-  testWidgets('a zero tile ignores taps', (tester) async {
-    await tester.pumpWidget(_app([_working, _idle]));
-    await tester.tap(find.byKey(const Key('tile-blocked')));
-    await tester.pump();
-    expect(_container(tester).read(statusFilterProvider), isNull);
+  testWidgets('a tile tells a screen reader whether its filter is on', (
+    tester,
+  ) async {
+    final handle = tester.ensureSemantics();
+    await tester.pumpWidget(_app([_blocked, _working, _idle]));
+    final tile = find.byKey(const Key('tile-working'));
+    expect(
+      tester.getSemantics(tile),
+      isSemantics(isButton: true, isSelected: false, hasTapAction: true),
+    );
+
+    await _tap(tester, 'tile-working');
+    expect(
+      tester.getSemantics(tile),
+      isSemantics(isButton: true, isSelected: true, hasTapAction: true),
+    );
+    handle.dispose();
+  });
+
+  testWidgets('two tiles show the union', (tester) async {
+    await tester.pumpWidget(_app([_blocked, _working, _idle]));
+    await _tap(tester, 'tile-blocked');
+    await _tap(tester, 'tile-working');
     expect(_cards, findsNWidgets(2));
   });
 
-  testWidgets('filter clears when its count drops to zero', (tester) async {
+  testWidgets('a zero tile can be selected', (tester) async {
+    await tester.pumpWidget(_app([_working, _idle]));
+    await _tap(tester, 'tile-blocked');
+    expect(_home(tester), {TileStatus.blocked});
+    expect(_cards, findsNothing);
+    expect(find.text('No sessions match the filter.'), findsOneWidget);
+  });
+
+  testWidgets('a selected tile stays selected at zero and shows new sessions',
+      (tester) async {
     await tester.pumpWidget(_app([_blocked, _working, _idle]));
-    await tester.tap(find.byKey(const Key('tile-blocked')));
-    await tester.pump();
-    expect(_cards, findsOneWidget);
+    await _tap(tester, 'tile-blocked');
 
     await tester.pumpWidget(_app([_s('a', 'working'), _working, _idle]));
     await tester.pump();
-    expect(_container(tester).read(statusFilterProvider), isNull);
-    expect(_cards, findsNWidgets(3));
+    expect(_home(tester), {TileStatus.blocked});
+    expect(_cards, findsNothing);
+
+    await tester.pumpWidget(
+        _app([_s('x', 'awaiting_input', prompt: true), _working, _idle]));
+    await tester.pump();
+    expect(_cards, findsOneWidget);
   });
 
-  testWidgets('a list without applyStatusFilter ignores the filter',
+  testWidgets('Show all clears only its own filter', (tester) async {
+    await tester.pumpWidget(_app([_working, _idle]));
+    _container(tester)
+        .read(statusFilterProvider('other').notifier)
+        .toggle(TileStatus.blocked);
+    await _tap(tester, 'tile-blocked');
+
+    await tester.tap(find.text('Show all'));
+    await tester.pump();
+    expect(_home(tester), isEmpty);
+    expect(_cards, findsNWidgets(2));
+    expect(_container(tester).read(statusFilterProvider('other')),
+        {TileStatus.blocked});
+  });
+
+  testWidgets('search message wins over the filter message', (tester) async {
+    await tester.pumpWidget(_app([_blocked, _working, _idle]));
+    final search = _container(tester).read(sessionSearchProvider.notifier);
+    search.open();
+    search.set('zzz');
+    await _tap(tester, 'tile-working');
+    expect(find.text('No sessions match.'), findsOneWidget);
+    expect(find.text('Show all'), findsNothing);
+  });
+
+  testWidgets('a list without a status scope ignores the filter',
       (tester) async {
     await tester.pumpWidget(_app([_blocked, _working, _idle], filter: false));
-    await tester.tap(find.byKey(const Key('tile-working')));
-    await tester.pump();
+    await _tap(tester, 'tile-working');
     expect(_cards, findsNWidgets(3));
   });
 
