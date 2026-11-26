@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/api"
@@ -242,5 +244,78 @@ func TestProjectHistoryTabs(t *testing.T) {
 	}
 	if b, ok := typeKeys(m, "gT").baseComp().(summaryComp); !ok || b.id != "n1:p1" {
 		t.Errorf("gT on History: base = %T, want n1:p1's summary", b)
+	}
+}
+
+func TestScopedHistoryListsFitThePane(t *testing.T) {
+	var many []session.HistoryProject
+	for i := range 40 {
+		many = append(many, histFolder("n1", fmt.Sprintf("/f%d", i)))
+	}
+	var page session.HistorySessionPage
+	for i := range 40 {
+		page.Items = append(page.Items, histSession(fmt.Sprintf("h%d", i)))
+	}
+	home := withHistoryProjects(homeTestModel(), many...)
+	ws := wsHistory(t, histFolder("n1", "/repo"))
+	ws, _ = upd(ws, histSessionsMsg{projectDir: "pd/repo", page: page})
+	for name, m := range map[string]model{"Home": home, "workspace": ws} {
+		m = typeKeys(m, "G")
+		if got, max := lipgloss.Height(mainView(m)), m.bodyHeight()-footerRows; got > max {
+			t.Errorf("%s History at its last card: %d rows, want at most %d", name, got, max)
+		}
+	}
+}
+
+func TestWorkspaceHistoryRefreshes(t *testing.T) {
+	m := wsHistory(t, histFolder("n1", "/repo"))
+	m, _ = upd(m, histSessionsMsg{projectDir: "pd/repo", page: historyPage()})
+	m, cmd := typeKeysCmd(m, "gr")
+	if h := m.baseComp().(historyComp); cmd == nil || h.all != nil || h.inProject {
+		t.Fatalf("gr on workspace History: cmd=%v all=%v inProject=%v, want a fresh folder fetch", cmd != nil, h.all, h.inProject)
+	}
+	mm, _ := m.updateHistory(histProjectsMsg{projects: []session.HistoryProject{histFolder("n1", "/repo")}})
+	if h := mm.(model).baseComp().(historyComp); !h.inProject || h.project.Cwd != "/repo" {
+		t.Errorf("after the refresh: inProject=%v folder=%q, want /repo's sessions again", h.inProject, h.project.Cwd)
+	}
+}
+
+func TestScopedHistoryTranscriptKeepsTheScope(t *testing.T) {
+	m := wsHistory(t, histFolder("n1", "/repo"))
+	m, _ = upd(m, histSessionsMsg{projectDir: "pd/repo", page: historyPage()})
+	m = pressKeys(m, keyMsg("enter"))
+	if _, ok := m.baseComp().(transcriptComp); !ok {
+		t.Fatalf("<CR>: base = %T, want the past session's transcript", m.baseComp())
+	}
+	if got := m.mainRow(); got != "n1:w1" {
+		t.Errorf("tree row under the transcript = %q, want n1:w1", got)
+	}
+	if got := m.currentWorkspace(); got != "n1:w1" {
+		t.Errorf("workspace under the transcript = %q, want n1:w1", got)
+	}
+}
+
+func TestScopedHistoryLeavesWithItsRow(t *testing.T) {
+	m := wsHistory(t, histFolder("n1", "/repo"))
+	m, _ = upd(m, histSessionsMsg{projectDir: "pd/repo", page: historyPage()})
+	p := m.left.tree.data[0]
+	p.Workspaces = p.Workspaces[1:]
+	m, _ = upd(m, projectsTreeMsg{tree: []api.ProjectNode{p}})
+	if viewOf(m) != viewHome {
+		t.Errorf("n1:w1 gone under its History: view = %v (base %T), want Home", viewOf(m), m.baseComp())
+	}
+
+	m = projectHistory(t, histFolder("n1", "/repo"))
+	m, _ = upd(m, projectsTreeMsg{tree: []api.ProjectNode{}})
+	if viewOf(m) != viewHome {
+		t.Errorf("n1:p1 gone under its History: view = %v (base %T), want Home", viewOf(m), m.baseComp())
+	}
+}
+
+func TestScopedHistoryIgnoresAnotherFoldersSessions(t *testing.T) {
+	m := wsHistory(t, histFolder("n1", "/repo"))
+	m, _ = upd(m, histSessionsMsg{projectDir: "pd/repo-feat", page: historyPage()})
+	if h := m.baseComp().(historyComp); len(h.sessions) != 0 || !h.loading {
+		t.Errorf("a late reply for another folder showed: sessions=%d loading=%v", len(h.sessions), h.loading)
 	}
 }

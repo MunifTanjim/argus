@@ -220,6 +220,11 @@ func (h historyComp) sessionsKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 		h = h.setQuery("")
 	case h.ws != "" && m.matches(msg, k.Back):
 		h.leave(c)
+	case h.ws != "" && m.matches(msg, historyProjectsKeys.Refresh):
+		// Back to the folder fetch, so the folder opens again once it lists.
+		h.all, h.projects, h.sessions, h.err = nil, nil, nil, nil
+		h.inProject, h.loading = false, false
+		cmd = m.fetchHistProjects()
 	case m.matches(msg, k.Back):
 		h.inProject = false
 	case h.ws != "" && m.matches(msg, listKeys.TabPrev):
@@ -269,6 +274,9 @@ func (h historyComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 			return h.openProject(c)
 		}
 	case histSessionsMsg:
+		if msg.projectDir != h.project.ProjectDir {
+			break
+		}
 		h.loading = false
 		if msg.err != nil {
 			h.err = msg.err
@@ -297,7 +305,7 @@ func (h historyComp) view(c *ctx, w, ht int) string {
 
 func (h historyComp) footer(c *ctx) []binding {
 	if h.ws != "" && h.inProject {
-		return append([]binding{listKeys.TabNext}, h.sessionsFooter()...)
+		return append([]binding{listKeys.TabNext}, append(h.sessionsFooter(), historyProjectsKeys.Refresh)...)
 	}
 	if !h.inProject {
 		return []binding{listKeys.TabNext, historyProjectsKeys.Bottom, projectsKeys.Filter,
@@ -428,7 +436,7 @@ func (h historyComp) projectsView(c *ctx, w, ht int) string {
 		prevNode = p.NodeID
 		cards[i] = card
 	}
-	body := renderCardList(c.below(lipgloss.Height(title)+1), "history-projects", cards, h.projCursor, max(1, ht-4))
+	body := renderCardList(c.below(lipgloss.Height(title)+1), "history-projects", cards, h.projCursor, max(1, ht-3-lipgloss.Height(title)))
 	return centerBlock(title+"\n\n"+body, cardW, w)
 }
 
@@ -459,7 +467,7 @@ func (h historyComp) sessionsView(c *ctx, w, ht int) string {
 	for i, s := range shown {
 		cards[i] = historySessionRow(s, i == h.sessCursor, c.m.mainFocused(), cardW, showAgent)
 	}
-	body := renderCardList(c.below(lipgloss.Height(title)+1), "history-sessions", cards, h.sessCursor, max(1, ht-4))
+	body := renderCardList(c.below(lipgloss.Height(title)+1), "history-sessions", cards, h.sessCursor, max(1, ht-3-lipgloss.Height(title)))
 	return centerBlock(title+"\n\n"+body, cardW, w)
 }
 
@@ -486,7 +494,7 @@ func (m model) updateHistory(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (h historyComp) commands(*ctx) []binding {
 	if h.ws != "" && h.inProject {
-		return bindingsOf(historySessionsKeys, transcriptKeys.Export, listKeys.Filter, listKeys.TabPrev, listKeys.TabNext)
+		return bindingsOf(historySessionsKeys, transcriptKeys.Export, listKeys.Filter, listKeys.TabPrev, listKeys.TabNext, historyProjectsKeys.Refresh)
 	}
 	if h.inProject {
 		return bindingsOf(historySessionsKeys, transcriptKeys.Export, listKeys.Filter)
@@ -502,6 +510,25 @@ func (h historyComp) offers(*ctx) []binding {
 }
 
 func (h historyComp) scoped() bool { return h.ws != "" || h.projectID != "" }
+
+// row is the tree row of h's scope, "" for Home.
+func (h historyComp) row() string {
+	if h.ws != "" {
+		return h.ws
+	}
+	return h.projectID
+}
+
+// scopedHistoryUnder is the scoped History that a past session's transcript
+// was opened from.
+func (m model) scopedHistoryUnder() (historyComp, bool) {
+	if i := m.historyAt(); i >= 0 {
+		if h := m.main[i].(historyComp); h.scoped() {
+			return h, true
+		}
+	}
+	return historyComp{}, false
+}
 
 // historyScopeDirs is the node and the cleaned workspace dirs of h's scope;
 // dirs is nil for Home.

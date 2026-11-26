@@ -142,11 +142,8 @@ func (m model) mainRow() string {
 	case summaryComp:
 		return b.id
 	case historyComp:
-		switch {
-		case b.ws != "":
-			return b.ws
-		case b.projectID != "":
-			return b.projectID
+		if r := b.row(); r != "" {
+			return r
 		}
 	case terminalsComp:
 		if !b.onHome() {
@@ -155,6 +152,9 @@ func (m model) mainRow() string {
 	case transcriptComp:
 		if b.live {
 			return m.sessionRow(b.sessionID)
+		}
+		if h, ok := m.scopedHistoryUnder(); ok {
+			return h.row()
 		}
 	case screenComp:
 		if b.row != "" {
@@ -266,6 +266,8 @@ func (m model) onRowPane() bool {
 		return true
 	case terminalsComp:
 		return !b.onHome()
+	case historyComp:
+		return b.scoped()
 	}
 	return false
 }
@@ -281,6 +283,14 @@ func (m model) rowGone() bool {
 	case summaryComp:
 		_, ok := b.row(&ctx{m: &m})
 		return !ok
+	case historyComp:
+		switch {
+		case b.ws != "":
+			return !listed[b.ws]
+		case b.projectID != "":
+			_, ok := summaryComp{kind: rowProject, id: b.projectID}.row(&ctx{m: &m})
+			return !ok
+		}
 	case terminalsComp:
 		switch {
 		case b.ws != "":
