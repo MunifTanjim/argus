@@ -30,8 +30,11 @@ Session _s({
       'summary': ?summary,
     });
 
-Future<void> _pump(WidgetTester t, Session s) => t.pumpWidget(
-      MaterialApp(home: Scaffold(body: SessionViewHeader(session: s))),
+Future<void> _pump(WidgetTester t, Session s, {bool wrap = false}) =>
+    t.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: SessionViewHeader(session: s, wrap: wrap)),
+      ),
     );
 
 void main() {
@@ -75,5 +78,32 @@ void main() {
     addTearDown(t.view.reset);
     await _pump(t, _s(nodeLabel: 'build-server-in-the-basement-rack-number-seven'));
     expect(t.takeException(), isNull);
+  });
+
+  testWidgets('the node name sits at the right edge with the node icon',
+      (t) async {
+    t.view.physicalSize = const Size(390, 844);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    await _pump(t, _s(name: 'auth-refactor'));
+    expect(t.getRect(find.text('mac')).right, closeTo(390, 0.5));
+    expect(find.byIcon(Icons.dns_outlined), findsOneWidget);
+  });
+
+  testWidgets('wrapped, a long branch shows whole on more lines', (t) async {
+    t.view.physicalSize = const Size(320, 600);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    const branch = 'feat/a-very-long-branch-name-that-does-not-fit-on-one-line';
+    await _pump(t, _s(name: 'auth-refactor', branch: branch), wrap: true);
+
+    final meta = find.textContaining('⎇ $branch');
+    expect(t.widget<Text>(meta).maxLines, isNull);
+    expect(t.getSize(meta).height, greaterThan(20));
+  });
+
+  testWidgets('not wrapped, the meta line stays on one line', (t) async {
+    await _pump(t, _s(branch: 'main'));
+    expect(t.widget<Text>(find.textContaining('⎇ main')).maxLines, 1);
   });
 }

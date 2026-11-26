@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/entry.dart';
 import '../state/tool_detail.dart';
 import 'code_block.dart';
+import 'history_format.dart';
 import 'item_detail_screen.dart';
 import 'item_row.dart';
 import 'subagent_trace_screen.dart';
@@ -24,30 +25,11 @@ String _fmtDuration(int ms) {
   return '${secs.toStringAsFixed(1)}s';
 }
 
-const _months = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-];
-
-/// A turn's time, with only the date parts that differ from [now]: the time
-/// today, "Nov 25 09:03:05" earlier this year, and the year too before that.
-/// The month stays with the day, since a day alone reads like a bare number.
-String turnStamp(DateTime t, DateTime now) {
-  String p(int n) => n.toString().padLeft(2, '0');
-  final time = '${p(t.hour)}:${p(t.minute)}:${p(t.second)}';
-  if (t.year == now.year && t.month == now.month && t.day == now.day) {
-    return time;
-  }
-  final day = '${_months[t.month - 1]} ${t.day}';
-  return t.year == now.year ? '$day $time' : '${t.year} $day $time';
-}
-
+/// [ts] as local "09:03:05"; [ts] itself when it does not parse.
 String _clockTime(String? ts) {
   if (ts == null) return '';
   final dt = DateTime.tryParse(ts)?.toLocal();
-  if (dt == null) return ts;
-  String p(int n) => n.toString().padLeft(2, '0');
-  return '${p(dt.hour)}:${p(dt.minute)}:${p(dt.second)}';
+  return dt == null ? ts : clockTime(dt, seconds: true);
 }
 
 /// Returns null when [e] has nothing deeper to show.

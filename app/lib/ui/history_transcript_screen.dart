@@ -7,8 +7,11 @@ import '../models/entry.dart';
 import '../models/history.dart';
 import '../state/control.dart';
 import '../state/tool_detail.dart';
+import 'history_details.dart';
+import 'history_format.dart';
 import 'resume_action.dart';
-import 'shell_drawer.dart';
+import 'session_composer.dart' show dockPadding;
+import 'theme.dart';
 import 'transcript_feed.dart';
 
 class HistoryTranscriptScreen extends ConsumerStatefulWidget {
@@ -80,20 +83,32 @@ class _HistoryTranscriptScreenState
             .select((ids) => ids.contains(widget.session.nodeId)));
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.session.displayTitle),
-        actions: [
-          ?shellMenuButton(context),
-          if (canResume)
-            IconButton(
-              icon: const Icon(Icons.play_arrow),
-              onPressed: _resumeSession,
-              tooltip: 'Resume',
-            ),
-        ],
+        title: HistoryTitle(
+          text: widget.session.displayTitle,
+          onTap: () => showHistorySessionDetails(
+              context, widget.session, widget.project),
+        ),
       ),
       // top:false — AppBar insets the top; bottom safe-area keeps the feed
       // clear of the system navigation bar (e.g. Android 3-button nav).
-      body: SafeArea(top: false, child: _buildBody()),
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            Expanded(child: _buildBody()),
+            if (canResume)
+              _ResumeBar(
+                machine: firstLabel([
+                  widget.session.nodeLabel,
+                  widget.project?.nodeLabel,
+                  widget.session.nodeId,
+                ]),
+                cwd: widget.project!.cwd,
+                onTap: _resumeSession,
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -115,6 +130,79 @@ class _HistoryTranscriptScreenState
       entries: entries,
       emptyText: 'Empty transcript.',
       stickToBottom: false, // static history reads top-down
+    );
+  }
+}
+
+/// Resume, where the composer sits in a live session, naming where the
+/// session will reopen.
+class _ResumeBar extends StatelessWidget {
+  const _ResumeBar({
+    required this.machine,
+    required this.cwd,
+    required this.onTap,
+  });
+
+  final String? machine;
+  final String cwd;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final radius = BorderRadius.circular(t.radius + 4);
+    final where = [
+      if (machine?.isNotEmpty ?? false) machine!,
+      shortenPath(cwd),
+    ].join(' · ');
+    return Material(
+      color: t.canvas,
+      child: Padding(
+        padding: dockPadding,
+        child: Semantics(
+          button: true,
+          label: 'Resume',
+          child: InkWell(
+            key: const Key('history-resume-bar'),
+            onTap: onTap,
+            borderRadius: radius,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                border: Border.all(color: t.line),
+                borderRadius: radius,
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.play_arrow, size: 18),
+                  const SizedBox(width: 6),
+                  const Text('Resume'),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        if (machine?.isNotEmpty ?? false) ...[
+                          Icon(Icons.dns_outlined, size: 13, color: t.textDim),
+                          const SizedBox(width: 4),
+                        ],
+                        Flexible(
+                          child: Text(
+                            where,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12, color: t.textDim),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

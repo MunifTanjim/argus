@@ -5,6 +5,14 @@ import 'card_layout.dart';
 import 'status_style.dart';
 import 'theme.dart';
 
+/// The text style of a section label, shared by the foldable group headers.
+TextStyle sectionLabelStyle(Color color) => mono.copyWith(
+  color: color,
+  fontSize: 10,
+  fontWeight: FontWeight.w600,
+  letterSpacing: 0.8,
+);
+
 class SectionLabel extends StatelessWidget {
   const SectionLabel({
     super.key,
@@ -27,12 +35,7 @@ class SectionLabel extends StatelessWidget {
           label.toUpperCase(),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: mono.copyWith(
-            color: color ?? context.tokens.textDim,
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.8,
-          ),
+          style: sectionLabelStyle(color ?? context.tokens.textDim),
         ),
       ),
     ],
@@ -84,4 +87,31 @@ class NeedsYouHeader extends StatelessWidget {
     label: label,
     color: color,
   );
+}
+
+/// A node's name with the node icon, as on the home session cards.
+class NodeName extends StatelessWidget {
+  const NodeName(this.label, {super.key});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.dns_outlined, size: 13, color: t.textDim),
+        const SizedBox(width: 4),
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: mono.copyWith(color: t.textDim, fontSize: 11),
+          ),
+        ),
+      ],
+    );
+  }
 }

@@ -4,6 +4,7 @@ import 'package:argus/models/entry.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/tool_detail.dart';
 import 'package:argus/ui/entry_row.dart';
+import 'package:argus/ui/history_format.dart';
 import 'package:argus/ui/item_detail_screen.dart';
 import 'package:argus/ui/subagent_trace_screen.dart';
 import 'package:argus/ui/theme.dart';

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/enums.dart';
 import '../models/session.dart';
+import 'details_header.dart';
 import 'session_card.dart';
 import 'status_style.dart';
 import 'theme.dart';
@@ -10,97 +11,33 @@ import 'theme.dart';
 /// mark and the repo, the session name, then branch, model, and context. An
 /// unnamed session shows its repo as the title on the first line.
 class SessionViewHeader extends StatelessWidget {
-  const SessionViewHeader({
-    super.key,
-    required this.session,
-    this.showDivider = true,
-  });
+  const SessionViewHeader({super.key, required this.session, this.wrap = false});
 
   final Session session;
 
-  /// The rule under the header; the details sheet leaves it out.
-  final bool showDivider;
+  /// The details sheet form; see [DetailsHeader.wrap].
+  final bool wrap;
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
     final s = session;
     final name = s.displayName;
-    final small = mono.copyWith(color: t.textDim, fontSize: 11);
-    final title = mono.copyWith(
-      color: t.text,
-      fontSize: 17,
-      fontWeight: FontWeight.w600,
-    );
-    final meta = <(String, Color)>[
-      if (s.branch?.isNotEmpty ?? false) ('⎇ ${s.branch}', t.textDim),
-      ...sessionMetaParts(s, t, agent: false),
-      if (s.frontend != FrontendKind.tmux) (s.frontend.name, t.textDim),
-    ];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            Text(
-              statusGlyph(s.status),
-              style: mono.copyWith(color: sessionColor(s, t)),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                s.displayTitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: name == null ? title : small,
-              ),
-            ),
-            if (s.nodeLabel?.isNotEmpty ?? false) ...[
-              const SizedBox(width: 8),
-              // Gives way to the title, but keeps a short label whole.
-              Flexible(
-                child: Text(
-                  s.nodeLabel!,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: small,
-                ),
-              ),
-            ],
-          ],
-        ),
-        if (name != null)
-          Text(
-            name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: title,
-          ),
-        if (meta.isNotEmpty) ...[
-          const SizedBox(height: 2),
-          Text.rich(
-            TextSpan(
-              style: small,
-              children: [
-                for (final (i, (text, color)) in meta.indexed) ...[
-                  if (i > 0) const TextSpan(text: ' · '),
-                  TextSpan(
-                    text: text,
-                    style: TextStyle(color: color),
-                  ),
-                ],
-              ],
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-        if (showDivider) ...[
-          const SizedBox(height: 12),
-          Divider(height: 1, color: t.line),
-        ],
+    return DetailsHeader(
+      mark: Text(
+        statusGlyph(s.status),
+        style: mono.copyWith(color: sessionColor(s, t)),
+      ),
+      // An unnamed session shows its repo as the title on the first line.
+      label: name == null ? null : s.displayTitle,
+      title: name ?? s.displayTitle,
+      node: s.nodeLabel,
+      meta: [
+        if (s.branch?.isNotEmpty ?? false) ('⎇ ${s.branch}', t.textDim),
+        ...sessionMetaParts(s, t, agent: false),
+        if (s.frontend != FrontendKind.tmux) (s.frontend.name, t.textDim),
       ],
+      wrap: wrap,
     );
   }
 }
@@ -116,7 +53,6 @@ class SessionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.tokens;
     final s = session;
-          // In the app bar's title style.
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
