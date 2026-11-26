@@ -61,7 +61,7 @@ class SessionSectionsList extends ConsumerWidget {
           showNode: section.showNode,
           showAgent: multiAgent,
           onTap: () => Navigator.of(context).push(sessionDetailRoute(s)),
-          onLongPress: () => showSessionActions(context, s),
+          onLongPress: () => showSessionSheet(context, s),
         );
 
   @override

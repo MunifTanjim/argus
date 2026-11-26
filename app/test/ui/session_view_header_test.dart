@@ -30,10 +30,10 @@ Session _s({
       'summary': ?summary,
     });
 
-Future<void> _pump(WidgetTester t, Session s, {bool wrap = false}) =>
+Future<void> _pump(WidgetTester t, Session s, {bool compact = true}) =>
     t.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: SessionViewHeader(session: s, wrap: wrap)),
+        home: Scaffold(body: SessionViewHeader(session: s, compact: compact)),
       ),
     );
 
@@ -95,7 +95,7 @@ void main() {
     t.view.devicePixelRatio = 1;
     addTearDown(t.view.reset);
     const branch = 'feat/a-very-long-branch-name-that-does-not-fit-on-one-line';
-    await _pump(t, _s(name: 'auth-refactor', branch: branch), wrap: true);
+    await _pump(t, _s(name: 'auth-refactor', branch: branch), compact: false);
 
     final meta = find.textContaining('⎇ $branch');
     expect(t.widget<Text>(meta).maxLines, isNull);

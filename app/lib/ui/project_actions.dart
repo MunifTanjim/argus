@@ -4,11 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/project.dart';
 import '../state/navigation.dart';
 import '../state/project_tree.dart';
+import '../state/projects.dart';
 import '../state/projects_api.dart';
 import '../state/sessions.dart';
 import '../state/setup_text.dart';
 import '../state/workspace.dart';
 import 'branch_picker_screen.dart';
+import 'details_header.dart';
 import 'nerd_icon.dart';
 import 'new_workspace_screen.dart';
 import 'setup_log_screen.dart';
@@ -59,7 +61,10 @@ bool _refused(ActionContext ax, String name, Iterable<String> workspaceIds) {
   return text != null;
 }
 
-Future<bool> _confirm(
+/// Asks to confirm [action], with each of [lines] as a paragraph. A
+/// [destructive] action's button shows in the destructive color. True once
+/// confirmed.
+Future<bool> confirmAction(
   ActionContext ax, {
   required String title,
   required List<String> lines,
@@ -82,7 +87,7 @@ Future<bool> _confirm(
         ),
         FilledButton(
           style: destructive
-              ? FilledButton.styleFrom(backgroundColor: ctx.tokens.error)
+              ? FilledButton.styleFrom(backgroundColor: ctx.tokens.destructive)
               : null,
           onPressed: () => Navigator.of(ctx).pop(true),
           child: Text(action),
@@ -122,7 +127,7 @@ Future<void> toggleHidden(ActionContext ax, ProjectNode p) =>
 
 Future<void> forgetProject(ActionContext ax, ProjectNode p) async {
   if (_refused(ax, p.name, [for (final w in p.workspaces) w.id])) return;
-  final ok = await _confirm(
+  final ok = await confirmAction(
     ax,
     title: 'Forget project ${p.name}?',
     lines: const ['It leaves the list. Its files stay.'],
@@ -151,7 +156,7 @@ Future<void> removeWorkspace(
   }
   if (_refused(ax, w.name, [w.id])) return;
   final named = w.branch.isEmpty ? w.name : '${w.name} (${w.branch})';
-  final ok = await _confirm(
+  final ok = await confirmAction(
     ax,
     title: force
         ? 'Force-remove workspace $named?'
@@ -398,67 +403,178 @@ Future<void> runWorkspaceAction(
   }
 }
 
-Future<T?> _sheet<T>(
-  BuildContext context,
-  String title,
-  List<(T, String, Widget, bool)> items,
-) => showModalBottomSheet<T>(
-  context: context,
-  useRootNavigator: true,
-  builder: (ctx) => SafeArea(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        ListTile(
-          title: Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w600),
-          ),
-        ),
-        for (final (value, label, icon, danger) in items)
-          ListTile(
-            leading: IconTheme.merge(
-              data: IconThemeData(color: danger ? context.tokens.error : null),
-              child: icon,
-            ),
-            title: Text(
-              label,
-              style: danger ? TextStyle(color: context.tokens.error) : null,
-            ),
-            onTap: () => Navigator.of(ctx).pop(value),
-          ),
-      ],
-    ),
-  ),
-);
-
-Future<void> showProjectSheet(BuildContext context, ProjectNode p) async {
-  final ax = ActionContext.of(context);
-  final a = await _sheet(context, p.name, [
-    for (final a in projectActionsFor(p))
-      (a, projectActionLabel(p, a), _projectIcon(a), false),
-  ]);
-  if (a != null) await runProjectAction(ax, p, a);
+/// The branch (or the short head), and the target it merges into:
+/// "feat/x → main".
+String workspaceAt(WorkspaceNode w) {
+  final at = w.branch.isNotEmpty ? w.branch : shortHead(w.head);
+  if (w.targetBranch.isEmpty) return at;
+  return at.isEmpty ? '→ ${w.targetBranch}' : '$at → ${w.targetBranch}';
 }
 
+/// Where a workspace sits: "project / workspace".
+String workspacePlace((ProjectNode, WorkspaceNode) hit) =>
+    '${hit.$1.name} / ${hit.$2.name}';
+
+/// The live sessions of an [Activity]: "1 blocked · 2 working", or "none".
+String activityText(Activity a) {
+  final idle = a.idle;
+  final parts = [
+    if (a.blocked > 0) '${a.blocked} blocked',
+    if (a.waiting > 0) '${a.waiting} waiting',
+    if (a.working > 0) '${a.working} working',
+    if (idle > 0) '$idle idle',
+  ];
+  return parts.isEmpty ? 'none' : parts.join(' · ');
+}
+
+String _setupText(SetupRun run) {
+  final state = run.state == 'failed'
+      ? 'failed (exit ${run.exitCode})'
+      : run.state;
+  final cmd = commandLine(run.command);
+  return cmd.isEmpty ? state : '$state · $cmd';
+}
+
+/// A project's details and actions: the header, a short table, Forget and
+/// New session pinned at the bottom, and the other actions as tiles.
+Future<void> showProjectSheet(BuildContext context, ProjectNode project) {
+  final ax = ActionContext.of(context);
+  // The sheet follows the live project and its sessions.
+  ProjectNode live(WidgetRef ref) =>
+      lookupProject(ref.watch(projectsProvider).projects, project.id) ??
+      project;
+  const bar = {ProjectAction.forget, ProjectAction.newSession};
+  List<SheetAction> actions(ProjectNode p, {required bool pinned}) => [
+    for (final a in projectActionsFor(p))
+      if (bar.contains(a) == pinned)
+        SheetAction(
+          label: projectActionLabel(p, a),
+          icon: _projectIcon(a),
+          destructive: a == ProjectAction.forget,
+          run: () => runProjectAction(ax, p, a),
+        ),
+  ];
+  return showDetailsSheet(
+    context,
+    body: (context, ref) {
+      final t = context.tokens;
+      final p = live(ref);
+      final ids = [for (final w in p.workspaces) w.id];
+      // Rebuilds when the counts change, not on every session update.
+      final act = ref.watch(
+        sessionsProvider.select(
+          (m) => sumActivity(workspaceActivity(m.values), ids),
+        ),
+      );
+      final n = p.workspaces.length;
+      final count = act.live == 0 ? '$n' : '$n · ${activityText(act)}';
+      return [
+        DetailsHeader(
+          label: !p.isGit
+              ? 'plain'
+              : (p.defaultBranch.isEmpty ? 'git' : 'git · ${p.defaultBranch}'),
+          title: p.name,
+          node: p.nodeName,
+          meta: [
+            if (p.pinned) ('pinned', t.textDim),
+            if (p.hidden) ('hidden', t.textDim),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (p.error.isNotEmpty)
+          DetailsFieldRow(label: 'error', value: p.error, color: t.error),
+        DetailsFieldRow(label: 'workspaces', value: count, copyable: false),
+        if (p.setupScript.isNotEmpty)
+          DetailsFieldRow(label: 'setup', value: p.setupScript),
+        if (p.teardownScript.isNotEmpty)
+          DetailsFieldRow(label: 'teardown', value: p.teardownScript),
+        if (p.dir.isNotEmpty) DetailsFieldRow(label: 'dir', value: p.dir),
+        const SizedBox(height: 4),
+        ...sheetActionTiles(context, actions(p, pinned: false)),
+      ];
+    },
+    footer: (sheet, ref) =>
+        DetailsActionBar(sheet: sheet, actions: actions(live(ref), pinned: true)),
+  );
+}
+
+/// A workspace's details and actions: the header, a short table, Remove and
+/// New session pinned at the bottom, and the other actions as tiles.
 Future<void> showWorkspaceSheet(
   BuildContext context,
-  ProjectNode p,
-  WorkspaceNode w,
-) async {
-  final actions = workspaceActionsFor(p, w);
-  if (actions.isEmpty) return;
+  ProjectNode project,
+  WorkspaceNode workspace,
+) {
   final ax = ActionContext.of(context);
-  final a = await _sheet(context, '${p.name} · ${w.name}', [
-    for (final a in actions)
-      (
-        a,
-        workspaceActionLabel(a),
-        _workspaceIcon(a),
-        a == WorkspaceAction.forceRemove,
-      ),
-  ]);
-  if (a != null) await runWorkspaceAction(ax, p, w, a);
+  // The sheet follows the live workspace and its sessions.
+  (ProjectNode, WorkspaceNode) live(WidgetRef ref) =>
+      lookupWorkspace(ref.watch(projectsProvider).projects, workspace.id) ??
+      (project, workspace);
+  const bar = {WorkspaceAction.remove, WorkspaceAction.newSession};
+  List<SheetAction> actions(
+    ProjectNode p,
+    WorkspaceNode w, {
+    required bool pinned,
+  }) => [
+    for (final a in workspaceActionsFor(p, w))
+      if (bar.contains(a) == pinned)
+        SheetAction(
+          label: workspaceActionLabel(a),
+          icon: _workspaceIcon(a),
+          destructive:
+              a == WorkspaceAction.remove || a == WorkspaceAction.forceRemove,
+          run: () => runWorkspaceAction(ax, p, w, a),
+        ),
+  ];
+  return showDetailsSheet(
+    context,
+    body: (context, ref) {
+      final t = context.tokens;
+      final (p, w) = live(ref);
+      // Rebuilds when the counts change, not on every session update.
+      final act = ref.watch(
+        sessionsProvider.select(
+          (m) => workspaceActivity(m.values)[w.id] ?? Activity.zero,
+        ),
+      );
+      final setup = w.setup;
+      final at = workspaceAt(w);
+      return [
+        DetailsHeader(
+          label: p.name,
+          title: w.name,
+          node: p.nodeName,
+          meta: [if (at.isNotEmpty) (at, t.textDim)],
+        ),
+        const SizedBox(height: 10),
+        DetailsFieldRow(
+          label: 'sessions',
+          value: activityText(act),
+          copyable: false,
+        ),
+        if (setup != null)
+          DetailsFieldRow(
+            label: 'setup',
+            value: _setupText(setup),
+            color: setup.state == 'failed' ? t.error : null,
+          ),
+        if (w.dir.isNotEmpty) DetailsFieldRow(label: 'dir', value: w.dir),
+        if (w.head.isNotEmpty)
+          DetailsFieldRow(
+            label: 'head',
+            value: shortHead(w.head),
+            copyValue: w.head,
+          ),
+        const SizedBox(height: 4),
+        ...sheetActionTiles(context, actions(p, w, pinned: false)),
+      ];
+    },
+    footer: (sheet, ref) {
+      final (p, w) = live(ref);
+      return DetailsActionBar(
+        sheet: sheet,
+        actions: actions(p, w, pinned: true),
+      );
+    },
+  );
 }

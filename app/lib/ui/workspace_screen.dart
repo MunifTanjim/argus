@@ -7,7 +7,6 @@ import '../state/changes.dart';
 import '../state/control.dart';
 import '../state/navigation.dart';
 import '../state/projects.dart';
-import 'details_header.dart';
 import 'project_actions.dart';
 import 'session_sections_list.dart';
 import 'shell_drawer.dart';
@@ -235,44 +234,14 @@ class _WorkspaceTitle extends StatelessWidget {
   final ProjectNode project;
   final WorkspaceNode workspace;
 
-  // The branch (or short head), and the target it merges into.
-  String get _at {
-    final head = workspace.head;
-    final at = workspace.branch.isNotEmpty
-        ? workspace.branch
-        : (head.length > 7 ? head.substring(0, 7) : head);
-    if (workspace.targetBranch.isEmpty) return at;
-    return at.isEmpty
-        ? '→ ${workspace.targetBranch}'
-        : '$at → ${workspace.targetBranch}';
-  }
+  String get _at => workspaceAt(workspace);
 
   String get _subtitle => [project.name, if (_at.isNotEmpty) _at].join(' · ');
 
-  // As the session view's title: the full details in a sheet.
-  void _showDetails(BuildContext context) {
-    final t = context.tokens;
-    showDetailsSheet(
-      context,
-      (sheet) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          DetailsHeader(
-            label: project.name,
-            title: workspace.name,
-            node: project.nodeName,
-            meta: [if (_at.isNotEmpty) (_at, t.textDim)],
-            wrap: true,
-          ),
-          if (workspace.dir.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            DetailsPathRow(path: workspace.dir, sheet: sheet),
-          ],
-        ],
-      ),
-    );
-  }
+  // As the session view's title: the full details in a sheet, here with the
+  // workspace's actions, the same sheet as a long press in the drawer.
+  void _showDetails(BuildContext context) =>
+      showWorkspaceSheet(context, project, workspace);
 
   @override
   Widget build(BuildContext context) {

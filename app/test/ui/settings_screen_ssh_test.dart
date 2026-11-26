@@ -51,7 +51,8 @@ void main() {
     // The forget-host-key button must be visible for an ssh:// gateway.
     expect(find.byKey(const Key('forget-host-key')), findsOneWidget);
 
-    // Tap it.
+    // Tap it. The button scrolls with the content, so bring it into view.
+    await tester.ensureVisible(find.byKey(const Key('forget-host-key')));
     await tester.tap(find.byKey(const Key('forget-host-key')));
     await tester.pumpAndSettle();
 

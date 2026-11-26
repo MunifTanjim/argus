@@ -4,6 +4,7 @@ import '../models/history.dart';
 import 'agent_badge.dart';
 import 'details_header.dart';
 import 'history_format.dart';
+import 'relative_time.dart';
 import 'theme.dart';
 import 'usage_format.dart';
 
@@ -71,33 +72,28 @@ Future<void> showHistorySessionDetails(
   final first = s.firstMessage ?? '';
   return showDetailsSheet(
     context,
-    (sheet) => Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        DetailsHeader(
-          label: label.isEmpty ? null : label,
-          title: s.displayTitle,
-          node: firstLabel([s.nodeLabel, project?.nodeLabel, s.nodeId]),
-          meta: meta,
-          wrap: true,
+    body: (_, _) => [
+      DetailsHeader(
+        label: label.isEmpty ? null : label,
+        title: s.displayTitle,
+        node: firstLabel([s.nodeLabel, project?.nodeLabel, s.nodeId]),
+        meta: meta,
+      ),
+      if (at != null)
+        Text(
+          '${dayLabel(at, DateTime.now())} ${clockTime(at)}',
+          style: mono.copyWith(color: t.textDim, fontSize: 11),
         ),
-        if (at != null)
-          Text(
-            '${dayLabel(at, DateTime.now())} ${clockTime(at)}',
-            style: mono.copyWith(color: t.textDim, fontSize: 11),
-          ),
-        if (hasTitle && first.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text(
-            '“$first',
-            maxLines: 4,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: t.textSecondary),
-          ),
-        ],
+      if (hasTitle && first.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        Text(
+          '“$first',
+          maxLines: 4,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: t.textSecondary),
+        ),
       ],
-    ),
+    ],
   );
 }
 
@@ -106,30 +102,24 @@ Future<void> showHistorySessionDetails(
 Future<void> showHistoryProjectDetails(BuildContext context, HistoryProject p) {
   final t = context.tokens;
   final n = p.sessionCount;
-  final ago = shortAgo(p.lastActivity);
+  final ago = relativeTime(p.lastActivity);
   final meta = <(String, Color)>[
     (n == 1 ? '1 session' : '$n sessions', t.textDim),
-    if (ago.isNotEmpty)
-      (ago == 'now' ? 'active now' : 'active $ago ago', t.textDim),
+    if (ago.isNotEmpty) ('active $ago', t.textDim),
     if (p.missing) ('folder missing', t.textDim),
   ];
   return showDetailsSheet(
     context,
-    (sheet) => Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        DetailsHeader(
-          title: p.label,
-          node: firstLabel([p.nodeLabel, p.nodeId]),
-          meta: meta,
-          wrap: true,
-        ),
-        if (p.cwd.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          DetailsPathRow(path: p.cwd, sheet: sheet),
-        ],
+    body: (_, _) => [
+      DetailsHeader(
+        title: p.label,
+        node: firstLabel([p.nodeLabel, p.nodeId]),
+        meta: meta,
+      ),
+      if (p.cwd.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        DetailsFieldRow(label: 'dir', value: p.cwd),
       ],
-    ),
+    ],
   );
 }

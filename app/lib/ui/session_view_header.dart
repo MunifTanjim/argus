@@ -11,12 +11,16 @@ import 'theme.dart';
 /// mark and the repo, the session name, then branch, model, and context. An
 /// unnamed session shows its repo as the title on the first line.
 class SessionViewHeader extends StatelessWidget {
-  const SessionViewHeader({super.key, required this.session, this.wrap = false});
+  const SessionViewHeader({
+    super.key,
+    required this.session,
+    this.compact = false,
+  });
 
   final Session session;
 
-  /// The details sheet form; see [DetailsHeader.wrap].
-  final bool wrap;
+  /// The in-feed form; see [DetailsHeader.compact].
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -37,7 +41,7 @@ class SessionViewHeader extends StatelessWidget {
         ...sessionMetaParts(s, t, agent: false),
         if (s.frontend != FrontendKind.tmux) (s.frontend.name, t.textDim),
       ],
-      wrap: wrap,
+      compact: compact,
     );
   }
 }

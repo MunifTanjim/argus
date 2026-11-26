@@ -48,9 +48,11 @@ class BlockedCard extends StatelessWidget {
         children: [
           SessionHeader(
             session: s,
-            mark: Text('●',
-                textAlign: TextAlign.center,
-                style: mono.copyWith(color: t.blocked)),
+            mark: Text(
+              '●',
+              textAlign: TextAlign.center,
+              style: mono.copyWith(color: t.blocked),
+            ),
             style: mono.copyWith(
               color: t.text,
               fontSize: 13,
@@ -131,7 +133,7 @@ class BlockedCard extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: () => _open(context),
-          onLongPress: () => showSessionActions(context, s),
+          onLongPress: () => showSessionSheet(context, s),
           child: body,
         ),
       ),

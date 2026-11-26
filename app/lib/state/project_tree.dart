@@ -91,11 +91,15 @@ SetupMark _setupMark(String? state) => switch (state) {
   _ => SetupMark.none,
 };
 
+/// A commit id cut to its short form: the first 7 characters.
+String shortHead(String head) =>
+    head.length > 7 ? head.substring(0, 7) : head;
+
 String? _detail(ProjectNode p, WorkspaceNode w) {
   if (!p.isGit) return null;
   if (w.branch.isNotEmpty) return w.branch;
   if (w.head.isEmpty) return null;
-  return w.head.length > 7 ? w.head.substring(0, 7) : w.head;
+  return shortHead(w.head);
 }
 
 ProjectNode? _match(ProjectNode p, String q) {
@@ -221,6 +225,17 @@ class Activity {
     waiting: waiting + o.waiting,
     blocked: blocked + o.blocked,
   );
+
+  @override
+  bool operator ==(Object other) =>
+      other is Activity &&
+      other.live == live &&
+      other.working == working &&
+      other.waiting == waiting &&
+      other.blocked == blocked;
+
+  @override
+  int get hashCode => Object.hash(live, working, waiting, blocked);
 }
 
 bool _isLive(Session s) => !s.offline && s.status != SessionStatus.dead;

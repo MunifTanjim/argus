@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/enums.dart';
 import '../models/project.dart';
 import '../models/session.dart';
 import '../state/gateway.dart';
@@ -14,7 +13,6 @@ import '../state/sessions.dart';
 import '../state/sidebar_sessions.dart';
 import 'agent_badge.dart';
 import 'fold_header.dart';
-import 'project_actions.dart';
 import 'relative_time.dart';
 import 'session_actions.dart';
 import 'status_style.dart';
@@ -92,7 +90,7 @@ class SidebarSessionsList extends ConsumerWidget {
                         PendingOpen(s.id);
                     onOpen();
                   },
-                  onLongPress: () => _showDetails(context, s),
+                  onLongPress: () => showSessionSheet(context, s),
                 ),
           ],
         ],
@@ -104,73 +102,6 @@ class SidebarSessionsList extends ConsumerWidget {
     final client = ref.read(gatewayProvider)?.client;
     if (client == null) return;
     await refreshSessions(client, ref.read(sessionsProvider.notifier));
-  }
-
-  // The app's counterpart of the TUI's hover: what a row cannot fit, and the
-  // session's actions.
-  static Future<void> _showDetails(BuildContext context, Session s) {
-    final ax = ActionContext.of(context);
-    final status = s.statusLabel.isNotEmpty ? s.statusLabel : s.status.name;
-    final tmux = s.tmux.paneId.isEmpty
-        ? ''
-        : [
-            s.tmux.sessionName,
-            s.tmux.paneId,
-            switch (s.tmux.server) {
-              TmuxServerKind.default_ => 'default',
-              TmuxServerKind.argus => 'argus',
-              TmuxServerKind.unknown => '',
-            },
-          ].where((p) => p.isNotEmpty).join(' · ');
-    final fields = [
-      ('Status', s.offline ? '$status, offline' : status),
-      ('Agent', agentLabel(s.agent)),
-      ('Task', s.summary?.task ?? ''),
-      ('Last activity', relativeTime(s.summary?.lastActivity)),
-      ('Dir', s.cwd ?? ''),
-      ('Branch', s.branch ?? ''),
-      ('Node', s.nodeLabel ?? ''),
-      ('Tmux', tmux),
-      ('ID', s.id),
-    ].where((f) => f.$2.isNotEmpty);
-    return showModalBottomSheet<void>(
-      context: context,
-      useRootNavigator: true,
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                sidebarTitle(s),
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 12),
-              for (final (label, value) in fields)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
-                        width: 104,
-                        child: Text(
-                          label,
-                          style: TextStyle(color: context.tokens.textDim),
-                        ),
-                      ),
-                      Expanded(child: SelectableText(value)),
-                    ],
-                  ),
-                ),
-              ...sessionActionTiles(ctx, ax, s),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   static bool _mixesAgents(List<Session> listed) =>
@@ -229,7 +160,9 @@ class _SessionRow extends StatelessWidget {
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontFamily: monoFamily,
-                      color: dim ? context.tokens.textDim : sessionColor(s, context.tokens),
+                      color: dim
+                          ? context.tokens.textDim
+                          : sessionColor(s, context.tokens),
                     ),
                   ),
                 ),

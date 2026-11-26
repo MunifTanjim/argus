@@ -10,6 +10,7 @@ import 'package:argus/state/navigation.dart';
 import 'package:argus/state/projects.dart';
 import 'package:argus/state/projects_api.dart';
 import 'package:argus/state/project_tree.dart';
+import 'package:argus/ui/details_header.dart';
 import 'package:argus/ui/nerd_icon.dart';
 import 'package:argus/ui/project_drawer.dart';
 import 'package:argus/transport/connection.dart';
@@ -28,6 +29,7 @@ Map<String, dynamic> _tree({
   String branch = 'feat/registry',
   String name = 'argus',
   String dir = '/src/argus/.worktrees/registry',
+  Map<String, dynamic>? setup,
 }) => {
   'projects': [
     {
@@ -42,6 +44,9 @@ Map<String, dynamic> _tree({
           'id': 'A:w2',
           'dir': dir,
           'branch': branch,
+          'head': '3f9c2a1e',
+          'target_branch': 'main',
+          'setup': ?setup,
         },
       ],
     },
@@ -100,9 +105,10 @@ Future<ProviderContainer> _pump(
   WidgetTester tester,
   Map<String, dynamic> tree, {
   double width = 400,
+  double height = 800,
   _MemKv? kv,
 }) async {
-  tester.view.physicalSize = Size(width, 800);
+  tester.view.physicalSize = Size(width, height);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final c = ProviderContainer(
@@ -509,6 +515,74 @@ void main() {
     expect(find.text('New session'), findsNothing);
   });
 
+  testWidgets('the workspace sheet pins Remove and New session', (
+    tester,
+  ) async {
+    final c = await _pump(tester, _tree(), height: 520);
+    c.read(sessionsProvider.notifier).replaceAll([
+      _sess('A:s1', 'working', ws: 'A:w2'),
+    ]);
+    await tester.pump();
+    await tester.longPress(find.text('registry'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    final header = tester.widget<DetailsHeader>(find.byType(DetailsHeader));
+    expect(header.label, 'argus');
+    expect(header.title, 'registry');
+    expect(header.meta.map((m) => m.$1), ['feat/registry → main']);
+    expect(find.text('1 working'), findsOneWidget);
+    expect(find.text('3f9c2a1'), findsOneWidget);
+    final bar = find.byType(DetailsActionBar);
+    for (final label in ['Remove', 'New session']) {
+      expect(
+        find.descendant(of: bar, matching: find.text(label)).hitTestable(),
+        findsOneWidget,
+        reason: label,
+      );
+    }
+    expect(
+      tester.getCenter(find.text('Remove')).dx,
+      lessThan(tester.getCenter(find.text('New session')).dx),
+    );
+    expect(find.text('Change target'), findsOneWidget);
+    expect(find.text('Force remove'), findsOneWidget);
+  });
+
+  testWidgets('the workspace sheet shows a failed setup', (tester) async {
+    await _pump(
+      tester,
+      _tree(
+        setup: {'state': 'failed', 'exit_code': 2, 'command': 'make setup'},
+      ),
+    );
+    await tester.longPress(find.text('registry'));
+    await tester.pumpAndSettle();
+    expect(find.text('failed (exit 2) · make setup'), findsOneWidget);
+  });
+
+  testWidgets('the project sheet pins Forget and shows a git error', (
+    tester,
+  ) async {
+    await _pump(tester, _tree(), height: 520);
+    await tester.longPress(find.text('dotfiles'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    final header = tester.widget<DetailsHeader>(find.byType(DetailsHeader));
+    expect(header.title, 'dotfiles');
+    expect(header.label, 'git');
+    expect(find.text('git exploded'), findsOneWidget);
+    expect(find.text('1'), findsOneWidget);
+    expect(
+      find
+          .descendant(
+            of: find.byType(DetailsActionBar),
+            matching: find.text('Forget'),
+          )
+          .hitTestable(),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('a workspace being removed says so', (tester) async {
     final c = await _pump(tester, _tree());
     c.read(removingProvider.notifier).state = {'A:w2'};
@@ -671,14 +745,16 @@ void main() {
       'Claude',
       'fix the login bug',
       '/src/argus',
-      'main',
-      'mbp',
       'work · %3 · default',
       'A:s1',
     ]) {
       expect(find.text(v), findsOneWidget, reason: v);
     }
-    expect(find.text('Last activity'), findsNothing);
+    // The header shows the branch in its meta line, and the node.
+    expect(find.textContaining('⎇ main', findRichText: true), findsOneWidget);
+    expect(find.textContaining('mbp', findRichText: true), findsWidgets);
+    // No last activity, so the status row has no time.
+    expect(find.textContaining('offline ·'), findsNothing);
   });
 
   testWidgets('switching tabs keeps the header height', (tester) async {
