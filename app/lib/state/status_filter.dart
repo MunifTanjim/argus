@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/enums.dart';
 import '../models/session.dart';
+import 'toggle_set.dart';
 
 /// The statuses that the home count tiles show and filter by.
 enum TileStatus { blocked, waiting, working }
@@ -25,18 +26,14 @@ Map<TileStatus, int> tileCounts(Iterable<Session> sessions) {
   return counts;
 }
 
-/// The home list's status filter: null shows every status.
-/// Kept in memory, the same as the active-only filter.
-class StatusFilterController extends Notifier<TileStatus?> {
-  @override
-  TileStatus? build() => null;
+/// The status filter scope of the home list. A workspace list uses its
+/// workspace ID.
+const homeStatusScope = 'home';
 
-  void toggle(TileStatus t) => state = state == t ? null : t;
-
-  void clear() => state = null;
-}
-
+/// The tiles selected in one list, keyed by scope: [homeStatusScope], or a
+/// workspace ID. An empty set shows every status. Kept in memory: every app
+/// start shows all sessions.
 final statusFilterProvider =
-    NotifierProvider<StatusFilterController, TileStatus?>(
-      StatusFilterController.new,
+    NotifierProvider.family<ToggleSet<TileStatus>, Set<TileStatus>, String>(
+      (String _) => ToggleSet<TileStatus>(),
     );

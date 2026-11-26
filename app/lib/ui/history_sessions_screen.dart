@@ -6,9 +6,9 @@ import '../data/history_repository.dart';
 import '../models/agent.dart';
 import '../models/history.dart';
 import 'filter_title.dart';
+import 'fold_header.dart';
 import 'history_details.dart';
 import 'history_format.dart';
-import 'history_group_header.dart';
 import 'history_transcript_screen.dart';
 import 'responsive.dart';
 import 'theme.dart';
@@ -147,7 +147,7 @@ class _HistorySessionsScreenState extends ConsumerState<HistorySessionsScreen> {
         itemCount: rows.length,
         itemBuilder: (context, index) => switch (rows[index]) {
           _DayHeader(:final day, :final label, :final count, :final folded) =>
-            HistoryGroupHeader(
+            FoldHeader(
               key: Key('history-day-$label'),
               label: label,
               count: count,

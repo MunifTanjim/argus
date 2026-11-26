@@ -7,6 +7,7 @@ import '../state/changes.dart';
 import '../state/control.dart';
 import '../state/navigation.dart';
 import '../state/projects.dart';
+import 'details_header.dart';
 import 'project_actions.dart';
 import 'session_sections_list.dart';
 import 'shell_drawer.dart';
@@ -31,15 +32,16 @@ class WorkspaceScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final info = ref.watch(serverInfoProvider).value;
-    final showTerminals = info?.nodes
-            .any((n) => n.id == project.nodeId && n.terminalSupported) ??
+    final showTerminals =
+        info?.nodes.any((n) => n.id == project.nodeId && n.terminalSupported) ??
         false;
     final selected = ref.watch(workspaceTabProvider(workspace.id));
     // A tab that disappears must not stay selected, or back resets it unseen.
     if (info != null && !showTerminals && selected == WorkspaceTab.terminals) {
-      WidgetsBinding.instance.addPostFrameCallback((_) =>
-          ref.read(workspaceTabProvider(workspace.id).notifier).state =
-              WorkspaceTab.sessions);
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => ref.read(workspaceTabProvider(workspace.id).notifier).state =
+            WorkspaceTab.sessions,
+      );
     }
     final tab = !showTerminals && selected == WorkspaceTab.terminals
         ? WorkspaceTab.sessions
@@ -54,10 +56,7 @@ class WorkspaceScreen extends ConsumerWidget {
               )
             : _WorkspaceTitle(project: project, workspace: workspace),
         actions: [
-          if (tab == WorkspaceTab.sessions) ...const [
-            SessionSearchButton(),
-            ActiveOnlyButton(),
-          ],
+          if (tab == WorkspaceTab.sessions) const SessionSearchButton(),
           if (tab == WorkspaceTab.changes && project.isGit)
             _RefreshChanges(workspace: workspace),
           if (workspaceActionsFor(project, workspace).isNotEmpty)
@@ -236,30 +235,65 @@ class _WorkspaceTitle extends StatelessWidget {
   final ProjectNode project;
   final WorkspaceNode workspace;
 
-  String get _subtitle {
+  // The branch (or short head), and the target it merges into.
+  String get _at {
     final head = workspace.head;
     final at = workspace.branch.isNotEmpty
         ? workspace.branch
         : (head.length > 7 ? head.substring(0, 7) : head);
-    final parts = [project.name, if (at.isNotEmpty) at].join(' · ');
-    return workspace.targetBranch.isEmpty
-        ? parts
-        : '$parts → ${workspace.targetBranch}';
+    if (workspace.targetBranch.isEmpty) return at;
+    return at.isEmpty
+        ? '→ ${workspace.targetBranch}'
+        : '$at → ${workspace.targetBranch}';
+  }
+
+  String get _subtitle => [project.name, if (_at.isNotEmpty) _at].join(' · ');
+
+  // As the session view's title: the full details in a sheet.
+  void _showDetails(BuildContext context) {
+    final t = context.tokens;
+    showDetailsSheet(
+      context,
+      (sheet) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          DetailsHeader(
+            label: project.name,
+            title: workspace.name,
+            node: project.nodeName,
+            meta: [if (_at.isNotEmpty) (_at, t.textDim)],
+            wrap: true,
+          ),
+          if (workspace.dir.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            DetailsPathRow(path: workspace.dir, sheet: sheet),
+          ],
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(workspace.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-        Text(
-          _subtitle,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: context.tokens.link, fontSize: 12),
+    return InkWell(
+      borderRadius: BorderRadius.circular(context.tokens.radius),
+      onTap: () => _showDetails(context),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(workspace.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text(
+              _subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: context.tokens.link, fontSize: 12),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }

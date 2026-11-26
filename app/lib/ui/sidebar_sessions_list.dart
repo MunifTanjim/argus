@@ -7,11 +7,13 @@ import '../models/session.dart';
 import '../state/gateway.dart';
 import '../state/left_sidebar.dart';
 import '../state/navigation.dart';
+import '../state/project_tree.dart';
 import '../state/projects.dart';
 import '../state/push.dart';
 import '../state/sessions.dart';
 import '../state/sidebar_sessions.dart';
 import 'agent_badge.dart';
+import 'fold_header.dart';
 import 'project_actions.dart';
 import 'relative_time.dart';
 import 'session_actions.dart';
@@ -32,6 +34,10 @@ class SidebarSessionsList extends ConsumerWidget {
     final shown = ref.watch(shownSessionProvider);
     final query = ref.watch(sidebarSessionsFilterProvider).trim();
     final ws = ref.watch(sidebarSessionsWorkspaceFilterProvider);
+    // A filter shows every group unfolded.
+    final shownFolded = query.isEmpty
+        ? ref.watch(sidebarSessionsFoldedProvider)
+        : const <SidebarSection>{};
     final groups = buildSidebarSections(
       sessions.where(
         (s) =>
@@ -66,25 +72,28 @@ class SidebarSessionsList extends ConsumerWidget {
         padding: const EdgeInsets.only(bottom: 8),
         children: [
           for (final g in groups) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Text(
-                g.section.title,
-                style: TextStyle(color: context.tokens.textDim, fontSize: 12),
-              ),
+            FoldHeader(
+              inset: true,
+              label: g.section.title,
+              folded: shownFolded.contains(g.section),
+              onTap: () => ref
+                  .read(sidebarSessionsFoldedProvider.notifier)
+                  .toggle(g.section),
+              activity: homeActivity(g.sessions),
             ),
-            for (final s in g.sessions)
-              _SessionRow(
-                session: s,
-                place: _place(s, projects, showAgent),
-                selected: s.id == shown,
-                onTap: () {
-                  ref.read(pendingOpenSessionProvider.notifier).state =
-                      PendingOpen(s.id);
-                  onOpen();
-                },
-                onLongPress: () => _showDetails(context, s),
-              ),
+            if (!shownFolded.contains(g.section))
+              for (final s in g.sessions)
+                _SessionRow(
+                  session: s,
+                  place: _place(s, projects, showAgent),
+                  selected: s.id == shown,
+                  onTap: () {
+                    ref.read(pendingOpenSessionProvider.notifier).state =
+                        PendingOpen(s.id);
+                    onOpen();
+                  },
+                  onLongPress: () => _showDetails(context, s),
+                ),
           ],
         ],
       ),
@@ -198,6 +207,7 @@ class _SessionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = session;
     final dim = s.offline;
+    final time = relativeTime(s.summary?.lastActivity);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
       child: Material(
@@ -252,6 +262,19 @@ class _SessionRow extends StatelessWidget {
                     ],
                   ),
                 ),
+                if (time.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      time,
+                      style: TextStyle(
+                        color: context.tokens.textDim,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

@@ -28,17 +28,18 @@ class SessionSectionsList extends ConsumerWidget {
     required this.sessions,
     this.emptyText = 'No sessions.',
     this.groupBy = GroupBy.host,
-    this.applyStatusFilter = false,
+    this.statusScope,
   });
 
   final Iterable<Session> sessions;
   final String emptyText;
 
-  /// The home list's grouping; workspace lists keep host.
+  /// The home list's grouping; workspace lists group by status.
   final GroupBy groupBy;
 
-  /// Whether the home status tiles' filter applies; workspace lists ignore it.
-  final bool applyStatusFilter;
+  /// The scope of the status tiles whose filter applies: [homeStatusScope],
+  /// or a workspace ID. Null ignores the tiles.
+  final String? statusScope;
 
   // A tap opens the session; a long press offers its actions.
   Widget _buildCard(
@@ -49,9 +50,7 @@ class SessionSectionsList extends ConsumerWidget {
   ) => s.blocked
       // Rows without a gap touch; the bordered card needs one below it.
       ? Padding(
-          padding: EdgeInsets.only(
-            bottom: context.tokens.rowGap == 0 ? 8 : 0,
-          ),
+          padding: EdgeInsets.only(bottom: context.tokens.rowGap == 0 ? 8 : 0),
           child: BlockedCard(
             session: s,
             showNode: section.showNode,
@@ -67,19 +66,13 @@ class SessionSectionsList extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final activeOnly = ref.watch(activeOnlyProvider);
     final query = ref.watch(sessionSearchProvider) ?? '';
-    final tileFilter = applyStatusFilter ? ref.watch(statusFilterProvider) : null;
-    if (tileFilter != null && tileCounts(sessions)[tileFilter] == 0) {
-      // The provider cannot change during build. Clearing is idempotent, so
-      // the listener fires once: the filter is null afterwards.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (ref.context.mounted) ref.read(statusFilterProvider.notifier).clear();
-      });
-    }
+    final scope = statusScope;
+    final tiles = scope == null
+        ? const <TileStatus>{}
+        : ref.watch(statusFilterProvider(scope));
     final shown = sessions
-        .where((s) => tileFilter == null || tileStatusOf(s) == tileFilter)
-        .where((s) => !activeOnly || isActiveSession(s))
+        .where((s) => tiles.isEmpty || tiles.contains(tileStatusOf(s)))
         .where((s) => matchesSessionQuery(s, query))
         .toList();
     final projects = groupBy == GroupBy.project || groupBy == GroupBy.workspace
@@ -101,13 +94,27 @@ class SessionSectionsList extends ConsumerWidget {
       return ListView(
         children: [
           const SizedBox(height: 120),
-          Center(
-            child: Text(switch (sessions.isNotEmpty) {
-              true when query.isNotEmpty => 'No sessions match.',
-              true when activeOnly => 'No active sessions.',
-              _ => emptyText,
-            }, style: TextStyle(color: context.tokens.textDim)),
-          ),
+          if (sessions.isNotEmpty && query.isEmpty && tiles.isNotEmpty)
+            Column(
+              children: [
+                Text(
+                  'No sessions match the filter.',
+                  style: TextStyle(color: context.tokens.textDim),
+                ),
+                TextButton(
+                  onPressed: () =>
+                      ref.read(statusFilterProvider(scope!).notifier).clear(),
+                  child: const Text('Show all'),
+                ),
+              ],
+            )
+          else
+            Center(
+              child: Text(switch (sessions.isNotEmpty) {
+                true when query.isNotEmpty => 'No sessions match.',
+                _ => emptyText,
+              }, style: TextStyle(color: context.tokens.textDim)),
+            ),
         ],
       );
     }
@@ -126,22 +133,6 @@ class SessionSectionsList extends ConsumerWidget {
           ],
         ],
       ),
-    );
-  }
-}
-
-class ActiveOnlyButton extends ConsumerWidget {
-  const ActiveOnlyButton({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final activeOnly = ref.watch(activeOnlyProvider);
-    return IconButton(
-      isSelected: activeOnly,
-      icon: const Icon(Icons.filter_list),
-      selectedIcon: const Icon(Icons.filter_list_alt),
-      tooltip: activeOnly ? 'Show all sessions' : 'Show active sessions',
-      onPressed: () => ref.read(activeOnlyProvider.notifier).toggle(),
     );
   }
 }
@@ -243,8 +234,11 @@ class _SectionHeader extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final outdated = ref.watch(outdatedNodeIdsProvider
-        .select((ids) => section.sessions.any((s) => ids.contains(s.nodeId))));
+    final outdated = ref.watch(
+      outdatedNodeIdsProvider.select(
+        (ids) => section.sessions.any((s) => ids.contains(s.nodeId)),
+      ),
+    );
     return Padding(
       // The header starts at the cards' left edge.
       padding: const EdgeInsets.only(top: 4, bottom: 8),
@@ -260,9 +254,7 @@ class _SectionHeader extends ConsumerWidget {
         ),
         _ => SectionLabel(
           leading: _leading(context),
-          label: section.offline
-              ? '${section.title} (offline)'
-              : section.title,
+          label: section.offline ? '${section.title} (offline)' : section.title,
         ),
       },
     );
@@ -279,7 +271,10 @@ class _SectionHeader extends ConsumerWidget {
         size: 14,
         color: context.tokens.textDim,
       ),
-      SectionIcon.branch => GitBranchIcon(size: 14, color: context.tokens.textDim),
+      SectionIcon.branch => GitBranchIcon(
+        size: 14,
+        color: context.tokens.textDim,
+      ),
       SectionIcon.agent => Icon(
         Icons.smart_toy_outlined,
         size: 14,
@@ -317,7 +312,9 @@ class ReconnectBanner extends StatelessWidget {
     };
     return Container(
       width: double.infinity,
-      color: failed ? context.tokens.errorSurface : context.tokens.blockedSurface,
+      color: failed
+          ? context.tokens.errorSurface
+          : context.tokens.blockedSurface,
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
       child: Text(
         text,

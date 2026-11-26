@@ -101,6 +101,39 @@ void main() {
     expect(hosts[1].sessions.map((s) => s.id), ['dev:1', 'dev:2']);
   });
 
+  test('sessions in a group and in needs-you sort by last activity', () {
+    Session at(String id, String status, String? when) => Session.fromJson(
+      jsonDecode(
+            jsonEncode({
+              'id': id,
+              'agent': 't',
+              'status': status,
+              'source': 'hooked',
+              'tmux': {
+                'server': 'argus',
+                'pane_id': '%1',
+                'session_name': 's',
+                'window_index': 0,
+                'current_path': '/p',
+              },
+              'node_label': 'dev',
+              if (when != null) 'summary': {'last_activity': when},
+            }),
+          )
+          as Map<String, dynamic>,
+    );
+
+    final sections = buildSections([
+      at('dev:1', 'idle', '2026-01-01T10:00:00Z'),
+      at('dev:2', 'idle', null),
+      at('dev:3', 'working', '2026-01-01T12:00:00Z'),
+      at('dev:4', 'awaiting_input', '2026-01-01T09:00:00Z'),
+      at('dev:5', 'awaiting_input', '2026-01-01T11:00:00Z'),
+    ]);
+    expect(sections[0].sessions.map((s) => s.id), ['dev:5', 'dev:4']);
+    expect(sections[1].sessions.map((s) => s.id), ['dev:3', 'dev:1', 'dev:2']);
+  });
+
   test('host offline only when all sessions offline', () {
     final sections = buildSections([
       _s('dev:1', 'dev', 'idle', offline: true),

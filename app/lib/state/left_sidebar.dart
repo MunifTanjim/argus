@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/legacy.dart';
 import '../pairing/gateway_store.dart';
 import 'navigation.dart';
 import 'sessions.dart';
+import 'sidebar_sessions.dart';
+import 'toggle_set.dart';
 
 enum LeftSidebarTab { projects, sessions }
 
@@ -68,6 +70,12 @@ final leftSidebarTabProvider =
 
 /// The Sessions tab's filter text, apart from the Projects filter.
 final sidebarSessionsFilterProvider = StateProvider<String>((ref) => '');
+
+/// The Sessions tab's folded groups. A filter shows them unfolded.
+final sidebarSessionsFoldedProvider =
+    NotifierProvider<ToggleSet<SidebarSection>, Set<SidebarSection>>(
+      ToggleSet<SidebarSection>.new,
+    );
 
 /// Whether the Sessions tab lists only the shown workspace's sessions.
 final sidebarSessionsWorkspaceOnlyProvider = StateProvider<bool>(

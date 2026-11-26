@@ -11,11 +11,14 @@ import 'package:argus/state/projects.dart';
 import 'package:argus/state/projects_api.dart';
 import 'package:argus/state/project_tree.dart';
 import 'package:argus/ui/nerd_icon.dart';
-import 'package:argus/ui/node_screen.dart';
 import 'package:argus/ui/project_drawer.dart';
+import 'package:argus/transport/connection.dart';
+import 'package:argus/ui/session_sections_list.dart';
+import 'package:argus/ui/settings_screen.dart';
 import 'package:argus/ui/spawn_dialog.dart';
 import 'package:argus/ui/theme.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -24,6 +27,7 @@ import '../support/fake_gateway_client.dart';
 Map<String, dynamic> _tree({
   String branch = 'feat/registry',
   String name = 'argus',
+  String dir = '/src/argus/.worktrees/registry',
 }) => {
   'projects': [
     {
@@ -36,7 +40,7 @@ Map<String, dynamic> _tree({
         {'id': 'A:w1', 'dir': '/src/argus', 'branch': 'main', 'is_main': true},
         {
           'id': 'A:w2',
-          'dir': '/src/argus/.worktrees/registry',
+          'dir': dir,
           'branch': branch,
         },
       ],
@@ -69,6 +73,7 @@ Session _sess(
   String status, {
   String? ws,
   String agent = 'claude',
+  String? lastActivity,
 }) => Session.fromJson(
   jsonDecode(
         jsonEncode({
@@ -78,6 +83,7 @@ Session _sess(
           'status': status,
           'source': 'hooked',
           'workspace_id': ?ws,
+          if (lastActivity != null) 'summary': {'last_activity': lastActivity},
           'tmux': {
             'server': 'argus',
             'pane_id': '%1',
@@ -134,13 +140,56 @@ void main() {
     ]);
     await tester.tap(find.text('Sessions'));
     await tester.pumpAndSettle();
-    expect(find.text('Needs you'), findsOneWidget);
+    expect(find.text('NEEDS YOU'), findsOneWidget);
     expect(find.text('name-A:s1'), findsOneWidget);
     expect(find.text('name-A:s2'), findsOneWidget);
     expect(find.text('name-A:s3'), findsNothing);
     expect(find.text('Home'), findsNothing);
     expect(kv.m['leftSidebar.tab'], 'sessions');
   });
+
+  testWidgets('a Sessions tab group folds like a tree node', (tester) async {
+    final c = await _pump(
+      tester,
+      _tree(),
+      kv: _MemKv({'leftSidebar.tab': 'sessions'}),
+    );
+    c.read(sessionsProvider.notifier).replaceAll([
+      _sess('A:s1', 'working', ws: 'A:w1'),
+      _sess('A:s2', 'idle', ws: 'A:w2'),
+    ]);
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.expand_more), findsNWidgets(2));
+
+    await tester.tap(find.text('WORKING'));
+    await tester.pump();
+    expect(find.text('name-A:s1'), findsNothing);
+    expect(find.text('name-A:s2'), findsOneWidget);
+    expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+    // The folded group shows its activity, as a folded tree node does.
+    expect(
+      find.descendant(
+        of: find.ancestor(
+          of: find.text('WORKING'),
+          matching: find.byType(InkWell),
+        ),
+        matching: find.text('1'),
+      ),
+      findsOneWidget,
+    );
+
+    // A filter shows every match, folded or not.
+    c.read(sidebarSessionsFilterProvider.notifier).state = 'name-A';
+    await tester.pump();
+    expect(find.text('name-A:s1'), findsOneWidget);
+    c.read(sidebarSessionsFilterProvider.notifier).state = '';
+    await tester.pump();
+
+    await tester.tap(find.text('WORKING'));
+    await tester.pump();
+    expect(find.text('name-A:s1'), findsOneWidget);
+  });
+
 
   testWidgets('the agent shows only when listed sessions mix agents', (
     tester,
@@ -212,33 +261,37 @@ void main() {
     expect(c.read(pendingOpenSessionProvider)?.inHome, isFalse);
   });
 
-  testWidgets('the node row info button opens the node screen', (tester) async {
+  testWidgets('node headers have no info button', (tester) async {
     await _pump(tester, _tree());
-    await tester.tap(find.bySemanticsLabel('Node info'));
-    await tester.pumpAndSettle();
-    expect(find.byType(NodeScreen), findsOneWidget);
+    expect(find.bySemanticsLabel('Node info'), findsNothing);
+    expect(find.byIcon(Icons.info_outline), findsNothing);
   });
 
-  testWidgets(
-    'the info button has a 40 px hit area and does not fold the node',
-    (tester) async {
-      final c = await _pump(tester, _tree());
-      final button = find
-          .ancestor(
-            of: find.byIcon(Icons.info_outline),
-            matching: find.byType(InkWell),
-          )
-          .first;
-      final size = tester.getSize(button);
-      expect(size.width, greaterThanOrEqualTo(40));
-      expect(size.height, greaterThanOrEqualTo(40));
-      await tester.tap(find.bySemanticsLabel('Node info'));
-      await tester.pumpAndSettle();
-      expect(c.read(treeViewProvider).folded, isNot(contains('A')));
-    },
-  );
+  // The test font draws every glyph as wide as its font size.
 
-  testWidgets('shows Home, projects, and two-line workspace rows', (
+  testWidgets('a long workspace name keeps 60% of the line, its branch the '
+      'rest', (tester) async {
+    await _pump(
+      tester,
+      _tree(
+        dir: '/src/argus/.worktrees/notifications-overhaul',
+        branch: 'feat/notifications-overhaul-v2',
+      ),
+    );
+    final name = tester.renderObject<RenderParagraph>(
+      find.text('notifications-overhaul'),
+    );
+    final branch = tester.renderObject<RenderParagraph>(
+      find.text('feat/notifications-overhaul-v2'),
+    );
+    expect(name.didExceedMaxLines, isTrue);
+    expect(branch.didExceedMaxLines, isTrue);
+    final line = name.size.width + 8 + branch.size.width;
+    expect(name.size.width, moreOrLessEquals(line * 0.6, epsilon: 1));
+  });
+
+
+  testWidgets('shows Home, projects, and one-line workspace rows', (
     tester,
   ) async {
     await _pump(tester, _tree());
@@ -249,7 +302,58 @@ void main() {
     expect(find.byIcon(Icons.folder_outlined), findsOneWidget); // main worktree
     expect(find.byType(GitBranchIcon), findsNWidgets(2));
     expect(find.byIcon(Icons.push_pin), findsOneWidget);
-    expect(find.text('Settings'), findsOneWidget);
+    expect(find.byTooltip('Settings'), findsOneWidget);
+    final row = find
+        .ancestor(of: find.text('registry'), matching: find.byType(InkWell))
+        .first;
+    expect(tester.getSize(row).height, 40);
+    expect(
+      tester.getCenter(find.text('feat/registry')).dy,
+      tester.getCenter(find.text('registry')).dy,
+    );
+    // The branch sits at the row's right edge (inside its 8 px padding).
+    expect(
+      tester.getTopRight(find.text('feat/registry')).dx,
+      closeTo(tester.getTopRight(row).dx - 8, 0.5),
+    );
+  });
+
+  testWidgets('a long branch with pills keeps the workspace name visible', (
+    tester,
+  ) async {
+    final c = await _pump(
+      tester,
+      _tree(branch: 'feature/an-extremely-long-branch-name'),
+      width: 264,
+    );
+    c.read(sessionsProvider.notifier).replaceAll([
+      _sess('A:s1', 'working', ws: 'A:w2'),
+      _sess('A:s2', 'awaiting_input', ws: 'A:w2'),
+      _sess('A:s3', 'idle', ws: 'A:w2'),
+    ]);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(tester.getSize(find.text('registry')).width, greaterThan(40));
+  });
+
+  testWidgets('a short branch sits at the right edge of its row', (
+    tester,
+  ) async {
+    await _pump(tester, _tree(branch: 'dev'));
+    final row = find
+        .ancestor(of: find.text('registry'), matching: find.byType(InkWell))
+        .first;
+    expect(
+      tester.getTopRight(find.text('dev')).dx,
+      closeTo(tester.getTopRight(row).dx - 8, 0.5),
+    );
+  });
+
+  testWidgets('a workspace named as its branch shows the name once', (
+    tester,
+  ) async {
+    await _pump(tester, _tree(branch: 'registry'));
+    expect(find.text('registry'), findsOneWidget);
   });
 
   testWidgets('a workspace tap sets the scope; Home clears it', (tester) async {
@@ -323,13 +427,14 @@ void main() {
     tester,
   ) async {
     final c = await _pump(tester, _tree());
-    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.tap(find.byTooltip('Filter options'));
     await tester.pumpAndSettle();
     expect(find.byType(Checkbox), findsNWidgets(2));
+    expect(find.text('Refresh'), findsOneWidget);
     await tester.tap(find.text('Show hidden'));
     await tester.pumpAndSettle();
     expect(c.read(treeViewProvider).showHidden, isTrue);
-    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.tap(find.byTooltip('Filter options'));
     await tester.pumpAndSettle();
     final hidden = tester.widget<Checkbox>(find.byType(Checkbox).first);
     expect(hidden.value, isTrue);
@@ -450,23 +555,39 @@ void main() {
     ]);
     await tester.tap(find.text('Sessions'));
     await tester.pumpAndSettle();
-    IconButton toggle() => tester.widget<IconButton>(
-      find.ancestor(
-        of: find.byTooltip('This workspace only'),
-        matching: find.byType(IconButton),
-      ),
-    );
+    Future<bool> enabled() async {
+      await tester.tap(find.byTooltip('Filter options'));
+      await tester.pumpAndSettle();
+      final on =
+          tester
+              .widget<CheckboxMenuButton>(
+                find.widgetWithText(CheckboxMenuButton, 'This workspace only'),
+              )
+              .onChanged !=
+          null;
+      await tester.tapAt(Offset.zero);
+      await tester.pumpAndSettle();
+      return on;
+    }
+
+    Future<void> toggle() async {
+      await tester.tap(find.byTooltip('Filter options'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('This workspace only'));
+      await tester.pumpAndSettle();
+    }
+
+    final dot = find.byKey(const Key('filter-options-active'));
     // No session shown, or one without a workspace: nothing to narrow to.
-    expect(toggle().onPressed, isNull);
+    expect(await enabled(), isFalse);
     c.read(shownSessionProvider.notifier).state = 'A:s4';
     await tester.pumpAndSettle();
-    expect(toggle().onPressed, isNull);
+    expect(await enabled(), isFalse);
 
     c.read(shownSessionProvider.notifier).state = 'A:s1';
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('This workspace only'));
-    await tester.pumpAndSettle();
-    expect(toggle().isSelected, isTrue);
+    await toggle();
+    expect(dot, findsOneWidget);
     expect(find.text('name-A:s1'), findsOneWidget);
     expect(find.text('name-A:s3'), findsOneWidget);
     expect(find.text('name-A:s2'), findsNothing);
@@ -482,17 +603,34 @@ void main() {
     // With no session shown, every session is listed again.
     c.read(shownSessionProvider.notifier).state = null;
     await tester.pumpAndSettle();
-    expect(toggle().isSelected, isFalse);
+    expect(dot, findsNothing);
     expect(find.text('name-A:s2'), findsOneWidget);
 
     c.read(shownSessionProvider.notifier).state = 'A:s2';
     await tester.pumpAndSettle();
     expect(find.text('name-A:s1'), findsNothing);
     expect(find.text('name-A:s2'), findsOneWidget);
-    await tester.tap(find.byTooltip('This workspace only'));
-    await tester.pumpAndSettle();
+    await toggle();
     expect(find.text('name-A:s1'), findsOneWidget);
     expect(find.text('name-A:s4'), findsOneWidget);
+  });
+
+  testWidgets('a session row shows its last activity time', (tester) async {
+    final c = await _pump(tester, _tree());
+    c.read(sessionsProvider.notifier).replaceAll([
+      _sess(
+        'A:s1',
+        'idle',
+        ws: 'A:w1',
+        lastActivity: DateTime.now()
+            .subtract(const Duration(hours: 3))
+            .toUtc()
+            .toIso8601String(),
+      ),
+    ]);
+    await tester.tap(find.text('Sessions'));
+    await tester.pumpAndSettle();
+    expect(find.text('3h ago'), findsOneWidget);
   });
 
   testWidgets('a long-press on a session shows its details', (tester) async {
@@ -545,25 +683,131 @@ void main() {
 
   testWidgets('switching tabs keeps the header height', (tester) async {
     await _pump(tester, _tree());
-    final before = tester.getTopLeft(
-      find.byType(SegmentedButton<LeftSidebarTab>),
-    );
+    final before = tester.getTopLeft(find.text('Projects'));
     await tester.tap(find.text('Sessions'));
     await tester.pumpAndSettle();
-    expect(
-      tester.getTopLeft(find.byType(SegmentedButton<LeftSidebarTab>)),
-      before,
-    );
-    expect(find.byTooltip('Tree options').hitTestable(), findsNothing);
+    expect(tester.getTopLeft(find.text('Projects')), before);
+    expect(find.byType(SegmentedButton<LeftSidebarTab>), findsNothing);
   });
 
-  testWidgets('the Sessions tab header opens the spawn dialog', (tester) async {
+  testWidgets('the header opens the spawn dialog on both tabs', (tester) async {
     await _pump(tester, _tree());
-    expect(find.byTooltip('New session'), findsNothing);
-    await tester.tap(find.text('Sessions'));
-    await tester.pumpAndSettle();
+    expect(find.byTooltip('New session'), findsOneWidget);
     await tester.tap(find.byTooltip('New session'));
     await tester.pumpAndSettle();
     expect(find.byType(SpawnDialog), findsOneWidget);
+  });
+
+  testWidgets('the header has text tabs, New session, and no menu', (
+    tester,
+  ) async {
+    await _pump(tester, _tree());
+    await tester.tap(find.text('Sessions'));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.more_vert), findsNothing);
+    expect(find.byTooltip('New session'), findsOneWidget);
+    expect(find.text('Argus'), findsNothing);
+  });
+
+  testWidgets('the filter bar sits below the list and Settings is a button', (
+    tester,
+  ) async {
+    await _pump(tester, _tree());
+    expect(
+      tester.getTopLeft(find.byType(TextField)).dy,
+      greaterThan(tester.getTopLeft(find.text('Home')).dy),
+    );
+    expect(find.text('Settings'), findsNothing);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SettingsScreen), findsOneWidget);
+  });
+
+  testWidgets('the clear button shows with text and clears the current tab', (
+    tester,
+  ) async {
+    final c = await _pump(tester, _tree());
+    expect(find.byTooltip('Clear filter'), findsNothing);
+    await tester.enterText(find.byType(TextField), 'dot');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Clear filter'));
+    await tester.pump();
+    expect(c.read(treeViewProvider).filter, '');
+    expect(find.text('registry'), findsOneWidget);
+    expect(tester.testTextInput.hasAnyClients, isTrue);
+
+    await tester.enterText(find.byType(TextField), 'zzz');
+    await tester.tap(find.text('Sessions'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Clear filter'), findsNothing);
+    await tester.enterText(find.byType(TextField), 's2');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Clear filter'));
+    await tester.pump();
+    expect(c.read(sidebarSessionsFilterProvider), '');
+  });
+
+  testWidgets('the options dot follows the effective filter', (tester) async {
+    final c = await _pump(tester, _tree());
+    final dot = find.byKey(const Key('filter-options-active'));
+    c.read(sessionsProvider.notifier).replaceAll([
+      _sess('A:s1', 'idle', ws: 'A:w1'),
+    ]);
+    await tester.tap(find.text('Sessions'));
+    await tester.pumpAndSettle();
+    c.read(sidebarSessionsWorkspaceOnlyProvider.notifier).state = true;
+    await tester.pump();
+    expect(dot, findsNothing);
+    c.read(shownSessionProvider.notifier).state = 'A:s1';
+    await tester.pump();
+    expect(dot, findsOneWidget);
+
+    await tester.tap(find.text('Projects'));
+    await tester.pumpAndSettle();
+    expect(dot, findsNothing);
+    c.read(treeViewProvider.notifier).toggleHidden();
+    await tester.pump();
+    expect(dot, findsOneWidget);
+  });
+
+  testWidgets('the filter bar stays above the keyboard', (tester) async {
+    await _pump(tester, _tree());
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    await tester.pump();
+    expect(
+      tester.getBottomLeft(find.byType(TextField)).dy,
+      lessThanOrEqualTo(800 - 300),
+    );
+  });
+
+  testWidgets(
+    'the reconnect banner shows above the filter bar only when not connected',
+    (tester) async {
+      final c = await _pump(tester, _tree());
+      c.read(connStateProvider.notifier).state = ConnState.reconnecting;
+      await tester.pump();
+      expect(find.text('Reconnecting…'), findsOneWidget);
+      expect(
+        tester.getBottomLeft(find.byType(ReconnectBanner)).dy,
+        lessThanOrEqualTo(tester.getTopLeft(find.byType(TextField)).dy),
+      );
+      c.read(connStateProvider.notifier).state = ConnState.connected;
+      await tester.pump();
+      expect(find.byType(ReconnectBanner), findsNothing);
+    },
+  );
+
+  testWidgets('the options menu opens above its button, not over it', (
+    tester,
+  ) async {
+    await _pump(tester, _tree());
+    final button = find.byTooltip('Filter options');
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(
+      tester.getBottomLeft(find.text('Refresh')).dy,
+      lessThanOrEqualTo(tester.getTopLeft(button).dy),
+    );
+    expect(button.hitTestable(), findsOneWidget);
   });
 }

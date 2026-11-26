@@ -323,11 +323,11 @@ void main() {
     await _shell(tester);
     expect(find.text('Sessions'), findsWidgets);
     expect(find.text('History'), findsOneWidget);
-    expect(find.text('Settings'), findsNothing);
+    expect(find.byTooltip('Settings'), findsNothing);
     await tester.tap(find.byIcon(Icons.menu));
     await tester.pumpAndSettle();
     expect(find.text('registry'), findsOneWidget);
-    expect(find.text('Settings'), findsOneWidget);
+    expect(find.byTooltip('Settings'), findsOneWidget);
   });
 
   testWidgets('a workspace tap shows its screen and closes the drawer', (tester) async {
@@ -350,7 +350,7 @@ void main() {
 
   testWidgets('Settings opens from the drawer footer', (tester) async {
     await _shell(tester, width: 1000);
-    await tester.tap(find.text('Settings'));
+    await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     expect(find.text('Disconnect'), findsOneWidget);
   });
@@ -474,11 +474,11 @@ void main() {
 
     await _holdOpenDrawer(tester);
     await _pumpRoute(tester);
-    expect(find.text('Settings'), findsOneWidget);
+    expect(find.byTooltip('Settings'), findsOneWidget);
     await tester.tap(find.text('registry'));
     await _pumpRoute(tester);
     expect(c.read(scopeProvider), 'A:w2');
-    expect(find.text('Settings'), findsNothing);
+    expect(find.byTooltip('Settings'), findsNothing);
     expect(find.byType(WorkspaceScreen), findsOneWidget);
   });
 
@@ -496,7 +496,7 @@ void main() {
     await _openSessionIn(tester, c, 'A:w2');
     expect(_detailInShell, findsOneWidget);
     expect(find.text('registry'), findsWidgets);
-    expect(find.text('Settings'), findsOneWidget);
+    expect(find.byTooltip('Settings'), findsOneWidget);
     expect(find.byIcon(Icons.menu), findsNothing);
   });
 
@@ -857,11 +857,11 @@ void main() {
     await _openSessionIn(tester, c, 'A:w2');
     await _holdOpenDrawer(tester);
     await _pumpRoute(tester);
-    expect(find.text('Settings'), findsOneWidget);
+    expect(find.byTooltip('Settings'), findsOneWidget);
 
     await tester.binding.handlePopRoute();
     await _pumpRoute(tester);
-    expect(find.text('Settings'), findsNothing);
+    expect(find.byTooltip('Settings'), findsNothing);
     expect(find.byType(SessionDetailScreen), findsOneWidget);
     expect(c.read(scopeProvider), 'A:w2');
   });
@@ -870,7 +870,7 @@ void main() {
     await _shell(tester);
     await tester.tap(find.byIcon(Icons.menu));
     await tester.pumpAndSettle();
-    expect(find.text('Settings'), findsOneWidget);
+    expect(find.byTooltip('Settings'), findsOneWidget);
 
     expect(await tester.binding.handlePopRoute(), isTrue);
     await tester.pumpAndSettle();
@@ -929,7 +929,7 @@ void main() {
       await gesture.moveBy(const Offset(150, 0));
       await gesture.up();
       await tester.pumpAndSettle();
-      expect(find.text('Settings'), findsOneWidget);
+      expect(find.byTooltip('Settings'), findsOneWidget);
       expect(tester.getTopLeft(find.byType(Drawer)).dx, 0);
     });
 
@@ -991,7 +991,7 @@ void main() {
       await gesture.moveBy(const Offset(150, 0));
       await gesture.up();
       await tester.pumpAndSettle();
-      expect(find.text('Settings'), findsOneWidget);
+      expect(find.byTooltip('Settings'), findsOneWidget);
       expect(tester.getTopLeft(find.byType(Drawer)).dx, 0);
     });
 
@@ -999,7 +999,7 @@ void main() {
       await _shell(tester);
       await tester.flingFrom(const Offset(5, 300), const Offset(80, 0), 1000);
       await tester.pumpAndSettle();
-      expect(find.text('Settings'), findsOneWidget);
+      expect(find.byTooltip('Settings'), findsOneWidget);
     });
 
     testWidgets('a short edge swipe settles closed', (tester) async {
@@ -1049,7 +1049,7 @@ void main() {
       tester.view.resetSystemGestureInsets();
       await tester.pump();
       await swipe(tester);
-      expect(find.text('Settings'), findsOneWidget);
+      expect(find.byTooltip('Settings'), findsOneWidget);
     });
 
     testWidgets('a tap at the edge still reaches the content', (tester) async {

@@ -3,12 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/project.dart';
 import '../state/gateway.dart';
+import '../state/grouping.dart';
 import '../state/projects.dart';
 import '../state/sessions.dart';
 import '../transport/connection.dart';
 import 'project_actions.dart';
 import 'session_sections_list.dart';
 import 'setup_card.dart';
+import 'status_tiles.dart';
 
 class WorkspaceSessionsTab extends ConsumerWidget {
   const WorkspaceSessionsTab({super.key, required this.workspaceId});
@@ -38,6 +40,7 @@ class WorkspaceSessionsTab extends ConsumerWidget {
             onRunAgain: () => runSetup(ActionContext.of(context), hit.$2),
             onFullLog: () => openSetupLog(ActionContext.of(context), hit.$2),
           ),
+        StatusTiles(sessions: sessions, scope: workspaceId),
         Expanded(
           child: RefreshIndicator(
             onRefresh: () async {
@@ -50,6 +53,8 @@ class WorkspaceSessionsTab extends ConsumerWidget {
             },
             child: SessionSectionsList(
               sessions: sessions,
+              groupBy: GroupBy.status,
+              statusScope: workspaceId,
               emptyText: 'No sessions in this workspace.',
             ),
           ),

@@ -15,30 +15,44 @@ import 'package:argus/transport/connection.dart';
 import 'package:argus/ui/device_identity_screen.dart';
 import 'package:argus/ui/session_list_screen.dart';
 
-Session _s(String id, String host, String status) =>
-    Session.fromJson(jsonDecode(
-        '{"id":"$id","agent":"t","status":"$status","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"$id","node_label":"$host"}'));
+Session _s(String id, String host, String status) => Session.fromJson(
+  jsonDecode(
+    '{"id":"$id","agent":"t","status":"$status","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"$id","node_label":"$host"}',
+  ),
+);
 
-Session _sa(String id, String host, String status, String agent) =>
-    Session.fromJson(jsonDecode(
-        '{"id":"$id","agent":"$agent","status":"$status","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"$id","node_label":"$host"}'));
+Session _sa(
+  String id,
+  String host,
+  String status,
+  String agent,
+) => Session.fromJson(
+  jsonDecode(
+    '{"id":"$id","agent":"$agent","status":"$status","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"$id","node_label":"$host"}',
+  ),
+);
 
 Widget _app(List<Override> overrides) => ProviderScope(
-      overrides: overrides,
-      child: const MaterialApp(home: SessionListScreen()),
-    );
+  overrides: overrides,
+  child: const MaterialApp(home: SessionListScreen()),
+);
 
 void main() {
   testWidgets('shows needs-you header and host header', (tester) async {
-    await tester.pumpWidget(_app([
-      sessionsProvider.overrideWith(() => _SeededSessions([
+    await tester.pumpWidget(
+      _app([
+        sessionsProvider.overrideWith(
+          () => _SeededSessions([
             _s('dev:1', 'dev', 'awaiting_input'),
             _s('dev:2', 'dev', 'working'),
-          ])),
-      gatewayProvider.overrideWithValue(null),
-      groupByStoreProvider.overrideWithValue(
-          GroupByStore(_MemKv({'sessions.groupBy': 'host'}))),
-    ]));
+          ]),
+        ),
+        gatewayProvider.overrideWithValue(null),
+        groupByStoreProvider.overrideWithValue(
+          GroupByStore(_MemKv({'sessions.groupBy': 'host'})),
+        ),
+      ]),
+    );
     await tester.pump();
     await tester.pump();
     expect(find.text('NEEDS YOU'), findsOneWidget);
@@ -49,82 +63,62 @@ void main() {
   });
 
   testWidgets('agent badges appear only when agents are mixed', (tester) async {
-    await tester.pumpWidget(_app([
-      sessionsProvider.overrideWith(() => _SeededSessions([
+    await tester.pumpWidget(
+      _app([
+        sessionsProvider.overrideWith(
+          () => _SeededSessions([
             _sa('dev:1', 'dev', 'working', 'claude'),
             _sa('dev:2', 'dev', 'working', 'codex'),
-          ])),
-      gatewayProvider.overrideWithValue(null),
-    ]));
+          ]),
+        ),
+        gatewayProvider.overrideWithValue(null),
+      ]),
+    );
     await tester.pump();
     expect(find.text('CLAUDE'), findsOneWidget);
     expect(find.text('CODEX'), findsOneWidget);
   });
 
   testWidgets('no agent badges when all one agent', (tester) async {
-    await tester.pumpWidget(_app([
-      sessionsProvider.overrideWith(() => _SeededSessions([
+    await tester.pumpWidget(
+      _app([
+        sessionsProvider.overrideWith(
+          () => _SeededSessions([
             _sa('dev:1', 'dev', 'working', 'claude'),
             _sa('dev:2', 'dev', 'working', 'claude'),
-          ])),
-      gatewayProvider.overrideWithValue(null),
-    ]));
+          ]),
+        ),
+        gatewayProvider.overrideWithValue(null),
+      ]),
+    );
     await tester.pump();
     expect(find.text('CLAUDE'), findsNothing);
   });
 
   testWidgets('empty state when no sessions', (tester) async {
-    await tester.pumpWidget(_app([
-      gatewayProvider.overrideWithValue(null),
-    ]));
+    await tester.pumpWidget(_app([gatewayProvider.overrideWithValue(null)]));
     await tester.pump();
     expect(find.textContaining('No sessions'), findsOneWidget);
   });
 
-  testWidgets('filter toggles between all and active sessions', (tester) async {
-    await tester.pumpWidget(_app([
-      sessionsProvider.overrideWith(() => _SeededSessions([
-            _s('dev:1', 'dev', 'awaiting_input'),
-            _s('dev:2', 'dev', 'working'),
-            _s('dev:3', 'dev', 'idle'),
-          ])),
-      gatewayProvider.overrideWithValue(null),
-    ]));
+  testWidgets('top bar has no active-only button', (tester) async {
+    await tester.pumpWidget(_app([gatewayProvider.overrideWithValue(null)]));
     await tester.pump();
-    expect(find.text('dev:3'), findsOneWidget);
-
-    await tester.tap(find.byTooltip('Show active sessions'));
-    await tester.pump();
-    expect(find.text('dev:1'), findsOneWidget);
-    expect(find.text('dev:2'), findsOneWidget);
-    expect(find.text('dev:3'), findsNothing);
-
-    await tester.tap(find.byTooltip('Show all sessions'));
-    await tester.pump();
-    expect(find.text('dev:3'), findsOneWidget);
-  });
-
-  testWidgets('filtered empty state names the filter', (tester) async {
-    await tester.pumpWidget(_app([
-      sessionsProvider.overrideWith(() => _SeededSessions([
-            _s('dev:1', 'dev', 'idle'),
-          ])),
-      gatewayProvider.overrideWithValue(null),
-    ]));
-    await tester.pump();
-    await tester.tap(find.byTooltip('Show active sessions'));
-    await tester.pump();
-    expect(find.text('No active sessions.'), findsOneWidget);
+    expect(find.byTooltip('Show active sessions'), findsNothing);
   });
 
   testWidgets('search narrows the list as you type', (tester) async {
-    await tester.pumpWidget(_app([
-      sessionsProvider.overrideWith(() => _SeededSessions([
+    await tester.pumpWidget(
+      _app([
+        sessionsProvider.overrideWith(
+          () => _SeededSessions([
             _s('dev:alpha', 'dev', 'idle'),
             _s('dev:beta', 'dev', 'idle'),
-          ])),
-      gatewayProvider.overrideWithValue(null),
-    ]));
+          ]),
+        ),
+        gatewayProvider.overrideWithValue(null),
+      ]),
+    );
     await tester.pump();
     await tester.tap(find.byTooltip('Filter sessions'));
     await tester.pump();
@@ -144,10 +138,12 @@ void main() {
   });
 
   testWidgets('reconnect banner when not connected', (tester) async {
-    await tester.pumpWidget(_app([
-      gatewayProvider.overrideWithValue(null),
-      connStateProvider.overrideWith((ref) => ConnState.reconnecting),
-    ]));
+    await tester.pumpWidget(
+      _app([
+        gatewayProvider.overrideWithValue(null),
+        connStateProvider.overrideWith((ref) => ConnState.reconnecting),
+      ]),
+    );
     await tester.pump();
     expect(find.textContaining('Reconnecting'), findsOneWidget);
   });
@@ -168,19 +164,22 @@ void main() {
       tip: null,
     );
     List<Override> trust(TrustSummary summary) => [
-          gatewayProvider.overrideWithValue(null),
-          connStateProvider.overrideWith((ref) => ConnState.connected),
-          trustSummaryProvider.overrideWith((_) => summary),
-          deviceIdentityProvider
-              .overrideWith((_) async => KeyPair(Uint8List(32), Uint8List(32))),
-        ];
+      gatewayProvider.overrideWithValue(null),
+      connStateProvider.overrideWith((ref) => ConnState.connected),
+      trustSummaryProvider.overrideWith((_) => summary),
+      deviceIdentityProvider.overrideWith(
+        (_) async => KeyPair(Uint8List(32), Uint8List(32)),
+      ),
+    ];
 
     testWidgets('banner and empty text explain the empty home', (tester) async {
       await tester.pumpWidget(_app(trust(awaiting)));
       await tester.pump();
       expect(find.text('Device not authorized'), findsOneWidget);
-      expect(find.text('Sessions appear after this device is authorized.'),
-          findsOneWidget);
+      expect(
+        find.text('Sessions appear after this device is authorized.'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('no banner once authorized', (tester) async {
@@ -198,16 +197,22 @@ void main() {
       expect(find.byType(DeviceIdentityScreen), findsOneWidget);
     });
   });
-  testWidgets('the group-by menu regroups the list and is saved', (tester) async {
+  testWidgets('the group-by menu regroups the list and is saved', (
+    tester,
+  ) async {
     final kv = _MemKv({'sessions.groupBy': 'host'});
-    await tester.pumpWidget(_app([
-      sessionsProvider.overrideWith(() => _SeededSessions([
+    await tester.pumpWidget(
+      _app([
+        sessionsProvider.overrideWith(
+          () => _SeededSessions([
             _sa('dev:1', 'dev', 'working', 'claude'),
             _sa('dev:2', 'dev', 'idle', 'claude'),
-          ])),
-      gatewayProvider.overrideWithValue(null),
-      groupByStoreProvider.overrideWithValue(GroupByStore(kv)),
-    ]));
+          ]),
+        ),
+        gatewayProvider.overrideWithValue(null),
+        groupByStoreProvider.overrideWithValue(GroupByStore(kv)),
+      ]),
+    );
     await tester.pump();
     await tester.pump();
     expect(find.text('DEV'), findsOneWidget);

@@ -8,7 +8,7 @@ import '../transport/connection.dart';
 import 'filter_title.dart';
 import 'history_details.dart';
 import 'history_format.dart';
-import 'history_group_header.dart';
+import 'fold_header.dart';
 import 'history_sessions_screen.dart';
 import 'responsive.dart';
 import 'shell_drawer.dart';
@@ -113,7 +113,7 @@ class _ProjectListState extends State<_ProjectList> {
         itemBuilder: (context, index) {
           final row = rows[index];
           return switch (row) {
-            _NodeHeader() => HistoryGroupHeader(
+            _NodeHeader() => FoldHeader(
               key: Key('history-node-${row.key}'),
               icon: Icons.dns_outlined,
               label: row.label,

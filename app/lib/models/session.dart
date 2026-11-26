@@ -358,6 +358,26 @@ class Session {
   static int compareBlocked(Session a, Session b) =>
       a.blocked == b.blocked ? 0 : (a.blocked ? -1 : 1);
 
+  /// Orders the most recently active first, then by id; a session with no
+  /// known activity goes last.
+  static int compareActivity(Session a, Session b) {
+    final c = _activity(b).compareTo(_activity(a));
+    return c != 0 ? c : a.id.compareTo(b.id);
+  }
+
+  static final _never = DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+
+  // Sorts call [_activity] O(n log n) times; a summary is immutable, so its
+  // parsed time is kept with it.
+  static final _activityOf = Expando<DateTime>();
+
+  static DateTime _activity(Session s) {
+    final sum = s.summary;
+    if (sum == null) return _never;
+    return _activityOf[sum] ??=
+        DateTime.tryParse(sum.lastActivity ?? '') ?? _never;
+  }
+
   /// Whether a paneless API session can be torn down (dismissed). Kill is
   /// unconditional, so status and interaction do not gate it.
   bool get _dismissable => inputMode == InputMode.api && !controllable;
