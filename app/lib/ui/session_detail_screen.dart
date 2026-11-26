@@ -18,7 +18,6 @@ import '../state/tool_detail.dart';
 import '../state/transcript_controller.dart';
 import '../transport/connection.dart';
 import '../transport/jsonrpc.dart';
-import 'details_header.dart';
 import 'live_screen_screen.dart';
 import 'project_actions.dart';
 import 'route_observer.dart';
@@ -186,21 +185,13 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     ref.read(scopeProvider.notifier).state = workspaceId;
   }
 
-  // The large header's details, for when it is far above in the transcript.
-  // The sheet follows the live session; the transcript keeps its place.
-  void _showDetails() {
-    showDetailsSheet(
-      context,
-      (_) => Consumer(
-        builder: (context, ref, _) => SessionViewHeader(
-          session:
-              ref.watch(sessionsProvider.select((m) => m[_sid])) ??
-              widget.session,
-          wrap: true,
-        ),
-      ),
-    );
-  }
+  // The large header's details, for when it is far above in the transcript:
+  // the session sheet, which follows the live session. The transcript keeps
+  // its place.
+  void _showDetails() => showSessionSheet(
+    context,
+    ref.read(sessionsProvider)[_sid] ?? widget.session,
+  );
 
   // The large header over a state with no feed; it stays in view, so the app
   // bar title stays hidden.
@@ -213,7 +204,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
     return Column(children: [
       Padding(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-        child: SessionViewHeader(session: live),
+        child: SessionViewHeader(session: live, compact: true),
       ),
       Expanded(child: body),
     ]);
@@ -436,7 +427,10 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
                                 entries: st.entries,
                                 bottomInset: _chipsHeight,
                                 live: live.status == SessionStatus.working,
-                                header: SessionViewHeader(session: live),
+                                header: SessionViewHeader(
+                                  session: live,
+                                  compact: true,
+                                ),
                                 onHeaderVisible: (v) =>
                                     _headerVisible.value = v,
                               ),

@@ -8,7 +8,7 @@ import '../data/session_repository.dart';
 import '../state/control.dart';
 import '../state/grouping.dart';
 import '../state/terminals.dart';
-import 'node_header.dart';
+import 'fold_header.dart';
 import 'shell_drawer.dart';
 import 'terminal_tile.dart';
 
@@ -17,7 +17,10 @@ class TerminalListScreen extends ConsumerWidget {
 
   Future<void> _create(BuildContext context, WidgetRef ref) async {
     final nodes = switch (await ref.read(sessionRepositoryProvider).nodes()) {
-      Ok(:final value) => [for (final n in value) if (n.terminalSupported) n],
+      Ok(:final value) => [
+        for (final n in value)
+          if (n.terminalSupported) n,
+      ],
       Error() => const <NodeRef>[],
     };
     if (!context.mounted) return;
@@ -46,23 +49,43 @@ class TerminalListScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final terms = ref.watch(terminalsProvider).terminals;
-    final capable = ref.watch(serverInfoProvider).value?.nodes.where((n) => n.terminalSupported).length ?? 0;
+    final capable =
+        ref
+            .watch(serverInfoProvider)
+            .value
+            ?.nodes
+            .where((n) => n.terminalSupported)
+            .length ??
+        0;
     final outdated = ref.watch(outdatedNodeIdsProvider);
     final grouped = max(terms.map((t) => t.nodeId).toSet().length, capable) > 1;
+    final folded = grouped
+        ? ref.watch(foldedTerminalNodesProvider)
+        : const <String>{};
+    final counts = <String, int>{};
+    for (final t in terms) {
+      counts[t.nodeId] = (counts[t.nodeId] ?? 0) + 1;
+    }
     final rows = <Widget>[];
     String? node;
     for (final t in terms) {
       if (grouped && t.nodeId != node) {
         node = t.nodeId;
-        rows.add(Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-          child: NodeHeader(
-            label: t.nodeLabel.isEmpty ? t.nodeId : t.nodeLabel,
-            outdated: outdated.contains(t.nodeId),
+        final id = t.nodeId;
+        final label = t.nodeLabel.isEmpty ? id : t.nodeLabel;
+        rows.add(
+          FoldHeader(
+            key: Key('terminal-node-$id'),
+            icon: Icons.dns_outlined,
+            label: outdated.contains(id) ? '$label (outdated)' : label,
+            count: counts[id]!,
+            folded: folded.contains(id),
+            onTap: () =>
+                ref.read(foldedTerminalNodesProvider.notifier).toggle(id),
           ),
-        ));
+        );
       }
-      rows.add(TerminalTile(terminal: t));
+      if (!folded.contains(t.nodeId)) rows.add(TerminalTile(terminal: t));
     }
     return Scaffold(
       appBar: AppBar(

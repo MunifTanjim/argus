@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../e2e/aggregate.dart' show sortByNode;
 import '../models/terminal.dart';
 import '../transport/gateway_client.dart';
+import 'toggle_set.dart';
 
 class TerminalsState {
   const TerminalsState({
@@ -63,3 +64,8 @@ class TerminalsNotifier extends Notifier<TerminalsState> {
 final terminalsProvider = NotifierProvider<TerminalsNotifier, TerminalsState>(
   TerminalsNotifier.new,
 );
+
+/// The nodes whose terminals the terminal list folds. Kept in memory: every
+/// app start shows all terminals.
+final foldedTerminalNodesProvider =
+    NotifierProvider<ToggleSet<String>, Set<String>>(ToggleSet<String>.new);

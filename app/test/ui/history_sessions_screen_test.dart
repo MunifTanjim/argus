@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/core/result.dart';
@@ -345,6 +346,37 @@ void main() {
 
     expect(find.text('/home/user/project'), findsOneWidget);
     expect(find.textContaining('2 sessions'), findsOneWidget);
+  });
+
+  testWidgets('tapping the project path copies it and keeps the sheet open',
+      (tester) async {
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    await _pumpSessions(tester, [_session('a', title: 'A')]);
+    await tester.tap(find.byKey(const Key('history-title')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('/home/user/project'));
+    await tester.pump();
+    expect(copied, ['/home/user/project']);
+    expect(find.byType(BottomSheet), findsOneWidget);
+    expect(find.text('Copied'), findsOneWidget);
+    await tester.pumpAndSettle(const Duration(seconds: 2));
+    expect(find.text('/home/user/project'), findsOneWidget);
   });
 
   testWidgets('tapping a day header folds and unfolds that day',

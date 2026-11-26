@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/result.dart';
 import '../data/session_repository.dart';
+import '../models/enums.dart';
 import '../models/session.dart';
 import '../state/control.dart';
 import '../state/projects_api.dart';
+import '../state/sessions.dart';
+import 'agent_badge.dart';
+import 'details_header.dart';
 import 'project_actions.dart';
+import 'relative_time.dart';
+import 'session_view_header.dart';
 import 'theme.dart';
 
 /// Whether [s]'s node is too old for the app's session requests.
@@ -36,30 +43,21 @@ Future<bool> killSession(ActionContext ax, Session s) async {
     Error() => null,
   };
   if (!ax.navigator.mounted) return false;
-  final confirmed = await showDialog<bool>(
-    context: ax.navigator.context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('Kill Session?'),
-      content: Text(switch (below) {
+  final confirmed = await confirmAction(
+    ax,
+    title: 'Kill Session?',
+    lines: [
+      switch (below) {
         null => 'Child sessions: unknown. This cannot be undone!',
         0 => 'This cannot be undone!',
         1 => 'Its 1 child session is killed too. This cannot be undone!',
         _ => 'Its $below child sessions are killed too. This cannot be undone!',
-      }),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(ctx).pop(false),
-          child: const Text('Cancel'),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(ctx).pop(true),
-          style: TextButton.styleFrom(foregroundColor: ctx.tokens.destructive),
-          child: const Text('Kill'),
-        ),
-      ],
-    ),
+      },
+    ],
+    action: 'Kill',
+    destructive: true,
   );
-  if (confirmed != true) return false;
+  if (!confirmed) return false;
   final result = await repo.kill(s.id);
   switch (result) {
     case Ok():
@@ -70,65 +68,93 @@ Future<bool> killSession(ActionContext ax, Session s) async {
   }
 }
 
-/// The actions [s] offers: rename, and kill when it can be killed. When its
-/// node is too old for them, a note to upgrade it instead.
-List<Widget> sessionActionTiles(
-  BuildContext sheet,
-  ActionContext ax,
-  Session s,
-) {
-  if (sessionOutdated(ax, s)) {
-    return [
-      ListTile(
-        title: Text(
-          'Upgrade argus on ${s.nodeLabel ?? 'this node'}',
-          style: TextStyle(color: sheet.tokens.textDim),
-        ),
-      ),
-    ];
-  }
-  return [
-    ListTile(
-      leading: const Icon(Icons.edit_outlined),
-      title: const Text('Rename'),
-      onTap: () {
-        Navigator.of(sheet).pop();
-        renameSession(ax, s);
-      },
+/// The note that replaces [s]'s actions when its node is too old for them.
+String? sessionUpgradeNote(ActionContext ax, Session s) =>
+    sessionOutdated(ax, s)
+    ? 'Upgrade argus on ${s.nodeLabel ?? 'this node'}'
+    : null;
+
+/// The actions [s] offers: rename, and kill when it can be killed. None when
+/// its node is too old for them.
+List<SheetAction> sessionActions(ActionContext ax, Session s) => [
+  if (!sessionOutdated(ax, s)) ...[
+    SheetAction(
+      label: 'Rename',
+      icon: const Icon(Icons.edit_outlined),
+      run: () => renameSession(ax, s),
     ),
     if (s.canKill)
-      ListTile(
-        leading: Icon(Icons.close, color: sheet.tokens.error),
-        title: Text('Kill', style: TextStyle(color: sheet.tokens.error)),
-        onTap: () {
-          Navigator.of(sheet).pop();
-          killSession(ax, s);
-        },
+      SheetAction(
+        label: 'Kill',
+        icon: const Icon(Icons.close),
+        destructive: true,
+        run: () => killSession(ax, s),
       ),
-  ];
+  ],
+];
+
+/// A session's details and actions: the live session header, a short table,
+/// and Kill and Rename pinned at the bottom. The sidebar rows and the session
+/// cards open it with a long press, and the session view with a tap on its
+/// title.
+Future<void> showSessionSheet(BuildContext context, Session session) {
+  final ax = ActionContext.of(context);
+  // The sheet follows the live session.
+  Session live(WidgetRef ref) =>
+      ref.watch(sessionsProvider.select((m) => m[session.id])) ?? session;
+  return showDetailsSheet(
+    context,
+    body: (context, ref) {
+      final s = live(ref);
+      final task = s.summary?.task ?? '';
+      return [
+        SessionViewHeader(session: s),
+        if (task.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Text(task, style: TextStyle(color: context.tokens.textSecondary)),
+        ],
+        const SizedBox(height: 10),
+        for (final (label, value) in _fields(s))
+          DetailsFieldRow(label: label, value: value),
+      ];
+    },
+    footer: (sheet, ref) {
+      final s = live(ref);
+      return DetailsActionBar(
+        sheet: sheet,
+        actions: sessionActions(ax, s),
+        note: sessionUpgradeNote(ax, s),
+      );
+    },
+  );
 }
 
-/// Opens [s]'s actions in a bottom sheet.
-Future<void> showSessionActions(BuildContext context, Session s) {
-  final ax = ActionContext.of(context);
-  return showModalBottomSheet<void>(
-    context: context,
-    useRootNavigator: true,
-    builder: (ctx) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            title: Text(
-              s.displayTitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-          ...sessionActionTiles(ctx, ax, s),
-        ],
-      ),
+// The sheet's fields that its header does not show.
+Iterable<(String, String)> _fields(Session s) {
+  final status = s.statusLabel.isNotEmpty ? s.statusLabel : s.status.name;
+  final ago = relativeTime(s.summary?.lastActivity);
+  final tmux = s.tmux.paneId.isEmpty
+      ? ''
+      : [
+          s.tmux.sessionName,
+          s.tmux.paneId,
+          switch (s.tmux.server) {
+            TmuxServerKind.default_ => 'default',
+            TmuxServerKind.argus => 'argus',
+            TmuxServerKind.unknown => '',
+          },
+        ].where((p) => p.isNotEmpty).join(' · ');
+  return [
+    (
+      'status',
+      [
+        s.offline ? '$status, offline' : status,
+        if (ago.isNotEmpty) ago,
+      ].join(' · '),
     ),
-  );
+    ('agent', agentLabel(s.agent)),
+    ('dir', s.cwd ?? ''),
+    ('tmux', tmux),
+    ('id', s.id),
+  ].where((f) => f.$2.isNotEmpty);
 }

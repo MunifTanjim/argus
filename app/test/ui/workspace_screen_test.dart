@@ -200,7 +200,7 @@ void main() {
     expect(find.byTooltip('New session'), findsOneWidget);
   });
 
-  testWidgets('a tap on the header opens the workspace details sheet', (
+  testWidgets('a tap on the header opens the workspace sheet', (
     tester,
   ) async {
     await _pump(tester);
@@ -211,6 +211,14 @@ void main() {
     expect(header.title, 'registry');
     expect(header.meta.map((m) => m.$1), ['feat/registry → main']);
     expect(find.text('/src/argus/.worktrees/registry'), findsOneWidget);
+    // The same sheet as the long press in the drawer, with its actions.
+    expect(
+      find.descendant(
+        of: find.byType(DetailsActionBar),
+        matching: find.text('New session'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('terminals tab lists the workspace terminals and spawns there', (

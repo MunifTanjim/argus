@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:argus/models/project.dart';
 import 'package:argus/models/terminal.dart';
 import 'package:argus/state/control.dart';
 import 'package:argus/state/grouping.dart';
+import 'package:argus/state/projects.dart';
 import 'package:argus/state/terminals.dart';
 import 'package:argus/state/terminals_api.dart';
 import 'package:argus/transport/gateway_client.dart';
+import 'package:argus/ui/details_header.dart';
 import 'package:argus/ui/terminal_list_screen.dart';
 
 class _Seeded extends TerminalsNotifier {
@@ -31,29 +34,61 @@ class _FakeApi implements TerminalsApi {
     if (failure != null) throw failure!;
     killed.add(id);
   }
+
   @override
   Future<void> rename(String id, String name) async => renamed.add((id, name));
 }
 
 const _terms = [
-  NodeTerminal(id: 'A:@1', nodeId: 'A', nodeLabel: 'home', command: 'zsh', cwd: '~'),
-  NodeTerminal(id: 'A:@2', nodeId: 'A', nodeLabel: 'home', name: 'build', command: 'make', cwd: '~/src', attached: true),
+  NodeTerminal(
+    id: 'A:@1',
+    nodeId: 'A',
+    nodeLabel: 'home',
+    command: 'zsh',
+    cwd: '~',
+  ),
+  NodeTerminal(
+    id: 'A:@2',
+    nodeId: 'A',
+    nodeLabel: 'home',
+    name: 'build',
+    command: 'make',
+    cwd: '~/src',
+    attached: true,
+  ),
 ];
 
 late _Seeded _notifier;
 
-Future<_FakeApi> _pump(WidgetTester tester, List<NodeTerminal> terms,
-    {List<NodeRef> nodes = const [], TerminalsState? state}) async {
+class _Projects extends ProjectsNotifier {
+  _Projects(this.projects);
+  final List<ProjectNode> projects;
+  @override
+  ProjectsState build() => ProjectsState(projects: projects, loaded: true);
+}
+
+Future<_FakeApi> _pump(
+  WidgetTester tester,
+  List<NodeTerminal> terms, {
+  List<NodeRef> nodes = const [],
+  TerminalsState? state,
+  List<ProjectNode> projects = const [],
+}) async {
   final api = _FakeApi();
   _notifier = _Seeded(state ?? TerminalsState(terminals: terms, loaded: true));
-  await tester.pumpWidget(ProviderScope(
-    overrides: [
-      terminalsProvider.overrideWith(() => _notifier),
-      terminalsApiProvider.overrideWithValue(api),
-      serverInfoProvider.overrideWith((ref) async => ServerInfo(version: '', nodes: nodes)),
-    ],
-    child: const MaterialApp(home: TerminalListScreen()),
-  ));
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        terminalsProvider.overrideWith(() => _notifier),
+        terminalsApiProvider.overrideWithValue(api),
+        projectsProvider.overrideWith(() => _Projects(projects)),
+        serverInfoProvider.overrideWith(
+          (ref) async => ServerInfo(version: '', nodes: nodes),
+        ),
+      ],
+      child: const MaterialApp(home: TerminalListScreen()),
+    ),
+  );
   await tester.pump();
   return api;
 }
@@ -120,10 +155,19 @@ void main() {
     expect(api.renamed, [('A:@1', 'logs')]);
   });
 
-  testWidgets('names the node when several nodes can run terminals', (tester) async {
+  testWidgets('names the node when several nodes can run terminals', (
+    tester,
+  ) async {
     await _pump(
       tester,
-      const [NodeTerminal(id: 'A:@1', nodeId: 'A', nodeLabel: 'alpha', command: 'zsh')],
+      const [
+        NodeTerminal(
+          id: 'A:@1',
+          nodeId: 'A',
+          nodeLabel: 'alpha',
+          command: 'zsh',
+        ),
+      ],
       nodes: const [NodeRef('A', 'alpha'), NodeRef('B', 'beta')],
     );
     await tester.pump();
@@ -132,17 +176,127 @@ void main() {
     expect(find.byTooltip('New terminal'), findsOneWidget);
   });
 
-  testWidgets('a terminal on an outdated node is marked and takes no actions', (tester) async {
+  testWidgets('a terminal on an outdated node is marked and takes no actions', (
+    tester,
+  ) async {
     await _pump(
       tester,
-      const [NodeTerminal(id: 'A:@1', nodeId: 'A', nodeLabel: 'alpha', command: 'zsh')],
-      nodes: const [NodeRef('A', 'alpha', version: '0.1.1'), NodeRef('B', 'beta')],
+      const [
+        NodeTerminal(
+          id: 'A:@1',
+          nodeId: 'A',
+          nodeLabel: 'alpha',
+          command: 'zsh',
+        ),
+      ],
+      nodes: const [
+        NodeRef('A', 'alpha', version: '0.1.1'),
+        NodeRef('B', 'beta'),
+      ],
     );
     await tester.pump();
     expect(find.text('ALPHA (OUTDATED)'), findsOneWidget);
-    expect(tester.widget<ListTile>(find.widgetWithText(ListTile, 'zsh')).enabled, isFalse);
+    expect(
+      tester.widget<ListTile>(find.widgetWithText(ListTile, 'zsh')).enabled,
+      isFalse,
+    );
     await tester.longPress(find.text('zsh'), warnIfMissed: false);
     await tester.pumpAndSettle();
     expect(find.text('Kill'), findsNothing);
+  });
+
+  testWidgets('a tap on a node header folds and unfolds its terminals', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      const [
+        NodeTerminal(
+          id: 'A:@1',
+          nodeId: 'A',
+          nodeLabel: 'alpha',
+          command: 'zsh',
+        ),
+        NodeTerminal(
+          id: 'B:@1',
+          nodeId: 'B',
+          nodeLabel: 'beta',
+          command: 'htop',
+        ),
+      ],
+      nodes: const [NodeRef('A', 'alpha'), NodeRef('B', 'beta')],
+    );
+    await tester.pump();
+    expect(find.text('zsh'), findsOneWidget);
+
+    await tester.tap(find.text('ALPHA'));
+    await tester.pump();
+    expect(find.text('zsh'), findsNothing);
+    expect(find.text('htop'), findsOneWidget);
+    expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+
+    await tester.tap(find.text('ALPHA'));
+    await tester.pump();
+    expect(find.text('zsh'), findsOneWidget);
+  });
+
+  testWidgets('the terminal sheet shows its details and pins Kill and Rename', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(400, 520));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _pump(
+      tester,
+      const [
+        NodeTerminal(
+          id: 'A:@2',
+          nodeId: 'A',
+          nodeLabel: 'home',
+          name: 'build',
+          command: 'make',
+          cwd: '~/src/argus/.worktrees/registry',
+          attached: true,
+          workspaceId: 'A:w2',
+        ),
+      ],
+      projects: [
+        ProjectNode.fromJson({
+          'id': 'A:p1',
+          'name': 'argus',
+          'node_id': 'A',
+          'workspaces': [
+            {'id': 'A:w2', 'dir': '/src/argus/.worktrees/registry'},
+          ],
+        }),
+      ],
+    );
+    await tester.longPress(find.text('build'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    final header = tester.widget<DetailsHeader>(find.byType(DetailsHeader));
+    expect(header.label, 'argus / registry');
+    expect(header.title, 'build');
+    expect(header.node, 'home');
+    expect(header.meta.map((m) => m.$1), ['open elsewhere']);
+    for (final v in ['make', '~/src/argus/.worktrees/registry', 'A:@2']) {
+      expect(
+        find.descendant(of: find.byType(BottomSheet), matching: find.text(v)),
+        findsOneWidget,
+        reason: v,
+      );
+    }
+    final bar = find.byType(DetailsActionBar);
+    expect(
+      find.descendant(of: bar, matching: find.text('Kill')).hitTestable(),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: bar, matching: find.text('Rename')).hitTestable(),
+      findsOneWidget,
+    );
+    expect(
+      tester.getCenter(find.text('Kill')).dx,
+      lessThan(tester.getCenter(find.text('Rename')).dx),
+    );
   });
 }
