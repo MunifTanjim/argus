@@ -4,8 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../models/enums.dart';
 import '../models/session.dart';
-import 'card_layout.dart';
-import 'relative_time.dart';
 import 'session_actions.dart';
 import 'session_card.dart';
 import 'session_composer.dart';
@@ -30,59 +28,51 @@ class BlockedCard extends StatelessWidget {
     final t = context.tokens;
     final s = session;
     final ix = s.interaction!;
-    final time = relativeTime(
-      s.summary?.lastActivity ?? s.statusSince?.toIso8601String(),
-    );
-    final radius = BorderRadius.circular(t.radius + 4);
+    // Filled, the card is tinted and bordered; otherwise it is a plain card
+    // with the same stripe or dot as a session card.
+    final filled = t.statusStyle == StatusStyle.filled;
     // The command a permission asks to run, or the start of a plan.
     final preview = _previewOf(ix);
     final question =
         ix.kind == InteractionKind.question && ix.questions.isNotEmpty
         ? ix.questions.first
         : null;
+    final message = _message(ix, question);
 
-    final body = Padding(
-      padding: const EdgeInsets.fromLTRB(kCardInset, 12, 12, 12),
+    return StatusCardFrame(
+      session: s,
+      color: t.blocked,
+      surface: filled ? t.blockedSurface : t.surface,
+      shape: filled
+          ? RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(t.radiusLarge),
+              side: BorderSide(color: t.blockedBorder),
+            )
+          : null,
+      onTap: () => _open(context),
+      onLongPress: () => showSessionSheet(context, s),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SessionHeader(
             session: s,
-            mark: Text(
-              '●',
-              textAlign: TextAlign.center,
-              style: mono.copyWith(color: t.blocked),
-            ),
+            mark: StatusMark(status: s.status, color: t.blocked),
             style: mono.copyWith(
               color: t.text,
               fontSize: 13,
               fontWeight: FontWeight.w600,
             ),
             trailing: [
-              if (showNode) ...[
-                const SizedBox(width: 8),
-                Icon(Icons.dns_outlined, size: 13, color: t.textDim),
-                const SizedBox(width: 4),
-                Text(
-                  s.nodeLabel ?? s.nodeId ?? 'local',
-                  style: mono.copyWith(color: t.textDim, fontSize: 11),
-                ),
-              ],
-              if (time.isNotEmpty) ...[
-                const SizedBox(width: 8),
-                Text(
-                  time,
-                  style: mono.copyWith(color: t.textDim, fontSize: 11),
-                ),
-              ],
+              ...cardTime(s, t),
+              if (showNode) ...cardNode(s, t),
             ],
           ),
           const SizedBox(height: 6),
           _KindLine(interaction: ix),
-          if ((ix.message ?? '').isNotEmpty) ...[
+          if (message != null) ...[
             const SizedBox(height: 6),
             Text(
-              ix.message!,
+              message,
               maxLines: 4,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(color: t.textSecondary, fontSize: 13),
@@ -107,7 +97,8 @@ class BlockedCard extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               decoration: BoxDecoration(
-                color: t.surface,
+                // Set off from the card behind it.
+                color: filled ? t.surface : t.canvas,
                 borderRadius: BorderRadius.circular(t.radius),
               ),
               child: Text(
@@ -119,23 +110,6 @@ class BlockedCard extends StatelessWidget {
             ),
           ],
         ],
-      ),
-    );
-
-    return Opacity(
-      opacity: s.offline ? 0.5 : 1,
-      child: Material(
-        color: Color.alphaBlend(t.blocked.withValues(alpha: 0.08), t.canvas),
-        shape: RoundedRectangleBorder(
-          borderRadius: radius,
-          side: BorderSide(color: t.blocked.withValues(alpha: 0.5)),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: () => _open(context),
-          onLongPress: () => showSessionSheet(context, s),
-          child: body,
-        ),
       ),
     );
   }
@@ -196,7 +170,7 @@ class _OptionChips extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         border: Border.all(color: t.line),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(t.radius),
       ),
       child: Text(
         text,
@@ -214,6 +188,22 @@ class _OptionChips extends StatelessWidget {
       ],
     );
   }
+}
+
+/// [ix]'s message, or null when it is blank or, on a question, repeats the
+/// kind line ("Questions" from an OpenCode form title) or [question]'s text.
+String? _message(Interaction ix, QuestionSpec? question) {
+  final m = ix.message;
+  if (m == null || m.trim().isEmpty) return null;
+  if (ix.kind != InteractionKind.question) return m;
+  String norm(String s) => s.trim().toLowerCase();
+  final label = norm(interactionLabel(ix));
+  final repeats = {
+    label,
+    '${label}s',
+    if (question?.question != null) norm(question!.question!),
+  };
+  return repeats.contains(norm(m)) ? null : m;
 }
 
 // An interaction is immutable, and its tool input can hold a whole file, so

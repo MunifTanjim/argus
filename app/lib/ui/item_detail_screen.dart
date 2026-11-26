@@ -8,6 +8,7 @@ import 'responsive.dart';
 import 'theme.dart';
 import 'tool_detail.dart';
 import 'tool_registry.dart';
+import 'top_bar.dart';
 
 String itemTitle(Entry it, {String? agent}) {
   switch (it.kind) {
@@ -83,7 +84,7 @@ class _ItemDetailScreenState extends ConsumerState<ItemDetailScreen> {
   Widget build(BuildContext context) {
     final t = context.tokens;
     return Scaffold(
-      appBar: AppBar(title: Text(itemTitle(_item, agent: widget.detailRef.agent))),
+      appBar: TopBar(title: Text(itemTitle(_item, agent: widget.detailRef.agent))),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : SafeArea(

@@ -88,7 +88,7 @@ class WorkspaceFilesTab extends ConsumerWidget {
   Widget _crumb(BuildContext context, String label, VoidCallback onTap, {Key? key}) => InkWell(
     key: key,
     onTap: onTap,
-    borderRadius: BorderRadius.circular(4),
+    borderRadius: BorderRadius.circular(context.tokens.radiusSmall),
     child: Container(
       constraints: const BoxConstraints(minHeight: 40),
       padding: const EdgeInsets.symmetric(horizontal: 6),

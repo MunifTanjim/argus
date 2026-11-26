@@ -11,6 +11,7 @@ import '../state/terminals.dart';
 import 'fold_header.dart';
 import 'shell_drawer.dart';
 import 'terminal_tile.dart';
+import 'top_bar.dart';
 
 class TerminalListScreen extends ConsumerWidget {
   const TerminalListScreen({super.key});
@@ -88,7 +89,7 @@ class TerminalListScreen extends ConsumerWidget {
       if (!folded.contains(t.nodeId)) rows.add(TerminalTile(terminal: t));
     }
     return Scaffold(
-      appBar: AppBar(
+      appBar: TopBar(
         leading: shellMenuButton(context),
         title: const Text('Terminals'),
       ),

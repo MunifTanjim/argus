@@ -501,7 +501,7 @@ class TranscriptFeedState extends ConsumerState<TranscriptFeed> {
         excludeSemantics: true,
         child: InkWell(
           key: key,
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(context.tokens.radiusSmall),
           onTap: () {
             setState(() {
               _overrides[runKey] = expand;

@@ -13,6 +13,7 @@ import 'history_sessions_screen.dart';
 import 'responsive.dart';
 import 'shell_drawer.dart';
 import 'theme.dart';
+import 'top_bar.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
@@ -37,13 +38,12 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     final projects = ref.watch(historyProjectsProvider);
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: TopBar(
         leading: shellMenuButton(context),
         title: FilterTitle(
           query: _query,
           hint: 'Filter projects',
           onChanged: (q) => setState(() => _query = q),
-          onClose: () => setState(() => _query = null),
           child: const Text('History'),
         ),
         actions: [
@@ -51,6 +51,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             query: _query,
             tooltip: 'Filter projects',
             onOpen: () => setState(() => _query = ''),
+            onClose: () => setState(() => _query = null),
           ),
         ],
       ),
@@ -246,7 +247,7 @@ class _MissingLabel extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
         border: Border.all(color: t.line),
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(t.radius),
       ),
       child: Text(
         'missing',

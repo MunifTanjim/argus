@@ -345,7 +345,7 @@ class _CodeBlockState extends State<_CodeBlock> {
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
         color: t.canvas,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(t.radius),
         border: Border.all(color: t.line),
       ),
       child: Column(
@@ -582,7 +582,7 @@ Widget _container(Widget child, ArgusTokens t, {bool selectable = true}) {
     padding: const EdgeInsets.all(10),
     decoration: BoxDecoration(
       color: t.canvas,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(t.radius),
       border: Border.all(color: t.line),
     ),
     child: selectable ? SelectionArea(child: inner) : inner,

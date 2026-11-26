@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/models/session.dart';
+import 'package:argus/ui/agent_badge.dart';
 import 'package:argus/ui/session_card.dart';
 import 'package:argus/state/appearance.dart';
 import 'package:argus/ui/theme.dart';
@@ -23,19 +24,38 @@ void main() {
     expect(find.text('argus'), findsOneWidget);
     expect(find.text('fix the bug'), findsOneWidget);
     expect(find.textContaining('43%'), findsOneWidget); // 42.5 rounds to 43
+    expect(find.textContaining('12.3k tok'), findsOneWidget);
 
     await tester.tap(find.byType(SessionCard));
     expect(tapped, isTrue);
   });
 
-  testWidgets('shows agent badge when showAgent is set', (tester) async {
+  testWidgets('filled: shows agent badge when showAgent is set', (tester) async {
     final s = _session(
         '{"id":"mac:%1","agent":"codex","status":"idle","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"argus"}');
     await tester.pumpWidget(MaterialApp(
+      theme: buildArgusTheme(
+        prefs: const AppearancePrefs(statusStyle: StatusStyle.filled),
+      ),
       home: Scaffold(body: SessionCard(session: s, showAgent: true)),
     ));
     expect(find.text('CODEX'), findsOneWidget);
   });
+
+  for (final style in [StatusStyle.stripe, StatusStyle.dot]) {
+    testWidgets('$style: the meta line names the agent, with no badge', (
+      tester,
+    ) async {
+      final s = _session(
+          '{"id":"mac:%1","agent":"codex","status":"idle","source":"hooked","tmux":{"server":"argus","pane_id":"%1","session_name":"s","window_index":0,"current_path":"/p"},"repo":"argus"}');
+      await tester.pumpWidget(MaterialApp(
+        theme: buildArgusTheme(prefs: AppearancePrefs(statusStyle: style)),
+        home: Scaffold(body: SessionCard(session: s, showAgent: true)),
+      ));
+      expect(find.byType(AgentBadge), findsNothing);
+      expect(find.textContaining(agentLabel('codex')), findsOneWidget);
+    });
+  }
 
   testWidgets('no agent badge by default', (tester) async {
     final s = _session(
@@ -84,34 +104,25 @@ void main() {
     final t = tester.element(find.byType(SessionCard)).tokens;
     expect(stripe.color, t.working);
     expect(find.byType(Card), findsNothing);
-    expect(find.byKey(const Key('status-dot')), findsNothing);
   });
 
-  testWidgets('dot style draws a dot and no stripe', (tester) async {
+  testWidgets('dot style draws the status glyph and no stripe', (tester) async {
     final s = _session('{"id":"a",$base,"status":"working"}');
     await tester.pumpWidget(app(s, StatusStyle.dot));
-    expect(find.byKey(const Key('status-dot')), findsOneWidget);
+    expect(find.text('●'), findsOneWidget);
     expect(find.byKey(const Key('status-stripe')), findsNothing);
   });
-
-  const blocked =
-      '"status":"awaiting_input","interaction":{"kind":"permission","message":"Run rm -rf?","tool_name":"Bash"}';
 
   testWidgets('filled style keeps the tinted card', (tester) async {
-    final s = _session('{"id":"a",$base,$blocked}');
+    final s = _session('{"id":"a",$base,"status":"awaiting_input"}');
     await tester.pumpWidget(app(s, StatusStyle.filled));
     final t = tester.element(find.byType(SessionCard)).tokens;
-    final box = tester.widgetList<Container>(find.byType(Container)).map((c) => c.decoration)
-        .whereType<BoxDecoration>().map((d) => d.color);
-    expect(box, contains(t.blockedSurface));
+    final card = tester.widget<Material>(find
+        .descendant(of: find.byType(SessionCard), matching: find.byType(Material))
+        .first);
+    expect(card.color, t.waitingSurface);
+    expect((card.shape! as RoundedRectangleBorder).side.color, t.waitingBorder);
     expect(find.byKey(const Key('status-stripe')), findsNothing);
-  });
-
-  testWidgets('blocked session shows its prompt box', (tester) async {
-    final s = _session('{"id":"a",$base,$blocked}');
-    await tester.pumpWidget(app(s, StatusStyle.stripe));
-    expect(find.byKey(const Key('blocked-prompt')), findsOneWidget);
-    expect(find.text('Run rm -rf?'), findsOneWidget);
   });
 
   testWidgets('idle session title is dim', (tester) async {
@@ -133,17 +144,12 @@ void main() {
       theme: buildArgusTheme(prefs: prefs),
       home: Scaffold(body: SessionCard(session: s, onTap: () {})),
     ));
-    final box = tester
-        .widgetList<Container>(find.descendant(
-          of: find.byType(SessionCard),
-          matching: find.byType(Container),
-        ))
-        .map((c) => c.decoration)
-        .whereType<BoxDecoration>()
-        .first;
-    expect(box.borderRadius, BorderRadius.circular(12));
-    final ink = tester.widget<InkWell>(find.byType(InkWell));
-    expect(ink.borderRadius, BorderRadius.circular(12));
+    final card = tester.widget<Material>(find
+        .descendant(of: find.byType(SessionCard), matching: find.byType(Material))
+        .first);
+    expect((card.shape! as RoundedRectangleBorder).borderRadius,
+        BorderRadius.circular(12));
+    expect(card.clipBehavior, Clip.antiAlias);
   });
 
   TextSpan spanWith(WidgetTester tester, String text) {
@@ -232,25 +238,20 @@ void main() {
           .first);
 
   for (final style in [StatusStyle.stripe, StatusStyle.dot]) {
-    for (final density in AppDensity.values) {
-      testWidgets('${style.name} ${density.name} row sits on the surface color',
-          (tester) async {
-        final s = _session('{"id":"mac:%1","status":"working",$base}');
-        await tester.pumpWidget(MaterialApp(
-          theme: buildArgusTheme(
-              prefs: AppearancePrefs(statusStyle: style, density: density)),
+    testWidgets('${style.name} row sits on the surface color', (tester) async {
+      final s = _session('{"id":"mac:%1","status":"working",$base}');
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildArgusTheme(prefs: AppearancePrefs(statusStyle: style)),
           home: Scaffold(body: SessionCard(session: s)),
-        ));
-        final t = tester.element(find.byType(SessionCard)).tokens;
-        final m = rowMaterial(tester);
-        expect(m.color, t.surface);
-        expect(m.color, isNot(t.canvas));
-        final radius = density == AppDensity.comfortable
-            ? BorderRadius.circular(t.radius)
-            : BorderRadius.zero;
-        expect(m.borderRadius ?? BorderRadius.zero, radius);
-      });
-    }
+        ),
+      );
+      final t = tester.element(find.byType(SessionCard)).tokens;
+      final m = rowMaterial(tester);
+      expect(m.color, t.surface);
+      expect(m.color, isNot(t.canvas));
+      expect(m.borderRadius, BorderRadius.circular(t.radius));
+    });
   }
 
   for (final style in StatusStyle.values) {
@@ -263,9 +264,7 @@ void main() {
         theme: buildArgusTheme(prefs: AppearancePrefs(statusStyle: style)),
         home: Scaffold(body: SessionCard(session: s, showNode: true)),
       ));
-      final mark = style == StatusStyle.dot
-          ? find.byKey(const Key('status-dot'))
-          : find.text('●');
+      final mark = find.text('●');
       final repoY = tester.getCenter(find.text('argus')).dy;
       expect(tester.getCenter(mark).dy, closeTo(repoY, 1));
       expect(tester.getCenter(find.text('mac')).dy, closeTo(repoY, 1));

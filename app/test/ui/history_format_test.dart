@@ -48,10 +48,4 @@ void main() {
     expect(shortenPath('/a/b/c/d/e'), '/a/…/e');
     expect(shortenPath(''), '');
   });
-
-  test('compactCount', () {
-    expect(compactCount(950), '950');
-    expect(compactCount(48200), '48.2k');
-    expect(compactCount(1250000), '1.3M');
-  });
 }

@@ -6,6 +6,9 @@ library;
 /// plus 12 px of padding, matched by every card style).
 const double kCardInset = 15;
 
+/// Space between session cards, in every style.
+const double kCardGap = 8;
+
 /// Width of the status mark column.
 const double kLeadWidth = 14;
 

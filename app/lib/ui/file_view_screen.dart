@@ -4,8 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/navigation.dart';
 import '../state/workspace.dart';
 import 'code_block.dart';
-import 'shell_drawer.dart';
 import 'theme.dart';
+import 'top_bar.dart';
 
 /// One workspace file, highlighted by its name. Pushed over the workspace tabs.
 class FileViewScreen extends ConsumerWidget {
@@ -24,7 +24,7 @@ class FileViewScreen extends ConsumerWidget {
     final async = ref.watch(workspaceFileProvider((workspaceId, path)));
     final dir = parentPath(path);
     return Scaffold(
-      appBar: AppBar(
+      appBar: TopBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -36,7 +36,6 @@ class FileViewScreen extends ConsumerWidget {
               ),
           ],
         ),
-        actions: [?shellMenuButton(context)],
       ),
       body: SafeArea(
         top: false,

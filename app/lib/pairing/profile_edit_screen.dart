@@ -6,6 +6,7 @@ import '../state/gateway.dart';
 import '../state/profiles.dart';
 import '../transport/ssh_gateway.dart';
 import '../ui/responsive.dart';
+import '../ui/top_bar.dart';
 import '../util/id.dart';
 import 'profile.dart';
 
@@ -174,7 +175,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   Widget build(BuildContext context) {
     final keys = ref.watch(keysProvider);
     return Scaffold(
-      appBar: AppBar(title: Text(widget.initial == null ? 'New connection' : 'Edit connection')),
+      appBar: TopBar(title: Text(widget.initial == null ? 'New connection' : 'Edit connection')),
       body: SafeArea(
         top: false,
         child: CenteredBody(

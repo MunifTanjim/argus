@@ -227,7 +227,9 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    await tester.tap(find.byKey(const Key('history-title')));
+    await tester.tap(find.descendant(
+        of: find.byKey(const Key('history-title')),
+        matching: find.byType(InkWell)));
     await tester.pumpAndSettle();
 
     expect(find.text('Project'), findsOneWidget);
@@ -259,7 +261,9 @@ void main() {
         project: _project(cwd: '/home/user/project')));
     await tester.pump();
     await tester.pump();
-    await tester.tap(find.byKey(const Key('history-title')));
+    await tester.tap(find.descendant(
+        of: find.byKey(const Key('history-title')),
+        matching: find.byType(InkWell)));
     await tester.pumpAndSettle();
 
     final context = tester.element(find.byType(HistoryTranscriptScreen));
@@ -304,7 +308,9 @@ void main() {
         project: _project(cwd: '/home/user/project')));
     await tester.pump();
     await tester.pump();
-    await tester.tap(find.byKey(const Key('history-title')));
+    await tester.tap(find.descendant(
+        of: find.byKey(const Key('history-title')),
+        matching: find.byType(InkWell)));
     await tester.pumpAndSettle();
 
     final sheet = tester.getRect(find.byType(BottomSheet));

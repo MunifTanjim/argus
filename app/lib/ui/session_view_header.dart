@@ -6,6 +6,7 @@ import 'details_header.dart';
 import 'session_card.dart';
 import 'status_style.dart';
 import 'theme.dart';
+import 'top_bar.dart';
 
 /// The session view's large header, at the top of the transcript: the status
 /// mark and the repo, the session name, then branch, model, and context. An
@@ -28,9 +29,10 @@ class SessionViewHeader extends StatelessWidget {
     final s = session;
     final name = s.displayName;
     return DetailsHeader(
-      mark: Text(
-        statusGlyph(s.status),
-        style: mono.copyWith(color: sessionColor(s, t)),
+      mark: StatusMark(
+        status: s.status,
+        color: sessionColor(s, t),
+        fontSize: 12,
       ),
       // An unnamed session shows its repo as the title on the first line.
       label: name == null ? null : s.displayTitle,
@@ -47,35 +49,21 @@ class SessionViewHeader extends StatelessWidget {
 }
 
 /// The app bar's one-line title: the status mark and the session name, or the
-/// repo for an unnamed session. The trailing `▾` says a tap opens the details.
+/// repo for an unnamed session. A tap opens the details.
 class SessionTitle extends StatelessWidget {
-  const SessionTitle({super.key, required this.session});
+  const SessionTitle({super.key, required this.session, required this.onTap});
 
   final Session session;
+  final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-    final s = session;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          statusGlyph(s.status),
-          style: mono.copyWith(fontSize: 16, color: sessionColor(s, t)),
-        ),
-        const SizedBox(width: 8),
-        Flexible(
-          // In the app bar's title style.
-          child: Text(
-            s.displayName ?? s.displayTitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-        const SizedBox(width: 2),
-        Icon(Icons.expand_more, size: 18, color: t.textDim),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => TopBarTitle(
+    leading: StatusMark(
+      status: session.status,
+      color: sessionColor(session, context.tokens),
+      fontSize: 16,
+    ),
+    text: session.displayName ?? session.displayTitle,
+    onTap: onTap,
+  );
 }

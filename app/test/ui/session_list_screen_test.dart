@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:argus/e2e/e2e.dart' show KeyPair;
 import 'package:argus/models/session.dart';
 import 'package:argus/pairing/gateway_store.dart';
+import 'package:argus/state/appearance.dart';
 import 'package:argus/state/session_filter.dart';
 import 'package:argus/state/device_identity.dart';
 import 'package:argus/state/sessions.dart';
@@ -14,6 +15,7 @@ import 'package:argus/state/gateway.dart';
 import 'package:argus/transport/connection.dart';
 import 'package:argus/ui/device_identity_screen.dart';
 import 'package:argus/ui/session_list_screen.dart';
+import 'package:argus/ui/theme.dart';
 
 Session _s(String id, String host, String status) => Session.fromJson(
   jsonDecode(
@@ -32,9 +34,15 @@ Session _sa(
   ),
 );
 
-Widget _app(List<Override> overrides) => ProviderScope(
+Widget _app(List<Override> overrides, {ThemeData? theme}) => ProviderScope(
   overrides: overrides,
-  child: const MaterialApp(home: SessionListScreen()),
+  child: MaterialApp(theme: theme, home: const SessionListScreen()),
+);
+
+// Only filled cards show agent badges; the others name the agent in the meta
+// line.
+final _filled = buildArgusTheme(
+  prefs: const AppearancePrefs(statusStyle: StatusStyle.filled),
 );
 
 void main() {
@@ -72,7 +80,7 @@ void main() {
           ]),
         ),
         gatewayProvider.overrideWithValue(null),
-      ]),
+      ], theme: _filled),
     );
     await tester.pump();
     expect(find.text('CLAUDE'), findsOneWidget);
@@ -89,7 +97,7 @@ void main() {
           ]),
         ),
         gatewayProvider.overrideWithValue(null),
-      ]),
+      ], theme: _filled),
     );
     await tester.pump();
     expect(find.text('CLAUDE'), findsNothing);

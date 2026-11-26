@@ -3,8 +3,6 @@ import 'package:flutter/material.dart';
 import 'palette.dart';
 import 'palettes.dart';
 
-enum AppDensity { compact, comfortable }
-
 enum StatusStyle { stripe, dot, filled }
 
 const _scrim = Color(0x8A000000);
@@ -16,6 +14,17 @@ double contrastRatio(Color a, Color b) {
   final la = a.computeLuminance();
   final lb = b.computeLuminance();
   return (la > lb ? la + 0.05 : lb + 0.05) / (la > lb ? lb + 0.05 : la + 0.05);
+}
+
+/// [c] with its HSL lightness lowered until it reaches 3:1 on both [a] and
+/// [b]. The hue and saturation stay.
+Color darkenToMark(Color c, Color a, Color b) {
+  var hsl = HSLColor.fromColor(c);
+  bool reads(Color x) => contrastRatio(x, a) >= 3 && contrastRatio(x, b) >= 3;
+  while (!reads(hsl.toColor()) && hsl.lightness > 0) {
+    hsl = hsl.withLightness((hsl.lightness - 0.005).clamp(0.0, 1.0));
+  }
+  return hsl.toColor();
 }
 
 /// Whichever of [x] and [y] reads better on [fill].
@@ -95,7 +104,6 @@ class ArgusTokens extends ThemeExtension<ArgusTokens> {
     required this.syntaxMeta,
     required this.ansi,
     required this.radius,
-    required this.density,
     required this.statusStyle,
   });
 
@@ -103,78 +111,80 @@ class ArgusTokens extends ThemeExtension<ArgusTokens> {
   /// [accent] wins over both.
   factory ArgusTokens.from(
     ArgusPalette p, {
-    AppDensity density = AppDensity.compact,
     StatusStyle statusStyle = StatusStyle.stripe,
     double radius = 6,
     Color? accent,
   }) {
     final o = p.overrides;
     final acc = accent ?? o.accent ?? p.aqua;
-    final canvas = o.canvas ?? p.bg0;
-    final surface = o.surface ?? p.bg1;
+    final canvas = p.bg0;
+    final surface = p.bg1;
     final surfaceRaised = o.surfaceRaised ?? p.bg2;
-    final line = o.line ?? p.bg2;
-    final text = o.text ?? p.fg0;
-    final textSecondary = o.textSecondary ?? p.fg1;
+    final line = p.bg2;
+    final text = p.fg0;
+    final textSecondary = p.fg1;
     final textDim = o.textDim ?? p.dim;
-    final link = o.link ?? p.blue;
-    final notice = o.notice ?? p.yellow;
-    final error = o.error ?? p.red;
+    // On light palettes the bright hues are too light as text and status
+    // marks, so the derived status colors are darkened. Overrides stay.
+    Color mark(Color c) => p.brightness == Brightness.light
+        ? darkenToMark(c, canvas, surface)
+        : c;
+    final link = p.blue;
+    final notice = p.yellow;
+    final error = mark(p.red);
     final errorSurface = o.errorSurface ?? _mix(p.bg0, p.red, 0.12);
-    final destructive = o.destructive ?? p.red;
-    final blocked = o.blocked ?? p.yellow;
-    final onAccent = o.onAccent ?? moreReadableOn(acc, canvas, text);
+    final destructive = p.red;
+    final blocked = mark(p.yellow);
+    final onAccent = moreReadableOn(acc, canvas, text);
     final blockedSurface = o.blockedSurface ?? _mix(p.bg0, p.yellow, 0.10);
     final blockedBorder = o.blockedBorder ?? _mix(p.bg0, p.yellow, 0.45);
-    final waiting = o.waiting ?? p.blue;
+    final waiting = mark(p.blue);
     final waitingSurface = o.waitingSurface ?? _mix(p.bg0, p.blue, 0.10);
     final waitingBorder = o.waitingBorder ?? _mix(p.bg0, p.blue, 0.45);
-    final working = o.working ?? p.green;
-    final idle = o.idle ?? p.dim;
-    final dead = o.dead ?? p.red;
-    final diffAdd = o.diffAdd ?? p.green;
-    final diffAddSurface = o.diffAddSurface ?? p.green.withValues(alpha: 0.10);
-    final diffRemove = o.diffRemove ?? p.red;
-    final diffRemoveSurface =
-        o.diffRemoveSurface ?? p.red.withValues(alpha: 0.10);
-    final diffHunk = o.diffHunk ?? p.blue;
-    final terminalFg = o.terminalFg ?? p.terminalFg;
-    final terminalBg = o.terminalBg ?? p.terminalBg;
-    final terminalCursor = o.terminalCursor ?? p.terminalFg.withAlpha(0x80);
-    final terminalSelection =
-        o.terminalSelection ?? p.terminalFg.withAlpha(0x40);
-    final keycapFill = o.keycapFill ?? surfaceRaised;
-    final keycapBorder = o.keycapBorder ?? line;
-    final keycapText = o.keycapText ?? textSecondary;
-    final keycapArmed = o.keycapArmed ?? acc;
-    final keycapArmedText = o.keycapArmedText ?? onAccent;
-    final scrim = o.scrim ?? _scrim;
-    final success = o.success ?? p.green;
+    final working = mark(p.green);
+    final idle = p.dim;
+    final dead = p.red;
+    final diffAdd = p.green;
+    final diffAddSurface = p.green.withValues(alpha: 0.10);
+    final diffRemove = p.red;
+    final diffRemoveSurface = p.red.withValues(alpha: 0.10);
+    final diffHunk = p.blue;
+    final terminalFg = p.terminalFg;
+    final terminalBg = p.terminalBg;
+    final terminalCursor = p.terminalFg.withAlpha(0x80);
+    final terminalSelection = p.terminalFg.withAlpha(0x40);
+    final keycapFill = surfaceRaised;
+    final keycapBorder = line;
+    final keycapText = textSecondary;
+    final keycapArmed = acc;
+    final keycapArmedText = onAccent;
+    final scrim = _scrim;
+    final success = p.green;
     final warning = o.warning ?? p.yellow;
-    final alert = o.alert ?? p.orange;
+    final alert = p.orange;
     final caution = o.caution ?? p.yellow;
     final busy = o.busy ?? p.yellow;
-    final workingBadge = o.workingBadge ?? p.green;
-    final taskCompleted = o.taskCompleted ?? p.aqua;
-    final taskInProgress = o.taskInProgress ?? p.orange;
+    final workingBadge = o.workingBadge ?? working;
+    final taskCompleted = p.aqua;
+    final taskInProgress = p.orange;
     final thinking = o.thinking ?? p.yellow;
-    final toolRead = o.toolRead ?? p.blue;
-    final toolEdit = o.toolEdit ?? p.yellow;
-    final toolWrite = o.toolWrite ?? p.green;
-    final toolShell = o.toolShell ?? p.orange;
-    final toolSearch = o.toolSearch ?? p.purple;
+    final toolRead = p.blue;
+    final toolEdit = p.yellow;
+    final toolWrite = p.green;
+    final toolShell = p.orange;
+    final toolSearch = p.purple;
     final changeAdded = o.changeAdded ?? p.green;
     final changeModified = o.changeModified ?? p.yellow;
     final changeDeleted = o.changeDeleted ?? p.red;
-    final changeRenamed = o.changeRenamed ?? p.purple;
-    final changeUntracked = o.changeUntracked ?? p.blue;
+    final changeRenamed = p.purple;
+    final changeUntracked = p.blue;
     final commitHash = o.commitHash ?? p.yellow;
     final syntaxComment = o.syntaxComment ?? p.dim;
     final syntaxTag = o.syntaxTag ?? p.fg1;
     final syntaxKeyword = o.syntaxKeyword ?? p.purple;
     final syntaxString = o.syntaxString ?? p.green;
     final syntaxNumber = o.syntaxNumber ?? p.orange;
-    final syntaxTitle = o.syntaxTitle ?? p.yellow;
+    final syntaxTitle = p.yellow;
     final syntaxBuiltIn = o.syntaxBuiltIn ?? p.aqua;
     final syntaxFunction = o.syntaxFunction ?? p.blue;
     final syntaxVariable = o.syntaxVariable ?? p.red;
@@ -250,7 +260,6 @@ class ArgusTokens extends ThemeExtension<ArgusTokens> {
       syntaxMeta: syntaxMeta,
       ansi: List.unmodifiable(p.ansi),
       radius: radius,
-      density: density,
       statusStyle: statusStyle,
     );
   }
@@ -464,15 +473,15 @@ class ArgusTokens extends ThemeExtension<ArgusTokens> {
   /// The 16 terminal colors: 8 normal, then 8 bright.
   final List<Color> ansi;
   final double radius;
-  final AppDensity density;
   final StatusStyle statusStyle;
 
-  /// Space between session rows. Filled cards and comfortable rows are set
-  /// apart by a gap; compact quiet rows touch and are split by a divider.
-  double get rowGap =>
-      statusStyle == StatusStyle.filled || density == AppDensity.comfortable
-          ? 8
-          : 0;
+  /// The corner radius for small inline marks: badges, tabs, and tap
+  /// highlights inside a row.
+  double get radiusSmall => radius / 2;
+
+  /// The corner radius for docked boxes: the composer, the resume bar, and
+  /// the floating action button.
+  double get radiusLarge => radius + 4;
 
   @override
   ArgusTokens copyWith({
@@ -546,7 +555,6 @@ class ArgusTokens extends ThemeExtension<ArgusTokens> {
     Color? syntaxMeta,
     List<Color>? ansi,
     double? radius,
-    AppDensity? density,
     StatusStyle? statusStyle,
   }) => ArgusTokens(
     canvas: canvas ?? this.canvas,
@@ -619,7 +627,6 @@ class ArgusTokens extends ThemeExtension<ArgusTokens> {
     syntaxMeta: syntaxMeta ?? this.syntaxMeta,
     ansi: ansi ?? this.ansi,
     radius: radius ?? this.radius,
-    density: density ?? this.density,
     statusStyle: statusStyle ?? this.statusStyle,
   );
 
@@ -701,7 +708,6 @@ class ArgusTokens extends ThemeExtension<ArgusTokens> {
         for (var i = 0; i < ansi.length; i++) c(ansi[i], other.ansi[i]),
       ]),
       radius: late ? other.radius : radius,
-      density: late ? other.density : density,
       statusStyle: late ? other.statusStyle : statusStyle,
     );
   }

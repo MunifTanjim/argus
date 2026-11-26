@@ -5,8 +5,8 @@ import '../models/session.dart';
 import '../models/tasks.dart';
 import '../state/tasks.dart';
 import 'responsive.dart';
-import 'shell_drawer.dart';
 import 'theme.dart';
+import 'top_bar.dart';
 
 const _mono = TextStyle(fontFamily: monoFamily, fontSize: 13);
 
@@ -31,10 +31,9 @@ class _SessionTasksScreenState extends ConsumerState<SessionTasksScreen> {
   Widget build(BuildContext context) {
     final async = ref.watch(tasksProvider(widget.session.id));
     return Scaffold(
-      appBar: AppBar(
+      appBar: TopBar(
         title: const Text('Tasks'),
         actions: [
-          ?shellMenuButton(context),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',
@@ -142,7 +141,7 @@ class _TaskRow extends StatelessWidget {
       decoration: BoxDecoration(
         color: context.tokens.surface,
         border: Border.all(color: context.tokens.line),
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(context.tokens.radius),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,

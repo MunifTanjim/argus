@@ -2,11 +2,13 @@ import 'dart:convert';
 
 import 'package:argus/data/session_repository.dart';
 import 'package:argus/models/session.dart';
+import 'package:argus/state/appearance.dart';
 import 'package:argus/state/grouping.dart';
 import 'package:argus/ui/blocked_card.dart';
 import 'package:argus/ui/session_card.dart';
 import 'package:argus/ui/session_detail_screen.dart';
 import 'package:argus/ui/session_sections_list.dart';
+import 'package:argus/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -22,7 +24,11 @@ class _Pushes extends NavigatorObserver {
       ids.add(sessionDetailRouteId(route));
 }
 
-Session _s(Map<String, dynamic>? interaction, {String id = 'mac:%1'}) =>
+Session _s(
+  Map<String, dynamic>? interaction, {
+  String id = 'mac:%1',
+  Map<String, dynamic> extra = const {},
+}) =>
     Session.fromJson(
       jsonDecode(
             jsonEncode({
@@ -39,6 +45,7 @@ Session _s(Map<String, dynamic>? interaction, {String id = 'mac:%1'}) =>
               },
               'repo': 'argus',
               'interaction': ?interaction,
+              ...extra,
             }),
           )
           as Map<String, dynamic>,
@@ -172,6 +179,42 @@ void main() {
       );
     });
 
+    testWidgets('a question hides a message that repeats the label', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        BlockedCard(
+          session: _s({
+            'kind': 'question',
+            'message': ' questions ',
+            'questions': [_question('Which one?', ['A'])],
+          }),
+        ),
+        _Repo(),
+      );
+      expect(find.textContaining('uestions'), findsNothing);
+      expect(find.text('Which one?'), findsOneWidget);
+    });
+
+    testWidgets('a question hides a message that repeats its text', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        BlockedCard(
+          session: _s({
+            'kind': 'question',
+            'message': 'Which one?',
+            'questions': [_question('which one?', ['A'])],
+          }),
+        ),
+        _Repo(),
+      );
+      expect(find.text('Which one?'), findsNothing);
+      expect(find.text('which one?'), findsOneWidget);
+    });
+
     testWidgets('a tap on an option chip opens the session', (tester) async {
       final pushes = await _pump(
         tester,
@@ -236,6 +279,124 @@ void main() {
       expect(find.byType(BlockedCard), findsOneWidget, reason: '$by');
       expect(find.byType(SessionCard), findsOneWidget, reason: '$by');
     }
+  });
+
+  group('status style', () {
+    Future<ArgusTokens> pumpStyle(
+      WidgetTester tester,
+      StatusStyle style,
+    ) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [sessionRepositoryProvider.overrideWithValue(_Repo())],
+          child: MaterialApp(
+            theme: buildArgusTheme(prefs: AppearancePrefs(statusStyle: style)),
+            home: Scaffold(
+              body: BlockedCard(
+                session: _s({
+                  'kind': 'question',
+                  'request_id': 'r1',
+                  'questions': [
+                    _question('Which one?', ['A', 'B']),
+                  ],
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+      return tester.element(find.byType(BlockedCard)).tokens;
+    }
+
+    Material card(WidgetTester tester) => tester.widget<Material>(
+      find
+          .descendant(
+            of: find.byType(BlockedCard),
+            matching: find.byType(Material),
+          )
+          .first,
+    );
+
+    testWidgets('stripe: a plain card with a stripe in the blocked color', (
+      tester,
+    ) async {
+      final t = await pumpStyle(tester, StatusStyle.stripe);
+      final stripe = tester.widget<Container>(
+        find.byKey(const Key('status-stripe')),
+      );
+      expect(stripe.color, t.blocked);
+      expect(card(tester).color, t.surface);
+    });
+
+    testWidgets('dot: a plain card with the glyph and no stripe', (
+      tester,
+    ) async {
+      final t = await pumpStyle(tester, StatusStyle.dot);
+      expect(find.byKey(const Key('status-stripe')), findsNothing);
+      expect(card(tester).color, t.surface);
+    });
+
+    testWidgets('filled: the tinted card', (tester) async {
+      final t = await pumpStyle(tester, StatusStyle.filled);
+      expect(find.byKey(const Key('status-stripe')), findsNothing);
+      expect(card(tester).color, isNot(t.surface));
+    });
+
+    for (final style in StatusStyle.values) {
+      testWidgets('$style: the mark is the waiting glyph', (tester) async {
+        await pumpStyle(tester, style);
+        expect(find.text('◆'), findsOneWidget);
+        expect(find.text('●'), findsNothing);
+      });
+    }
+  });
+
+
+  testWidgets('the mark matches a waiting session card\'s mark', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      Column(
+        children: [
+          BlockedCard(session: _s(_permission)),
+          SessionCard(session: _s(null, id: 'mac:%2')),
+        ],
+      ),
+      _Repo(),
+    );
+    final marks = find.descendant(
+      of: find.byType(StatusMark),
+      matching: find.byType(Text),
+    );
+    expect(marks, findsNWidgets(2));
+    expect(
+      tester.getSize(marks.at(0)).height,
+      tester.getSize(marks.at(1)).height,
+    );
+  });
+
+  testWidgets('the node name is right of the time', (tester) async {
+    await _pump(
+      tester,
+      BlockedCard(
+        showNode: true,
+        session: _s(
+          _permission,
+          extra: {
+            'node_label': 'macbook',
+            'status_since': DateTime.now()
+                .subtract(const Duration(minutes: 5))
+                .toUtc()
+                .toIso8601String(),
+          },
+        ),
+      ),
+      _Repo(),
+    );
+    final node = tester.getRect(find.text('macbook'));
+    final time = tester.getRect(find.text('5m ago'));
+    expect(time.right, lessThan(node.left));
   });
 
   testWidgets('a long prompt message is cut to 4 lines', (tester) async {

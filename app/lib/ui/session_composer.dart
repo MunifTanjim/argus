@@ -80,7 +80,7 @@ List<(String, Color)> modelParts(Summary? s, ArgusTokens t) {
   if (s == null) return const [];
   final parts = <(String, Color)>[
     if ((s.modelName ?? '').isNotEmpty)
-      (s.modelName!, hexColor(s.modelColor) ?? t.textDim),
+      (s.modelName!, modelColor(s.modelColor, t)),
     if ((s.effort ?? '').isNotEmpty) (s.effort!, t.textDim),
   ];
   if (s.hasContext) {
@@ -515,7 +515,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
         ),
       );
     }
-    final radius = BorderRadius.circular(t.radius + 4);
+    final radius = BorderRadius.circular(t.radiusLarge);
     return Material(
       color: t.canvas,
       child: Padding(
@@ -701,7 +701,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
           ),
           decoration: BoxDecoration(
             border: Border.all(color: t.line),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(t.radius),
           ),
           child: Text.rich(
             modelLine(parts, n, t),

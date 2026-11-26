@@ -105,7 +105,6 @@ void main() {
     expect(t.ansi[9], const Color(0xFFfb4934));
     expect(t.ansi.last, const Color(0xFFebdbb2));
     expect(t.radius, 6);
-    expect(t.density, AppDensity.compact);
     expect(t.statusStyle, StatusStyle.stripe);
   });
 
@@ -155,23 +154,21 @@ void main() {
     expect(t.error, x);
     expect(t.radius, 2);
     expect(t.canvas, base.canvas);
-    expect(t.density, base.density);
+    expect(t.statusStyle, base.statusStyle);
   });
 
   test('lerp mixes colors and switches non-color fields at half', () {
     final a = ArgusTokens.fallback;
     final b = a.copyWith(
       canvas: const Color(0xFFFFFFFF),
-      density: AppDensity.comfortable,
       statusStyle: StatusStyle.dot,
       radius: 12,
     );
     final low = a.lerp(b, 0.25);
     expect(low.canvas, Color.lerp(a.canvas, b.canvas, 0.25));
-    expect(low.density, AppDensity.compact);
+    expect(low.statusStyle, StatusStyle.stripe);
     expect(low.radius, 6);
     final high = a.lerp(b, 0.5);
-    expect(high.density, AppDensity.comfortable);
     expect(high.statusStyle, StatusStyle.dot);
     expect(high.radius, 12);
   });

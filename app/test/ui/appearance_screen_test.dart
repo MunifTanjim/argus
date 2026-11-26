@@ -2,7 +2,6 @@ import 'package:argus/pairing/gateway_store.dart';
 import 'package:argus/state/appearance.dart';
 import 'package:argus/ui/appearance_screen.dart';
 import 'package:argus/ui/session_card.dart';
-import 'package:argus/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -44,7 +43,6 @@ void main() {
       'Palette',
       'Mode',
       'Accent',
-      'Density',
       'Text size',
       'Corner radius',
       'Status style',
@@ -58,12 +56,7 @@ void main() {
       'System',
       'Dark',
       'Light',
-      'Compact',
-      'Comfortable',
-      '90%',
       '100%',
-      '115%',
-      '130%',
       'Sharp',
       'Medium',
       'Rounded',
@@ -75,43 +68,44 @@ void main() {
     ]) {
       expect(find.text(t), findsOneWidget, reason: t);
     }
-    expect(find.byKey(const Key('appearance-preview')), findsOneWidget);
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('appearance-preview')),
-        matching: find.byType(SessionCard),
-      ),
-      findsNWidgets(3),
-    );
+    expect(find.byKey(const Key('appearance-preview')), findsNothing);
+    expect(find.byType(SessionCard), findsNothing);
   });
 
-  testWidgets('choosing a palette persists and recolors the preview', (
-    tester,
-  ) async {
+  testWidgets('choosing a palette persists it', (tester) async {
     final kv = await _pump(tester);
     await tester.tap(find.text('Nord'));
     await tester.pumpAndSettle();
     expect(kv.m['appearance.palette'], 'nord');
-    final ctx = tester.element(
-      find.descendant(
-        of: find.byKey(const Key('appearance-preview')),
-        matching: find.byType(SessionCard).first,
-      ),
-    );
-    expect(ctx.tokens.canvas, nord.bg0);
   });
 
-  testWidgets('status style change updates the preview', (tester) async {
+  testWidgets('choosing a status style persists it', (tester) async {
     final kv = await _pump(tester);
-    final dot = find.descendant(
-      of: find.byKey(const Key('appearance-preview')),
-      matching: find.byKey(const Key('status-dot')),
-    );
-    expect(dot, findsNothing);
     await tester.tap(find.text('Dot'));
     await tester.pumpAndSettle();
     expect(kv.m['appearance.statusStyle'], 'dot');
-    expect(dot, findsWidgets);
+  });
+
+  testWidgets('text size slider persists the size on release', (tester) async {
+    final kv = await _pump(tester);
+    final slider = find.byKey(const Key('text-scale-slider'));
+    expect(tester.widget<Slider>(slider).value, 1.0);
+
+    // Drag from the 100% thumb to the right end of the track.
+    final thumb = tester.getCenter(slider);
+    final rect = tester.getRect(slider);
+    final g = await tester.startGesture(
+      Offset(rect.left + (rect.width - 48) * (0.2 / 0.7) + 24, thumb.dy),
+    );
+    await g.moveTo(Offset(rect.right, thumb.dy));
+    await tester.pump();
+    expect(find.text('150%'), findsOneWidget);
+    expect(kv.m['appearance.textScale'], isNull);
+
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(kv.m['appearance.textScale'], '1.5');
+    expect(tester.widget<Slider>(slider).value, 1.5);
   });
 
   testWidgets('verbose transcript toggle persists', (tester) async {

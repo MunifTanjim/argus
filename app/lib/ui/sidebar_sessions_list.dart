@@ -15,6 +15,7 @@ import 'agent_badge.dart';
 import 'fold_header.dart';
 import 'relative_time.dart';
 import 'session_actions.dart';
+import 'session_card.dart' show StatusMark;
 import 'status_style.dart';
 import 'theme.dart';
 
@@ -139,31 +140,23 @@ class _SessionRow extends StatelessWidget {
     final s = session;
     final dim = s.offline;
     final time = relativeTime(s.summary?.lastActivity);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-      child: Material(
-        color: selected ? context.tokens.surfaceRaised : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          onLongPress: onLongPress,
-          child: Padding(
+    return SidebarRowFrame(
+      selected: selected,
+      onTap: onTap,
+      onLongPress: onLongPress,
+      child: Padding(
             padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 SizedBox(
                   width: 24,
-                  child: Text(
-                    dim ? '○' : statusGlyph(s.status),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontFamily: monoFamily,
-                      color: dim
-                          ? context.tokens.textDim
-                          : sessionColor(s, context.tokens),
-                    ),
+                  child: StatusMark(
+                    status: s.status,
+                    glyph: dim ? '○' : null,
+                    color: dim
+                        ? context.tokens.textDim
+                        : sessionColor(s, context.tokens),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -210,9 +203,35 @@ class _SessionRow extends StatelessWidget {
                 ],
               ],
             ),
-          ),
-        ),
       ),
     );
   }
+}
+
+/// The frame of a sidebar row in the Sessions and Projects tabs: the inset,
+/// the selected highlight, and the tap target.
+class SidebarRowFrame extends StatelessWidget {
+  const SidebarRowFrame({
+    super.key,
+    required this.selected,
+    required this.onTap,
+    this.onLongPress,
+    required this.child,
+  });
+
+  final bool selected;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+    child: Material(
+      color: selected ? context.tokens.surfaceRaised : Colors.transparent,
+      borderRadius: BorderRadius.circular(context.tokens.radius),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(onTap: onTap, onLongPress: onLongPress, child: child),
+    ),
+  );
 }

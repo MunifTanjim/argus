@@ -26,6 +26,7 @@ import 'session_composer.dart';
 import 'session_chips.dart';
 import 'session_view_header.dart';
 import 'theme.dart';
+import 'top_bar.dart';
 import 'transcript_feed.dart';
 import 'workspace_screen.dart';
 
@@ -269,8 +270,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
             .select((p) => lookupWorkspace(p.projects, wsId) != null));
 
     return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 0,
+      appBar: TopBar(
         // The large header at the top of the transcript holds the details;
         // this one-line title shows once that header scrolls away.
         // Hidden, it takes no taps; shown, a tap opens the details in place.
@@ -284,17 +284,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen>
               child: title,
             ),
           ),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(context.tokens.radius),
-              onTap: _showDetails,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: SessionTitle(session: live),
-              ),
-            ),
-          ),
+          child: SessionTitle(session: live, onTap: _showDetails),
         ),
         actions: [
           IconButton(

@@ -28,7 +28,7 @@ final argusThemeProvider =
 final _themesProvider = Provider<({ThemeData light, ThemeData dark})>((ref) {
   ref.watch(
     appearancePrefsProvider.select(
-      (p) => (p.palette, p.accent, p.font, p.density, p.radius, p.statusStyle),
+      (p) => (p.palette, p.accent, p.font, p.radius, p.statusStyle),
     ),
   );
   final prefs = ref.read(appearancePrefsProvider);

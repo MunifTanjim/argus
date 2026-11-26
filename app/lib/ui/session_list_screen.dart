@@ -12,6 +12,7 @@ import '../state/status_filter.dart';
 import 'status_tiles.dart';
 import 'shell_drawer.dart';
 import 'spawn_dialog.dart';
+import 'top_bar.dart';
 
 class SessionListScreen extends ConsumerWidget {
   const SessionListScreen({super.key});
@@ -32,7 +33,7 @@ class SessionListScreen extends ConsumerWidget {
         TrustStatus.awaitingAuthorization;
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: TopBar(
         leading: shellMenuButton(context),
         title: const SessionSearchTitle(child: Text('Sessions')),
         actions: const [SessionSearchButton(), GroupByButton()],

@@ -33,7 +33,7 @@ class ShellDrawerScope extends InheritedWidget {
 }
 
 /// The button that opens the modal projects drawer: the AppBar leading of a
-/// scope root, the first AppBar action of a screen pushed above one. Null when
+/// scope root. A screen pushed above one has a back button only. Null when
 /// there is no modal drawer to open.
 Widget? shellMenuButton(BuildContext context) {
   final open = ShellDrawerScope.openDrawerOf(context);

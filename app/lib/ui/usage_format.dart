@@ -23,9 +23,12 @@ Color contextColor(double pct, ArgusTokens t) {
 Color modelColor(String? hex, ArgusTokens t) =>
     readableOn(hexColor(hex) ?? t.textDim, t);
 
+/// A `#rrggbb` color; the leading `#` is optional.
 Color? hexColor(String? hex) {
-  if (hex == null || hex.length != 7 || !hex.startsWith('#')) return null;
-  final v = int.tryParse(hex.substring(1), radix: 16);
+  if (hex == null) return null;
+  final h = hex.startsWith('#') ? hex.substring(1) : hex;
+  if (h.length != 6) return null;
+  final v = int.tryParse(h, radix: 16);
   // The mask applies full alpha to the parsed user hex.
   return v == null ? null : Color(0xFF000000 | v);
 }

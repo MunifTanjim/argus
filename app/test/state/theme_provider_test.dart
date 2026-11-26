@@ -54,7 +54,7 @@ void main() {
     expect(t.dark.colorScheme.primary, gruvboxDark.red);
   });
 
-  test('radius, density, font, statusStyle reach the theme', () async {
+  test('radius, font, statusStyle reach the theme', () async {
     final c = await _container();
     addTearDown(c.dispose);
     var t = c.read(argusThemeProvider).dark;
@@ -66,7 +66,6 @@ void main() {
 
     final n = c.read(appearancePrefsProvider.notifier);
     await n.setRadius(CornerRadius.rounded);
-    await n.setDensity(AppDensity.comfortable);
     await n.setFont(InterfaceFont.mono);
     await n.setStatusStyle(StatusStyle.dot);
     t = c.read(argusThemeProvider).dark;
@@ -96,8 +95,10 @@ void main() {
       (t.inputDecorationTheme.border! as OutlineInputBorder).borderRadius,
       BorderRadius.circular(12),
     );
-    expect(_tokens(t).density, AppDensity.comfortable);
-    expect(t.visualDensity, VisualDensity.standard);
+    expect(
+      t.floatingActionButtonTheme.shape,
+      RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    );
     expect(t.textTheme.bodyMedium!.fontFamily, 'JetBrainsMonoNerdFontMono');
     expect(_tokens(t).statusStyle, StatusStyle.dot);
   });

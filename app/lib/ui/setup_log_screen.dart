@@ -10,6 +10,7 @@ import '../state/setup_text.dart';
 import 'branch_picker_screen.dart';
 import 'code_block.dart';
 import 'project_actions.dart';
+import 'top_bar.dart';
 
 class SetupLogScreen extends ConsumerStatefulWidget {
   const SetupLogScreen({super.key, required this.workspaceId});
@@ -125,7 +126,7 @@ class _SetupLogScreenState extends ConsumerState<SetupLogScreen> {
     );
     final output = _output == null ? null : cleanOutput(_output!);
     return Scaffold(
-      appBar: AppBar(
+      appBar: TopBar(
         title: Text(hit == null ? 'Setup log' : 'Setup log · ${hit.$2.name}'),
         actions: [
           if (hit != null && hit.$1.setupScript.isNotEmpty)

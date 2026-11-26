@@ -211,7 +211,7 @@ class _PromptMenuState extends State<PromptMenu> {
         color: context.tokens.surface,
         elevation: 4,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(context.tokens.radius),
           side: BorderSide(color: context.tokens.line),
         ),
         clipBehavior: Clip.antiAlias,
