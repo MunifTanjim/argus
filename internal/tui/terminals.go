@@ -287,3 +287,25 @@ func openNodeTerminals(c *ctx, nodeID string) tea.Cmd {
 	c.replaceBase(terminalsComp{nodeID: nodeID})
 	return c.m.loadTerminalsCmd()
 }
+
+type projTab int
+
+const (
+	projTabWorkspaces projTab = iota
+	projTabHistory
+)
+
+var projTabLabels = []string{"Workspaces", "History"}
+
+func (m model) projTabs(active projTab) string { return m.tabLine(projTabLabels, int(active)) }
+
+func (m model) hitProjTabs(c *ctx, x int) { c.hitTabs(x, 0, 3, projTabLabels...) }
+
+func openProjectSummary(c *ctx, projectID string) {
+	c.replaceBase(summaryComp{kind: rowProject, id: projectID})
+}
+
+func openProjectHistory(c *ctx, projectID string) tea.Cmd {
+	c.replaceBase(historyComp{projectID: projectID})
+	return c.m.fetchHistProjects()
+}

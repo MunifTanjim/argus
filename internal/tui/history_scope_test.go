@@ -149,13 +149,13 @@ func TestWorkspaceHistoryTabClicks(t *testing.T) {
 	m := homeTestModel()
 	m.nodeInfo = []api.NodeInfo{{ID: "n1"}}
 	if b, ok := clickTab(t, workspacePane(m), 1).baseComp().(historyComp); !ok || b.ws != "n1:w1" {
-		t.Errorf("click 1 without Terminals: base = %#v, want n1:w1's History", b)
+		t.Errorf("click 1 without Terminals: base = %T, want n1:w1's History", b)
 	}
 	if b, ok := clickTab(t, workspacePane(homeTestModel()), 2).baseComp().(terminalsComp); !ok || b.ws != "n1:w1" {
-		t.Errorf("click 2: base = %#v, want n1:w1's Terminals", b)
+		t.Errorf("click 2: base = %T, want n1:w1's Terminals", b)
 	}
 	if b, ok := clickTab(t, wsHistory(t, histFolder("n1", "/repo")), 0).baseComp().(workspaceComp); !ok || b.ws != "n1:w1" {
-		t.Errorf("click 0 on History: base = %#v, want n1:w1's Sessions", b)
+		t.Errorf("click 0 on History: base = %T, want n1:w1's Sessions", b)
 	}
 }
 
@@ -166,5 +166,81 @@ func TestWorkspaceHistoryFollowsTheTreeAndItsRemoval(t *testing.T) {
 	mm, _ := m.updateHistory(histProjectsMsg{projects: []session.HistoryProject{histFolder("n1", "/repo")}})
 	if h := mm.(model).baseComp().(historyComp); len(h.projects) != 0 {
 		t.Errorf("a removed workspace still lists folders: %v", h.projects)
+	}
+}
+
+func projectHistory(t *testing.T, folders ...session.HistoryProject) model {
+	t.Helper()
+	m := homeTestModel()
+	m.openRow("n1:p1")
+	m = typeKeys(m, "gt")
+	if h, ok := m.baseComp().(historyComp); !ok || h.projectID != "n1:p1" {
+		t.Fatalf("gt on the project: base = %T, want n1:p1's History", m.baseComp())
+	}
+	mm, _ := m.updateHistory(histProjectsMsg{projects: folders})
+	return mm.(model)
+}
+
+func TestProjectHistoryListsItsWorkspaceFolders(t *testing.T) {
+	m := projectHistory(t, histFolder("n1", "/repo-feat"), histFolder("n1", "/other"), histFolder("n1", "/repo"))
+	h := m.baseComp().(historyComp)
+	if h.inProject || len(h.projects) != 2 {
+		t.Fatalf("project History: inProject=%v folders=%v, want the 2 workspace folders", h.inProject, folderCwds(h.projects))
+	}
+	out := ansi.Strip(mainView(m))
+	for _, want := range []string{"Workspaces   History", "project · argus  /repo/.git"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("view lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "home") {
+		t.Errorf("project History should not show node headers:\n%s", out)
+	}
+	if got := m.mainRow(); got != "n1:p1" {
+		t.Errorf("tree row = %q, want n1:p1", got)
+	}
+	if m.memory.home.view == homeHistory {
+		t.Error("project History must not become Home's remembered view")
+	}
+}
+
+func TestProjectHistoryDrillAndBack(t *testing.T) {
+	m := projectHistory(t, histFolder("n1", "/repo"))
+	m = pressKeys(m, keyMsg("enter"))
+	if h := m.baseComp().(historyComp); !h.inProject || h.project.Cwd != "/repo" {
+		t.Fatalf("<CR>: want /repo's sessions, got inProject=%v %q", h.inProject, h.project.Cwd)
+	}
+	m = pressKeys(m, keyMsg("esc"))
+	if h := m.baseComp().(historyComp); h.inProject {
+		t.Fatal("<Esc> from a folder's sessions should return to the folder list")
+	}
+	m = pressKeys(m, keyMsg("esc"))
+	if s, ok := m.baseComp().(summaryComp); !ok || s.id != "n1:p1" {
+		t.Fatalf("<Esc> from the folder list: base = %T, want n1:p1's summary", m.baseComp())
+	}
+}
+
+func TestProjectHistoryEmpty(t *testing.T) {
+	m := projectHistory(t, histFolder("n1", "/other"))
+	if out := ansi.Strip(mainView(m)); !strings.Contains(out, "no past sessions in this project") {
+		t.Errorf("empty project History:\n%s", out)
+	}
+}
+
+func TestProjectHistoryTabs(t *testing.T) {
+	m := homeTestModel()
+	m.openRow("n1:p1")
+	if out := ansi.Strip(mainView(m)); !strings.Contains(out, "Workspaces   History") {
+		t.Errorf("project summary lacks its tabs:\n%s", out)
+	}
+	if b, ok := clickTab(t, m, 1).baseComp().(historyComp); !ok || b.projectID != "n1:p1" {
+		t.Errorf("click 1 on the summary: base = %T, want n1:p1's History", b)
+	}
+	m = projectHistory(t, histFolder("n1", "/repo"))
+	if b, ok := clickTab(t, m, 0).baseComp().(summaryComp); !ok || b.id != "n1:p1" {
+		t.Errorf("click 0 on History: base = %T, want n1:p1's summary", b)
+	}
+	if b, ok := typeKeys(m, "gT").baseComp().(summaryComp); !ok || b.id != "n1:p1" {
+		t.Errorf("gT on History: base = %T, want n1:p1's summary", b)
 	}
 }

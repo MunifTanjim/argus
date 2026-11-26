@@ -1,11 +1,11 @@
   󰚩 Argus                            ·  argus  /repo/.git                                                           
 
-  Projects  Sessions                 │  󰉋 repo  main                                                               ○ 2
-                                     │   repo-feat  feature                                                       ○ 1
-  󰋜 Home                         ○ 3 │
-  ▾  home                           │  esc tree: a new workspace · r rename
+  Projects  Sessions                 │  Workspaces   History
+                                     │
+  󰋜 Home                         ○ 3 │  󰉋 repo  main                                                               ○ 2
+  ▾  home                           │   repo-feat  feature                                                       ○ 1
 ▌   ▾ argus                          │
-      󰉋 repo  main               ○ 2 │
+      󰉋 repo  main               ○ 2 │  esc tree: a new workspace · r rename
        repo-feat  feature       ○ 1 │
                                      │
                                      │
@@ -27,4 +27,4 @@
                                      │
                                      │
 
-                                                        g? help
+                                                  gT/gt tabs · g? help

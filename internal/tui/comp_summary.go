@@ -73,6 +73,9 @@ func (s summaryComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd,
 		}
 		return s, openWakelockPicker(c, s.id, label), true
 	}
+	if s.kind == rowProject && (c.m.matches(msg, listKeys.TabNext) || c.m.matches(msg, listKeys.TabPrev)) {
+		return s, openProjectHistory(c, s.id), true
+	}
 	if !c.m.matches(msg, projectsKeys.Back) {
 		return s, nil, false
 	}
@@ -94,6 +97,10 @@ func (s summaryComp) view(c *ctx, w, _ int) string {
 		c.m.hitNodeTabs(c, centerGutter(cardW, w))
 		body = c.m.nodeTabs(nodeTabProjects) + "\n\n" + body
 	}
+	if s.kind == rowProject {
+		c.m.hitProjTabs(c, centerGutter(cardW, w))
+		body = c.m.projTabs(projTabWorkspaces) + "\n\n" + body
+	}
 	return centerBlock(body, cardW, w)
 }
 
@@ -108,12 +115,18 @@ func (s summaryComp) click(c *ctx, t hitTarget, _ bool) (component, tea.Cmd) {
 	if s.kind == rowNode && t.kind == hitTab && nodeTab(t.index) == nodeTabTerminals {
 		return s, openNodeTerminals(c, s.id)
 	}
+	if s.kind == rowProject && t.kind == hitTab && projTab(t.index) == projTabHistory {
+		return s, openProjectHistory(c, s.id)
+	}
 	return s, nil
 }
 
 func (s summaryComp) footer(c *ctx) []binding {
 	if s.kind == rowNode && c.m.nodeHasWakelock(s.id) {
 		return []binding{nodeKeys.Wakelock, projectsKeys.Help}
+	}
+	if s.kind == rowProject {
+		return []binding{listKeys.TabNext, projectsKeys.Help}
 	}
 	return []binding{projectsKeys.Help}
 }

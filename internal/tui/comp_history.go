@@ -69,6 +69,12 @@ func (h historyComp) click(c *ctx, t hitTarget, focused bool) (component, tea.Cm
 			}
 			return h, nil
 		}
+		if h.projectID != "" {
+			if projTab(t.index) != projTabHistory {
+				openProjectSummary(c, h.projectID)
+			}
+			return h, nil
+		}
 		if c.m.homeTabAt(t.index) == tabHistory {
 			return h, nil
 		}
@@ -416,7 +422,7 @@ func (h historyComp) projectsView(c *ctx, w, ht int) string {
 	prevNode := ""
 	for i, p := range shown {
 		card := historyProjectRow(p, i == h.projCursor, c.m.mainFocused(), cardW)
-		if i == 0 || p.NodeID != prevNode {
+		if !h.scoped() && (i == 0 || p.NodeID != prevNode) {
 			card = historyNodeHeader(p) + "\n" + card
 		}
 		prevNode = p.NodeID
@@ -555,8 +561,16 @@ func (h historyComp) scopeLine(c *ctx) string {
 func (h historyComp) workspace(*ctx) string { return h.ws }
 
 func (h historyComp) paneHeader(c *ctx, w int) (string, int) {
-	if r, ok := c.m.wsRow(h.ws); ok && h.ws != "" {
-		return c.m.wsHeader(r), centerGutter(historyWidth(w), w)
+	col := centerGutter(historyWidth(w), w)
+	switch {
+	case h.ws != "":
+		if r, ok := c.m.wsRow(h.ws); ok {
+			return c.m.wsHeader(r), col
+		}
+	case h.projectID != "":
+		if r, ok := (summaryComp{kind: rowProject, id: h.projectID}).row(c); ok {
+			return c.m.rowHeader(r), col
+		}
 	}
 	return "", 0
 }
@@ -564,6 +578,10 @@ func (h historyComp) paneHeader(c *ctx, w int) (string, int) {
 func (h historyComp) tabsHeader(c *ctx, x int) string {
 	if h.ws != "" {
 		return c.m.wsTabsHeader(c, h.ws, wsTabHistory, x)
+	}
+	if h.projectID != "" {
+		c.m.hitProjTabs(c, x)
+		return c.m.projTabs(projTabHistory)
 	}
 	c.m.hitHomeTabs(c, x)
 	return c.m.homeTabs(tabHistory)
@@ -573,21 +591,31 @@ func (h historyComp) stepTab(c *ctx, d int) tea.Cmd {
 	if h.ws != "" {
 		return stepWsTab(c, h.ws, wsTabHistory, d)
 	}
+	if h.projectID != "" {
+		openProjectSummary(c, h.projectID)
+		return nil
+	}
 	return stepHomeTab(c, tabHistory, d)
 }
 
 // leave is back from the top of the History tab: to the scope's first tab.
 func (h historyComp) leave(c *ctx) {
-	if h.ws != "" {
+	switch {
+	case h.ws != "":
 		openWorkspaceSessions(c, h.ws)
-		return
+	case h.projectID != "":
+		openProjectSummary(c, h.projectID)
+	default:
+		c.replaceBase(c.m.homePane())
 	}
-	c.replaceBase(c.m.homePane())
 }
 
 func (h historyComp) emptyText() string {
-	if h.ws != "" {
+	switch {
+	case h.ws != "":
 		return "no past sessions in this workspace"
+	case h.projectID != "":
+		return "no past sessions in this project"
 	}
 	return "no past sessions found"
 }

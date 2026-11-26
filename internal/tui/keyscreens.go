@@ -124,7 +124,7 @@ var sectionLists = map[string]sectionList{
 			listKeys.Filter, listKeys.TabPrev, listKeys.TabNext})...),
 		focus: focusFor("workspace"),
 	},
-	"project": {own: summaryKeys, focus: focusFor("project")},
+	"project": {own: append(slices.Clone(summaryKeys), listKeys.TabPrev, listKeys.TabNext), focus: focusFor("project")},
 	"node": {
 		own:   append(slices.Clone(summaryKeys), listKeys.TabPrev, listKeys.TabNext, nodeKeys.Wakelock),
 		focus: focusFor("node"),
