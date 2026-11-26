@@ -256,8 +256,10 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
         null;
     return [
       _scrollBody([
-        for (var qi = 0; qi < qs.length; qi++)
+        for (var qi = 0; qi < qs.length; qi++) ...[
+          if (qi > 0) const Divider(height: 16),
           _questionCard(qs[qi], drafts[qi]),
+        ],
       ]),
       const SizedBox(height: 12),
       FilledButton(
@@ -320,7 +322,22 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
       rows.add(
         Align(
           alignment: Alignment.centerLeft,
-          child: Chip(label: Text(q.header!)),
+          // An outlined label, not a Chip: a Chip paints a surface-colored
+          // Material under its label, a box inside the composer box.
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              border: Border.all(color: context.tokens.line),
+              borderRadius: BorderRadius.circular(context.tokens.radius),
+            ),
+            child: Text(
+              q.header!,
+              style: Theme.of(context)
+                  .textTheme
+                  .labelLarge
+                  ?.copyWith(color: context.tokens.textSecondary),
+            ),
+          ),
         ),
       );
     }
@@ -434,13 +451,13 @@ class _InteractionPanelState extends ConsumerState<InteractionPanel> {
         );
       }
     }
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: rows,
-        ),
+    // On the panel itself, not in a card: the composer box around the panel
+    // already frames it.
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: rows,
       ),
     );
   }

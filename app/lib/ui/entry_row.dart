@@ -8,6 +8,7 @@ import 'code_block.dart';
 import 'item_detail_screen.dart';
 import 'item_row.dart';
 import 'subagent_trace_screen.dart';
+import 'text_measure.dart';
 import 'theme.dart';
 import 'tool_registry.dart';
 import 'usage_format.dart';
@@ -23,13 +24,22 @@ String _fmtDuration(int ms) {
   return '${secs.toStringAsFixed(1)}s';
 }
 
-String _fmtContext(Entry e) {
-  if (e.contextDeltaTokens == 0 &&
-      e.contextFirstPct.round() == e.contextPct.round()) {
-    return fmtContextPct(e.contextPct);
+const _months = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/// A turn's time, with only the date parts that differ from [now]: the time
+/// today, "Nov 25 09:03:05" earlier this year, and the year too before that.
+/// The month stays with the day, since a day alone reads like a bare number.
+String turnStamp(DateTime t, DateTime now) {
+  String p(int n) => n.toString().padLeft(2, '0');
+  final time = '${p(t.hour)}:${p(t.minute)}:${p(t.second)}';
+  if (t.year == now.year && t.month == now.month && t.day == now.day) {
+    return time;
   }
-  return 'ctx ${e.contextFirstPct.round()}% → ${e.contextPct.round()}% '
-      '(+${fmtTokens(e.contextDeltaTokens)})';
+  final day = '${_months[t.month - 1]} ${t.day}';
+  return t.year == now.year ? '$day $time' : '${t.year} $day $time';
 }
 
 String _clockTime(String? ts) {
@@ -72,12 +82,16 @@ class EntryRow extends StatelessWidget {
     required this.entry,
     this.expanded = false,
     this.onToggle,
+    this.showModel = true,
   });
 
   final ToolDetailRef detailRef;
   final Entry entry;
   final bool expanded;
   final VoidCallback? onToggle;
+
+  /// For a turn footer: false hides a model that did not change.
+  final bool showModel;
 
   @override
   Widget build(BuildContext context) {
@@ -96,7 +110,7 @@ class EntryRow extends StatelessWidget {
       case EntryKind.thinking:
         return _ThinkingRow(entry: e, expanded: expanded, onToggle: onToggle);
       case EntryKind.turnEnd:
-        return _TurnEndDivider(entry: e);
+        return _TurnEndDivider(entry: e, showModel: showModel);
       case EntryKind.system:
         return _EventCard(
           title: 'System',
@@ -438,101 +452,93 @@ class _TeammateMessage extends StatelessWidget {
   }
 }
 
+// Each turn footer's time and its width, kept per entry: the feed rebuilds
+// on every session update, and an entry does not change. Made again on a new
+// day or text scale.
+final _stamps =
+    Expando<({DateTime day, TextScaler scaler, String? time, double width})>();
+
+({String? time, double width}) _stampOf(
+    BuildContext context, Entry e, TextStyle style) {
+  final now = DateTime.now();
+  final day = DateTime(now.year, now.month, now.day);
+  final scaler = MediaQuery.textScalerOf(context);
+  final hit = _stamps[e];
+  if (hit != null && hit.day == day && hit.scaler == scaler) {
+    return (time: hit.time, width: hit.width);
+  }
+  final dt = DateTime.tryParse(e.timestamp ?? '')?.toLocal();
+  final time = dt == null ? null : turnStamp(dt, now);
+  final width = time == null
+      ? 0.0
+      : measureText(context, TextSpan(text: time, style: style)).width;
+  _stamps[e] = (day: day, scaler: scaler, time: time, width: width);
+  return (time: time, width: width);
+}
+
 class _TurnEndDivider extends StatelessWidget {
-  const _TurnEndDivider({required this.entry});
+  const _TurnEndDivider({required this.entry, this.showModel = true});
   final Entry entry;
+
+  /// False when the model is the same as the previous turn's.
+  final bool showModel;
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
     final e = entry;
-    final parts = <InlineSpan>[];
-    // The same fields, in the same order, as the TUI's turn footer.
-    void add(String s, {Color? color, IconData? icon, Color? iconColor}) {
-      // The no-break space keeps a separator from starting a line.
-      if (parts.isNotEmpty) {
-        parts.add(TextSpan(text: '\u00A0· ', style: _monoDim(t)));
-      }
-      final value = TextSpan(
-        text: s,
-        style: color == null ? _monoDim(t) : _mono.copyWith(color: color),
-      );
-      if (icon == null) {
-        parts.add(value);
-        return;
-      }
-      // One unit, so a line break cannot split the icon from its value.
-      parts.add(
-        WidgetSpan(
-          alignment: PlaceholderAlignment.baseline,
-          baseline: TextBaseline.alphabetic,
-          child: Text.rich(
-            TextSpan(
-              children: [
-                WidgetSpan(
-                  alignment: PlaceholderAlignment.middle,
-                  child: Icon(
-                    icon,
-                    size: 12,
-                    color: iconColor ?? t.textDim,
-                  ),
-                ),
-                TextSpan(text: ' ', style: _monoDim(t)),
-                value,
-              ],
-            ),
-            softWrap: false,
-          ),
-        ),
-      );
-    }
+    // How the turn went, all dim: the run folds above already count thinking
+    // and tools, and the header shows the model and context.
+    final parts = [
+      if (e.interrupted) 'interrupted',
+      if (showModel && (e.modelName?.isNotEmpty ?? false)) e.modelName!,
+      if (e.durationMs > 0) _fmtDuration(e.durationMs),
+      if (e.hasContext) fmtContextPct(e.contextPct),
+    ];
 
-    if (e.interrupted) add('interrupted', color: t.error);
-    if (e.modelName?.isNotEmpty ?? false) {
-      add(e.modelName!, color: hexColor(e.modelColor) ?? t.textSecondary);
-    }
-    if (e.thinking > 0) {
-      add(
-        '${e.thinking}',
-        icon: Icons.lightbulb,
-        iconColor: t.thinking,
-      );
-    }
-    if (e.toolCount > 0) {
-      add('${e.toolCount}', icon: Icons.build, iconColor: t.toolCall);
-    }
-    if (e.usage.output > 0) add(fmtTokens(e.usage.output), icon: Icons.token);
-    if (e.hasContext) add(_fmtContext(e), color: contextColor(e.contextPct, t));
-    if (e.durationMs > 0) add(_fmtDuration(e.durationMs), icon: Icons.schedule);
-    final time = _clockTime(e.timestamp);
-    if (time.isNotEmpty) add(time);
-
+    // [lead]: the short rule at each end; [gap]: space around the text.
     const lead = 16.0, gap = 8.0;
-    final rule = Divider(color: t.line, height: 1);
+    const rule = Divider(height: 1);
+    final timeStyle = _monoDim(t);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-      child: parts.isEmpty
-          ? rule
-          // The stats wrap rather than overflow a narrow screen.
-          : LayoutBuilder(
-              builder: (context, c) => Row(
-                children: [
-                  SizedBox(width: lead, child: rule),
-                  const SizedBox(width: gap),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: max(0, c.maxWidth - 2 * (lead + gap)),
-                    ),
-                    child: Text.rich(
-                      TextSpan(children: parts),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  const SizedBox(width: gap),
-                  Expanded(child: rule),
-                ],
-              ),
-            ),
+      // The stats at the left, the time at the right, a rule between that
+      // fills all the rest.
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final stamp = _stampOf(context, e, timeStyle);
+          final time = stamp.time;
+          final timeWidth =
+              time == null ? 0.0 : stamp.width + 2 * gap + lead;
+          // The stats wrap rather than overflow a narrow screen, and always
+          // leave some rule.
+          final statsMax = c.maxWidth - lead - 2 * gap - timeWidth - lead;
+          return Row(
+            children: [
+              const SizedBox(width: lead, child: rule),
+              if (parts.isNotEmpty) ...[
+                const SizedBox(width: gap),
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: max(0, statsMax)),
+                  // The no-break space keeps a separator from starting a line.
+                  child: Text.rich(TextSpan(style: timeStyle, children: [
+                    metaSpan([for (final p in parts) (p, t.textDim)], t,
+                        sep: '\u00A0· '),
+                  ])),
+                ),
+                const SizedBox(width: gap),
+              ],
+              const Expanded(child: rule),
+              if (time != null) ...[
+                const SizedBox(width: gap),
+                Text(time, style: timeStyle),
+                const SizedBox(width: gap),
+                const SizedBox(width: lead, child: rule),
+              ],
+            ],
+          );
+        },
+      ),
     );
   }
 }

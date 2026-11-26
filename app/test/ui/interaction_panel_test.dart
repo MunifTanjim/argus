@@ -7,6 +7,7 @@ import 'package:argus/data/session_repository.dart';
 import 'package:argus/models/session.dart';
 import 'package:argus/state/respond_params.dart';
 import 'package:argus/ui/interaction_panel.dart';
+import 'package:argus/ui/theme.dart';
 import '../support/fake_session_repository.dart';
 
 class _RecordingControl extends FakeSessionRepository {
@@ -46,6 +47,64 @@ Future<void> _pumpPanel(
 }
 
 void main() {
+  group('question layout', () {
+    Map<String, dynamic> q(String text) => {
+          'question': text,
+          'options': ['A', 'B'],
+        };
+
+    testWidgets('a question sits on the panel, not in a card', (tester) async {
+      await _pumpPanel(
+          tester,
+          _session({
+            'kind': 'question',
+            'questions': [q('Which one?')],
+          }),
+          _RecordingControl());
+      expect(find.text('Which one?'), findsOneWidget);
+      expect(find.byType(Card), findsNothing);
+      expect(find.byType(Divider), findsNothing);
+    });
+
+    testWidgets('the question header is flat: an outline and no fill',
+        (tester) async {
+      await _pumpPanel(
+          tester,
+          _session({
+            'kind': 'question',
+            'questions': [
+              {...q('Which one?'), 'header': 'Approach'},
+            ],
+          }),
+          _RecordingControl());
+      // A Chip paints a surface-colored Material under its label, which
+      // shows as a box on the composer's canvas.
+      expect(find.byType(Chip), findsNothing);
+      final box = tester.widget<Container>(find.ancestor(
+          of: find.text('Approach'), matching: find.byType(Container)).first);
+      final d = box.decoration! as BoxDecoration;
+      expect(d.color, isNull);
+      expect((d.border! as Border).top.color, ArgusTokens.fallback.line);
+    });
+
+    testWidgets('a line separates two questions', (tester) async {
+      await _pumpPanel(
+          tester,
+          _session({
+            'kind': 'question',
+            'questions': [q('First?'), q('Second?')],
+          }),
+          _RecordingControl());
+      expect(find.byType(Card), findsNothing);
+      final line = find.byType(Divider);
+      expect(line, findsOneWidget);
+      expect(tester.getTopLeft(line).dy,
+          greaterThan(tester.getTopLeft(find.text('First?')).dy));
+      expect(tester.getTopLeft(line).dy,
+          lessThan(tester.getTopLeft(find.text('Second?')).dy));
+    });
+  });
+
   testWidgets('permission allow sends option_value allow', (tester) async {
     final c = _RecordingControl();
     await _pumpPanel(

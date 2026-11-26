@@ -76,7 +76,6 @@ void main() {
     expect(t.taskCompleted, const Color(0xFF8ec07c));
     expect(t.taskInProgress, const Color(0xFFfe8019));
     expect(t.thinking, const Color(0xFFd79921));
-    expect(t.toolCall, const Color(0xFF458588));
     expect(t.toolRead, const Color(0xFF83a598));
     expect(t.toolEdit, const Color(0xFFfabd2f));
     expect(t.toolWrite, const Color(0xFFb8bb26));

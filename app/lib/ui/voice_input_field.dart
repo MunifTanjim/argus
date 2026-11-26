@@ -23,6 +23,7 @@ class VoiceInputField extends ConsumerWidget {
     required this.field,
     this.onChanged,
     this.statusBelow = false,
+    this.micInset,
   });
 
   final TextEditingController controller;
@@ -36,6 +37,11 @@ class VoiceInputField extends ConsumerWidget {
   /// that keeps the field still when the row appears in the host's layout.
   final bool statusBelow;
 
+  /// Pins the mic at this distance from the field's bottom-right corner, in
+  /// place of centering it on the last text line. The host puts the
+  /// placeholder that [field] receives under it.
+  final EdgeInsets? micInset;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) =>
       ref.watch(voicePrefsProvider.select((p) => p.enabled))
@@ -44,6 +50,7 @@ class VoiceInputField extends ConsumerWidget {
               field: field,
               onChanged: onChanged,
               statusBelow: statusBelow,
+              micInset: micInset,
             )
           : field(null);
 }
@@ -60,12 +67,14 @@ class _Dictation extends ConsumerStatefulWidget {
     required this.field,
     required this.statusBelow,
     this.onChanged,
+    this.micInset,
   });
 
   final TextEditingController controller;
   final Widget Function(Widget? suffixIcon) field;
   final ValueChanged<String>? onChanged;
   final bool statusBelow;
+  final EdgeInsets? micInset;
 
   @override
   ConsumerState<_Dictation> createState() => _DictationState();
@@ -465,7 +474,12 @@ class _DictationState extends ConsumerState<_Dictation> {
   @override
   Widget build(BuildContext context) {
     final dim = TextStyle(color: context.tokens.textDim, fontSize: 12);
-    WidgetsBinding.instance.addPostFrameCallback(_alignMic);
+    final inset = widget.micInset;
+    if (inset == null) {
+      WidgetsBinding.instance.addPostFrameCallback(_alignMic);
+    }
+    final micRight = inset?.right ?? 0;
+    final micBottom = inset?.bottom ?? _micBottom;
 
     final error = Theme.of(context).colorScheme.error;
     final holding = _phase == _Phase.recording && _holdPointer != null;
@@ -628,8 +642,8 @@ class _DictationState extends ConsumerState<_Dictation> {
                     ),
                   ),
                   // Same slot width as the primary button, so the two stack in
-                  // one column at the field's right edge. Hidden while a finger
-                  // holds the mic, where sliding left does its job.
+                  // one column over the mic. Hidden while a finger holds the
+                  // mic, where sliding left does its job.
                   if (!holding)
                     IconButton(
                       key: const Key('voice-cancel'),
@@ -647,6 +661,8 @@ class _DictationState extends ConsumerState<_Dictation> {
                       onPressed:
                           _phase == _Phase.message ? _dismissMessage : _discard,
                     ),
+                  // Keeps the column above a mic pinned away from the edge.
+                  SizedBox(width: widget.micInset?.right ?? 0),
                 ],
               ),
             ),
@@ -657,13 +673,13 @@ class _DictationState extends ConsumerState<_Dictation> {
       clipBehavior: Clip.none,
       children: [
         widget.field(const SizedBox(width: _slot)),
-        Positioned(right: 0, bottom: _micBottom, child: primary),
+        Positioned(right: micRight, bottom: micBottom, child: primary),
         if (holding && !_cancelArmed)
           Positioned(
-            right: 0,
+            right: micRight,
             bottom: widget.statusBelow
-                ? _micBottom - _lockHintHeight
-                : _micBottom + _slot,
+                ? micBottom - _lockHintHeight
+                : micBottom + _slot,
             width: _slot,
             height: _lockHintHeight,
             child: _LockHint(

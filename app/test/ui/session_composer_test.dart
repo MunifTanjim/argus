@@ -11,14 +11,25 @@ import 'package:argus/data/session_repository.dart';
 import 'package:argus/models/entry.dart';
 import 'package:argus/models/enums.dart';
 import 'package:argus/models/session.dart';
+import 'package:argus/pairing/gateway_store.dart';
 import 'package:argus/state/appearance.dart';
 import 'package:argus/state/grouping.dart';
-import 'package:argus/state/sessions.dart';
+import 'package:argus/state/voice.dart';
 import 'package:argus/ui/interaction_panel.dart';
 import 'package:argus/ui/prompt_completion.dart';
 import 'package:argus/ui/session_composer.dart';
 import 'package:argus/ui/theme.dart';
 import '../support/fake_session_repository.dart';
+
+class _MemKv implements SecureKv {
+  final _m = <String, String>{};
+  @override
+  Future<String?> read(String key) async => _m[key];
+  @override
+  Future<void> write(String key, String value) async => _m[key] = value;
+  @override
+  Future<void> delete(String key) async => _m.remove(key);
+}
 
 class _Recording extends FakeSessionRepository {
   final inputs = <List<String>>[];
@@ -76,10 +87,15 @@ class _GatedCompleting extends _Recording {
 const _compact = PromptCompletion(
     name: 'compact', description: 'Compact the conversation');
 
+BoxDecoration _box(WidgetTester t) => t
+    .widget<DecoratedBox>(find.byKey(const Key('composer-box')))
+    .decoration as BoxDecoration;
+
 String _field(WidgetTester t) =>
     t.widget<TextField>(find.byType(TextField)).controller!.text;
 
 Session _s({
+  String agent = 'claude',
   String status = 'idle',
   Map<String, dynamic>? interaction,
   Map<String, dynamic>? summary,
@@ -90,7 +106,7 @@ Session _s({
 }) =>
     Session.fromJson({
       'id': 'n:%1',
-      'agent': 'claude',
+      'agent': agent,
       'status': status,
       'source': 'hooked',
       'frontend': 'tmux',
@@ -158,7 +174,7 @@ void main() {
             now),
         'Question');
     String line(Summary? s) {
-      final (:parts, base: _) = modelParts(s, ArgusTokens.fallback);
+      final parts = modelParts(s, ArgusTokens.fallback);
       return modelLine(parts, parts.length, ArgusTokens.fallback).toPlainText();
     }
 
@@ -188,18 +204,60 @@ void main() {
     final repo = _Recording();
     await _pump(t, _s(), repo);
     await t.enterText(find.byType(TextField), 'next task');
+    // Let the box grow to show Send: one frame starts the animation.
     await t.pump();
+    await t.pump(const Duration(milliseconds: 200));
     await t.tap(find.byTooltip('Send'));
     await t.pumpAndSettle();
     expect(repo.inputs.single, ['n:%1', 'next task']);
     expect(find.text('next task'), findsNothing);
   });
 
+  testWidgets(
+    'the empty box is even, and typing keeps the space above the text',
+    (t) async {
+      await _pump(t, _s(), _Recording());
+      double gap() =>
+          t.getTopLeft(find.byType(EditableText)).dy -
+          t.getTopLeft(find.byKey(const Key('composer-box'))).dy;
+      final empty = gap();
+      // Empty, the text sits in the middle of the box.
+      expect(
+        t.getBottomLeft(find.byKey(const Key('composer-box'))).dy -
+            t.getBottomLeft(find.byType(EditableText)).dy,
+        empty,
+      );
+      await t.enterText(find.byType(TextField), 'next task');
+      await t.pumpAndSettle();
+      expect(gap(), empty);
+    },
+  );
+
+
+  testWidgets('the model chip has even space to its left, top, and bottom', (
+    t,
+  ) async {
+    await _pump(
+      t,
+      _s(summary: {'model_name': 'Opus 4.8', 'effort': 'high'}),
+      _Recording(),
+    );
+    await t.enterText(find.byType(TextField), 'next task');
+    await t.pumpAndSettle();
+    final box = t.getRect(find.byKey(const Key('composer-box')));
+    final chip = t.getRect(find.byKey(const Key('model-chip')));
+    final text = t.getRect(find.byType(EditableText));
+    final left = chip.left - box.left;
+    expect([chip.top - text.bottom, box.bottom - chip.bottom], [left, left]);
+  });
+
   testWidgets('a sent prompt reports onSent', (t) async {
     var sent = 0;
     await _pump(t, _s(), _Recording(), onSent: () => sent++);
     await t.enterText(find.byType(TextField), 'next task');
+    // Let the box grow to show Send: one frame starts the animation.
     await t.pump();
+    await t.pump(const Duration(milliseconds: 200));
     await t.tap(find.byTooltip('Send'));
     await t.pumpAndSettle();
     expect(sent, 1);
@@ -209,7 +267,9 @@ void main() {
     var sent = 0;
     await _pump(t, _s(), _Failing(), onSent: () => sent++);
     await t.enterText(find.byType(TextField), 'next task');
+    // Let the box grow to show Send: one frame starts the animation.
     await t.pump();
+    await t.pump(const Duration(milliseconds: 200));
     await t.tap(find.byTooltip('Send'));
     await t.pumpAndSettle();
     expect(sent, 0);
@@ -221,27 +281,30 @@ void main() {
     final repo = _Recording();
     await _pump(t, _s(status: 'working', since: '2026-10-15T09:00:00Z'), repo);
     await t.enterText(find.byType(TextField), 'later');
+    // Let the box grow to show Send: one frame starts the animation.
     await t.pump();
-    final send =
-        t.widget<IconButton>(find.widgetWithIcon(IconButton, Icons.send));
+    await t.pump(const Duration(milliseconds: 200));
+    final send = t.widget<IconButton>(
+        find.widgetWithIcon(IconButton, Icons.arrow_upward));
     expect(send.onPressed, isNull);
     // A tooltip, not a helper line that would push the input up.
     expect(find.text('Wait for idle to send'), findsNothing);
     expect(find.byTooltip('Wait for idle to send'), findsOneWidget);
     final field = t.getRect(find.byType(TextField));
-    final button = t.getRect(find.widgetWithIcon(IconButton, Icons.send));
-    expect(field.top, button.top, reason: 'the input and Send line up');
-    expect(field.bottom, button.bottom, reason: 'the input and Send line up');
-    await t.tap(find.widgetWithIcon(IconButton, Icons.send));
+    final button =
+        t.getRect(find.widgetWithIcon(IconButton, Icons.arrow_upward));
+    expect(button.top, greaterThanOrEqualTo(field.bottom),
+        reason: 'Send sits in the toolbar below the input');
+    await t.tap(find.widgetWithIcon(IconButton, Icons.arrow_upward));
     await t.pump(const Duration(milliseconds: 500));
     expect(find.text('Wait for idle to send'), findsOneWidget,
         reason: 'a tap on the disabled button shows why');
     await t.pump(const Duration(seconds: 3)); // let the tooltip go
-    expect(find.textContaining('Working…'), findsOneWidget);
-    final width = t.getSize(find.byType(SessionComposer)).width;
-    expect(t.getTopRight(find.textContaining('Working…')).dx,
-        greaterThan(width * 0.75),
-        reason: 'the status sits at the right end of its rule');
+    expect(
+        find.descendant(
+            of: find.byKey(const Key('composer-status')),
+            matching: find.textContaining('Working…')),
+        findsOneWidget);
     await t.pumpWidget(const SizedBox()); // stop the timer
   });
 
@@ -249,8 +312,8 @@ void main() {
     await _pump(t, _s(status: 'starting'), _Recording());
     await t.enterText(find.byType(TextField), 'early');
     await t.pump();
-    final send =
-        t.widget<IconButton>(find.widgetWithIcon(IconButton, Icons.send));
+    final send = t.widget<IconButton>(
+        find.widgetWithIcon(IconButton, Icons.arrow_upward));
     expect(send.onPressed, isNull);
     expect(find.byTooltip('Wait for idle to send'), findsOneWidget);
     expect(find.text('Starting…'), findsOneWidget);
@@ -260,6 +323,8 @@ void main() {
       (t) async {
     await _pump(t, _s(status: 'working', summary: {'model_name': 'Opus 5.5'}),
         _Recording());
+    await t.enterText(find.byType(TextField), 'later');
+    await t.pump();
     expect(find.text('Working…'), findsOneWidget);
     expect(find.text('Opus 5.5'), findsOneWidget);
     await t.pumpWidget(const SizedBox());
@@ -286,26 +351,22 @@ void main() {
     expect(find.byType(TextField), findsNothing);
     Color? labelColor() =>
         t.widget<Text>(find.text('Permission: Bash')).style?.color;
-    Set<Color?> ruleColors() =>
-        {for (final d in t.widgetList<Divider>(find.byType(Divider))) d.color};
-    Set<Color?> surfaces() => {
-          for (final c in t.widgetList<Container>(find.ancestor(
-              of: find.byType(Divider), matching: find.byType(Container))))
-            c.color
-        };
+    Color? border() => (_box(t).border as Border?)?.top.color;
+    Color? strip() =>
+        t.widget<Container>(find.byKey(const Key('composer-status'))).color;
     Color? iconColor() => t
         .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.expand_more))
         .color;
     expect(labelColor(), ArgusTokens.fallback.blocked);
     expect(iconColor(), ArgusTokens.fallback.blocked);
-    expect(ruleColors(), {ArgusTokens.fallback.blocked});
-    expect(surfaces(), isNot(contains(ArgusTokens.fallback.blockedSurface)));
+    expect(border(), ArgusTokens.fallback.blocked);
+    expect(strip(), isNot(ArgusTokens.fallback.blockedSurface));
     await t.tap(find.byTooltip('Collapse'));
     await t.pump();
     expect(find.byType(InteractionPanel), findsNothing);
     expect(labelColor(), ArgusTokens.fallback.blocked);
-    expect(ruleColors(), {ArgusTokens.fallback.blockedBorder, ArgusTokens.fallback.line});
-    expect(surfaces(), contains(ArgusTokens.fallback.blockedSurface));
+    expect(border(), ArgusTokens.fallback.blockedBorder);
+    expect(strip(), ArgusTokens.fallback.blockedSurface);
     await t.tap(find.byTooltip('Expand'));
     await t.pump();
     expect(find.byType(InteractionPanel), findsOneWidget);
@@ -333,6 +394,8 @@ void main() {
         t,
         _s(summary: {'model_name': 'Opus 5.5', 'effort': 'high'}),
         _Recording());
+    await t.enterText(find.byType(TextField), 'hi');
+    await t.pump();
     expect(find.text('Opus 5.5 · high'), findsOneWidget);
   });
 
@@ -570,114 +633,11 @@ void main() {
     expect(find.text('second'), findsOneWidget);
   });
 
-  group('running subagents', () {
-    final two = [
-      {'id': 'a1', 'type': 'Explore', 'desc': 'find it'},
-      {'id': 'a2', 'name': 'scout', 'desc': 'map it'},
-    ];
-    final summary = {'model_name': 'Opus 5.5', 'effort': 'high'};
-
-    testWidgets('the model line shows the count at its left', (t) async {
-      await _pump(t, _s(subagents: two, summary: summary), _Recording());
-      expect(find.byIcon(Icons.smart_toy_outlined), findsOneWidget);
-      expect(find.text('2'), findsOneWidget);
-      expect(find.text('Opus 5.5 · high'), findsOneWidget);
-      expect(t.getTopLeft(find.byIcon(Icons.smart_toy_outlined)).dx,
-          lessThan(t.getTopLeft(find.text('Opus 5.5 · high')).dx));
-    });
-
-    testWidgets('none shows no icon', (t) async {
-      await _pump(t, _s(summary: summary), _Recording());
-      expect(find.byIcon(Icons.smart_toy_outlined), findsNothing);
-    });
-
-    testWidgets('the count leaves the composer height alone', (t) async {
-      await _pump(t, _s(summary: summary), _Recording());
-      final without = t.getSize(find.byType(SessionComposer)).height;
-      await _pump(t, _s(subagents: two, summary: summary), _Recording());
-      expect(t.getSize(find.byType(SessionComposer)).height, without);
-    });
-
-    testWidgets('the count is a 48 px wide tap target', (t) async {
-      await _pump(t, _s(subagents: two, summary: summary), _Recording());
-      final size = t.getSize(find
-          .ancestor(
-              of: find.byIcon(Icons.smart_toy_outlined),
-              matching: find.byType(InkWell))
-          .first);
-      expect(size.width, greaterThanOrEqualTo(48));
-    });
-
-    testWidgets('tapping the count opens the sheet', (t) async {
-      final container = ProviderContainer(overrides: [
-        sessionRepositoryProvider.overrideWithValue(_Recording()),
-      ]);
-      addTearDown(container.dispose);
-      final s = _s(subagents: two, summary: summary);
-      container.read(sessionsProvider.notifier).put(s);
-      await _pump(t, s, _Recording(), container: container);
-      await t.tap(find.byIcon(Icons.smart_toy_outlined));
-      await t.pumpAndSettle();
-      expect(find.text('Explore'), findsOneWidget);
-      expect(find.text('scout'), findsOneWidget);
-    });
-  });
-
-  group('running shells', () {
-    final two = [
-      {'id': 'b1', 'tool_use_id': 't1', 'command': 'make test'},
-      {'id': 'b2', 'tool_use_id': 't2', 'command': 'npm run dev'},
-    ];
-    final summary = {'model_name': 'Opus 5.5', 'effort': 'high'};
-
-    testWidgets('the model line shows the count at its left', (t) async {
-      await _pump(t, _s(shells: two, summary: summary), _Recording());
-      expect(find.byIcon(Icons.terminal), findsOneWidget);
-      expect(find.text('2'), findsOneWidget);
-      expect(t.getTopLeft(find.byIcon(Icons.terminal)).dx,
-          lessThan(t.getTopLeft(find.text('Opus 5.5 · high')).dx));
-    });
-
-    testWidgets('both counts show, subagents first', (t) async {
-      await _pump(
-          t,
-          _s(subagents: [
-            {'id': 'a1', 'type': 'Explore'},
-          ], shells: two, summary: summary),
-          _Recording());
-      expect(find.text('1'), findsOneWidget);
-      expect(find.text('2'), findsOneWidget);
-      expect(t.getTopLeft(find.byIcon(Icons.smart_toy_outlined)).dx,
-          lessThan(t.getTopLeft(find.byIcon(Icons.terminal)).dx));
-    });
-
-    testWidgets('none shows no icon', (t) async {
-      await _pump(t, _s(summary: summary), _Recording());
-      expect(find.byIcon(Icons.terminal), findsNothing);
-    });
-
-    testWidgets('tapping the count opens the sheet', (t) async {
-      final container = ProviderContainer(overrides: [
-        sessionRepositoryProvider.overrideWithValue(_Recording()),
-      ]);
-      addTearDown(container.dispose);
-      final s = _s(shells: two, summary: summary);
-      container.read(sessionsProvider.notifier).put(s);
-      await _pump(t, s, _Recording(), container: container);
-      await t.tap(find.byIcon(Icons.terminal));
-      await t.pumpAndSettle();
-      expect(find.text('make test'), findsOneWidget);
-      expect(find.text('npm run dev'), findsOneWidget);
-    });
-  });
-
-  testWidgets('the model line drops parts in the TUI order, never truncating',
+  testWidgets('the model chip drops parts in the TUI order, never truncating',
       (t) async {
     t.view.devicePixelRatio = 1;
     addTearDown(t.view.reset);
-    final s = _s(subagents: [
-      {'id': 'a1', 'type': 'Explore'},
-    ], summary: {
+    final s = _s(summary: {
       'model_name': 'Opus 5.5',
       'effort': 'high',
       'has_context': true,
@@ -687,34 +647,42 @@ void main() {
       'cost_usd': 1.234,
     });
     const steps = [
-      (true, 'Opus 5.5 · high · 84.0k (42%) · \$1.23'),
-      (true, 'Opus 5.5 · high · 84.0k (42%)'),
-      (true, 'Opus 5.5 · high'),
-      (false, 'Opus 5.5 · high'),
-      (false, 'Opus 5.5'),
+      'Opus 5.5 · high · 84.0k (42%) · \$1.23',
+      'Opus 5.5 · high · 84.0k (42%)',
+      'Opus 5.5 · high',
+      'Opus 5.5',
+      null,
     ];
     final seen = <int>[];
-    for (var w = 800.0; w >= 140; w -= 4) {
+    for (var w = 800.0; w >= 200; w -= 4) {
       t.view.physicalSize = Size(w, 800);
       await _pump(t, s, _Recording());
-      final count = find.byIcon(Icons.smart_toy_outlined).evaluate().isNotEmpty;
-      final i = steps.indexWhere(
-          (st) => st.$1 == count && find.text(st.$2).evaluate().isNotEmpty);
+      await t.enterText(find.byType(TextField), 'hi');
+      await t.pump();
+      final i = steps.indexWhere((st) => st == null
+          ? find.textContaining('Opus').evaluate().isEmpty
+          : find.text(st).evaluate().isNotEmpty);
       expect(i, isNot(-1), reason: 'width $w');
-      final p = t.renderObject<RenderParagraph>(find.text(steps[i].$2));
-      expect(p.didExceedMaxLines, isFalse, reason: 'width $w');
+      if (steps[i] != null) {
+        final p = t.renderObject<RenderParagraph>(find.text(steps[i]!));
+        expect(p.didExceedMaxLines, isFalse, reason: 'width $w');
+      }
+      expect(t.takeException(), isNull, reason: 'width $w');
       if (seen.isEmpty || seen.last != i) seen.add(i);
     }
-    expect(seen, [0, 1, 2, 3, 4]);
-    expect(t.takeException(), isNull);
+    expect(seen.first, 0);
+    expect(seen, [for (var i = 0; i < seen.length; i++) i]);
+    expect(seen.length, greaterThanOrEqualTo(4));
   });
 
   testWidgets('a queueing session sends while working', (t) async {
     final repo = _Recording();
     await _pump(t, _s(status: 'working', canPrompt: true), repo);
     await t.enterText(find.byType(TextField), 'steer');
+    // Let the box grow to show Send: one frame starts the animation.
     await t.pump();
-    await t.tap(find.byIcon(Icons.send));
+    await t.pump(const Duration(milliseconds: 200));
+    await t.tap(find.byIcon(Icons.arrow_upward));
     await t.pump();
     expect(repo.inputs, [
       ['n:%1', 'steer']
@@ -832,6 +800,7 @@ void main() {
       await t.enterText(find.byType(TextField), '/');
       await t.pump();
       expect(repo.calls, hasLength(1));
+      await t.pump(const Duration(milliseconds: 200)); // the box grows
       await t.tap(find.byTooltip('Send'));
       await t.pump();
       repo.pending.single.complete(const Result.ok([_compact]));
@@ -887,7 +856,8 @@ void main() {
     });
   });
 
-  testWidgets('reply field takes the corner radius from the theme', (t) async {
+  testWidgets('the composer box takes the corner radius from the theme',
+      (t) async {
     const prefs = AppearancePrefs(radius: CornerRadius.rounded);
     await t.pumpWidget(ProviderScope(
       overrides: [
@@ -898,10 +868,193 @@ void main() {
         home: Scaffold(body: SessionComposer(session: _s())),
       ),
     ));
-    final border = t
-        .widget<InputDecorator>(find.byType(InputDecorator).first)
-        .decoration
-        .border as OutlineInputBorder;
-    expect(border.borderRadius, BorderRadius.circular(12));
+    expect(_box(t).borderRadius, BorderRadius.circular(12 + 4));
+  });
+
+  testWidgets('the box border paints over the status strip', (t) async {
+    await _pump(
+        t,
+        _s(status: 'awaiting_input', interaction: {
+          'kind': 'permission',
+          'tool_name': 'Bash'
+        }),
+        _Recording());
+    await t.pump();
+    // An opaque strip painted over a background border hides its top edge.
+    expect(
+        t.widget<DecoratedBox>(find.byKey(const Key('composer-box'))).position,
+        DecorationPosition.foreground);
+  });
+
+  testWidgets('idle shows no status strip', (t) async {
+    await _pump(t, _s(), _Recording());
+    expect(find.byKey(const Key('composer-status')), findsNothing);
+  });
+
+  testWidgets('working shows the status strip', (t) async {
+    await _pump(
+        t,
+        _s(status: 'working', since: DateTime.now().toUtc().toIso8601String()),
+        _Recording());
+    expect(
+        find.descendant(
+            of: find.byKey(const Key('composer-status')),
+            matching: find.textContaining('Working…')),
+        findsOneWidget);
+    await t.pumpWidget(const SizedBox()); // stop the timer
+  });
+
+  group('compact when empty', () {
+    final summary = {'model_name': 'Opus 5.5', 'effort': 'high'};
+
+    testWidgets('an empty input hides Send and the model chip', (t) async {
+      await _pump(t, _s(summary: summary), _Recording());
+      expect(find.byIcon(Icons.arrow_upward), findsNothing);
+      expect(find.text('Opus 5.5 · high'), findsNothing);
+      expect(find.byType(TextField), findsOneWidget);
+    });
+
+    testWidgets('typing expands to the toolbar', (t) async {
+      await _pump(t, _s(summary: summary), _Recording());
+      final compact = t.getSize(find.byType(SessionComposer)).height;
+      await t.enterText(find.byType(TextField), 'hi');
+      await t.pumpAndSettle();
+      expect(find.byIcon(Icons.arrow_upward), findsOneWidget);
+      expect(find.text('Opus 5.5 · high'), findsOneWidget);
+      expect(t.getSize(find.byType(SessionComposer)).height,
+          greaterThan(compact));
+    });
+
+    testWidgets('focus alone does not expand', (t) async {
+      await _pump(t, _s(summary: summary), _Recording());
+      await t.tap(find.byType(TextField));
+      await t.pumpAndSettle();
+      expect(find.byIcon(Icons.arrow_upward), findsNothing);
+    });
+
+    testWidgets('clearing the input returns to compact', (t) async {
+      await _pump(t, _s(summary: summary), _Recording());
+      await t.enterText(find.byType(TextField), 'hi');
+      await t.pumpAndSettle();
+      await t.enterText(find.byType(TextField), '');
+      await t.pumpAndSettle();
+      expect(find.byIcon(Icons.arrow_upward), findsNothing);
+    });
+
+    testWidgets('a sent prompt returns to compact', (t) async {
+      await _pump(t, _s(summary: summary), _Recording());
+      await t.enterText(find.byType(TextField), 'hi');
+      await t.pumpAndSettle();
+      await t.tap(find.byTooltip('Send'));
+      await t.pumpAndSettle();
+      expect(find.byIcon(Icons.arrow_upward), findsNothing);
+    });
+
+    testWidgets('the text field keeps its state when the box expands',
+        (t) async {
+      await _pump(t, _s(summary: summary), _Recording());
+      await t.showKeyboard(find.byType(TextField));
+      final before = t.state(find.byType(EditableText));
+      await t.enterText(find.byType(TextField), 'h');
+      await t.pumpAndSettle();
+      expect(t.state(find.byType(EditableText)), same(before));
+    });
+
+    testWidgets('the status strip and the queue stay in compact', (t) async {
+      await _pump(t, _s(status: 'working', canPrompt: true), _Recording(),
+          queue: [const QueuedPrompt(text: 'queued one')]);
+      expect(find.byKey(const Key('composer-status')), findsOneWidget);
+      expect(find.text('queued one'), findsOneWidget);
+      expect(find.byIcon(Icons.arrow_upward), findsNothing);
+      await t.pumpWidget(const SizedBox()); // stop the timer
+    });
+  });
+
+  testWidgets('the model chip drops a part only when it does not fit',
+      (t) async {
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    final s = _s(summary: {
+      'model_name': 'Opus 5.5',
+      'effort': 'high',
+      'has_context': true,
+      'context_pct': 42,
+      'tokens': 84000,
+      'has_cost': true,
+      'cost_usd': 1.234,
+    });
+    final parts = modelParts(s.summary, ArgusTokens.fallback);
+    // The style the chip draws with: the theme default merged with its own.
+    TextStyle? drawn;
+    double width(int n) {
+      final p = TextPainter(
+        text: TextSpan(
+            style: drawn,
+            children: [modelLine(parts, n, ArgusTokens.fallback)]),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final w = p.width;
+      p.dispose();
+      return w;
+    }
+
+    for (var w = 800.0; w >= 200; w -= 4) {
+      t.view.physicalSize = Size(w, 800);
+      await _pump(t, s, _Recording());
+      await t.enterText(find.byType(TextField), 'hi');
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 200));
+      final room = t.getSize(find.byKey(const Key('model-chip-slot'))).width;
+      var shown = 0;
+      for (var n = parts.length; n > 0; n--) {
+        final text = modelLine(parts, n, ArgusTokens.fallback).toPlainText();
+        if (find.text(text).evaluate().isNotEmpty) {
+          shown = n;
+          break;
+        }
+      }
+      final chipText = find.descendant(
+          of: find.byKey(const Key('model-chip')), matching: find.byType(Text));
+      if (chipText.evaluate().isNotEmpty) {
+        drawn = DefaultTextStyle.of(t.element(chipText))
+            .style
+            .merge(t.widget<Text>(chipText).style);
+      }
+      if (shown < parts.length && drawn != null) {
+        expect(width(shown + 1) + 2 * 8 + 2, greaterThan(room),
+            reason: 'width $w dropped a part that fits');
+      }
+    }
+  });
+
+  testWidgets('the toolbar has no trigger buttons', (t) async {
+    for (final agent in ['claude', 'codex', 'opencode']) {
+      await _pump(t, _s(agent: agent), _Recording());
+      expect(find.byType(TextButton), findsNothing, reason: agent);
+    }
+  });
+
+  testWidgets('a pending prompt hides the toolbar and the mic', (t) async {
+    final store = VoiceStore(_MemKv());
+    await store.setProvider(VoiceProvider.system);
+    final container = ProviderContainer(overrides: [
+      sessionRepositoryProvider.overrideWithValue(_Recording()),
+      voiceStoreProvider.overrideWithValue(store),
+    ]);
+    addTearDown(container.dispose);
+    await _pump(t, _s(), _Recording(), container: container);
+    await t.pumpAndSettle();
+    expect(find.byKey(const Key('voice-input')), findsOneWidget);
+    await _pump(
+        t,
+        _s(status: 'awaiting_input', interaction: {
+          'kind': 'permission',
+          'tool_name': 'Bash'
+        }),
+        _Recording(),
+        container: container);
+    await t.pump();
+    expect(find.byKey(const Key('voice-input')), findsNothing);
+    expect(find.byIcon(Icons.arrow_upward), findsNothing);
   });
 }

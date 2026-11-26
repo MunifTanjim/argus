@@ -34,8 +34,12 @@ Widget _feed(List<Entry> entries) => ProviderScope(
   ),
 );
 
-SuperListView _list(WidgetTester tester) =>
-    tester.widget<SuperListView>(find.byType(SuperListView));
+ListController _lc(WidgetTester tester) => tester
+    .widget<SuperSliverList>(find.byType(SuperSliverList))
+    .listController!;
+
+ScrollController _sc(WidgetTester tester) =>
+    tester.widget<CustomScrollView>(find.byType(CustomScrollView)).controller!;
 
 Offset _trackPoint(WidgetTester tester, double fraction) {
   final r = tester.getRect(
@@ -46,7 +50,7 @@ Offset _trackPoint(WidgetTester tester, double fraction) {
 
 /// Reveals the scrollbar the way a user does: a small scroll of the list.
 Future<void> _reveal(WidgetTester tester) async {
-  await tester.drag(find.byType(SuperListView), const Offset(0, 40));
+  await tester.drag(find.byType(CustomScrollView), const Offset(0, 40));
   await tester.pump();
 }
 
@@ -178,7 +182,7 @@ void main() {
       await g.up();
       await tester.pumpAndSettle();
 
-      expect(_list(tester).listController!.visibleRange!.$1, 20);
+      expect(_lc(tester).visibleRange!.$1, 20);
       final top = tester.getTopLeft(find.byKey(const ValueKey('e20'))).dy;
       expect(top, closeTo(r.top, 1));
     });
@@ -190,7 +194,7 @@ void main() {
 
       final g = await tester.startGesture(_trackPoint(tester, 0.1));
       await tester.pump();
-      final sc = _list(tester).controller!;
+      final sc = _sc(tester);
       expect(sc.offset, lessThan(sc.position.maxScrollExtent - 100));
       await g.moveTo(_trackPoint(tester, 1));
       await tester.pump();
@@ -218,7 +222,7 @@ void main() {
       await tester.pump();
       await g.up();
       await tester.pumpAndSettle();
-      final sc = _list(tester).controller!;
+      final sc = _sc(tester);
       final before = sc.offset;
       expect(before, lessThan(sc.position.maxScrollExtent - 100));
 
@@ -265,13 +269,13 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200)); // hold: no fling
       await g.up();
       await tester.pumpAndSettle();
-      final first = _list(tester).listController!.visibleRange!.$1;
+      final first = _lc(tester).visibleRange!.$1;
       expect(
         first,
         greaterThan(30),
         reason: 'the swipe scrolled the list a little; it did not jump',
       );
-      final sc = _list(tester).controller!;
+      final sc = _sc(tester);
       expect(
         sc.offset,
         lessThan(sc.position.maxScrollExtent),
@@ -393,7 +397,7 @@ void main() {
         await tester.pump();
         await g.up();
         await tester.pumpAndSettle();
-        return _list(tester).listController!.visibleRange!.$1;
+        return _lc(tester).visibleRange!.$1;
       }
 
       // 16px real is past the plain 12px reach but inside the magnified one.

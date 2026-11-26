@@ -72,7 +72,6 @@ class ArgusTokens extends ThemeExtension<ArgusTokens> {
     required this.taskCompleted,
     required this.taskInProgress,
     required this.thinking,
-    required this.toolCall,
     required this.toolRead,
     required this.toolEdit,
     required this.toolWrite,
@@ -159,7 +158,6 @@ class ArgusTokens extends ThemeExtension<ArgusTokens> {
     final taskCompleted = o.taskCompleted ?? p.aqua;
     final taskInProgress = o.taskInProgress ?? p.orange;
     final thinking = o.thinking ?? p.yellow;
-    final toolCall = o.toolCall ?? p.blue;
     final toolRead = o.toolRead ?? p.blue;
     final toolEdit = o.toolEdit ?? p.yellow;
     final toolWrite = o.toolWrite ?? p.green;
@@ -229,7 +227,6 @@ class ArgusTokens extends ThemeExtension<ArgusTokens> {
       taskCompleted: taskCompleted,
       taskInProgress: taskInProgress,
       thinking: thinking,
-      toolCall: toolCall,
       toolRead: toolRead,
       toolEdit: toolEdit,
       toolWrite: toolWrite,
@@ -401,9 +398,6 @@ class ArgusTokens extends ThemeExtension<ArgusTokens> {
   /// Thinking-block marker.
   final Color thinking;
 
-  /// Tool-call count marker.
-  final Color toolCall;
-
   /// Read and web tools.
   final Color toolRead;
 
@@ -529,7 +523,6 @@ class ArgusTokens extends ThemeExtension<ArgusTokens> {
     Color? taskCompleted,
     Color? taskInProgress,
     Color? thinking,
-    Color? toolCall,
     Color? toolRead,
     Color? toolEdit,
     Color? toolWrite,
@@ -603,7 +596,6 @@ class ArgusTokens extends ThemeExtension<ArgusTokens> {
     taskCompleted: taskCompleted ?? this.taskCompleted,
     taskInProgress: taskInProgress ?? this.taskInProgress,
     thinking: thinking ?? this.thinking,
-    toolCall: toolCall ?? this.toolCall,
     toolRead: toolRead ?? this.toolRead,
     toolEdit: toolEdit ?? this.toolEdit,
     toolWrite: toolWrite ?? this.toolWrite,
@@ -684,7 +676,6 @@ class ArgusTokens extends ThemeExtension<ArgusTokens> {
       taskCompleted: c(taskCompleted, other.taskCompleted),
       taskInProgress: c(taskInProgress, other.taskInProgress),
       thinking: c(thinking, other.thinking),
-      toolCall: c(toolCall, other.toolCall),
       toolRead: c(toolRead, other.toolRead),
       toolEdit: c(toolEdit, other.toolEdit),
       toolWrite: c(toolWrite, other.toolWrite),

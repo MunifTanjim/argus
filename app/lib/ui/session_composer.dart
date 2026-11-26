@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -16,21 +17,21 @@ import '../state/prompt_drafts.dart';
 import '../state/respond_view_model.dart';
 import 'interaction_panel.dart';
 import 'prompt_completion.dart';
-import 'running_shells_sheet.dart';
-import 'running_subagents_sheet.dart';
+import 'text_measure.dart';
 import 'theme.dart';
 import 'usage_format.dart';
 import 'voice_input_field.dart';
 
 String interactionLabel(Interaction ix) => switch (ix.kind) {
-      InteractionKind.permission => (ix.toolName ?? '').isNotEmpty
-          ? 'Permission: ${ix.toolName}'
-          : 'Permission',
-      InteractionKind.plan => 'Plan review',
-      InteractionKind.question => 'Question',
-      InteractionKind.idle => 'Reply',
-      InteractionKind.unknown => 'Respond',
-    };
+  InteractionKind.permission =>
+    (ix.toolName ?? '').isNotEmpty
+        ? 'Permission: ${ix.toolName}'
+        : 'Permission',
+  InteractionKind.plan => 'Plan review',
+  InteractionKind.question => 'Question',
+  InteractionKind.idle => 'Reply',
+  InteractionKind.unknown => 'Respond',
+};
 
 String respondElsewhereLabel(FrontendKind f) =>
     f == FrontendKind.vscode ? 'Respond in VSCode' : 'Respond in your terminal';
@@ -73,54 +74,44 @@ String? composerStatus(Session s, DateTime now) {
   }
 }
 
-/// A model line part: its text and color.
-typedef ModelPart = ({String text, Color color});
-
-/// The model line's parts: model, effort, usage, cost, each left out when
-/// unknown. The first [base] are the model and effort.
-({List<ModelPart> parts, int base}) modelParts(
-    Summary? s, ArgusTokens t) {
-  if (s == null) return (parts: const <ModelPart>[], base: 0);
-  final parts = <ModelPart>[
+/// The model chip's parts: model, effort, usage, cost, each left out when
+/// unknown.
+List<(String, Color)> modelParts(Summary? s, ArgusTokens t) {
+  if (s == null) return const [];
+  final parts = <(String, Color)>[
     if ((s.modelName ?? '').isNotEmpty)
-      (text: s.modelName!, color: hexColor(s.modelColor) ?? t.textDim),
-    if ((s.effort ?? '').isNotEmpty) (text: s.effort!, color: t.textDim),
+      (s.modelName!, hexColor(s.modelColor) ?? t.textDim),
+    if ((s.effort ?? '').isNotEmpty) (s.effort!, t.textDim),
   ];
-  final base = parts.length;
   if (s.hasContext) {
     final pct = fmtPct(s.contextPct);
     parts.add((
-      text: s.tokens > 0 ? '${fmtTokens(s.tokens)} ($pct)' : pct,
-      color: contextColor(s.contextPct, t)
+      s.tokens > 0 ? '${fmtTokens(s.tokens)} ($pct)' : pct,
+      contextColor(s.contextPct, t),
     ));
   } else if (s.tokens > 0) {
-    parts.add((text: fmtTokens(s.tokens), color: t.textDim));
+    parts.add((fmtTokens(s.tokens), t.textDim));
   }
   if (s.hasCost) {
-    parts.add(
-        (text: '\$${s.costUsd.toStringAsFixed(2)}', color: t.textDim));
+    parts.add(('\$${s.costUsd.toStringAsFixed(2)}', t.textDim));
   }
-  return (parts: parts, base: base);
+  return parts;
 }
 
 /// The first [n] of [parts].
-TextSpan modelLine(List<ModelPart> parts, int n, ArgusTokens t) {
-  final dim = TextStyle(color: t.textDim);
-  return TextSpan(children: [
-    for (var i = 0; i < n; i++) ...[
-      if (i > 0) TextSpan(text: ' · ', style: dim),
-      TextSpan(text: parts[i].text, style: TextStyle(color: parts[i].color)),
-    ],
-  ]);
-}
+TextSpan modelLine(List<(String, Color)> parts, int n, ArgusTokens t) =>
+    metaSpan(parts.take(n), t);
 
-/// The least tap target width a touch control gets.
-const _countTapWidth = 48.0;
-const _countPad = 6.0;
-const _countIcon = 14.0;
-const _countGap = 4.0;
-const _ruleEdge = 12.0;
-const _rulePad = 6.0;
+/// The space around the composer's box, and around the resume bar that takes
+/// its place in a history transcript.
+const dockPadding = EdgeInsets.fromLTRB(10, 6, 10, 10);
+
+/// One IconButton slot: the toolbar's height and the width of Send and the
+/// mic.
+const _slot = 48.0;
+const _toolbarEdge = 6.0;
+const _chipPad = 8.0;
+const _chipPadV = 2.0;
 const _maxQueued = 3;
 
 final _whitespace = RegExp(r'\s+');
@@ -139,15 +130,16 @@ class _Menu {
   List<PromptMatch> matches = const [];
 }
 
-/// The prompt input, or the pending prompt in its place, between a status line
-/// and a model line.
+/// The composer box: a status strip, then the queue, the input, and the
+/// toolbar, or the pending prompt or a notice in their place.
 class SessionComposer extends ConsumerStatefulWidget {
-  const SessionComposer(
-      {super.key,
-      required this.session,
-      this.inputNotice,
-      this.queue = const [],
-      this.onSent});
+  const SessionComposer({
+    super.key,
+    required this.session,
+    this.inputNotice,
+    this.queue = const [],
+    this.onSent,
+  });
 
   final Session session;
 
@@ -177,6 +169,16 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
 
   /// The panel's height cap set by dragging the status line; null until then.
   double? _panelHeight;
+
+  /// The model chip's height; measured once per change of text scale or
+  /// default text style, not on every keystroke.
+  double? _chipHeight;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _chipHeight = null;
+  }
 
   final _panelKey = GlobalKey();
 
@@ -244,9 +246,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   }
 
   bool get _canSend =>
-      widget.session.canPrompt &&
-      !_vm.running &&
-      _text.text.trim().isNotEmpty;
+      widget.session.canPrompt && !_vm.running && _text.text.trim().isNotEmpty;
 
   Future<void> _send() async {
     if (!_canSend) return;
@@ -264,8 +264,9 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
           ref.read(promptDraftsProvider.notifier).clear(_sid);
         }
       case Error(:final error):
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Failed: $error')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed: $error')));
       case null:
         break;
     }
@@ -306,21 +307,25 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     }
     if (m != null && m.trigger == q.trigger) {
       if (m.query != q.query) {
-        setState(() => m
-          ..query = q.query
-          ..selected = 0
-          ..matches = _matchFor(q.trigger, q.query));
+        setState(
+          () => m
+            ..query = q.query
+            ..selected = 0
+            ..matches = _matchFor(q.trigger, q.query),
+        );
       }
       return;
     }
-    setState(() => _menu = _Menu(q.trigger, q.query)
-      ..matches = _matchFor(q.trigger, q.query));
+    setState(
+      () =>
+          _menu = _Menu(q.trigger, q.query)
+            ..matches = _matchFor(q.trigger, q.query),
+    );
     if (_completions[_sid]?.containsKey(q.trigger) ?? false) return;
     final seq = ++_completeSeq;
-    ref
-        .read(sessionRepositoryProvider)
-        .completePrompt(_sid, q.trigger)
-        .then((r) {
+    ref.read(sessionRepositoryProvider).completePrompt(_sid, q.trigger).then((
+      r,
+    ) {
       if (!mounted || seq != _completeSeq) return;
       if (r case Ok(:final value) when value.isNotEmpty) {
         setState(() {
@@ -343,8 +348,9 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     final head = applyCompletion(before, m.trigger, m.query, item.name);
     _menu = null;
     _text.value = TextEditingValue(
-        text: head + after,
-        selection: TextSelection.collapsed(offset: head.length));
+      text: head + after,
+      selection: TextSelection.collapsed(offset: head.length),
+    );
     _onChanged(_text.text);
   }
 
@@ -397,19 +403,55 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   }
 
   void _toggle() => setState(() {
-        _collapsed = !_collapsed;
-        if (_collapses(_panelHeight ?? _panelMin)) _panelHeight = null;
-      });
+    _collapsed = !_collapsed;
+    if (_collapses(_panelHeight ?? _panelMin)) _panelHeight = null;
+  });
 
   @override
   Widget build(BuildContext context) =>
       LayoutBuilder(builder: (context, box) => _build(box.maxHeight));
 
   Widget _build(double maxHeight) {
+    final t = context.tokens;
     final s = widget.session;
     final notice = widget.inputNotice;
     final pending = s.interactionPending;
     final showPanel = pending && notice == null;
+    // A pending prompt waits on the user, so the box stands out; collapsed,
+    // the status strip stands out more.
+    final alert = showPanel && _collapsed;
+    final blocked = showPanel && !_collapsed;
+    final label = composerStatus(s, DateTime.now());
+    Widget? strip;
+    if (label != null) {
+      strip = _strip(
+        label,
+        bg: alert
+            ? t.blockedSurface
+            : blocked
+            ? t.canvas
+            : t.surfaceRaised,
+        color: showPanel ? t.blocked : t.textDim,
+        trailing: showPanel
+            ? IconButton(
+                tooltip: _collapsed ? 'Expand' : 'Collapse',
+                visualDensity: VisualDensity.compact,
+                color: t.blocked,
+                icon: Icon(_collapsed ? Icons.expand_less : Icons.expand_more),
+                onPressed: _toggle,
+              )
+            : null,
+      );
+      if (showPanel) {
+        strip = GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _collapsed ? _toggle : null,
+          onVerticalDragStart: _dragStart,
+          onVerticalDragUpdate: _dragUpdate,
+          child: strip,
+        );
+      }
+    }
     final Widget body;
     if (notice != null) {
       body = _notice(notice);
@@ -423,74 +465,124 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
             key: _panelKey,
             cap: _panelHeight ?? maxHeight * 0.6,
             child: InteractionPanel(
-                key: ValueKey(_promptKey(s.interaction)), session: s),
+              key: ValueKey(_promptKey(s.interaction)),
+              session: s,
+            ),
           ),
         ),
       );
     } else {
-      body = Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (widget.queue.isNotEmpty) _queueList(widget.queue),
-          _input(s),
-        ],
+      // Empty, the box is one row: the input and the mic. Text brings the
+      // toolbar with the model and Send; focus alone does not, so a tap on
+      // the field does not make the box jump.
+      final compact = _text.text.isEmpty;
+      body = VoiceInputField(
+        controller: _text,
+        onChanged: _onChanged,
+        // Over the placeholder in the input row, or in the toolbar left of
+        // Send.
+        micInset: compact
+            ? const EdgeInsets.only(right: _toolbarEdge)
+            : const EdgeInsets.only(right: _toolbarEdge + _slot),
+        field: (micSlot) => AnimatedSize(
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
+          alignment: Alignment.topCenter,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (widget.queue.isNotEmpty) _queueList(widget.queue),
+              // Keyed, so the field keeps its state (focus, keyboard) as the
+              // rows around it come and go.
+              ConstrainedBox(
+                key: const ValueKey('composer-input-row'),
+                constraints: BoxConstraints(minHeight: compact ? _slot : 0),
+                child: Row(
+                  children: [
+                    Expanded(child: _input(compact: compact)),
+                    if (compact && micSlot != null)
+                      Padding(
+                        padding: const EdgeInsets.only(right: _toolbarEdge),
+                        child: micSlot,
+                      ),
+                  ],
+                ),
+              ),
+              if (!compact) _toolbar(s, micSlot),
+            ],
+          ),
+        ),
       );
     }
-    // A pending prompt waits on the user, so its rules stand out; collapsed,
-    // the status line stands out more.
-    final alert = showPanel && _collapsed;
-    final blocked = showPanel && !_collapsed;
-    final status = _rule(
-      label: switch (composerStatus(s, DateTime.now())) {
-        final t? => TextSpan(text: t),
-        null => null,
-      },
-      bg: alert ? context.tokens.blockedSurface : context.tokens.canvas,
-      lineColor: alert
-          ? context.tokens.blockedBorder
-          : blocked
-              ? context.tokens.blocked
-              : context.tokens.line,
-      labelColor: showPanel ? context.tokens.blocked : context.tokens.textDim,
-      trailing: showPanel
-          ? IconButton(
-              tooltip: _collapsed ? 'Expand' : 'Collapse',
-              visualDensity: VisualDensity.compact,
-              color: context.tokens.blocked,
-              icon: Icon(_collapsed ? Icons.expand_less : Icons.expand_more),
-              onPressed: _toggle,
-            )
-          : null,
-    );
+    final radius = BorderRadius.circular(t.radius + 4);
     return Material(
-      color: context.tokens.canvas,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (showPanel)
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _collapsed ? _toggle : null,
-              onVerticalDragStart: _dragStart,
-              onVerticalDragUpdate: _dragUpdate,
-              child: status,
-            )
-          else
-            status,
-          body,
-          _modelRule(s, blocked: blocked),
-        ],
+      color: t.canvas,
+      child: Padding(
+        padding: dockPadding,
+        child: OverlayPortal.overlayChildLayoutBuilder(
+          controller: _portal,
+          overlayChildBuilder: _menuOverlay,
+          // In front, so the opaque status strip does not hide the top edge.
+          // The Material behind gives the box its canvas color.
+          child: DecoratedBox(
+            key: const Key('composer-box'),
+            position: DecorationPosition.foreground,
+            decoration: BoxDecoration(
+              borderRadius: radius,
+              border: Border.all(
+                color: alert
+                    ? t.blockedBorder
+                    : blocked
+                    ? t.blocked
+                    : t.line,
+              ),
+            ),
+            child: ClipRRect(
+              borderRadius: radius,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [?strip, body],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
 
+  /// The top of the box: what the session is doing, or the pending prompt.
+  Widget _strip(
+    String label, {
+    required Color bg,
+    required Color color,
+    Widget? trailing,
+  }) => Container(
+    key: const Key('composer-status'),
+    height: trailing == null ? 28 : 36,
+    color: bg,
+    padding: EdgeInsets.only(left: 12, right: trailing == null ? 12 : 0),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.ellipsis,
+            style: mono.copyWith(color: color, fontSize: 11),
+          ),
+        ),
+        ?trailing,
+      ],
+    ),
+  );
+
   Widget _queueList(List<QueuedPrompt> q) {
-    final style = Theme.of(context)
-        .textTheme
-        .bodySmall
-        ?.copyWith(color: context.tokens.textDim);
+    final style = Theme.of(
+      context,
+    ).textTheme.bodySmall?.copyWith(color: context.tokens.textDim);
     Widget line(String text) =>
         Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
     return Padding(
@@ -506,235 +598,193 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     );
   }
 
-  Widget _input(Session s) => Padding(
-        padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+  // The same space above the text in both states. Empty, the text is
+  // centered and one line fills the row's 48 dp; with text, the toolbar's
+  // row starts right below it.
+  Widget _input({required bool compact}) => TextField(
+    controller: _text,
+    focusNode: _focus,
+    minLines: 1,
+    maxLines: 6,
+    textCapitalization: TextCapitalization.sentences,
+    onChanged: _onChanged,
+    decoration: InputDecoration(
+      hintText: 'Reply',
+      border: InputBorder.none,
+      enabledBorder: InputBorder.none,
+      focusedBorder: InputBorder.none,
+      isDense: true,
+      contentPadding: EdgeInsets.fromLTRB(12, 12, 12, compact ? 12 : 0),
+    ),
+  );
+
+  static final _chipStyle = mono.copyWith(fontSize: 11);
+
+  /// The model chip at the left; the mic slot and Send at the right. The
+  /// chip is centered in the row, and as far from the box's left edge as
+  /// from the row's top and bottom.
+  Widget _toolbar(Session s, Widget? micSlot) {
+    final chipHeight = _chipHeight ??=
+        measureText(context, const TextSpan(text: ' '), _chipStyle).height +
+        2 * _chipPadV +
+        2;
+    return Padding(
+      padding: const EdgeInsets.only(right: _toolbarEdge),
+      child: SizedBox(
+        height: _slot,
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Expanded(
-              child: OverlayPortal.overlayChildLayoutBuilder(
-                controller: _portal,
-                overlayChildBuilder: _menuOverlay,
-                child: VoiceInputField(
-                  controller: _text,
-                  onChanged: _onChanged,
-                  field: (suffixIcon) => TextField(
-                    controller: _text,
-                    focusNode: _focus,
-                    minLines: 1,
-                    maxLines: 6,
-                    textCapitalization: TextCapitalization.sentences,
-                    onChanged: _onChanged,
-                    decoration: InputDecoration(
-                      hintText: 'Reply',
-                      border: OutlineInputBorder(
-                        borderRadius:
-                            BorderRadius.circular(context.tokens.radius),
-                      ),
-                      isDense: true,
-                      suffixIcon: suffixIcon,
-                    ),
-                  ),
+              child: Padding(
+                padding: EdgeInsets.only(left: (_slot - chipHeight) / 2),
+                child: Align(
+                  key: const Key('model-chip-slot'),
+                  alignment: Alignment.centerLeft,
+                  child: _modelChip(s),
                 ),
               ),
             ),
-            // While sending is blocked, a tap on the disabled button says why.
-            Tooltip(
-              message: s.canPrompt ? 'Send' : 'Wait for idle to send',
-              triggerMode: s.canPrompt
-                  ? TooltipTriggerMode.longPress
-                  : TooltipTriggerMode.tap,
-              child: IconButton(
-                icon: const Icon(Icons.send),
-                onPressed: _canSend ? _send : null,
-              ),
-            ),
+            ?micSlot,
+            _sendButton(s),
           ],
         ),
-      );
+      ),
+    );
+  }
 
-  // Over the transcript, right above the input, so nothing resizes.
+  // The model chip's last fit: typing and the elapsed tick rebuild the
+  // composer, and the chip need not be measured again.
+  ({List<(String, Color)> parts, double width, TextScaler scaler, int n})?
+      _chipFit;
+
+  /// How many of [parts] fit in [maxWidth].
+  int _chipFitCount(
+      BuildContext context, List<(String, Color)> parts, double maxWidth) {
+    final scaler = MediaQuery.textScalerOf(context);
+    final fit = _chipFit;
+    if (fit != null &&
+        fit.width == maxWidth &&
+        fit.scaler == scaler &&
+        listEquals(fit.parts, parts)) {
+      return fit.n;
+    }
+    final t = context.tokens;
+    var n = parts.length;
+    while (n > 0 &&
+        measureText(context, modelLine(parts, n, t), _chipStyle).width +
+                2 * _chipPad +
+                2 >
+            maxWidth) {
+      n--;
+    }
+    _chipFit = (parts: parts, width: maxWidth, scaler: scaler, n: n);
+    return n;
+  }
+
+  /// Model, effort, usage, and cost; as the TUI's bottom rule does, it drops
+  /// cost, usage, effort, then the model, to fit without truncating.
+  Widget _modelChip(Session s) {
+    final t = context.tokens;
+    final parts = modelParts(s.summary, t);
+    // Measured and drawn with the same style, so a part drops only when it
+    // does not fit.
+    final style = _chipStyle;
+    return LayoutBuilder(
+      builder: (context, c) {
+        final n = _chipFitCount(context, parts, c.maxWidth);
+        if (n == 0) return const SizedBox.shrink();
+        return Container(
+          key: const Key('model-chip'),
+          padding: const EdgeInsets.symmetric(
+            horizontal: _chipPad,
+            vertical: _chipPadV,
+          ),
+          decoration: BoxDecoration(
+            border: Border.all(color: t.line),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text.rich(
+            modelLine(parts, n, t),
+            maxLines: 1,
+            softWrap: false,
+            style: style,
+          ),
+        );
+      },
+    );
+  }
+
+  // While sending is blocked, a tap on the disabled button says why.
+  Widget _sendButton(Session s) => SizedBox(
+    width: _slot,
+    child: Center(
+      child: Tooltip(
+        message: s.canPrompt ? 'Send' : 'Wait for idle to send',
+        triggerMode: s.canPrompt
+            ? TooltipTriggerMode.longPress
+            : TooltipTriggerMode.tap,
+        child: IconButton.filled(
+          iconSize: 18,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+          icon: const Icon(Icons.arrow_upward),
+          onPressed: _canSend ? _send : null,
+        ),
+      ),
+    ),
+  );
+
+  // Over the transcript, above the composer box, so nothing resizes.
   Widget _menuOverlay(BuildContext context, OverlayChildLayoutInfo info) {
     final items = _matches;
     if (items.isEmpty) return const SizedBox.shrink();
-    final top =
-        MatrixUtils.transformPoint(info.childPaintTransform, Offset.zero);
+    final top = MatrixUtils.transformPoint(
+      info.childPaintTransform,
+      Offset.zero,
+    );
     final room = top.dy - 4 - _menuMargin;
     if (room <= 0) return const SizedBox.shrink();
-    return Stack(children: [
-      Positioned(
-        left: top.dx,
-        bottom: info.overlaySize.height - top.dy + 4,
-        width: info.childSize.width,
-        // Part of the field's tap region, so a click on a row keeps its focus.
-        child: TextFieldTapRegion(
-          child: PromptMenu(
-            items: items,
-            selected: _menu!.selected,
-            maxHeight: room,
-            onSelect: _select,
-          ),
-        ),
-      ),
-    ]);
-  }
-
-  Widget _notice(String text) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(text,
-                style: TextStyle(
-                    color: context.tokens.textSecondary, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 2),
-            Text("argus can't send input to this session",
-                style: TextStyle(color: context.tokens.textSecondary, fontSize: 12)),
-          ],
-        ),
-      );
-
-  Widget _subagentCount(Session s) => _count(
-      Icons.smart_toy_outlined,
-      s.subagents.length,
-      () => showRunningSubagents(context, sessionId: s.id, agent: s.agent));
-
-  Widget _shellCount(Session s) => _count(Icons.terminal, s.shells.length,
-      () => showRunningShells(context, sessionId: s.id, agent: s.agent));
-
-  // The tap target is only as tall as the model line, so the composer never
-  // shifts when the count shows.
-  Widget _count(IconData icon, int n, VoidCallback onTap) => InkWell(
-        onTap: onTap,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minWidth: _countTapWidth),
-          child: Center(
-            child: ColoredBox(
-              color: context.tokens.canvas,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: _countPad),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(icon, size: _countIcon, color: context.tokens.textDim),
-                  const SizedBox(width: _countGap),
-                  Text('$n',
-                      style: mono.copyWith(color: context.tokens.textDim)),
-                ]),
-              ),
+    return Stack(
+      children: [
+        Positioned(
+          left: top.dx,
+          bottom: info.overlaySize.height - top.dy + 4,
+          width: info.childSize.width,
+          // Part of the field's tap region, so a click on a row keeps its focus.
+          child: TextFieldTapRegion(
+            child: PromptMenu(
+              items: items,
+              selected: _menu!.selected,
+              maxHeight: room,
+              onSelect: _select,
             ),
           ),
         ),
-      );
-
-  double _textWidth(BuildContext context, InlineSpan span) {
-    final p = TextPainter(
-        text: TextSpan(
-            style: DefaultTextStyle.of(context).style.merge(mono),
-            children: [span]),
-        maxLines: 1,
-        textDirection: TextDirection.ltr,
-        textScaler: MediaQuery.textScalerOf(context))
-      ..layout();
-    final w = p.width;
-    p.dispose();
-    return w;
-  }
-
-  /// The model line: running counts at its left end, model parts at its
-  /// right. As the TUI's bottom rule does, it drops cost, usage, the counts,
-  /// effort, then the model, to fit without truncating.
-  Widget _modelRule(Session s, {bool blocked = false}) {
-    final (:parts, :base) = modelParts(s.summary, context.tokens);
-    final counts = [
-      if (s.subagents.isNotEmpty) (s.subagents.length, _subagentCount(s)),
-      if (s.shells.isNotEmpty) (s.shells.length, _shellCount(s)),
-    ];
-    final order = [
-      for (var n = parts.length; n > base; n--) (counts.length, n),
-      for (var k = counts.length; k > 0; k--) (k, base),
-      for (var n = base; n >= 0; n--) (0, n),
-    ];
-    double countsWidth(BuildContext context, int k) {
-      var w = 0.0;
-      for (final (n, _) in counts.take(k)) {
-        final content = 2 * _countPad + _countIcon + _countGap +
-            _textWidth(context, TextSpan(text: '$n'));
-        w += math.max(_countTapWidth, content);
-      }
-      return w;
-    }
-    return LayoutBuilder(builder: (context, c) {
-      final room = c.maxWidth - 2 * _ruleEdge;
-      final (k, n) = order.firstWhere((o) {
-        final (k, n) = o;
-        if (k == 0 && n == 0) return true;
-        final label = n == 0
-            ? 0
-            : _textWidth(context, modelLine(parts, n, context.tokens)) + 2 * _rulePad;
-        return countsWidth(context, k) + label <= room;
-      }, orElse: () => (0, 0));
-      return _rule(
-        lineColor: blocked ? context.tokens.blocked : context.tokens.line,
-        label: n == 0 ? null : modelLine(parts, n, context.tokens),
-        leading: k == 0
-            ? null
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [for (final c in counts.take(k)) c.$2]),
-      );
-    });
-  }
-
-  /// A divider with [label] set into its right end, like the TUI's rules. The
-  /// label truncates when it alone exceeds the width.
-  Widget _rule(
-      {InlineSpan? label,
-      Widget? leading,
-      Widget? trailing,
-      Color? bg,
-      Color? lineColor,
-      Color? labelColor}) {
-    final t = context.tokens;
-    bg ??= t.canvas;
-    lineColor ??= t.line;
-    labelColor ??= t.textDim;
-    final line = Divider(height: 1, color: lineColor);
-    final style = mono.copyWith(color: labelColor);
-    return Container(
-      height: trailing == null ? 20 : 36,
-      color: bg,
-      child: Row(children: [
-        SizedBox(width: _ruleEdge, child: line),
-        ?leading,
-        Expanded(
-            child: label == null
-                ? line
-                : Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      line,
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: ColoredBox(
-                          color: bg,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: _rulePad),
-                            child: Text.rich(label,
-                                maxLines: 1,
-                                softWrap: false,
-                                overflow: TextOverflow.ellipsis,
-                                style: style),
-                          ),
-                        ),
-                      ),
-                    ],
-                  )),
-        ?trailing,
-        SizedBox(width: _ruleEdge, child: line),
-      ]),
+      ],
     );
   }
+
+  Widget _notice(String text) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          text,
+          style: TextStyle(
+            color: context.tokens.textSecondary,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          "argus can't send input to this session",
+          style: TextStyle(color: context.tokens.textSecondary, fontSize: 12),
+        ),
+      ],
+    ),
+  );
 }
 
 /// Lays the panel out at most [cap] tall but never shorter than its minimum
@@ -770,8 +820,10 @@ class _RenderPanelBox extends RenderProxyBox {
 
   @override
   Size computeDryLayout(BoxConstraints constraints) => constraints.constrain(
-      child!.getDryLayout(_capped(
-          constraints, child!.getMinIntrinsicHeight(constraints.maxWidth))));
+    child!.getDryLayout(
+      _capped(constraints, child!.getMinIntrinsicHeight(constraints.maxWidth)),
+    ),
+  );
 
   @override
   void performLayout() {

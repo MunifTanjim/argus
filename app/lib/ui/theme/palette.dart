@@ -50,7 +50,6 @@ class PaletteOverrides {
     this.taskCompleted,
     this.taskInProgress,
     this.thinking,
-    this.toolCall,
     this.toolRead,
     this.toolEdit,
     this.toolWrite,
@@ -121,7 +120,6 @@ class PaletteOverrides {
   final Color? taskCompleted;
   final Color? taskInProgress;
   final Color? thinking;
-  final Color? toolCall;
   final Color? toolRead;
   final Color? toolEdit;
   final Color? toolWrite;

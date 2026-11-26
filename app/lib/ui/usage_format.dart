@@ -9,8 +9,8 @@ String fmtTokens(int n) {
 
 String fmtPct(double pct) => '${pct.round()}%';
 
-/// A context-window usage percentage as `ctx 42%`.
-String fmtContextPct(double pct) => 'ctx ${fmtPct(pct)}';
+/// A context-window usage percentage as `42% ctx`.
+String fmtContextPct(double pct) => '${fmtPct(pct)} ctx';
 
 /// Mirrors the TUI thresholds.
 Color contextColor(double pct, ArgusTokens t) {
@@ -24,4 +24,24 @@ Color? hexColor(String? hex) {
   final v = int.tryParse(hex.substring(1), radix: 16);
   // The mask applies full alpha to the parsed user hex.
   return v == null ? null : Color(0xFF000000 | v);
+}
+
+/// [parts] joined by a dim [sep], each part in its own color.
+TextSpan metaSpan(
+  Iterable<(String, Color)> parts,
+  ArgusTokens t, {
+  String sep = ' · ',
+}) {
+  final dim = TextStyle(color: t.textDim);
+  return TextSpan(
+    children: [
+      for (final (i, (text, color)) in parts.indexed) ...[
+        if (i > 0) TextSpan(text: sep, style: dim),
+        TextSpan(
+          text: text,
+          style: TextStyle(color: color),
+        ),
+      ],
+    ],
+  );
 }

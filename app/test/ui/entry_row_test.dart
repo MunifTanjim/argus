@@ -1,14 +1,18 @@
+import 'dart:math';
+
 import 'package:argus/models/entry.dart';
 import 'package:argus/state/gateway.dart';
 import 'package:argus/state/tool_detail.dart';
 import 'package:argus/ui/entry_row.dart';
 import 'package:argus/ui/item_detail_screen.dart';
 import 'package:argus/ui/subagent_trace_screen.dart';
+import 'package:argus/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-Future<void> _pump(WidgetTester tester, Entry e, {bool scroll = false}) {
+Future<void> _pump(WidgetTester tester, Entry e,
+    {bool scroll = false, bool showModel = true}) {
   var expanded = false;
   return tester.pumpWidget(
     ProviderScope(
@@ -20,6 +24,7 @@ Future<void> _pump(WidgetTester tester, Entry e, {bool scroll = false}) {
               final row = EntryRow(
                 detailRef: const ToolDetailRef.live('s'),
                 entry: e,
+                showModel: showModel,
                 expanded: expanded,
                 onToggle: () => setState(() => expanded = !expanded),
               );
@@ -77,41 +82,140 @@ void main() {
     expect(find.text('deep reasoning'), findsOneWidget);
   });
 
-  testWidgets('turn_end shows the same stats as the TUI', (tester) async {
-    await _pump(
-      tester,
-      const Entry(
-        id: 'e',
-        kind: EntryKind.turnEnd,
-        modelName: 'Opus 4.8',
-        thinking: 2,
-        toolCount: 5,
-        usage: Usage(input: 900, output: 12300, cacheRead: 80000),
-        hasContext: true,
-        contextFirstPct: 40,
-        contextPct: 45,
-        contextDeltaTokens: 3100,
-        durationMs: 62000,
-        timestamp: '2026-10-08T14:32:05Z',
-      ),
-    );
-    final text = tester
-        .widgetList<Text>(find.byType(Text))
-        .map((t) => t.textSpan?.toPlainText() ?? t.data)
-        .join(' ');
-    // Output tokens, not input + cache: the turn's spend, as the TUI shows.
-    expect(text, contains('12.3k'));
-    expect(text, isNot(contains('93.2k')));
-    expect(text, contains('2'));
-    expect(text, contains('5'));
-    expect(text, contains('ctx 40% → 45% (+3.1k)'));
-    expect(text, contains('1m 2s'));
+  const full = Entry(
+    id: 'e',
+    kind: EntryKind.turnEnd,
+    modelName: 'Opus 4.8',
+    modelColor: '#d3869b',
+    thinking: 2,
+    toolCount: 5,
+    usage: Usage(input: 900, output: 12300, cacheRead: 80000),
+    hasContext: true,
+    contextFirstPct: 40,
+    contextPct: 45,
+    contextDeltaTokens: 3100,
+    durationMs: 62000,
+    timestamp: '2026-10-08T14:32:05Z',
+  );
+
+  String footer(WidgetTester tester) => tester
+      .widgetList<Text>(find.byType(Text))
+      .map((t) => t.textSpan?.toPlainText() ?? t.data)
+      .join(' ');
+
+  testWidgets('turn_end shows the model, duration, context, and time',
+      (tester) async {
+    await _pump(tester, full);
+    final text = footer(tester);
     final local = DateTime.parse('2026-10-08T14:32:05Z').toLocal();
-    String p(int n) => n.toString().padLeft(2, '0');
     expect(
-      text,
-      contains('${p(local.hour)}:${p(local.minute)}:${p(local.second)}'),
-    );
+        text,
+        // No-break spaces keep a separator from starting a line.
+        contains('Opus 4.8\u00A0· 1m 2s\u00A0· 45% ctx'));
+    expect(find.text(turnStamp(local, DateTime.now())), findsOneWidget);
+  });
+
+  testWidgets('turn_end drops counts, tokens, and the context detail',
+      (tester) async {
+    await _pump(tester, full);
+    final text = footer(tester);
+    expect(text, isNot(contains('12.3k')));
+    expect(text, isNot(contains('→')));
+    expect(find.byType(Icon), findsNothing);
+  });
+
+  testWidgets('turn_end is all dim', (tester) async {
+    await _pump(tester, const Entry(
+      id: 'e',
+      kind: EntryKind.turnEnd,
+      interrupted: true,
+      modelName: 'Opus 4.8',
+      modelColor: '#d3869b',
+      hasContext: true,
+      contextFirstPct: 85,
+      contextPct: 85,
+      durationMs: 1000,
+    ));
+    for (final word in ['interrupted', 'Opus 4.8', '85% ctx', '1.0s']) {
+      expect(_span(tester, word).style?.color, ArgusTokens.fallback.textDim,
+          reason: word);
+    }
+  });
+
+  testWidgets('turn_end puts the stats left and the time right',
+      (tester) async {
+    await _pump(tester, full);
+    final width = tester.getSize(find.byType(Scaffold)).width;
+    expect(tester.getTopLeft(find.textContaining('1m 2s')).dx, lessThan(40));
+    final time = turnStamp(
+        DateTime.parse('2026-10-08T14:32:05Z').toLocal(), DateTime.now());
+    expect(tester.getTopRight(find.text(time)).dx, greaterThan(width - 40));
+  });
+
+  // Each rule's rect; the footer reuses one Divider widget, so read boxes.
+  Iterable<Rect> rules(WidgetTester tester) =>
+      find.byType(Divider).evaluate().map((e) {
+        final box = e.renderObject! as RenderBox;
+        return box.localToGlobal(Offset.zero) & box.size;
+      });
+
+  testWidgets('with no time, the rule runs to the right edge', (tester) async {
+    await _pump(tester,
+        const Entry(id: 'e', kind: EntryKind.turnEnd, durationMs: 1000));
+    final width = tester.getSize(find.byType(Scaffold)).width;
+    final right = rules(tester).map((r) => r.right).reduce(max);
+    expect(right, closeTo(width - 4, 1));
+  });
+
+  testWidgets('with short stats and a time, the rules reach the right edge',
+      (tester) async {
+    await _pump(
+        tester,
+        Entry(
+            id: 'e',
+            kind: EntryKind.turnEnd,
+            durationMs: 1000,
+            timestamp: DateTime.now().toUtc().toIso8601String()));
+    final width = tester.getSize(find.byType(Scaffold)).width;
+    expect(rules(tester).map((r) => r.right).reduce(max),
+        closeTo(width - 4, 1));
+  });
+
+  testWidgets('the middle rule touches the stats and the time',
+      (tester) async {
+    await _pump(tester, full);
+    final stats = tester.getRect(find.textContaining('1m 2s'));
+    final time = tester.getRect(find.text(turnStamp(
+        DateTime.parse('2026-10-08T14:32:05Z').toLocal(), DateTime.now())));
+    final middle = rules(tester).reduce((a, b) => a.width > b.width ? a : b);
+    expect(middle.left, closeTo(stats.right + 8, 1));
+    expect(middle.right, closeTo(time.left - 8, 1));
+    final width = tester.getSize(find.byType(Scaffold)).width;
+    expect(rules(tester).map((r) => r.right).reduce(max),
+        closeTo(width - 4, 1));
+  });
+
+  group('turnStamp', () {
+    final now = DateTime(2026, 11, 26, 18);
+    test('today shows the time only', () {
+      expect(turnStamp(DateTime(2026, 11, 26, 9, 3, 5), now), '09:03:05');
+    });
+    test('another day this month shows month and day', () {
+      expect(turnStamp(DateTime(2026, 11, 25, 9, 3, 5), now), 'Nov 25 09:03:05');
+    });
+    test('another month this year shows month and day', () {
+      expect(turnStamp(DateTime(2026, 2, 3, 9, 3, 5), now), 'Feb 3 09:03:05');
+    });
+    test('another year shows the year too', () {
+      expect(turnStamp(DateTime(2025, 11, 26, 9, 3, 5), now),
+          '2025 Nov 26 09:03:05');
+    });
+  });
+
+  testWidgets('turn_end hides an unchanged model', (tester) async {
+    await _pump(tester, full, showModel: false);
+    expect(footer(tester), isNot(contains('Opus 4.8')));
+    expect(footer(tester), contains('1m 2s'));
   });
 
   testWidgets('a full turn_end wraps on a phone instead of overflowing', (
@@ -331,34 +435,6 @@ void main() {
       expect(tester.takeException(), isNull);
       if (desc.isNotEmpty) expect(find.text(desc), findsOneWidget);
     }
-  });
-
-  testWidgets('turn_end shows context % colored by pressure', (tester) async {
-    await _pump(
-      tester,
-      const Entry(
-        id: 'e1',
-        kind: EntryKind.turnEnd,
-        hasContext: true,
-        contextFirstPct: 85,
-        contextPct: 85,
-      ),
-    );
-    expect(_span(tester, 'ctx 85%').style?.color, const Color(0xFFfb4934));
-  });
-
-  testWidgets('turn_end healthy context % is green', (tester) async {
-    await _pump(
-      tester,
-      const Entry(
-        id: 'e2',
-        kind: EntryKind.turnEnd,
-        hasContext: true,
-        contextFirstPct: 42,
-        contextPct: 42,
-      ),
-    );
-    expect(_span(tester, 'ctx 42%').style?.color, const Color(0xFFb8bb26));
   });
 
   testWidgets('compact divider renders its summary', (tester) async {
