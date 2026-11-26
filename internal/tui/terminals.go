@@ -226,21 +226,49 @@ func (m model) hitNodeTabs(c *ctx, x int) { c.hitTabs(x, 0, 3, nodeTabLabels...)
 
 type wsTab int
 
+// Home's order; Terminals is last so a node without tmux just drops it.
 const (
 	wsTabSessions wsTab = iota
+	wsTabHistory
 	wsTabTerminals
 )
 
-var wsTabLabels = []string{"Sessions", "Terminals"}
+var wsTabLabels = []string{"Sessions", "History", "Terminals"}
 
-// wsTabsHeader shows only the Sessions tab for a node without tmux; x is the
-// tabs' column, for their click zones.
-func (m model) wsTabsHeader(c *ctx, ws string, active wsTab, x int) string {
-	if !m.wsHasTerminals(ws) {
-		return m.tabLine(wsTabLabels[:1], 0)
+func (m model) wsTabCount(ws string) int {
+	if m.wsHasTerminals(ws) {
+		return len(wsTabLabels)
 	}
-	c.hitTabs(x, 0, 3, wsTabLabels...)
-	return m.tabLine(wsTabLabels, int(active))
+	return len(wsTabLabels) - 1
+}
+
+// wsTabsHeader drops the Terminals tab for a node without tmux; x is the tabs'
+// column, for their click zones.
+func (m model) wsTabsHeader(c *ctx, ws string, active wsTab, x int) string {
+	labels := wsTabLabels[:m.wsTabCount(ws)]
+	c.hitTabs(x, 0, 3, labels...)
+	return m.tabLine(labels, int(active))
+}
+
+func openWsTab(c *ctx, ws string, t wsTab) tea.Cmd {
+	switch t {
+	case wsTabHistory:
+		return openWorkspaceHistory(c, ws)
+	case wsTabTerminals:
+		return openWorkspaceTerminals(c, ws)
+	}
+	openWorkspaceSessions(c, ws)
+	return nil
+}
+
+func stepWsTab(c *ctx, ws string, from wsTab, d int) tea.Cmd {
+	n := c.m.wsTabCount(ws)
+	return openWsTab(c, ws, wsTab((int(from)+d+n)%n))
+}
+
+func openWorkspaceHistory(c *ctx, ws string) tea.Cmd {
+	c.replaceBase(historyComp{ws: ws})
+	return c.m.fetchHistProjects()
 }
 
 func (m model) wsHasTerminals(ws string) bool {

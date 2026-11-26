@@ -3,10 +3,12 @@ package tui
 import (
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -62,5 +64,107 @@ func TestHistoryScopeLine(t *testing.T) {
 		if got := ansi.Strip(tc.h.scopeLine(c)); got != tc.want {
 			t.Errorf("scope line = %q, want %q", got, tc.want)
 		}
+	}
+}
+
+func wsHistory(t *testing.T, folders ...session.HistoryProject) model {
+	t.Helper()
+	m := typeKeys(workspacePane(homeTestModel()), "gt")
+	if h, ok := m.baseComp().(historyComp); !ok || h.ws != "n1:w1" {
+		t.Fatalf("gt on the workspace: base = %T, want n1:w1's History", m.baseComp())
+	}
+	mm, _ := m.updateHistory(histProjectsMsg{projects: folders})
+	return mm.(model)
+}
+
+func clickTab(t *testing.T, m model, i int) model {
+	t.Helper()
+	c := &ctx{m: &m}
+	comp, cmd := m.baseComp().(clicker).click(c, hitTarget{kind: hitTab, index: i}, true)
+	m.main = m.main.replaceAt(m.baseTop()-1, comp)
+	_ = cmd
+	m.apply(c)
+	return m
+}
+
+func TestWorkspaceHistoryOpensItsOnlyFolder(t *testing.T) {
+	m := wsHistory(t, histFolder("n1", "/repo"), histFolder("n1", "/repo-feat"))
+	h := m.baseComp().(historyComp)
+	if !h.inProject || h.project.Cwd != "/repo" || !h.loading {
+		t.Fatalf("History of n1:w1: inProject=%v folder=%q loading=%v, want /repo's sessions loading", h.inProject, h.project.Cwd, h.loading)
+	}
+	if got := m.mainRow(); got != "n1:w1" {
+		t.Errorf("tree row = %q, want n1:w1", got)
+	}
+	out := ansi.Strip(mainView(m))
+	for _, want := range []string{"Sessions   History   Terminals", "workspace · argus › repo  /repo"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("view lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestWorkspaceHistoryEmpty(t *testing.T) {
+	m := wsHistory(t, histFolder("n1", "/repo-feat"))
+	if out := ansi.Strip(mainView(m)); !strings.Contains(out, "no past sessions in this workspace") {
+		t.Errorf("empty workspace History:\n%s", out)
+	}
+}
+
+func TestWorkspaceHistoryBackAndTabs(t *testing.T) {
+	m := wsHistory(t, histFolder("n1", "/repo"))
+	m, _ = upd(m, histSessionsMsg{projectDir: "pd/repo", page: historyPage()})
+	m = typeKeys(m, "/first")
+	m = pressKeys(m, keyMsg("enter"), keyMsg("esc"))
+	if h, ok := m.baseComp().(historyComp); !ok || h.sessQuery != "" {
+		t.Fatalf("<Esc> with a filter: base = %T, want History with the filter cleared", m.baseComp())
+	}
+	m = pressKeys(m, keyMsg("esc"))
+	if w, ok := m.baseComp().(workspaceComp); !ok || w.ws != "n1:w1" {
+		t.Fatalf("<Esc>: base = %T, want n1:w1's Sessions", m.baseComp())
+	}
+	if m.memory.home.view == homeHistory {
+		t.Error("workspace History must not become Home's remembered view")
+	}
+	m = typeKeys(typeKeys(m, "gt"), "gt")
+	if tc, ok := m.baseComp().(terminalsComp); !ok || tc.ws != "n1:w1" {
+		t.Errorf("gt gt: base = %T, want n1:w1's Terminals", m.baseComp())
+	}
+	m = typeKeys(m, "gT")
+	if h, ok := m.baseComp().(historyComp); !ok || h.ws != "n1:w1" {
+		t.Errorf("gT from Terminals: base = %T, want n1:w1's History", m.baseComp())
+	}
+}
+
+func TestWorkspaceHistoryTabWithoutTerminals(t *testing.T) {
+	m := homeTestModel()
+	m.nodeInfo = []api.NodeInfo{{ID: "n1"}}
+	m = typeKeys(typeKeys(workspacePane(m), "gt"), "gt")
+	if _, ok := m.baseComp().(workspaceComp); !ok {
+		t.Errorf("gt gt without Terminals: base = %T, want back on Sessions", m.baseComp())
+	}
+}
+
+func TestWorkspaceHistoryTabClicks(t *testing.T) {
+	m := homeTestModel()
+	m.nodeInfo = []api.NodeInfo{{ID: "n1"}}
+	if b, ok := clickTab(t, workspacePane(m), 1).baseComp().(historyComp); !ok || b.ws != "n1:w1" {
+		t.Errorf("click 1 without Terminals: base = %#v, want n1:w1's History", b)
+	}
+	if b, ok := clickTab(t, workspacePane(homeTestModel()), 2).baseComp().(terminalsComp); !ok || b.ws != "n1:w1" {
+		t.Errorf("click 2: base = %#v, want n1:w1's Terminals", b)
+	}
+	if b, ok := clickTab(t, wsHistory(t, histFolder("n1", "/repo")), 0).baseComp().(workspaceComp); !ok || b.ws != "n1:w1" {
+		t.Errorf("click 0 on History: base = %#v, want n1:w1's Sessions", b)
+	}
+}
+
+func TestWorkspaceHistoryFollowsTheTreeAndItsRemoval(t *testing.T) {
+	m := wsHistory(t, histFolder("n1", "/repo"))
+	m.left.tree.data[0].Workspaces = m.left.tree.data[0].Workspaces[1:]
+	_ = mainView(m)
+	mm, _ := m.updateHistory(histProjectsMsg{projects: []session.HistoryProject{histFolder("n1", "/repo")}})
+	if h := mm.(model).baseComp().(historyComp); len(h.projects) != 0 {
+		t.Errorf("a removed workspace still lists folders: %v", h.projects)
 	}
 }

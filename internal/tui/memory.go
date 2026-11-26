@@ -62,8 +62,13 @@ func (m *model) remember() {
 		b.killID = ""
 		m.memory.home.view, m.memory.home.session, m.memory.home.home = homeSessions, "", b
 	case historyComp:
-		m.memory.home.view, m.memory.home.session = homeHistory, ""
-		m.memory.home.historyCursor = b.projCursor
+		switch {
+		case b.ws != "":
+			delete(m.memory.ws, b.ws)
+		case b.projectID == "":
+			m.memory.home.view, m.memory.home.session = homeHistory, ""
+			m.memory.home.historyCursor = b.projCursor
+		}
 	case logsComp:
 		m.memory.home.view, m.memory.home.session = homeLogs, ""
 	case terminalsComp:
@@ -136,6 +141,13 @@ func (m model) mainRow() string {
 		return b.ws
 	case summaryComp:
 		return b.id
+	case historyComp:
+		switch {
+		case b.ws != "":
+			return b.ws
+		case b.projectID != "":
+			return b.projectID
+		}
 	case terminalsComp:
 		if !b.onHome() {
 			return b.row()

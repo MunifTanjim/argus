@@ -168,10 +168,10 @@ func wsTerminalsTab(t *testing.T, m model) terminalsComp {
 
 func TestWorkspaceTabsSwitch(t *testing.T) {
 	m, _ := workspaceTerminalsPane(t, capable("n1"))
-	if v := viewText(m); !strings.Contains(v, "Sessions   Terminals") {
+	if v := viewText(m); !strings.Contains(v, "Sessions   History   Terminals") {
 		t.Fatalf("the workspace pane lacks its tabs:\n%s", v)
 	}
-	m = typeKeys(m, "gt")
+	m = typeKeys(m, "gT")
 	wsTerminalsTab(t, m)
 	v := viewText(m)
 	if !strings.Contains(v, "repo  main") || !strings.Contains(v, "build") || !strings.Contains(v, "logs") ||
@@ -181,9 +181,9 @@ func TestWorkspaceTabsSwitch(t *testing.T) {
 	if m.mainRow() != "n1:w1" {
 		t.Errorf("mainRow = %q, want n1:w1", m.mainRow())
 	}
-	m = typeKeys(m, "gT")
+	m = typeKeys(m, "gt")
 	if p, ok := m.baseComp().(workspaceComp); !ok || p.ws != "n1:w1" {
-		t.Fatalf("gT: base = %#v, want the Sessions tab", m.baseComp())
+		t.Fatalf("gt: base = %#v, want the Sessions tab", m.baseComp())
 	}
 
 	m = withMouse(m)
@@ -199,7 +199,7 @@ func TestWorkspaceTabsSwitch(t *testing.T) {
 
 func TestWorkspaceTerminalsTabOpensKillsAndRenames(t *testing.T) {
 	m, c := workspaceTerminalsPane(t, capable("n1"))
-	m = typeKeys(m, "gtj")
+	m = typeKeys(m, "gTj")
 	m, cmd := upd(m, keyMsg("enter"))
 	runCmd(cmd)
 	s, ok := m.liveScreen()
@@ -229,7 +229,7 @@ func TestWorkspaceTerminalsTabOpensKillsAndRenames(t *testing.T) {
 func TestWorkspaceTerminalsTabSpawnsInTheWorkspace(t *testing.T) {
 	m, c := workspaceTerminalsPane(t, capable("n1"))
 	c.created = api.Terminal{ID: "n1:@7", Command: "zsh", Cwd: "~/repo", NodeID: "n1", WorkspaceID: "n1:w1"}
-	m = typeKeys(m, "gt")
+	m = typeKeys(m, "gT")
 	m, cmd := typeKeysCmd(m, "a")
 	if cmd == nil {
 		t.Fatal("a should create a terminal")
@@ -247,7 +247,7 @@ func TestWorkspaceTerminalsTabSpawnsInTheWorkspace(t *testing.T) {
 
 func TestWorkspaceTerminalsCursorSurvivesSessionUpdates(t *testing.T) {
 	m, _ := workspaceTerminalsPane(t, capable("n1"))
-	m = typeKeys(m, "gtj")
+	m = typeKeys(m, "gTj")
 	params, _ := json.Marshal(registry.Event{Type: registry.EventUpdated, Session: m.sessions["n1:s1"]})
 	m, _ = upd(m, notificationMsg(api.Notification{Method: api.MethodSessionEvent, Params: params}))
 	if tc := wsTerminalsTab(t, m); tc.cursor != 1 {
@@ -257,21 +257,21 @@ func TestWorkspaceTerminalsCursorSurvivesSessionUpdates(t *testing.T) {
 
 func TestWorkspaceWithoutTmuxHasNoTerminalsTab(t *testing.T) {
 	m, _ := workspaceTerminalsPane(t, []api.NodeInfo{{ID: "n1", Label: "home"}})
-	if v := viewText(m); strings.Contains(v, "Terminals") || !strings.Contains(v, "Sessions") {
-		t.Fatalf("the pane of a node without tmux should show only the Sessions tab:\n%s", v)
+	if v := viewText(m); strings.Contains(v, "Terminals") || !strings.Contains(v, "Sessions   History") {
+		t.Fatalf("the pane of a node without tmux should show Sessions and History only:\n%s", v)
+	}
+	if f := ansi.Strip(m.currentFooter()); !strings.Contains(f, "tabs") {
+		t.Errorf("footer = %q, want the tab hint for History", f)
 	}
 	m = typeKeys(m, "gt")
-	if _, ok := m.baseComp().(workspaceComp); !ok {
-		t.Fatalf("gt: base = %T, want the Sessions tab to stay", m.baseComp())
-	}
-	if f := ansi.Strip(m.currentFooter()); strings.Contains(f, "tabs") {
-		t.Errorf("footer = %q, want no tab hint", f)
+	if h, ok := m.baseComp().(historyComp); !ok || h.ws != "n1:w1" {
+		t.Fatalf("gt: base = %T, want n1:w1's History", m.baseComp())
 	}
 }
 
 func TestWorkspaceTerminalsTabLeavesWithItsWorkspace(t *testing.T) {
 	m, _ := workspaceTerminalsPane(t, capable("n1"))
-	m = typeKeys(m, "gt")
+	m = typeKeys(m, "gT")
 	wsTerminalsTab(t, m)
 	p := m.left.tree.data[0]
 	p.Workspaces = p.Workspaces[1:]
@@ -316,7 +316,7 @@ func paneStart(t *testing.T, m model) int {
 func TestTopBarAlignsTheOpenWorkspace(t *testing.T) {
 	m, _ := workspaceTerminalsPane(t, capable("n1"))
 	_, divider := findBlock(t, m, "│")
-	_, tabs := findBlock(t, m, "Sessions   Terminals")
+	_, tabs := findBlock(t, m, "Sessions   History   Terminals")
 	if dot, header := barHeader(m); dot != divider || header != tabs || !strings.Contains(topBar(m), "repo  main") {
 		t.Fatalf("Sessions tab: dot at %d, header at %d; want %d over the divider and %d over the tabs:\n%s",
 			dot, header, divider, tabs, topBar(m))
@@ -324,11 +324,11 @@ func TestTopBarAlignsTheOpenWorkspace(t *testing.T) {
 	if v := viewText(m); strings.Count(v, "repo  main") != 2 {
 		t.Errorf("the pane should not repeat the header; only the top bar and the tree name it:\n%s", v)
 	}
-	m = typeKeys(m, "gt")
+	m = typeKeys(m, "gT")
 	if dot, header := barHeader(m); dot != divider || header != tabs {
 		t.Errorf("Terminals tab: dot at %d, header at %d; want %d and %d", dot, header, divider, tabs)
 	}
-	m = typeKeys(m, "gT")
+	m = typeKeys(m, "gt")
 	m = withFile(m, fileComp{ws: "n1:w1", path: "a.go", lines: []string{"x"}})
 	if dot, header := barHeader(m); dot != divider || header != tabs {
 		t.Errorf("file over the pane: dot at %d, header at %d; want %d and %d", dot, header, divider, tabs)
@@ -342,7 +342,7 @@ func TestTopBarAlignsTheOpenWorkspace(t *testing.T) {
 func TestWorkspaceTabLineCarriesTheFilter(t *testing.T) {
 	m, _ := workspaceTerminalsPane(t, capable("n1"))
 	m = typeKeys(m, "za")
-	if v := viewText(m); !strings.Contains(v, "Sessions   Terminals  active") {
+	if v := viewText(m); !strings.Contains(v, "Sessions   History   Terminals  active") {
 		t.Fatalf("active-only should mark the tab line:\n%s", v)
 	}
 }
@@ -429,7 +429,7 @@ func TestTopBarNamesTheLiveScreen(t *testing.T) {
 
 func TestWorkspaceTerminalsTabLeavesWhenTheNodeLosesTmux(t *testing.T) {
 	m, _ := workspaceTerminalsPane(t, capable("n1"))
-	m = typeKeys(m, "gt")
+	m = typeKeys(m, "gT")
 	wsTerminalsTab(t, m)
 	m, _ = upd(m, terminalsMsg{list: workspaceTerminals, nodes: []api.NodeInfo{{ID: "n1", Label: "home"}}})
 	if p, ok := m.baseComp().(workspaceComp); !ok || p.ws != "n1:w1" {

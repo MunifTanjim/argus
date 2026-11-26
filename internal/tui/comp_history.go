@@ -63,6 +63,12 @@ func (h historyComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cmd,
 
 func (h historyComp) click(c *ctx, t hitTarget, focused bool) (component, tea.Cmd) {
 	if t.kind == hitTab {
+		if h.ws != "" {
+			if wsTab(t.index) != wsTabHistory {
+				return h, openWsTab(c, h.ws, wsTab(t.index))
+			}
+			return h, nil
+		}
 		if c.m.homeTabAt(t.index) == tabHistory {
 			return h, nil
 		}
@@ -128,18 +134,18 @@ func (h historyComp) projectsKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 	case m.matches(msg, k.Open):
 		h, cmd = h.openProject(c)
 	case m.matches(msg, k.Refresh):
-		h.projects, h.err = nil, nil
+		h.all, h.projects, h.err = nil, nil, nil
 		cmd = m.fetchHistProjects()
 	case m.matches(msg, projectsKeys.Filter):
 		h.filter, cmd = h.filter.start(h.projQuery)
 	case m.matches(msg, k.Back) && h.projQuery != "":
 		h = h.setQuery("")
 	case m.matches(msg, k.Back):
-		c.replaceBase(c.m.homePane())
+		h.leave(c)
 	case m.matches(msg, listKeys.TabPrev):
-		cmd = stepHomeTab(c, tabHistory, -1)
+		cmd = h.stepTab(c, -1)
 	case m.matches(msg, listKeys.TabNext):
-		cmd = stepHomeTab(c, tabHistory, 1)
+		cmd = h.stepTab(c, 1)
 	default:
 		return h, nil, false
 	}
@@ -206,8 +212,14 @@ func (h historyComp) sessionsKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 		h.filter, cmd = h.filter.start(h.sessQuery)
 	case m.matches(msg, k.Back) && h.sessQuery != "":
 		h = h.setQuery("")
+	case h.ws != "" && m.matches(msg, k.Back):
+		h.leave(c)
 	case m.matches(msg, k.Back):
 		h.inProject = false
+	case h.ws != "" && m.matches(msg, listKeys.TabPrev):
+		cmd = h.stepTab(c, -1)
+	case h.ws != "" && m.matches(msg, listKeys.TabNext):
+		cmd = h.stepTab(c, 1)
 	default:
 		return h, nil, false
 	}
@@ -245,6 +257,11 @@ func (h historyComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 		if n := len(h.shownProjects()); h.projCursor >= n {
 			h.projCursor = max(0, n-1)
 		}
+		// A workspace has one folder at most: its History is that folder's
+		// sessions.
+		if h.ws != "" && !h.inProject && len(h.projects) == 1 {
+			return h.openProject(c)
+		}
 	case histSessionsMsg:
 		h.loading = false
 		if msg.err != nil {
@@ -273,10 +290,17 @@ func (h historyComp) view(c *ctx, w, ht int) string {
 }
 
 func (h historyComp) footer(c *ctx) []binding {
+	if h.ws != "" && h.inProject {
+		return append([]binding{listKeys.TabNext}, h.sessionsFooter()...)
+	}
 	if !h.inProject {
 		return []binding{listKeys.TabNext, historyProjectsKeys.Bottom, projectsKeys.Filter,
 			clearFilterKey(historyProjectsKeys.Back, h.projQuery != ""), historyProjectsKeys.Refresh, projectsKeys.Help}
 	}
+	return h.sessionsFooter()
+}
+
+func (h historyComp) sessionsFooter() []binding {
 	binds := []binding{historySessionsKeys.Bottom, historySessionsKeys.Resume, transcriptKeys.Export, listKeys.Filter,
 		clearFilterKey(historySessionsKeys.Back, h.sessQuery != "")}
 	if h.hasMore {
@@ -372,18 +396,17 @@ func (h historyComp) filterTitle() string {
 
 func (h historyComp) projectsView(c *ctx, w, ht int) string {
 	m := c.m
-	title := m.homeTabs(tabHistory) + h.filterTitle() + "\n" + h.scopeLine(c)
 	cardW := historyWidth(w)
-	m.hitHomeTabs(c, centerGutter(cardW, w))
+	title := h.tabsHeader(c, centerGutter(cardW, w)) + h.filterTitle() + "\n" + h.scopeLine(c)
 	backHint := m.keyTextOn(h.section(), historyProjectsKeys.Back) + " back"
 	if h.err != nil {
 		return centerBlock(title+"\n\n"+dimStyle.Render("error: "+h.err.Error())+"\n\n"+dimStyle.Render(backHint), cardW, w)
 	}
-	if h.projects == nil {
+	if h.all == nil {
 		return centerBlock(title+"\n\n"+dimStyle.Render("loading projects…"), cardW, w)
 	}
 	if len(h.projects) == 0 {
-		return centerBlock(title+"\n\n"+dimStyle.Render("no past sessions found")+"\n\n"+dimStyle.Render(backHint), cardW, w)
+		return centerBlock(title+"\n\n"+dimStyle.Render(h.emptyText())+"\n\n"+dimStyle.Render(backHint), cardW, w)
 	}
 	shown := h.shownProjects()
 	if len(shown) == 0 {
@@ -405,8 +428,11 @@ func (h historyComp) projectsView(c *ctx, w, ht int) string {
 
 func (h historyComp) sessionsView(c *ctx, w, ht int) string {
 	m := c.m
-	title := headerStyle.Render("history · "+h.project.Label) + dimStyle.Render("  "+truncate(h.project.Cwd, 50)) + h.filterTitle()
 	cardW := historyWidth(w)
+	title := headerStyle.Render("history · "+h.project.Label) + dimStyle.Render("  "+truncate(h.project.Cwd, 50)) + h.filterTitle()
+	if h.ws != "" {
+		title = h.tabsHeader(c, centerGutter(cardW, w)) + h.filterTitle() + "\n" + h.scopeLine(c)
+	}
 	backHint := m.keyTextOn(h.section(), historySessionsKeys.Back) + " back"
 	if h.err != nil {
 		return centerBlock(title+"\n\n"+dimStyle.Render("error: "+h.err.Error())+"\n\n"+dimStyle.Render(backHint), cardW, w)
@@ -453,6 +479,9 @@ func (m model) updateHistory(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (h historyComp) commands(*ctx) []binding {
+	if h.ws != "" && h.inProject {
+		return bindingsOf(historySessionsKeys, transcriptKeys.Export, listKeys.Filter, listKeys.TabPrev, listKeys.TabNext)
+	}
 	if h.inProject {
 		return bindingsOf(historySessionsKeys, transcriptKeys.Export, listKeys.Filter)
 	}
@@ -521,4 +550,44 @@ func (h historyComp) scopeLine(c *ctx) string {
 		return dimStyle.Render("project · " + p.Name + "  " + dir)
 	}
 	return dimStyle.Render("all projects · " + plural(len(h.projects), "folder"))
+}
+
+func (h historyComp) workspace(*ctx) string { return h.ws }
+
+func (h historyComp) paneHeader(c *ctx, w int) (string, int) {
+	if r, ok := c.m.wsRow(h.ws); ok && h.ws != "" {
+		return c.m.wsHeader(r), centerGutter(historyWidth(w), w)
+	}
+	return "", 0
+}
+
+func (h historyComp) tabsHeader(c *ctx, x int) string {
+	if h.ws != "" {
+		return c.m.wsTabsHeader(c, h.ws, wsTabHistory, x)
+	}
+	c.m.hitHomeTabs(c, x)
+	return c.m.homeTabs(tabHistory)
+}
+
+func (h historyComp) stepTab(c *ctx, d int) tea.Cmd {
+	if h.ws != "" {
+		return stepWsTab(c, h.ws, wsTabHistory, d)
+	}
+	return stepHomeTab(c, tabHistory, d)
+}
+
+// leave is back from the top of the History tab: to the scope's first tab.
+func (h historyComp) leave(c *ctx) {
+	if h.ws != "" {
+		openWorkspaceSessions(c, h.ws)
+		return
+	}
+	c.replaceBase(c.m.homePane())
+}
+
+func (h historyComp) emptyText() string {
+	if h.ws != "" {
+		return "no past sessions in this workspace"
+	}
+	return "no past sessions found"
 }
