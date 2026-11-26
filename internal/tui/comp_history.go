@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -11,8 +12,13 @@ import (
 
 // historyComp browses past sessions on disk: the project list, and a project's
 // paginated session list. err is shared by both views. The cursors index the
-// filtered rows.
+// filtered rows. ws or projectID scopes it to that workspace's or project's
+// folders; neither is Home's History. all holds every folder, projects the
+// scope's.
 type historyComp struct {
+	ws            string
+	projectID     string
+	all           []session.HistoryProject
 	projects      []session.HistoryProject
 	projCursor    int
 	projQuery     string
@@ -231,10 +237,11 @@ func (h historyComp) export(c *ctx) tea.Cmd {
 	return c.m.exportCmd(s.Agent, s.TranscriptPath, h.project.NodeID, historyExportMetadata(s, h.project))
 }
 
-func (h historyComp) update(_ *ctx, msg tea.Msg) (component, tea.Cmd) {
+func (h historyComp) update(c *ctx, msg tea.Msg) (component, tea.Cmd) {
 	switch msg := msg.(type) {
 	case histProjectsMsg:
-		h.projects, h.err = groupProjectsByNode(msg.projects), msg.err
+		h.all, h.err = groupProjectsByNode(msg.projects), msg.err
+		h.projects = c.m.scopeFolders(h, h.all)
 		if n := len(h.shownProjects()); h.projCursor >= n {
 			h.projCursor = max(0, n-1)
 		}
@@ -365,7 +372,7 @@ func (h historyComp) filterTitle() string {
 
 func (h historyComp) projectsView(c *ctx, w, ht int) string {
 	m := c.m
-	title := m.homeTabs(tabHistory) + h.filterTitle()
+	title := m.homeTabs(tabHistory) + h.filterTitle() + "\n" + h.scopeLine(c)
 	cardW := historyWidth(w)
 	m.hitHomeTabs(c, centerGutter(cardW, w))
 	backHint := m.keyTextOn(h.section(), historyProjectsKeys.Back) + " back"
@@ -392,7 +399,7 @@ func (h historyComp) projectsView(c *ctx, w, ht int) string {
 		prevNode = p.NodeID
 		cards[i] = card
 	}
-	body := renderCardList(c.below(2), "history-projects", cards, h.projCursor, max(1, ht-4))
+	body := renderCardList(c.below(lipgloss.Height(title)+1), "history-projects", cards, h.projCursor, max(1, ht-4))
 	return centerBlock(title+"\n\n"+body, cardW, w)
 }
 
@@ -457,4 +464,61 @@ func (h historyComp) offers(*ctx) []binding {
 		return nil
 	}
 	return sectionOffers[h.section()].keys
+}
+
+func (h historyComp) scoped() bool { return h.ws != "" || h.projectID != "" }
+
+// historyScopeDirs is the node and the cleaned workspace dirs of h's scope;
+// dirs is nil for Home.
+func (m model) historyScopeDirs(h historyComp) (nodeID string, dirs map[string]bool) {
+	for _, p := range m.left.tree.data {
+		for _, w := range p.Workspaces {
+			if w.ID == h.ws || p.ID == h.projectID && !w.IsGone {
+				if dirs == nil {
+					dirs = map[string]bool{}
+				}
+				nodeID, dirs[filepath.Clean(w.Dir)] = p.NodeID, true
+			}
+		}
+	}
+	return nodeID, dirs
+}
+
+// scopeFolders keeps the folders of all that are exactly a dir of h's scope,
+// on its node. Home keeps all.
+func (m model) scopeFolders(h historyComp, all []session.HistoryProject) []session.HistoryProject {
+	if !h.scoped() {
+		return all
+	}
+	nodeID, dirs := m.historyScopeDirs(h)
+	var out []session.HistoryProject
+	for _, p := range all {
+		if p.NodeID == nodeID && dirs[filepath.Clean(p.Cwd)] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// scopeLine names what the History on screen covers.
+func (h historyComp) scopeLine(c *ctx) string {
+	switch {
+	case h.ws != "":
+		for _, p := range c.m.left.tree.data {
+			for _, w := range p.Workspaces {
+				if w.ID == h.ws {
+					return dimStyle.Render("workspace · " + p.Name + " › " + filepath.Base(w.Dir) + "  " + w.Dir)
+				}
+			}
+		}
+		return dimStyle.Render("workspace")
+	case h.projectID != "":
+		p, _ := c.m.findProject(h.projectID)
+		dir := p.Root
+		if dir == "" {
+			dir = p.Dir
+		}
+		return dimStyle.Render("project · " + p.Name + "  " + dir)
+	}
+	return dimStyle.Render("all projects · " + plural(len(h.projects), "folder"))
 }
