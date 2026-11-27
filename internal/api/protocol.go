@@ -120,6 +120,13 @@ const (
 	// relay.peer_opened tells a node that another node opened a channel to it,
 	// sent before the channel's first relayed frame.
 	MethodRelayPeerOpened = "relay.peer_opened" // gateway->node notification: RelayPeerOpenedParams
+	// channel.opened tells a p2p-capable node who opened a relay channel, sent
+	// before the channel's first relayed frame. It replaces relay.peer_opened for
+	// such nodes.
+	MethodChannelOpened = "channel.opened" // gateway->node notification: ChannelOpenedParams
+	// token.list.changed gives a p2p-capable node the hashes of the paired client
+	// tokens, on identify and whenever the set changes.
+	MethodTokenListChanged = "token.list.changed" // gateway->node notification: TokenListChangedParams
 	// Trust-log distribution (locked mode). Cleartext, self-authenticating chain
 	// bytes the blind gateway relays but cannot forge/roll back.
 	MethodTrustLogSync = "trustlog.sync" // request: TrustLogSyncParams; result: TrustLogSyncResult (offer: known hashes; gateway set-subtracts diff)
@@ -593,6 +600,8 @@ type NodeCapabilities struct {
 	// CrossNodeOrch is the version of the node-to-node orch protocol the node
 	// speaks; 0 means none. Version 2 adds orch.peer.state.
 	CrossNodeOrch int `json:"cross_node_orch"`
+	// P2P reports whether the node accepts channel.opened and token.list.changed.
+	P2P bool `json:"p2p"`
 
 	// unknown keeps the keys this build does not know, so a gateway relays the
 	// capabilities of a newer node unchanged.
@@ -654,6 +663,21 @@ func capabilityKeys(known knownCapabilities) (map[string]json.RawMessage, error)
 // handshake and echoed in server.info.
 type PeerCapabilities struct {
 	CBOR bool `json:"cbor"`
+	P2P  bool `json:"p2p,omitempty"`
+}
+
+// ChannelOpenedParams tells a p2p-capable node who opened a relay channel.
+// TokenHash is the opener's client token hash; NodeID is set only when another
+// node opened the channel.
+type ChannelOpenedParams struct {
+	ChanID    string `json:"chan_id"`
+	TokenHash string `json:"token_hash"`
+	NodeID    string `json:"node_id,omitempty"`
+}
+
+// TokenListChangedParams carries the hashes of the paired client tokens.
+type TokenListChangedParams struct {
+	Hashes []string `json:"hashes"`
 }
 
 // IdentifyParams is what a client sends to declare its capabilities.
