@@ -851,7 +851,7 @@ func TestPeerOpenedLockedUnauthorizedRejected(t *testing.T) {
 	bKP := mustKeyPair(t)
 	r := buildLockedResponder(t, mustKeyPair(t).Public) // b's key is not authorized
 	rosterKey(r.d, "b", bKP.Public)
-	r.notePeerOpened("enforce-test-chan", "b")
+	r.notePeerOpened("enforce-test-chan", "b", "")
 	if runClientHandshake(t, r, bKP) {
 		t.Fatal("locked store without the opener's key must reject the channel")
 	}
@@ -891,13 +891,13 @@ func TestPeerOpenedPlaintext(t *testing.T) {
 func TestPeerOpenedRecordsDoNotLeak(t *testing.T) {
 	d := newE2ETestNode(t)
 	r := d.newRelayResponder(nil)
-	r.notePeerOpened("x", "b")
+	r.notePeerOpened("x", "b", "")
 	r.closeChan("x") // relay.closed before any frame
 	if n := r.pendingPeerCountForTest(); n != 0 {
 		t.Fatalf("pending after close = %d, want 0", n)
 	}
 	for i := 0; i < maxPendingPeerOpened+10; i++ {
-		r.notePeerOpened("c"+strconv.Itoa(i), "b")
+		r.notePeerOpened("c"+strconv.Itoa(i), "b", "")
 	}
 	if n := r.pendingPeerCountForTest(); n > maxPendingPeerOpened {
 		t.Fatalf("pending = %d, want <= %d", n, maxPendingPeerOpened)

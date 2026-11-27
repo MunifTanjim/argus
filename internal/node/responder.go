@@ -56,14 +56,19 @@ type relayResponder struct {
 
 	mu         sync.Mutex
 	chans      map[string]*chanState
-	peerOpened map[string]peerOpened // relay.peer_opened not yet consumed, by chan_id
+	peerOpened map[string]peerOpened // relay.peer_opened/channel.opened not yet consumed, by chan_id
+
+	binds *bindingStore // client keys bound to their channel's token; cleared by closeAll
 }
 
-// peerOpened is the gateway's statement that FromNode opened a channel, held
-// until that channel's first frame.
+// peerOpened is the gateway's statement of who opened a channel, held until
+// that channel's first frame. from is the opening node, "" for a client;
+// tokenHash is the opener's token hash, "" from a gateway that only sends
+// relay.peer_opened.
 type peerOpened struct {
-	from string
-	at   time.Time
+	from      string
+	tokenHash string
+	at        time.Time
 }
 
 // maxPendingPeerOpened bounds unconsumed relay.peer_opened records; past it the
@@ -83,13 +88,15 @@ func (d *Node) newRelayResponder(peers *peerPool) *relayResponder {
 		peerDispatch: d.peerDispatch(),
 		chans:        map[string]*chanState{},
 		peerOpened:   map[string]peerOpened{},
+		binds:        newBindingStore(d.masterTokenHash()),
 	}
 }
 
-// notePeerOpened records that the gateway says from opened chanID. It runs on
-// the uplink read loop, before the channel's first frame.
-func (r *relayResponder) notePeerOpened(chanID, from string) {
-	if chanID == "" || from == "" {
+// notePeerOpened records who the gateway says opened chanID: node from, or a
+// client when from is "", with tokenHash. It runs on the uplink read loop,
+// before the channel's first frame.
+func (r *relayResponder) notePeerOpened(chanID, from, tokenHash string) {
+	if chanID == "" || (from == "" && tokenHash == "") {
 		return
 	}
 	now := time.Now()
@@ -109,23 +116,23 @@ func (r *relayResponder) notePeerOpened(chanID, from string) {
 	if len(r.peerOpened) >= maxPendingPeerOpened {
 		delete(r.peerOpened, oldestID)
 	}
-	r.peerOpened[chanID] = peerOpened{from: from, at: now}
+	r.peerOpened[chanID] = peerOpened{from: from, tokenHash: tokenHash, at: now}
 }
 
-// takePeerOpened removes and returns the node the gateway named as chanID's
-// opener, or "" when there is no live record.
-func (r *relayResponder) takePeerOpened(chanID string) string {
+// takePeerOpened removes and returns the gateway's record of chanID's opener,
+// or the zero record when there is no live one.
+func (r *relayResponder) takePeerOpened(chanID string) peerOpened {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	p, ok := r.peerOpened[chanID]
 	if !ok {
-		return ""
+		return peerOpened{}
 	}
 	delete(r.peerOpened, chanID)
 	if time.Since(p.at) > pendingPeerOpenedTTL {
-		return ""
+		return peerOpened{}
 	}
-	return p.from
+	return p
 }
 
 // peerKeyMatches reports whether key is nodeID's identity key in the roster.
@@ -203,9 +210,9 @@ func (r *relayResponder) onFrame(_ *api.Peer, f api.RelayFrame) {
 
 // handshake runs the Noise responder for a new channel and replies with msg2.
 func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
-	// Consume the gateway's peer_opened record whatever the outcome, so a failed
+	// Consume the gateway's opener record whatever the outcome, so a failed
 	// handshake cannot leave it behind.
-	from := r.takePeerOpened(f.Route.ChanID)
+	opened := r.takePeerOpened(f.Route.ChanID)
 	msg1, err := api.HandshakeFromFrame(f)
 	if err != nil {
 		return
@@ -235,7 +242,7 @@ func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
 	// key to be that node's roster key, and serves the channel as a client
 	// channel while it is not.
 	base, cancel := context.WithCancel(context.Background())
-	cs := &chanState{ch: api.NewChannel(f.Route.ChanID, sess), cancel: cancel, clientStatic: append([]byte(nil), clientStatic...), opener: from}
+	cs := &chanState{ch: api.NewChannel(f.Route.ChanID, sess), cancel: cancel, clientStatic: append([]byte(nil), clientStatic...), opener: opened.from}
 	cn := &channelNotifier{r: r, cs: cs}
 	cs.ctx = api.WithNotifier(base, cn)
 	r.mu.Lock()
@@ -261,6 +268,11 @@ func (r *relayResponder) handshake(peer *api.Peer, f api.RelayFrame) {
 	// Only now, with msg2 on the wire, may sealed frames follow: the client cannot
 	// open one until it has finished the handshake. A gateway-relayed client has no
 	// other way to learn the session list — there is no accept hook on this path.
+	// The handshake completed and passed the locked-mode checks: bind the client's
+	// key to its token for direct connections. A node-opened channel never binds.
+	if opened.from == "" && opened.tokenHash != "" {
+		r.binds.bind(cs.clientStatic, opened.tokenHash)
+	}
 	r.startStream(f.Route.ChanID, cs, cn)
 }
 
@@ -291,7 +303,7 @@ func (r *relayResponder) createPlain(chanID string) *chanState {
 	cs := &chanState{
 		ch:     api.NewPlainChannel(chanID),
 		cancel: cancel,
-		opener: r.takePeerOpened(chanID),
+		opener: r.takePeerOpened(chanID).from,
 	}
 	cn := &channelNotifier{r: r, cs: cs}
 	cs.ctx = api.WithNotifier(base, cn)
@@ -337,6 +349,7 @@ func (r *relayResponder) closeAll() {
 	}
 	clear(r.peerOpened)
 	r.mu.Unlock()
+	r.binds.clear()
 	for _, stop := range stops {
 		stop()
 	}

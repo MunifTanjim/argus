@@ -80,6 +80,7 @@ type Node struct {
 	lastDisjointLogged bool                 // true when the last sync returned disjoint; suppresses repeat warnings; guarded by pinMu
 
 	activeResponder atomic.Pointer[relayResponder]
+	masterHash      atomic.Pointer[string]   // HashToken of the gateway token; see SetMasterToken
 	activeUplink    atomic.Pointer[api.Peer] // current gateway uplink peer for event-triggered pulls
 	peers           atomic.Pointer[peerPool] // channels to peer nodes on the current uplink; nil when down
 	roster          *peerRoster              // gateway roster mirror, never nil

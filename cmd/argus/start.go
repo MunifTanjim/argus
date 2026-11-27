@@ -172,6 +172,7 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		opts := startMCP(cfg, d, adapter.InstallOptions{ArgusBin: cfg.Bin, Socket: node.ModSocketPath(cfg.Socket)}, logger.Scoped("mcp").L)
 		d.UseMCP(opts)
 		go d.ReconcileHooks(logger.Scoped("hooks").L, opts)
+		d.SetMasterToken(cfg.Token)
 		if err := connectGateway(ctx, cfg, d); err != nil {
 			return fail(cmd, err)
 		}
