@@ -226,9 +226,12 @@ func endpointsFor(nd api.NodeDescriptor, overrides map[string][]string) []string
 	return nd.P2PEndpoints
 }
 
-// tryUpgrade dials nd directly and switches the node onto the new link. It
-// returns the direct link, or nil when the node stays on the relay.
+// tryUpgrade switches nd onto SSH when p2p.ssh configures it, else onto TCP
+// direct. It returns the new link, or nil when the node stays on the relay.
 func (m *E2EClient) tryUpgrade(nd api.NodeDescriptor) *nodeChan {
+	if nc := m.trySSH(nd); nc != nil {
+		return nc
+	}
 	if _, _, _, ok := m.p2pEligible(nd); !ok {
 		return nil
 	}
@@ -254,24 +257,43 @@ func (m *E2EClient) tryUpgrade(nd api.NodeDescriptor) *nodeChan {
 }
 
 // holdDirect waits for the direct link to end. A remote drop falls back to
-// the relay; a link closed by the client (roster, trust, Close) does not. It
-// reports whether the upgrade loop should go on.
+// the relay; a link closed by the client (roster, trust, Close) does not. While
+// the link is tcp and p2p.ssh configures the node, ssh is retried every
+// p2pRetryInterval and replaces the tcp link once it answers. It reports
+// whether the upgrade loop should go on.
 func (m *E2EClient) holdDirect(nd api.NodeDescriptor, direct *nodeChan) bool {
-	select {
-	case <-direct.out.Done():
-	case <-direct.done:
-	case <-m.trustCtx.Done():
-		return false
-	case <-m.peer.Done():
-		// Gateway loss drops every link; the node has none until a reconnect
-		// reopens it.
-		m.mu.Lock()
-		if m.byNode[nd.ID] == direct {
-			m.sendPath(NodePath{NodeID: nd.ID})
+	retry := time.NewTimer(p2pRetryInterval)
+	defer retry.Stop()
+	for {
+		var tick <-chan time.Time
+		if direct.via == viaTCP {
+			if _, ok := m.sshTargetFor(nd); ok {
+				tick = retry.C
+			}
 		}
-		m.mu.Unlock()
-		direct.close()
-		return false
+		select {
+		case <-tick:
+			if nc := m.trySSH(nd); nc != nil {
+				direct = nc
+			}
+			retry.Reset(p2pRetryInterval)
+			continue
+		case <-direct.out.Done():
+		case <-direct.done:
+		case <-m.trustCtx.Done():
+			return false
+		case <-m.peer.Done():
+			// Gateway loss drops every link; the node has none until a reconnect
+			// reopens it.
+			m.mu.Lock()
+			if m.byNode[nd.ID] == direct {
+				m.sendPath(NodePath{NodeID: nd.ID})
+			}
+			m.mu.Unlock()
+			direct.close()
+			return false
+		}
+		break
 	}
 	if !m.isLink(nd.ID, direct) {
 		return true // closed by the client; upgradeTarget decides

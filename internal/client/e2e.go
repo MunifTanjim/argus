@@ -62,7 +62,7 @@ type nodeChan struct {
 	cbor        atomic.Bool                 // gateway and node both declared cbor; set after node.identify
 
 	out   *api.Peer     // the peer this channel's frames travel on; set before the channel is registered
-	via   string        // path name: "gateway" or "tcp"
+	via   string        // path name: "gateway", "tcp" or "ssh"
 	close func()        // releases the link and removes the channel from the maps; idempotent, takes m.mu
 	done  chan struct{} // closed by close, so calls waiting on this link fail at once
 
@@ -630,35 +630,46 @@ func (m *E2EClient) onRelayFrame(src *api.Peer, f api.RelayFrame) {
 			return
 		}
 		nc.decFails = 0
-		if !nc.routeNotes.Load() {
-			return // decrypted to keep the nonce in step, but not this link's to deliver
-		}
-		if f.Enc == api.EncodingCBOR {
-			// CBOR methods need no stamping; anything else is transcoded so it
-			// gets stamped like JSON.
-			if api.CBORMethods[f.Method] {
-				select {
-				case m.events <- api.Notification{Method: f.Method, Params: params, Enc: api.EncodingCBOR}:
-				default:
-				}
-				return
+		// Decrypted to keep the nonce in step even when not this link's to deliver.
+		m.deliverNote(nc, api.Notification{Method: f.Method, Params: params, Enc: f.Enc})
+	}
+}
+
+// deliverNote stamps a node notification arriving on nc and hands it to the
+// event stream, unless nc does not route notifications now. It runs on nc's
+// read loop and never blocks.
+func (m *E2EClient) deliverNote(nc *nodeChan, n api.Notification) {
+	if !nc.routeNotes.Load() {
+		return
+	}
+	params := n.Params
+	if n.Enc == api.EncodingCBOR {
+		// CBOR methods need no stamping; anything else is transcoded so it
+		// gets stamped like JSON.
+		if api.CBORMethods[n.Method] {
+			select {
+			case m.events <- api.Notification{Method: n.Method, Params: params, Enc: api.EncodingCBOR}:
+			default:
 			}
-			if params, err = api.CBORToJSON(params); err != nil {
-				return
-			}
+			return
 		}
-		if f.Method == api.MethodSessionEvent {
-			params = stampEvent(params, nc.nodeID, nc.label)
-			m.trackSessionEvent(nc.nodeID, params)
-		} else if f.Method == api.MethodTasksChanged {
-			params = stampTasksChanged(params, nc.nodeID)
-		} else if f.Method == api.MethodTerminalChanged {
-			params, _ = json.Marshal(api.TerminalChanged{NodeID: nc.nodeID})
+		var err error
+		if params, err = api.CBORToJSON(params); err != nil {
+			return
 		}
-		select {
-		case m.events <- api.Notification{Method: f.Method, Params: params}:
-		default: // buffered; drop for a stalled consumer rather than wedge the read loop
-		}
+	}
+	switch n.Method {
+	case api.MethodSessionEvent:
+		params = stampEvent(params, nc.nodeID, nc.label)
+		m.trackSessionEvent(nc.nodeID, params)
+	case api.MethodTasksChanged:
+		params = stampTasksChanged(params, nc.nodeID)
+	case api.MethodTerminalChanged:
+		params, _ = json.Marshal(api.TerminalChanged{NodeID: nc.nodeID})
+	}
+	select {
+	case m.events <- api.Notification{Method: n.Method, Params: params}:
+	default: // buffered; drop for a stalled consumer rather than wedge the read loop
 	}
 }
 
@@ -1256,6 +1267,9 @@ func (m *E2EClient) callNode(nodeID, method string, params, out any) error {
 // callChan is callNode on a given channel. inline, when set, sees the reply
 // on the read loop (see pendingCall).
 func (m *E2EClient) callChan(nc *nodeChan, method string, params, out any, inline func(pendingReply)) error {
+	if nc.via == viaSSH {
+		return m.callSSH(nc, method, params, out, inline)
+	}
 	nodeID := nc.nodeID
 	ch := nc.ch.Load()
 	if ch == nil {
