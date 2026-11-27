@@ -31,6 +31,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/node"
 	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/selfupgrade"
+	"github.com/MunifTanjim/argus/internal/tailnet"
 	"github.com/MunifTanjim/argus/internal/tunnel"
 )
 
@@ -173,6 +174,11 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		d.UseMCP(opts)
 		go d.ReconcileHooks(logger.Scoped("hooks").L, opts)
 		d.SetMasterToken(cfg.Token)
+		if len(cfg.P2P.Listen) > 0 || len(cfg.P2P.Advertise) > 0 {
+			tctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			d.SetP2PEndpoints(tailnet.Advertised(tctx, tailnet.Local(), cfg.P2P.Listen, cfg.P2P.Advertise, logger.Scoped("p2p").L))
+			cancel()
+		}
 		if err := connectGateway(ctx, cfg, d); err != nil {
 			return fail(cmd, err)
 		}
