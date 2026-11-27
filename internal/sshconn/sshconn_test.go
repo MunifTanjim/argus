@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -141,4 +142,55 @@ func writeFakeBin(t *testing.T, script string) string {
 		t.Fatalf("write fake bin: %v", err)
 	}
 	return path
+}
+
+func TestDialCommandArgs(t *testing.T) {
+	var got []string
+	orig := sshCommand
+	defer func() { sshCommand = orig }()
+	sshCommand = func(args []string) *exec.Cmd {
+		got = args
+		return exec.Command("cat")
+	}
+	c, err := DialCommand("u@h", "2222", []string{"argus", "bridge"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	want := []string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ForwardAgent=no",
+		"-o", "ClearAllForwardings=yes", "-o", "ForwardX11=no", "-o", "ControlMaster=no",
+		"-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2", "-T", "-p", "2222", "--", "u@h", "argus", "bridge"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("args = %v\nwant   %v", got, want)
+	}
+
+	DialCommand("h", "", []string{"x"}, nil)
+	if got[len(got)-3] != "--" || got[len(got)-2] != "h" {
+		t.Fatalf("no-port args = %v", got)
+	}
+	for _, a := range got {
+		if a == "-p" {
+			t.Fatalf("unexpected -p: %v", got)
+		}
+	}
+}
+
+func TestParseSSHTarget(t *testing.T) {
+	ok := []struct{ raw, dest, port string }{
+		{"ssh://h", "h", ""},
+		{"ssh://u@h", "u@h", ""},
+		{"ssh://u@h:2222", "u@h", "2222"},
+		{"ssh://h:22/", "h", "22"},
+	}
+	for _, tc := range ok {
+		d, p, err := ParseSSHTarget(tc.raw)
+		if err != nil || d != tc.dest || p != tc.port {
+			t.Errorf("%s = %q,%q,%v want %q,%q", tc.raw, d, p, err, tc.dest, tc.port)
+		}
+	}
+	for _, raw := range []string{"ssh://-oProxyCommand=x@h", "ssh://u@-h", "ssh://", "ssh://h/p", "ssh://h?port=1", "http://h"} {
+		if _, _, err := ParseSSHTarget(raw); err == nil {
+			t.Errorf("%s: want error", raw)
+		}
+	}
 }

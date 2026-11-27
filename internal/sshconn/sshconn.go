@@ -10,7 +10,9 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/url"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 )
@@ -33,8 +35,72 @@ var command = func(sshDest, remoteHostPort, sshPort string) *exec.Cmd {
 // context and lives until the conn is closed, so the long-lived uplink outlives the
 // handshake request context. ssh's stderr is logged so auth/host-key failures surface.
 func Dial(sshDest, remoteHostPort, sshPort string, log *slog.Logger) (net.Conn, error) {
-	cmd := command(sshDest, remoteHostPort, sshPort)
+	return startConn(command(sshDest, remoteHostPort, sshPort), log)
+}
 
+// sshCommand builds the ssh invocation for DialCommand from its argument list. A
+// package var so tests can capture the argv and substitute a fake process.
+var sshCommand = func(args []string) *exec.Cmd { return exec.Command("ssh", args...) }
+
+// DialCommand runs remoteCmd on dest over ssh and returns its stdio as a net.Conn. The
+// ssh options are passed explicitly so a user's ssh_config cannot loosen them: no
+// prompts, strict host keys, no agent, X11 or other forwarding, no shared control
+// connection, a dead link detected within about 30s, no tty. "--" precedes dest so
+// it can never be parsed as an option; ParseSSHTarget also rejects dash-led values.
+func DialCommand(dest, port string, remoteCmd []string, log *slog.Logger) (net.Conn, error) {
+	args := []string{
+		"-o", "BatchMode=yes",
+		"-o", "StrictHostKeyChecking=yes",
+		"-o", "ForwardAgent=no",
+		"-o", "ClearAllForwardings=yes",
+		"-o", "ForwardX11=no",
+		"-o", "ControlMaster=no",
+		"-o", "ServerAliveInterval=15",
+		"-o", "ServerAliveCountMax=2",
+		"-T",
+	}
+	if port != "" {
+		args = append(args, "-p", port)
+	}
+	args = append(args, "--", dest)
+	args = append(args, remoteCmd...)
+	return startConn(sshCommand(args), log)
+}
+
+// ParseSSHTarget parses ssh://[user@]host[:port] into an ssh destination and port. It
+// rejects a path, query, or fragment, and a user or host starting with "-" (which ssh
+// would read as an option).
+func ParseSSHTarget(raw string) (dest, port string, err error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", "", fmt.Errorf("parse ssh url: %w", err)
+	}
+	if u.Scheme != "ssh" {
+		return "", "", fmt.Errorf("not an ssh url: %s", raw)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return "", "", fmt.Errorf("ssh url needs a host: %s", raw)
+	}
+	if (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return "", "", fmt.Errorf("ssh url takes no path or query: %s", raw)
+	}
+	dest = host
+	if u.User != nil {
+		if name := u.User.Username(); name != "" {
+			if strings.HasPrefix(name, "-") {
+				return "", "", fmt.Errorf("ssh url user must not start with '-': %s", raw)
+			}
+			dest = name + "@" + host
+		}
+	}
+	if strings.HasPrefix(host, "-") {
+		return "", "", fmt.Errorf("ssh url host must not start with '-': %s", raw)
+	}
+	return dest, u.Port(), nil
+}
+
+func startConn(cmd *exec.Cmd, log *slog.Logger) (net.Conn, error) {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("ssh stdout: %w", err)

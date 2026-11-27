@@ -44,24 +44,20 @@ func resolveGatewayURL(raw, route string, log *slog.Logger) (string, *http.Clien
 		return u.Scheme + "://" + u.Host + strings.TrimRight(u.Path, "/") + route, nil, nil
 
 	case "ssh":
-		host := u.Hostname()
-		if host == "" {
-			return "", nil, fmt.Errorf("ssh gateway url needs a host: %s", raw)
-		}
 		if u.Path != "" && u.Path != "/" {
 			return "", nil, fmt.Errorf("ssh gateway url takes no path (it dials the gateway directly): %s", raw)
 		}
-		sshPort := u.Port() // SSH port (ssh -p); empty => ssh config / 22
 		gatewayPort := u.Query().Get("port")
 		if gatewayPort == "" {
 			gatewayPort = "8443" // gateway's default --listen-addr port
 		}
-		sshDest := host
-		if u.User != nil {
-			if name := u.User.Username(); name != "" {
-				sshDest = name + "@" + host
-			}
+		q := *u
+		q.RawQuery = ""
+		sshDest, sshPort, err := sshconn.ParseSSHTarget(q.String()) // SSH port empty => ssh config / 22
+		if err != nil {
+			return "", nil, fmt.Errorf("ssh gateway url: %w", err)
 		}
+		host := u.Hostname()
 		remote := net.JoinHostPort("127.0.0.1", gatewayPort)
 
 		client := &http.Client{Transport: &http.Transport{

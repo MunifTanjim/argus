@@ -66,3 +66,11 @@ func TestResolveGatewayURLErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestGatewaySSHURLRejectsDashUser(t *testing.T) {
+	for _, raw := range []string{"ssh://-oProxyCommand=x@h", "ssh://u@-h"} {
+		if _, _, err := resolveGatewayURL(raw, "/node", nil); err == nil {
+			t.Errorf("%s: want error", raw)
+		}
+	}
+}
