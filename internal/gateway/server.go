@@ -50,9 +50,14 @@ type Server struct {
 	// nodeOpening counts the channels each node uplink is opening, so the
 	// channel limit holds while an open is between its check and addChannel.
 	nodeOpening map[*api.Peer]int
-	entries     *trustlog.EntryStore // retained trust-log entries (blind)
-	nextChan    atomic.Uint64        // chan_id allocator
-	log         *slog.Logger         // relay lifecycle logging; nil disables
+	// clientConns tracks live /client connections by token hash so revoking a
+	// token can close them.
+	clientConns map[string]map[net.Conn]struct{}
+	// afterClientAccept is a test hook run between WebSocket accept and tracking.
+	afterClientAccept func()
+	entries           *trustlog.EntryStore // retained trust-log entries (blind)
+	nextChan          atomic.Uint64        // chan_id allocator
+	log               *slog.Logger         // relay lifecycle logging; nil disables
 }
 
 // NewServer builds a gateway Server over agg using the relay path for all connections.
@@ -62,6 +67,7 @@ func NewServer(agg *Aggregator, nodeAuth, clientAuth func(token string) bool) *S
 		pairWaiters: map[string]<-chan struct{}{},
 		channels:    map[string]*relayChannel{},
 		nodePeers:   map[string]*api.Peer{},
+		clientConns: map[string]map[net.Conn]struct{}{},
 		entries:     trustlog.NewEntryStore(),
 
 		nodeKeepaliveInterval: api.DefaultKeepaliveInterval,
@@ -141,10 +147,56 @@ func (s *Server) clientHandler() http.Handler {
 		if err != nil {
 			return
 		}
+		if s.afterClientAccept != nil {
+			s.afterClientAccept()
+		}
 		admin := s.master != "" && tok == s.master
-		ctx := api.WithPrincipal(context.Background(), api.Principal{Admin: admin})
+		var hash string
+		if tok != "" {
+			hash = clienttoken.HashToken(tok)
+			s.trackClientConn(hash, conn)
+			defer s.untrackClientConn(hash, conn)
+			// A removal before tracking is invisible to closeClientsWithToken.
+			if !admin && s.clientTokens != nil && !s.clientTokens.Has(hash) {
+				_ = conn.Close()
+				return
+			}
+		}
+		ctx := api.WithPrincipal(context.Background(), api.Principal{Admin: admin, TokenHash: hash})
 		s.clientSrv.ServeConnContext(ctx, conn)
 	})
+}
+
+func (s *Server) trackClientConn(hash string, c net.Conn) {
+	s.relayMu.Lock()
+	defer s.relayMu.Unlock()
+	if s.clientConns[hash] == nil {
+		s.clientConns[hash] = map[net.Conn]struct{}{}
+	}
+	s.clientConns[hash][c] = struct{}{}
+}
+
+func (s *Server) untrackClientConn(hash string, c net.Conn) {
+	s.relayMu.Lock()
+	defer s.relayMu.Unlock()
+	delete(s.clientConns[hash], c)
+	if len(s.clientConns[hash]) == 0 {
+		delete(s.clientConns, hash)
+	}
+}
+
+// closeClientsWithToken closes every /client connection that authenticated with
+// the token hash. The connection teardown drops its relay channels.
+func (s *Server) closeClientsWithToken(hash string) {
+	s.relayMu.Lock()
+	conns := make([]net.Conn, 0, len(s.clientConns[hash]))
+	for c := range s.clientConns[hash] {
+		conns = append(conns, c)
+	}
+	s.relayMu.Unlock()
+	for _, c := range conns {
+		_ = c.Close()
+	}
 }
 
 // registerPush wires the gateway's push surface. Only push.vapidKey is served:
@@ -257,6 +309,7 @@ func (s *Server) registerClientAdmin(srv *api.Server) {
 		if err := s.clientTokens.Remove(p.Token); err != nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 		}
+		s.closeClientsWithToken(p.Token)
 		return nil, nil
 	}))
 }
@@ -483,6 +536,9 @@ func (s *Server) buildClientServer() *api.Server {
 		clientPeer, isPeer := n.(*api.Peer)
 		if !ok || !isPeer {
 			return nil, &api.RPCError{Code: api.CodeInternalError, Message: "no client peer"}
+		}
+		if pr := api.PrincipalFrom(ctx); !pr.Admin && pr.TokenHash != "" && s.clientTokens != nil && !s.clientTokens.Has(pr.TokenHash) {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unauthorized: token revoked"}
 		}
 		p, err := api.Decode[api.RelayOpenParams](params)
 		if err != nil {
