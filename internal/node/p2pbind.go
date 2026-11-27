@@ -173,7 +173,3 @@ func (d *Node) bindings() *bindingStore {
 	}
 	return nil
 }
-
-// closeDirectFor ends direct connections authenticated by keys. The direct
-// listener (a later change) fills this in; until then there are none.
-func (d *Node) closeDirectFor(keys [][]byte) {}

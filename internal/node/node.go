@@ -31,6 +31,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/selfupgrade"
 	"github.com/MunifTanjim/argus/internal/session"
+	"github.com/MunifTanjim/argus/internal/tailnet"
 	"github.com/MunifTanjim/argus/internal/tmux"
 	"github.com/MunifTanjim/argus/internal/trustlog"
 	"github.com/MunifTanjim/argus/internal/trustpin"
@@ -54,9 +55,10 @@ type Node struct {
 	label   string // human-friendly node name (e.g. hostname)
 	version string // binary version, reported to clients via identify/server.info
 
-	identity       e2e.KeyPair // node's Noise static keypair (E2E channel responder)
-	p2pEndpoints   []string    // direct URLs announced to the gateway
-	identityPubB64 string      // base64 public half, announced to the gateway
+	identity       e2e.KeyPair                    // node's Noise static keypair (E2E channel responder)
+	p2pEndpoints   atomic.Pointer[[]string]       // direct URLs announced to the gateway
+	p2pSource      func(context.Context) []string // recomputes p2pEndpoints before each uplink dial; nil keeps them
+	identityPubB64 string                         // base64 public half, announced to the gateway
 	e2ee           bool
 
 	signer       trustlog.SignerKey // node's Ed25519 signer keypair (locked-mode trust log); zero when unset
@@ -84,6 +86,8 @@ type Node struct {
 	activeUplink    atomic.Pointer[api.Peer] // current gateway uplink peer for event-triggered pulls
 	peers           atomic.Pointer[peerPool] // channels to peer nodes on the current uplink; nil when down
 	roster          *peerRoster              // gateway roster mirror, never nil
+	direct          *directSet               // direct listener connections, never nil
+	tailnetD        tailnet.Daemon           // identifies direct callers; nil rejects all
 
 	// trustPullTrigger rate-limits pulls a gateway trustlog.changed hint can
 	// provoke, so one untrusted notification amplifies into at most one pull/window.
@@ -333,8 +337,20 @@ func (d *Node) SetIdentityKey(kp e2e.KeyPair) {
 	d.identityPubB64 = base64.StdEncoding.EncodeToString(kp.Public)
 }
 
-// SetP2PEndpoints sets the direct URLs announced in node.identify. Call before ConnectGateway.
-func (d *Node) SetP2PEndpoints(urls []string) { d.p2pEndpoints = urls }
+// SetP2PEndpoints sets the direct URLs announced in node.identify.
+func (d *Node) SetP2PEndpoints(urls []string) { d.p2pEndpoints.Store(&urls) }
+
+// SetP2PEndpointSource makes the node recompute its direct URLs before each
+// uplink dial, so URLs that were unavailable at startup (tailscaled not yet
+// up) are announced on the next connect. Call before ConnectGateway.
+func (d *Node) SetP2PEndpointSource(src func(context.Context) []string) { d.p2pSource = src }
+
+func (d *Node) advertisedEndpoints() []string {
+	if p := d.p2pEndpoints.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
 
 // SetE2EE toggles the blind-relay uplink; default false uses the plaintext uplink. Call before ConnectGateway.
 func (d *Node) SetE2EE(enabled bool) { d.e2ee = enabled }
@@ -363,9 +379,12 @@ func (d *Node) Quarantined() bool { return d.trustGate.Tripped() }
 func (d *Node) localDisabled() bool { return d.localDisabledFlag.Load() }
 
 // reevaluateTrustChannels drops live client channels no longer authorized after a
-// trust-store advance. No-op when no uplink responder is active.
+// trust-store or quarantine change, on the uplink and on every direct link.
 func (d *Node) reevaluateTrustChannels() {
 	if r := d.activeResponder.Load(); r != nil {
+		r.reevaluate()
+	}
+	for _, r := range d.directResponders() {
 		r.reevaluate()
 	}
 }
@@ -546,6 +565,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 		resuming:     map[string]string{},
 	}
 	d.roster = newPeerRoster(func() string { return d.id })
+	d.direct = newDirectSet()
 	d.notifier = push.NewOSNotifier(nil, nil)
 	d.scripts = wsscript.NewRunner(d.notifyProjectsChanged)
 	d.revealFn = func(ctx context.Context, c *tmux.Client, paneID string) error {

@@ -175,12 +175,18 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		go d.ReconcileHooks(logger.Scoped("hooks").L, opts)
 		d.SetMasterToken(cfg.Token)
 		if len(cfg.P2P.Listen) > 0 || len(cfg.P2P.Advertise) > 0 {
-			tctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			d.SetP2PEndpoints(tailnet.Advertised(tctx, tailnet.Local(), cfg.P2P.Listen, cfg.P2P.Advertise, logger.Scoped("p2p").L))
-			cancel()
+			d.SetP2PEndpointSource(p2pEndpointSource(cfg, tailnet.Local()))
 		}
 		if err := connectGateway(ctx, cfg, d); err != nil {
 			return fail(cmd, err)
+		}
+		if len(cfg.P2P.Listen) > 0 {
+			if cfg.E2EE.Enabled {
+				d.SetTailnet(tailnet.Local())
+				d.ListenP2P(ctx, cfg.P2P.Listen)
+			} else {
+				logger.Scoped("p2p").L.Warn("p2p.listen ignored: direct connections need e2ee")
+			}
 		}
 	}
 
@@ -460,6 +466,17 @@ func watchParent(r io.Reader, stop context.CancelFunc) {
 
 // connectGateway dials an upstream gateway in the background to enroll the node as a
 // source. No-op when no --gateway is set.
+// p2pEndpointSource computes the direct URLs a node announces, asking
+// tailscaled for its addresses each time, so URLs missing while tailscaled is
+// not up yet are announced on a later uplink connect.
+func p2pEndpointSource(cfg *config.Config, t tailnet.Daemon) func(context.Context) []string {
+	return func(ctx context.Context) []string {
+		tctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		return tailnet.Advertised(tctx, t, cfg.P2P.Listen, cfg.P2P.Advertise, logger.Scoped("p2p").L)
+	}
+}
+
 func connectGateway(ctx context.Context, cfg *config.Config, d *node.Node) error {
 	if !uplinkMode(cfg) {
 		return nil

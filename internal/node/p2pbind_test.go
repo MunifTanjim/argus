@@ -204,10 +204,10 @@ func TestPeerChannelNeverBinds(t *testing.T) {
 	rosterKey(d, "b", bKP.Public)
 
 	notifyGW(t, gw, api.MethodTokenListChanged, api.TokenListChangedParams{Hashes: []string{"h1"}})
-	notifyGW(t, gw, api.MethodChannelOpened, api.ChannelOpenedParams{ChanID: "p1", TokenHash: "h1", NodeID: "b"})
-	handshakeOver(t, r, gw, fromNode, "p1", bKP)
-	if cs := r.lookup("p1"); cs == nil || r.channelPeer(cs) != "b" {
-		t.Fatalf("p1 = %+v, want a peer channel from b", cs)
+	notifyGW(t, gw, api.MethodChannelOpened, api.ChannelOpenedParams{ChanID: "n1", TokenHash: "h1", NodeID: "b"})
+	handshakeOver(t, r, gw, fromNode, "n1", bKP)
+	if cs := r.lookup("n1"); cs == nil || r.channelPeer(cs) != "b" {
+		t.Fatalf("n1 = %+v, want a peer channel from b", cs)
 	}
 	time.Sleep(50 * time.Millisecond)
 	if r.binds.admits(bKP.Public) || r.binds.countForTest() != 0 {
@@ -223,10 +223,10 @@ func TestLegacyPeerOpenedStillMarksPeer(t *testing.T) {
 	bKP := mustKeyPair(t)
 	rosterKey(d, "b", bKP.Public)
 
-	announcePeer(t, gw, "p1", "b")
-	handshakeOver(t, r, gw, fromNode, "p1", bKP)
-	if cs := r.lookup("p1"); cs == nil || r.channelPeer(cs) != "b" {
-		t.Fatalf("p1 = %+v, want a peer channel from b", cs)
+	announcePeer(t, gw, "n1", "b")
+	handshakeOver(t, r, gw, fromNode, "n1", bKP)
+	if cs := r.lookup("n1"); cs == nil || r.channelPeer(cs) != "b" {
+		t.Fatalf("n1 = %+v, want a peer channel from b", cs)
 	}
 	if r.binds.countForTest() != 0 {
 		t.Fatal("relay.peer_opened must not bind")

@@ -46,6 +46,9 @@ func (d *Node) ConnectGateway(ctx context.Context, url, token string, httpClient
 // relay responder that terminates channels from clients; the gateway can only
 // issue node.identify, all client requests travel through relay frames.
 func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *http.Client) (connected bool) {
+	if d.p2pSource != nil {
+		d.SetP2PEndpoints(d.p2pSource(ctx))
+	}
 	pool := d.newPeerPool()
 	resp := d.newRelayResponder(pool)
 	peer, err := api.DialWSPeer(ctx, url, token, httpClient, api.PeerOptions{
@@ -70,6 +73,9 @@ func (d *Node) runUplink(ctx context.Context, url, token string, httpClient *htt
 		d.activeUplink.CompareAndSwap(peer, nil)
 		d.activeResponder.CompareAndSwap(resp, nil)
 		d.peers.CompareAndSwap(pool, nil)
+		// Direct links need a live uplink. bindings() is nil from here, so no
+		// handshake can admit with this uplink's store once these are closed.
+		d.closeAllDirect()
 		pool.closeAll()
 		resp.closeAll()
 		peer.Close()

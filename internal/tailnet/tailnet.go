@@ -33,21 +33,40 @@ const (
 // userspace-networking mode tailscaled registers a forwarded connection just
 // after it connects, so not-found is retried briefly. Other errors fail fast.
 func Peer(ctx context.Context, d Daemon, remoteAddr string) (bool, error) {
+	res, err := whoIs(ctx, d, remoteAddr)
+	return res != nil, err
+}
+
+// PeerIdentity is Peer that returns the caller's stable tailnet node id, ""
+// when remoteAddr is not a tailnet peer or tailscaled names no node.
+func PeerIdentity(ctx context.Context, d Daemon, remoteAddr string) (string, error) {
+	res, err := whoIs(ctx, d, remoteAddr)
+	if err != nil || res == nil || res.Node == nil {
+		return "", err
+	}
+	return string(res.Node.StableID), nil
+}
+
+// whoIs looks remoteAddr up with Peer's retry, returning nil for not found.
+func whoIs(ctx context.Context, d Daemon, remoteAddr string) (*apitype.WhoIsResponse, error) {
 	deadline := time.Now().Add(peerRetryWindow)
 	for {
-		_, err := d.WhoIs(ctx, remoteAddr)
+		res, err := d.WhoIs(ctx, remoteAddr)
 		if err == nil {
-			return true, nil
+			if res == nil {
+				res = &apitype.WhoIsResponse{}
+			}
+			return res, nil
 		}
 		if !errors.Is(err, local.ErrPeerNotFound) {
-			return false, err
+			return nil, err
 		}
 		if !time.Now().Add(peerRetryInterval).Before(deadline) {
-			return false, nil
+			return nil, nil
 		}
 		select {
 		case <-ctx.Done():
-			return false, ctx.Err()
+			return nil, ctx.Err()
 		case <-time.After(peerRetryInterval):
 		}
 	}

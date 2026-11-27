@@ -33,7 +33,7 @@ func (f *fakeDaemon) WhoIs(ctx context.Context, addr string) (*apitype.WhoIsResp
 	if f.calls <= f.notFound {
 		return nil, local.ErrPeerNotFound
 	}
-	return &apitype.WhoIsResponse{Node: &tailcfg.Node{}}, nil
+	return &apitype.WhoIsResponse{Node: &tailcfg.Node{StableID: "n1"}}, nil
 }
 
 func (f *fakeDaemon) Status(ctx context.Context) (*ipnstate.Status, error) {
@@ -75,6 +75,17 @@ func TestPeerGivesUp(t *testing.T) {
 	}
 	if el := time.Since(start); el > 600*time.Millisecond {
 		t.Fatalf("took %v", el)
+	}
+}
+
+func TestPeerIdentity(t *testing.T) {
+	id, err := PeerIdentity(context.Background(), &fakeDaemon{notFound: 1}, "100.64.0.2:1234")
+	if err != nil || id != "n1" {
+		t.Fatalf("got %q, %v; want n1", id, err)
+	}
+	id, err = PeerIdentity(context.Background(), &fakeDaemon{err: errors.New("boom")}, "100.64.0.2:1234")
+	if err == nil || id != "" {
+		t.Fatalf("daemon error: got %q, %v", id, err)
 	}
 }
 
