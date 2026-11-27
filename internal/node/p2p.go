@@ -4,15 +4,22 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/clienttoken"
+	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/tailnet"
 )
 
@@ -226,8 +233,9 @@ func (s *directSet) snapshot() []*directConn {
 	return out
 }
 
-// SetTailnet sets the tailscaled used to identify direct callers. Call before
-// ListenP2P; without one every direct caller is rejected.
+// SetTailnet sets the tailscaled used to identify direct callers and to check
+// peer nodes before dialing them. Call before ConnectGateway; without one
+// every direct caller is rejected and peer nodes are reached on the relay.
 func (d *Node) SetTailnet(t tailnet.Daemon) { d.tailnetD = t }
 
 // p2pListenRetryBase and p2pListenRetryMax bound the backoff between binds of
@@ -756,4 +764,208 @@ func (d *Node) closeAllDirect() {
 		dc.resp.closeAll()
 		dc.close()
 	}
+}
+
+// peerDirectDialTimeout bounds a direct link attempt to a peer node, from the
+// dial through admission.
+const peerDirectDialTimeout = 3 * time.Second
+
+// errNoDirect reports a peer node that cannot be dialed directly: no
+// endpoints, no p2p capability, or nothing to admit this node with.
+var errNoDirect = errors.New("no direct endpoint")
+
+// directHTTPClient dials direct endpoints straight to the endpoint: no proxy
+// from the environment, which would bypass the tailnet peer check (and in
+// plaintext carry the token in the clear), and no redirects.
+var directHTTPClient = &http.Client{
+	Transport:     noProxyTransport(),
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
+// dialDirect opens pc on a direct link to nd: the first ws/wss endpoint whose
+// host is a tailnet peer, admitted by Noise with E2EE, or by the master token
+// in plaintext. On success pc is registered on its link.
+func (p *peerPool) dialDirect(pc *peerChan, nd api.NodeDescriptor) error {
+	if !nd.Capabilities.P2P || len(nd.P2PEndpoints) == 0 || p.d.tailnetD == nil {
+		return errNoDirect
+	}
+	var pub []byte
+	if p.d.e2ee {
+		var err error
+		if pub, err = base64.StdEncoding.DecodeString(nd.IdentityPubKey); err != nil || len(pub) == 0 {
+			return errNoDirect
+		}
+	} else if p.d.masterToken() == "" {
+		return errNoDirect
+	}
+	ctx, cancel := context.WithTimeout(p.ctx, peerDirectDialTimeout)
+	defer cancel()
+	err := errNoDirect
+	for _, raw := range nd.P2PEndpoints {
+		u, perr := url.Parse(raw)
+		if perr != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Hostname() == "" {
+			continue
+		}
+		if !tailnet.Dialable(ctx, p.d.tailnetD, u.Hostname()) {
+			err = fmt.Errorf("%s is not a reachable tailnet peer", u.Hostname())
+			continue
+		}
+		if err = p.dialEndpoint(ctx, pc, nd.ID, pub, raw); err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return err
+}
+
+// dialEndpoint connects to rawURL and admits a fresh direct channel to
+// nodeID on it. Frames on the link reach pc only once it is registered; the
+// handshake reply before that is taken here.
+func (p *peerPool) dialEndpoint(ctx context.Context, pc *peerChan, nodeID string, pub []byte, rawURL string) (err error) {
+	chanID, err := newDirectChanID()
+	if err != nil {
+		return err
+	}
+	var live atomic.Bool
+	hsFrames := make(chan api.RelayFrame, 1)
+	opts := api.PeerOptions{
+		OnRelayFrame: func(_ *api.Peer, f api.RelayFrame) {
+			if f.Route.ChanID != chanID {
+				return
+			}
+			if live.Load() {
+				p.frame(pc, f)
+				return
+			}
+			if f.Method == api.MethodE2EHandshake {
+				select {
+				case hsFrames <- f:
+				default:
+				}
+			}
+		},
+		KeepaliveInterval:         api.DefaultKeepaliveInterval,
+		KeepaliveTimeout:          api.DefaultKeepaliveTimeout,
+		KeepaliveFailureThreshold: api.DefaultKeepaliveFailures,
+	}
+	if !p.d.e2ee {
+		// The target names a master-token opener by asking it.
+		opts.Dispatch = p.d.identifyOnlyDispatch()
+	}
+	out, err := api.DialWSPeer(ctx, rawURL, "", directHTTPClient, opts)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			go out.Close()
+		}
+	}()
+	var ch *api.Channel
+	if p.d.e2ee {
+		ch, err = directHandshake(ctx, out, p.d.identity, pub, nodeID, chanID, hsFrames)
+	} else {
+		ch, err = presentMasterToken(ctx, out, p.d.masterToken(), nodeID, chanID)
+	}
+	if err != nil {
+		return fmt.Errorf("node %s: direct link: %w", nodeID, err)
+	}
+	pc.ch.Store(ch)
+	if err := p.register(pc, chanID, nil, out, viaTCP); err != nil {
+		return err
+	}
+	live.Store(true)
+	return nil
+}
+
+// directHandshake runs the Noise initiator for chanID on out against the
+// target's key pub.
+func directHandshake(ctx context.Context, out *api.Peer, static e2e.KeyPair, pub []byte, nodeID, chanID string, frames <-chan api.RelayFrame) (*api.Channel, error) {
+	init, msg1, err := e2e.NewInitiator(static, pub, api.ChannelPrologue(nodeID, chanID))
+	if err != nil {
+		return nil, err
+	}
+	frame, err := api.MarshalHandshakeFrame(chanID, msg1)
+	if err != nil {
+		return nil, err
+	}
+	if err := out.SendRawFrame(api.EncodingJSON, frame); err != nil {
+		return nil, err
+	}
+	select {
+	case f := <-frames:
+		msg2, err := api.HandshakeFromFrame(f)
+		if err != nil {
+			return nil, err
+		}
+		sess, err := init.Finish(msg2)
+		if err != nil {
+			return nil, err
+		}
+		return api.NewChannel(chanID, sess), nil
+	case <-out.Done():
+		return nil, errors.New("not admitted")
+	case <-ctx.Done():
+		return nil, errors.New("handshake timeout")
+	}
+}
+
+// presentMasterToken admits chanID on out with the master token, which is
+// written only after the target proved it holds the token's hash. The hash
+// itself is never sent.
+func presentMasterToken(ctx context.Context, out *api.Peer, token, nodeID, chanID string) (*api.Channel, error) {
+	var nonceRaw [32]byte
+	if _, err := rand.Read(nonceRaw[:]); err != nil {
+		return nil, err
+	}
+	nonce := base64.StdEncoding.EncodeToString(nonceRaw[:])
+	hash := clienttoken.HashToken(token)
+	tag, err := api.P2PTag(hash, nonce)
+	if err != nil {
+		return nil, err
+	}
+	want, err := api.P2PMAC(hash, nodeID, chanID, nonce)
+	if err != nil {
+		return nil, err
+	}
+	var chal api.TokenChallengeResult
+	if err := out.CallContext(ctx, api.MethodTokenChallenge, api.TokenChallengeParams{ChanID: chanID, Nonce: nonce, Tag: tag}, &chal); err != nil {
+		return nil, fmt.Errorf("token challenge: %w", err)
+	}
+	if !hmac.Equal([]byte(chal.MAC), []byte(want)) {
+		return nil, errors.New("node did not prove the token")
+	}
+	if err := out.CallContext(ctx, api.MethodTokenPresent, api.TokenPresentParams{ChanID: chanID, Token: token}, nil); err != nil {
+		return nil, fmt.Errorf("token present: %w", err)
+	}
+	return api.NewPlainChannel(chanID), nil
+}
+
+// identifyOnlyDispatch answers node.identify, which a plaintext target sends
+// a master-token opener, and nothing else.
+func (d *Node) identifyOnlyDispatch() api.DispatchFunc {
+	return func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+		if method == api.MethodNodeIdentify {
+			return d.handleNodeIdentify(ctx, params)
+		}
+		return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+	}
+}
+
+// newDirectChanID returns "p" and 16 lowercase hex digits.
+func newDirectChanID() (string, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return "p" + hex.EncodeToString(b[:]), nil
+}
+
+// noProxyTransport is the default transport without a proxy.
+func noProxyTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = nil
+	return t
 }

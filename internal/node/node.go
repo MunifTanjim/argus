@@ -83,6 +83,7 @@ type Node struct {
 
 	activeResponder atomic.Pointer[relayResponder]
 	masterHash      atomic.Pointer[string]   // HashToken of the gateway token; see SetMasterToken
+	masterTok       atomic.Pointer[string]   // the gateway token; see SetMasterToken
 	activeUplink    atomic.Pointer[api.Peer] // current gateway uplink peer for event-triggered pulls
 	peers           atomic.Pointer[peerPool] // channels to peer nodes on the current uplink; nil when down
 	roster          *peerRoster              // gateway roster mirror, never nil
@@ -379,7 +380,8 @@ func (d *Node) Quarantined() bool { return d.trustGate.Tripped() }
 func (d *Node) localDisabled() bool { return d.localDisabledFlag.Load() }
 
 // reevaluateTrustChannels drops live client channels no longer authorized after a
-// trust-store or quarantine change, on the uplink and on every direct link.
+// trust-store or quarantine change, on the uplink and on every direct link, and
+// the direct peer channels this node opened to nodes it no longer accepts.
 func (d *Node) reevaluateTrustChannels() {
 	if r := d.activeResponder.Load(); r != nil {
 		r.reevaluate()
@@ -387,6 +389,7 @@ func (d *Node) reevaluateTrustChannels() {
 	for _, r := range d.directResponders() {
 		r.reevaluate()
 	}
+	d.peers.Load().reevaluate()
 }
 
 // remoteDispatch rejects lock.*, orch.* and server.stop (local-only) and dispatches the rest.
@@ -544,6 +547,7 @@ func newNode(clients map[session.TmuxServer]*tmux.Client) *Node {
 	caps.HostWakelock = wakelock.Supported()
 	caps.CBOR = true
 	caps.CrossNodeOrch = crossNodeOrchVersion
+	caps.P2P = true
 
 	d := &Node{
 		reg: reg, clients: clients, id: hostname, label: hostname,

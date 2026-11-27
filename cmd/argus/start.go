@@ -177,11 +177,11 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		if len(cfg.P2P.Listen) > 0 || len(cfg.P2P.Advertise) > 0 {
 			d.SetP2PEndpointSource(p2pEndpointSource(cfg, tailnet.Local()))
 		}
+		d.SetTailnet(tailnet.Local())
 		if err := connectGateway(ctx, cfg, d); err != nil {
 			return fail(cmd, err)
 		}
 		if len(cfg.P2P.Listen) > 0 {
-			d.SetTailnet(tailnet.Local())
 			d.ListenP2P(ctx, cfg.P2P.Listen)
 		}
 	}

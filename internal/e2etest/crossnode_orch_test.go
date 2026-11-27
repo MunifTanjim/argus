@@ -13,6 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"tailscale.com/client/tailscale/apitype"
+	"tailscale.com/ipn/ipnstate"
+	"tailscale.com/tailcfg"
+
 	"github.com/MunifTanjim/argus/internal/adapter"
 	"github.com/MunifTanjim/argus/internal/adapter/opencode"
 	"github.com/MunifTanjim/argus/internal/api"
@@ -129,6 +133,8 @@ type crossOpts struct {
 	mode crossMode
 	// unauthB leaves b's identity key out of the trust log (locked mode).
 	unauthB bool
+	// direct makes both nodes listen for direct links and advertise them.
+	direct bool
 }
 
 // crossNet is a real gateway with nodes a and b. a holds the parent opencode
@@ -172,8 +178,8 @@ func newCrossNet(t *testing.T, opts crossOpts) *crossNet {
 		cn.chain = trustlog.MarshalChain(tlog.Entries())
 	}
 
-	cn.a = startOrchNode(t, ctx, cn, "a", keyA, opts.mode, "p1")
-	cn.b = startOrchNode(t, ctx, cn, "b", keyB, opts.mode, "")
+	cn.a = startOrchNode(t, ctx, cn, "a", keyA, opts, "p1")
+	cn.b = startOrchNode(t, ctx, cn, "b", keyB, opts, "")
 	if opts.mode != modePlaintext {
 		waitRostered(t, ctx, cn.url, "a")
 		waitRostered(t, ctx, cn.url, "b")
@@ -194,8 +200,9 @@ func mustCrossKey(t *testing.T) e2e.KeyPair {
 // startOrchNode brings up node id with an orch store and the fake agent. A
 // non-empty session registers that opencode session at once; otherwise the
 // node gets a fake spawner that registers c1.
-func startOrchNode(t *testing.T, ctx context.Context, cn *crossNet, id string, kp e2e.KeyPair, mode crossMode, sess string) *orchNode {
+func startOrchNode(t *testing.T, ctx context.Context, cn *crossNet, id string, kp e2e.KeyPair, opts crossOpts, sess string) *orchNode {
 	t.Helper()
+	mode := opts.mode
 	n := node.New()
 	n.SetIdentity(id, id)
 	n.SetVersion("itest")
@@ -241,12 +248,25 @@ func startOrchNode(t *testing.T, ctx context.Context, cn *crossNet, id string, k
 		on.sid = session.CompositeID(id, applyAgent(n, sess, session.StatusIdle, nil).ID)
 	}
 
+	var p2pAddr string
+	if opts.direct {
+		// Nodes share the master token; a plaintext node presents it to open a
+		// direct peer channel.
+		n.SetMasterToken("orch-master")
+		n.SetTailnet(tailnetStub{})
+		p2pAddr = freeAddr(t)
+		n.SetP2PEndpoints([]string{"ws://" + p2pAddr + "/p2p"})
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		n.ConnectGateway(ctx, wsURL(cn.url, "/node"), "", nil)
 	}()
+	if opts.direct {
+		n.ListenP2P(ctx, []string{p2pAddr})
+	}
 	wait := n.StartOrchForTest(ctx)
 	// Registered after the db's Close, so it runs first: the loops stop before
 	// the db closes.
@@ -456,6 +476,55 @@ func TestCrossNodeOrchPlaintext(t *testing.T) {
 
 func TestCrossNodeOrchLocked(t *testing.T) {
 	runFlow(t, newCrossNet(t, crossOpts{mode: modeLocked}), nil)
+}
+
+// tailnetStub is a running tailscaled that names every address a peer.
+type tailnetStub struct{}
+
+func (tailnetStub) WhoIs(context.Context, string) (*apitype.WhoIsResponse, error) {
+	return &apitype.WhoIsResponse{Node: &tailcfg.Node{StableID: "peer"}}, nil
+}
+
+func (tailnetStub) Status(context.Context) (*ipnstate.Status, error) {
+	return &ipnstate.Status{BackendState: "Running"}, nil
+}
+
+// freeAddr returns a loopback address with a port nothing listens on.
+func freeAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	return addr
+}
+
+// TestCrossNodeOrchDirect runs the cross-node flow with both nodes listening
+// for direct links: the nodes call each other directly, and the gateway
+// carries no channel between them.
+func TestCrossNodeOrchDirect(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mode crossMode
+	}{{"e2ee", modeE2EE}, {"plaintext", modePlaintext}, {"locked", modeLocked}} {
+		t.Run(tc.name, func(t *testing.T) {
+			cn := newCrossNet(t, crossOpts{mode: tc.mode, direct: true})
+			runFlow(t, cn, nil)
+			for _, p := range []struct {
+				from *orchNode
+				to   string
+			}{{cn.a, "b"}, {cn.b, "a"}} {
+				if via := p.from.n.PeerViaForTest(p.to); via != "tcp" {
+					t.Errorf("peer channel to %s is on %q, want tcp", p.to, via)
+				}
+			}
+			if n := cn.a.n.RelayChannelCountForTest() + cn.b.n.RelayChannelCountForTest(); n != 0 {
+				t.Errorf("nodes terminate %d relay channels, want 0", n)
+			}
+		})
+	}
 }
 
 // lockedClient connects a locked-mode client with the authorized client key.

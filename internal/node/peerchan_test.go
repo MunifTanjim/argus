@@ -398,3 +398,276 @@ func TestPeerChanSpawnGetsLongerTimeout(t *testing.T) {
 		t.Fatalf("spawn slower than a call, within the spawn timeout: %v", err)
 	}
 }
+
+// directPair is nodes a and b on one gateway, sharing a master token. b
+// listens for direct links and advertises its listener; a dials out through
+// aNet. setupB runs after b's defaults, so it can replace the endpoints.
+type directPair struct {
+	a, b  *Node
+	aNet  *fakeTailnet
+	stopA func()
+}
+
+func newDirectPair(t *testing.T, e2ee bool, setupB func(*Node)) directPair {
+	t.Helper()
+	url := startPeerGateway(t)
+	dp := directPair{aNet: &fakeTailnet{}}
+	dp.a, dp.stopA = startPeerNodeWith(t, url, "a", mustKeyPair(t), e2ee, func(n *Node) {
+		n.SetMasterToken(masterTok)
+		n.SetTailnet(dp.aNet)
+	})
+	dp.b, _ = startPeerNodeWith(t, url, "b", mustKeyPair(t), e2ee, func(n *Node) {
+		n.SetMasterToken(masterTok)
+		n.SetTailnet(&fakeTailnet{})
+		n.SetP2PEndpoints([]string{serveDirectForTest(t, n)})
+		if setupB != nil {
+			setupB(n)
+		}
+	})
+	waitPeerOnline(t, dp.a, "b", e2ee)
+	waitPeerOnline(t, dp.b, "a", e2ee)
+	return dp
+}
+
+// pingDirect pings b from a and requires the channel to be direct.
+func (dp directPair) pingDirect(t *testing.T) {
+	t.Helper()
+	pool := dp.a.peers.Load()
+	if err := pool.call(peerCtx(t), "b", api.MethodPing, nil, nil); err != nil {
+		t.Fatalf("ping b: %v", err)
+	}
+	if via := dp.a.PeerViaForTest("b"); via != viaTCP {
+		t.Fatalf("via = %q, want %q", via, viaTCP)
+	}
+}
+
+// slowCall starts a call to test.slow on b, which never returns on its own.
+func (dp directPair) slowCall(t *testing.T) <-chan error {
+	t.Helper()
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	started := make(chan struct{}, 1)
+	dp.b.server.Handle("test.slow", func(context.Context, json.RawMessage) (any, error) {
+		started <- struct{}{}
+		<-release
+		return nil, nil
+	})
+	errc := make(chan error, 1)
+	go func() { errc <- dp.a.peers.Load().call(peerCtx(t), "b", "test.slow", nil, nil) }()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("test.slow never reached b")
+	}
+	return errc
+}
+
+func wantPromptFailure(t *testing.T, errc <-chan error) {
+	t.Helper()
+	select {
+	case err := <-errc:
+		if err == nil {
+			t.Fatal("in-flight call succeeded, want it failed")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("in-flight call still waiting after its link dropped")
+	}
+}
+
+func TestPeerOpensDirect(t *testing.T) {
+	dp := newDirectPair(t, true, nil)
+	dp.pingDirect(t)
+	if id := dp.a.peers.Load().chanIDForTest("b"); !validDirectChanID(id) {
+		t.Fatalf("chan id = %q, want p and 16 hex digits", id)
+	}
+	// The gateway carried no node-opened channel.
+	if n := dp.b.RelayChannelCountForTest(); n != 0 {
+		t.Fatalf("b terminates %d relay channels, want 0", n)
+	}
+	if n := dp.b.activeResponder.Load().pendingPeerCountForTest(); n != 0 {
+		t.Fatalf("b holds %d channel.opened records, want 0", n)
+	}
+	if n := len(dp.b.directRespondersForTest()); n != 1 {
+		t.Fatalf("b serves %d direct connections, want 1", n)
+	}
+}
+
+func TestPlainPeerOpensDirect(t *testing.T) {
+	dp := newDirectPair(t, false, nil)
+	dp.b.server.Handle("orch.test", func(ctx context.Context, _ json.RawMessage) (any, error) {
+		id, _ := peerNodeFrom(ctx)
+		return id, nil
+	})
+	dp.pingDirect(t)
+	var from string
+	if err := dp.a.peers.Load().call(peerCtx(t), "b", "orch.test", nil, &from); err != nil {
+		t.Fatalf("orch.test: %v", err)
+	}
+	if from != "a" {
+		t.Fatalf("b served the call as peer %q, want a", from)
+	}
+	if n := dp.b.RelayChannelCountForTest(); n != 0 {
+		t.Fatalf("b terminates %d relay channels, want 0", n)
+	}
+	if n := len(dp.b.directRespondersForTest()); n != 1 {
+		t.Fatalf("b serves %d direct connections, want 1", n)
+	}
+}
+
+func TestPeerDirectFallsBackToRelay(t *testing.T) {
+	forModes(t, func(t *testing.T, e2ee bool) {
+		t.Run("unreachable", func(t *testing.T) {
+			dp := newDirectPair(t, e2ee, func(n *Node) {
+				n.SetP2PEndpoints([]string{"ws://127.0.0.1:1/p2p"})
+			})
+			pool := dp.a.peers.Load()
+			if err := pool.call(peerCtx(t), "b", api.MethodPing, nil, nil); err != nil {
+				t.Fatalf("ping b: %v", err)
+			}
+			if via := dp.a.PeerViaForTest("b"); via != viaGateway {
+				t.Fatalf("via = %q, want %q", via, viaGateway)
+			}
+		})
+		t.Run("not a tailnet peer", func(t *testing.T) {
+			dp := newDirectPair(t, e2ee, nil)
+			dp.aNet.deny.Store(true)
+			pool := dp.a.peers.Load()
+			if err := pool.call(peerCtx(t), "b", api.MethodPing, nil, nil); err != nil {
+				t.Fatalf("ping b: %v", err)
+			}
+			if via := dp.a.PeerViaForTest("b"); via != viaGateway {
+				t.Fatalf("via = %q, want %q", via, viaGateway)
+			}
+			if n := len(dp.b.directRespondersForTest()); n != 0 {
+				t.Fatalf("b serves %d direct connections, want 0", n)
+			}
+		})
+		t.Run("dropped", func(t *testing.T) {
+			dp := newDirectPair(t, e2ee, nil)
+			dp.pingDirect(t)
+			errc := dp.slowCall(t)
+			dp.b.closeAllDirect()
+			wantPromptFailure(t, errc)
+			pool := dp.a.peers.Load()
+			// The relay channel opens at once, before the next call.
+			waitFor(t, func() bool { return dp.a.PeerViaForTest("b") == viaGateway && pool.chanCountForTest() == 1 })
+			if err := pool.call(peerCtx(t), "b", api.MethodPing, nil, nil); err != nil {
+				t.Fatalf("ping b on the relay: %v", err)
+			}
+			if n := dp.b.RelayChannelCountForTest(); n != 1 {
+				t.Fatalf("b terminates %d relay channels, want 1", n)
+			}
+		})
+	})
+}
+
+func TestPeerUpgradesLater(t *testing.T) {
+	forModes(t, func(t *testing.T, e2ee bool) {
+		prev := peerUpgradeIntervalNs.Load()
+		peerUpgradeIntervalNs.Store(int64(100 * time.Millisecond))
+		t.Cleanup(func() { peerUpgradeIntervalNs.Store(prev) })
+
+		dp := newDirectPair(t, e2ee, nil)
+		dp.aNet.deny.Store(true)
+		pool := dp.a.peers.Load()
+		if err := pool.call(peerCtx(t), "b", api.MethodPing, nil, nil); err != nil {
+			t.Fatalf("ping b: %v", err)
+		}
+		if via := dp.a.PeerViaForTest("b"); via != viaGateway {
+			t.Fatalf("via = %q, want %q", via, viaGateway)
+		}
+		dp.aNet.deny.Store(false)
+		waitFor(t, func() bool { return dp.a.PeerViaForTest("b") == viaTCP })
+		dp.pingDirect(t)
+		// The replaced relay channel is released once it is idle.
+		waitFor(t, func() bool { return pool.chanCountForTest() == 1 && dp.b.RelayChannelCountForTest() == 0 })
+	})
+}
+
+func TestPeerDirectLockedRejectsUnauthorizedTarget(t *testing.T) {
+	dp := newDirectPair(t, true, nil)
+	// a's trust log does not hold b's key, so the roster key can be the gateway's.
+	lockTrust(t, dp.a, mustKeyPair(t).Public)
+	err := dp.a.peers.Load().call(peerCtx(t), "b", api.MethodPing, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "not authorized") {
+		t.Fatalf("err = %v, want a refused open", err)
+	}
+	if n := len(dp.b.directRespondersForTest()); n != 0 {
+		t.Fatalf("b serves %d direct connections, want 0", n)
+	}
+	if n := dp.a.peers.Load().chanCountForTest(); n != 0 {
+		t.Fatalf("channels = %d, want 0", n)
+	}
+
+	lockTrust(t, dp.a, dp.b.identity.Public)
+	lockTrust(t, dp.b, dp.a.identity.Public)
+	dp.pingDirect(t)
+}
+
+func TestPeerDirectClosesOnUplinkClose(t *testing.T) {
+	forModes(t, func(t *testing.T, e2ee bool) {
+		dp := newDirectPair(t, e2ee, nil)
+		dp.pingDirect(t)
+		errc := dp.slowCall(t)
+		dp.stopA()
+		wantPromptFailure(t, errc)
+		waitFor(t, func() bool { return len(dp.b.directRespondersForTest()) == 0 })
+	})
+}
+
+func TestPeerDirectClosesOnRosterOffline(t *testing.T) {
+	forModes(t, func(t *testing.T, e2ee bool) {
+		dp := newDirectPair(t, e2ee, nil)
+		dp.pingDirect(t)
+		pool := dp.a.peers.Load()
+		dp.a.roster.apply(api.NodeEvent{Type: api.NodeEventOffline, Node: api.NodeDescriptor{ID: "b"}})
+		waitFor(t, func() bool { return len(dp.b.directRespondersForTest()) == 0 })
+		// The roster governs: no relay fallback for an offline node.
+		time.Sleep(100 * time.Millisecond)
+		if n := pool.chanCountForTest(); n != 0 {
+			t.Fatalf("channels = %d, want 0", n)
+		}
+	})
+}
+
+func TestPeerDirectClosesOnQuarantine(t *testing.T) {
+	dp := newDirectPair(t, true, nil)
+	dp.pingDirect(t)
+	pool := dp.a.peers.Load()
+	dp.a.trustGate.Trip([]byte("genesis"))
+	dp.a.reevaluateTrustChannels()
+	waitFor(t, func() bool { return len(dp.b.directRespondersForTest()) == 0 })
+	time.Sleep(100 * time.Millisecond)
+	if n := pool.chanCountForTest(); n != 0 {
+		t.Fatalf("channels = %d, want 0", n)
+	}
+}
+
+// TestPeerDirectIgnoresUplinkFrames: a frame the gateway sends on a direct
+// channel's id never reaches that channel.
+func TestPeerDirectIgnoresUplinkFrames(t *testing.T) {
+	dp := newDirectPair(t, false, nil)
+	dp.pingDirect(t)
+	pool := dp.a.peers.Load()
+	chanID := pool.chanIDForTest("b")
+	pool.mu.Lock()
+	pc := pool.byNode["b"]
+	replyCh := make(chan peerReply, 1)
+	pc.pending[999] = replyCh
+	pool.mu.Unlock()
+	id := json.RawMessage("999")
+	raw, err := api.NewPlainChannel(chanID).SealResponseFrame(api.EncodingJSON, &id, []byte(`"forged"`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := api.ParseRelayFrame(api.EncodingJSON, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.onFrame(f)
+	select {
+	case r := <-replyCh:
+		t.Fatalf("uplink frame reached the direct channel: %+v", r)
+	case <-time.After(100 * time.Millisecond):
+	}
+}

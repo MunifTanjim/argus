@@ -201,14 +201,24 @@ func (s *bindingStore) countForTest() int {
 	return len(s.byKey)
 }
 
-// SetMasterToken records the hash of the token this node connects to the
-// gateway with. The gateway never lists it, so the node vouches for it itself.
+// SetMasterToken records the token this node connects to the gateway with,
+// and its hash. The gateway never lists it, so the node vouches for it itself.
 func (d *Node) SetMasterToken(tok string) {
 	var h string
 	if tok != "" {
 		h = clienttoken.HashToken(tok)
 	}
 	d.masterHash.Store(&h)
+	d.masterTok.Store(&tok)
+}
+
+// masterToken is the gateway token itself, which a plaintext node presents to
+// open a direct peer channel.
+func (d *Node) masterToken() string {
+	if t := d.masterTok.Load(); t != nil {
+		return *t
+	}
+	return ""
 }
 
 func (d *Node) masterTokenHash() string {

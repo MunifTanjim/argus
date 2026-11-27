@@ -66,8 +66,11 @@ var switchSettleTimeout = 5 * time.Second
 
 const dialableTimeout = 3 * time.Second
 
-// noRedirectClient dials direct endpoints without following redirects.
+// noRedirectClient dials direct endpoints straight to the endpoint: no proxy
+// from the environment, which would bypass the tailnet peer check (and in
+// plaintext carry the token in the clear), and no redirects.
 var noRedirectClient = &http.Client{
+	Transport:     noProxyTransport(),
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
@@ -634,4 +637,11 @@ func (m *E2EClient) logOnce(key, format string, args ...any) {
 	if !seen {
 		log.Printf(format, args...)
 	}
+}
+
+// noProxyTransport is the default transport without a proxy.
+func noProxyTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = nil
+	return t
 }

@@ -39,3 +39,18 @@ func (d *Node) StartOrchForTest(ctx context.Context) (wait func()) {
 	wg.Go(func() { d.outboxLoop(ctx) })
 	return wg.Wait
 }
+
+// PeerViaForTest reports the link of this node's peer channel to nodeID:
+// "gateway", "tcp", or "" when it has none. Test-only.
+func (d *Node) PeerViaForTest(nodeID string) string {
+	p := d.peers.Load()
+	if p == nil {
+		return ""
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if pc := p.byNode[nodeID]; pc != nil {
+		return pc.via
+	}
+	return ""
+}

@@ -76,8 +76,10 @@ func (f *fakeTailnet) WhoIs(ctx context.Context, _ string) (*apitype.WhoIsRespon
 	return &apitype.WhoIsResponse{Node: &tailcfg.Node{StableID: tailcfg.StableNodeID(f.nextID())}}, nil
 }
 
+// Status reports a running tailscaled, so a node dialing out through f finds
+// every WhoIs-approved host dialable.
 func (f *fakeTailnet) Status(context.Context) (*ipnstate.Status, error) {
-	return nil, errors.New("unused")
+	return &ipnstate.Status{BackendState: "Running"}, nil
 }
 
 const directChanID = "p0123456789abcdef"
