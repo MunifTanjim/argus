@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -122,7 +124,7 @@ func (m *E2EClient) startUpgrade(nd api.NodeDescriptor) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.desc[nd.ID] = nd
-	if !m.p2p.Enabled || m.plaintext || m.upgrading[nd.ID] != nil || m.byNode[nd.ID] == nil {
+	if !m.p2p.Enabled || m.upgrading[nd.ID] != nil || m.byNode[nd.ID] == nil {
 		return
 	}
 	run := &upgradeRun{}
@@ -188,7 +190,12 @@ func (m *E2EClient) p2pEligible(nd api.NodeDescriptor) (P2POptions, []string, *n
 	o := m.p2p
 	cur := m.byNode[nd.ID]
 	m.mu.Unlock()
-	if !o.Enabled || o.NoTCP || m.plaintext || !m.gatewayP2P.Load() || !nd.Capabilities.P2P || nd.IdentityPubKey == "" {
+	if !o.Enabled || o.NoTCP || !m.gatewayP2P.Load() || !nd.Capabilities.P2P {
+		return o, nil, nil, false
+	}
+	// A plaintext node has no identity key; its direct link is admitted by the
+	// token instead.
+	if m.plaintext && o.Token == "" || !m.plaintext && nd.IdentityPubKey == "" {
 		return o, nil, nil, false
 	}
 	if cur == nil || cur.via != viaGateway {
@@ -222,11 +229,17 @@ func (m *E2EClient) tryUpgrade(nd api.NodeDescriptor) *nodeChan {
 	if _, _, _, ok := m.p2pEligible(nd); !ok {
 		return nil
 	}
-	pub, err := base64.StdEncoding.DecodeString(nd.IdentityPubKey)
-	if err != nil {
-		return nil
+	var direct *nodeChan
+	var err error
+	if m.plaintext {
+		direct, err = m.dialPlainTCP(nd)
+	} else {
+		var pub []byte
+		if pub, err = base64.StdEncoding.DecodeString(nd.IdentityPubKey); err != nil {
+			return nil
+		}
+		direct, err = m.dialTCP(nd, pub)
 	}
-	direct, err := m.dialTCP(nd, pub)
 	if err != nil {
 		m.logOnce(nd.ID+"\x00"+err.Error(), "client: node %s direct link unavailable: %v", nd.ID, err)
 		return nil
@@ -294,9 +307,11 @@ func (m *E2EClient) fallBack(nd api.NodeDescriptor, direct *nodeChan) error {
 		return err
 	}
 	relay.cbor.Store(m.gatewayCBOR.Load() && res.Capabilities.CBOR)
-	m.mu.Lock()
-	m.authTip[string(pub)] = res.Tip
-	m.mu.Unlock()
+	if !m.plaintext {
+		m.mu.Lock()
+		m.authTip[string(pub)] = res.Tip
+		m.mu.Unlock()
+	}
 	return m.swapLink(nd.ID, relay)
 }
 
@@ -327,7 +342,13 @@ func (m *E2EClient) dialTCP(nd api.NodeDescriptor, pub []byte) (*nodeChan, error
 			err = fmt.Errorf("%s is not a reachable tailnet peer", u.Hostname())
 			continue
 		}
-		nc, derr := m.dialEndpoint(nd, pub, raw)
+		var nc *nodeChan
+		var derr error
+		if m.plaintext {
+			nc, derr = m.dialPlainEndpoint(nd, o.Token, raw)
+		} else {
+			nc, derr = m.dialEndpoint(nd, pub, raw)
+		}
 		if derr == nil {
 			nc.replaces = cur
 			return nc, nil
@@ -349,12 +370,7 @@ func (m *E2EClient) dialEndpoint(nd api.NodeDescriptor, pub []byte, rawURL strin
 		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(m.trustCtx, time.Duration(handshakeTimeoutNs.Load()))
-	peer, err := api.DialWSPeer(ctx, rawURL, "", noRedirectClient, api.PeerOptions{
-		OnRelayFrame:              m.onRelayFrame,
-		KeepaliveInterval:         p2pKeepaliveInterval,
-		KeepaliveTimeout:          p2pKeepaliveTimeout,
-		KeepaliveFailureThreshold: p2pKeepaliveFailures,
-	})
+	peer, err := m.dialDirectPeer(ctx, rawURL)
 	cancel()
 	if err != nil {
 		return nil, err
@@ -384,6 +400,93 @@ func (m *E2EClient) dialEndpoint(nd api.NodeDescriptor, pub []byte, rawURL strin
 	m.mu.Lock()
 	m.authTip[string(pub)] = res.Tip
 	m.mu.Unlock()
+	return nc, nil
+}
+
+func (m *E2EClient) dialDirectPeer(ctx context.Context, rawURL string) (*api.Peer, error) {
+	return api.DialWSPeer(ctx, rawURL, "", noRedirectClient, api.PeerOptions{
+		OnRelayFrame:              m.onRelayFrame,
+		KeepaliveInterval:         p2pKeepaliveInterval,
+		KeepaliveTimeout:          p2pKeepaliveTimeout,
+		KeepaliveFailureThreshold: p2pKeepaliveFailures,
+	})
+}
+
+// dialPlainTCP opens and identifies a plaintext direct link to nd on the first
+// reachable ws/wss endpoint that is a tailnet peer.
+func (m *E2EClient) dialPlainTCP(nd api.NodeDescriptor) (*nodeChan, error) {
+	return m.dialTCP(nd, nil)
+}
+
+// dialPlainEndpoint connects to rawURL and admits the client with its token,
+// which is written only after the node proved it holds the token's hash. The
+// hash itself is never sent. The node is not switched onto the new link.
+func (m *E2EClient) dialPlainEndpoint(nd api.NodeDescriptor, token, rawURL string) (_ *nodeChan, err error) {
+	chanID, err := newDirectChanID()
+	if err != nil {
+		return nil, err
+	}
+	var nonceRaw [32]byte
+	if _, err := rand.Read(nonceRaw[:]); err != nil {
+		return nil, err
+	}
+	nonce := base64.StdEncoding.EncodeToString(nonceRaw[:])
+	hash := clienttoken.HashToken(token)
+	tag, err := api.P2PTag(hash, nonce)
+	if err != nil {
+		return nil, err
+	}
+	want, err := api.P2PMAC(hash, nd.ID, chanID, nonce)
+	if err != nil {
+		return nil, err
+	}
+	timeout := time.Duration(handshakeTimeoutNs.Load())
+	ctx, cancel := context.WithTimeout(m.trustCtx, timeout)
+	peer, err := m.dialDirectPeer(ctx, rawURL)
+	cancel()
+	if err != nil {
+		return nil, err
+	}
+	// Admission calls take no context; closing the peer ends them.
+	guard := time.AfterFunc(timeout, func() { peer.Close() })
+	defer func() {
+		guard.Stop()
+		if err != nil {
+			go peer.Close()
+		}
+	}()
+	var chal api.TokenChallengeResult
+	if err := peer.Call(api.MethodTokenChallenge, api.TokenChallengeParams{ChanID: chanID, Nonce: nonce, Tag: tag}, &chal); err != nil {
+		return nil, fmt.Errorf("token challenge: %w", err)
+	}
+	if !hmac.Equal([]byte(chal.MAC), []byte(want)) {
+		return nil, errors.New("node did not prove the token")
+	}
+	if err := peer.Call(api.MethodTokenPresent, api.TokenPresentParams{ChanID: chanID, Token: token}, nil); err != nil {
+		return nil, fmt.Errorf("token present: %w", err)
+	}
+	guard.Stop()
+
+	nc := &nodeChan{nodeID: nd.ID, label: nd.Label, hs: make(chan error, 1), standby: true}
+	m.useDirectLink(nc, peer, chanID)
+	nc.ch.Store(api.NewPlainChannel(chanID))
+	m.mu.Lock()
+	m.byChanID[chanID] = nc
+	m.mu.Unlock()
+	defer func() {
+		if err != nil {
+			nc.close()
+		}
+	}()
+	if m.trustCtx.Err() != nil {
+		return nil, errors.New("client closed")
+	}
+	// The node creates its side of the channel on the first channel frame.
+	var res api.IdentifyResult
+	if err := m.callChan(nc, api.MethodNodeIdentify, api.IdentifyParams{Capabilities: &api.PeerCapabilities{CBOR: true}}, &res, nil); err != nil {
+		return nil, fmt.Errorf("identify: %w", err)
+	}
+	nc.cbor.Store(res.Capabilities.CBOR)
 	return nc, nil
 }
 

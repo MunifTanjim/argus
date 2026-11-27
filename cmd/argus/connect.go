@@ -51,6 +51,7 @@ func dialNodeClient(ctx context.Context, cfg *config.Config, gatewayURL, token, 
 			if err != nil {
 				return nil, fmt.Errorf("cannot connect to gateway at %s: %w", gatewayURL, err)
 			}
+			c.SetP2POptions(p2pOptions(cfg, token, oneShot))
 			return c, nil
 		}
 		if len(head) > 0 {

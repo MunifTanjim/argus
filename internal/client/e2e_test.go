@@ -114,6 +114,8 @@ type fakeNode struct {
 	// plaintext, when true, skips the Noise handshake: the first sealed (=cleartext)
 	// request frame lazily creates an identity channel instead.
 	plaintext bool
+	// plainChanID is the relay channel n.ch serves in plaintext mode.
+	plainChanID string
 	// tip is returned by node.identify over the authenticated channel.
 	tip []byte
 	// lockDisabled is advertised in the roster as LockDisabled.
@@ -315,11 +317,12 @@ func (g *fakeMultiGateway) onFrame(_ *api.Peer, f api.RelayFrame) {
 		}
 		return
 	}
-	if n.ch == nil {
+	if n.ch == nil || n.plaintext && n.plainChanID != f.Route.ChanID {
 		if !n.plaintext {
 			return
 		}
 		n.ch = api.NewPlainChannel(f.Route.ChanID)
+		n.plainChanID = f.Route.ChanID
 	}
 	params, err := n.ch.OpenParams(f)
 	if err != nil {

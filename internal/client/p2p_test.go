@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -911,4 +912,303 @@ func TestLostDuringSwitchNotReportedTCP(t *testing.T) {
 		return len(gws) == 2
 	})
 	noPath(t, c.Paths(), time.Second)
+}
+
+// recordConn keeps every byte read from the client.
+type recordConn struct {
+	net.Conn
+	mu  *sync.Mutex
+	buf *[]byte
+}
+
+func (c *recordConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	c.mu.Lock()
+	*c.buf = append(*c.buf, b[:n]...)
+	c.mu.Unlock()
+	return n, err
+}
+
+// plainDirect is a plaintext node's /p2p listener: token.challenge,
+// token.present, then a plain channel serving node.identify, sessions.list and
+// echo. mode selects a misbehaving node.
+type plainDirect struct {
+	t      *testing.T
+	nodeID string
+	hash   string // the token hash the node holds
+	mode   string // "", "wrongmac" or "close"
+	refuse atomic.Bool
+	srv    *httptest.Server
+	url    string
+
+	mu        sync.Mutex
+	recv      []byte
+	presented []string
+	chanID    string
+	nonce     string
+	ch        *api.Channel
+	peer      atomic.Pointer[api.Peer]
+	calls     map[string]int
+	sessions  []session.Session
+}
+
+func newPlainDirect(t *testing.T, n *fakeNode, token string, sessions ...session.Session) *plainDirect {
+	t.Helper()
+	d := &plainDirect{t: t, nodeID: n.id, hash: clienttoken.HashToken(token), calls: map[string]int{}, sessions: sessions}
+	d.srv = httptest.NewServer(http.HandlerFunc(d.serve))
+	t.Cleanup(d.srv.Close)
+	d.url = "ws" + strings.TrimPrefix(d.srv.URL, "http") + "/p2p"
+	return d
+}
+
+func (d *plainDirect) serve(w http.ResponseWriter, r *http.Request) {
+	if d.refuse.Load() {
+		http.Error(w, "busy", http.StatusServiceUnavailable)
+		return
+	}
+	conn, err := api.AcceptWS(w, r)
+	if err != nil {
+		return
+	}
+	rc := &recordConn{Conn: conn, mu: &d.mu, buf: &d.recv}
+	p := api.NewPeer(rc, api.PeerOptions{
+		OnRelayFrame: d.onFrame,
+		Dispatch: func(_ context.Context, method string, params json.RawMessage) (any, error) {
+			switch method {
+			case api.MethodTokenChallenge:
+				var p api.TokenChallengeParams
+				_ = json.Unmarshal(params, &p)
+				if d.mode == "close" {
+					go d.closePeer()
+					return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "not admitted"}
+				}
+				if want, _ := api.P2PTag(d.hash, p.Nonce); want != p.Tag {
+					go d.closePeer()
+					return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "not admitted"}
+				}
+				mac, _ := api.P2PMAC(d.hash, d.nodeID, p.ChanID, p.Nonce)
+				if d.mode == "wrongmac" {
+					mac, _ = api.P2PMAC(d.hash, d.nodeID, p.ChanID, p.Nonce+"x")
+				}
+				d.mu.Lock()
+				d.chanID, d.nonce = p.ChanID, p.Nonce
+				d.mu.Unlock()
+				return api.TokenChallengeResult{MAC: mac}, nil
+			case api.MethodTokenPresent:
+				var p api.TokenPresentParams
+				_ = json.Unmarshal(params, &p)
+				d.mu.Lock()
+				d.presented = append(d.presented, p.Token)
+				d.mu.Unlock()
+				return nil, nil
+			}
+			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found"}
+		},
+	})
+	d.peer.Store(p)
+}
+
+func (d *plainDirect) closePeer() {
+	for d.peer.Load() == nil {
+		time.Sleep(time.Millisecond)
+	}
+	d.peer.Load().Close()
+}
+
+func (d *plainDirect) onFrame(p *api.Peer, f api.RelayFrame) {
+	d.mu.Lock()
+	if d.ch == nil {
+		if f.Route.ChanID != d.chanID || len(d.presented) == 0 {
+			d.mu.Unlock()
+			go p.Close()
+			return
+		}
+		d.ch = api.NewPlainChannel(f.Route.ChanID)
+	}
+	ch := d.ch
+	d.calls[f.Method]++
+	sessions := d.sessions
+	d.mu.Unlock()
+	params, err := ch.OpenParams(f)
+	if err != nil {
+		return
+	}
+	var result json.RawMessage
+	switch f.Method {
+	case api.MethodNodeIdentify:
+		result, _ = json.Marshal(api.IdentifyResult{ID: d.nodeID, Capabilities: api.NodeCapabilities{P2P: true}})
+	case api.MethodSessionsList:
+		result, _ = json.Marshal(sessions)
+	case "test.block":
+		return // never answered
+	default:
+		result = params
+	}
+	rf, _ := ch.SealResponseFrame(api.EncodingJSON, f.ID, result, nil)
+	_ = p.SendRawFrame(api.EncodingJSON, rf)
+}
+
+func (d *plainDirect) received() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return string(d.recv)
+}
+
+func (d *plainDirect) callCount(method string) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.calls[method]
+}
+
+const plainTestToken = "tok-secret-0123456789abcdef"
+
+// connectPlainP2P connects a plaintext client to a relay node whose roster
+// entry points at a plaintext direct listener.
+func connectPlainP2P(t *testing.T, mode string) (*E2EClient, *plainDirect, *fakeMultiGateway) {
+	t.Helper()
+	n, _ := p2pNode(t, "n1", session.Session{ID: "argus:%1", Agent: "claude"})
+	n.plaintext = true
+	d := newPlainDirect(t, n, plainTestToken, session.Session{ID: "argus:%1", Agent: "claude"})
+	d.mode = mode
+	n.endpoints = []string{d.url}
+	g, conn := newFakeMultiGateway(t, n)
+	g.p2p = true
+	t.Cleanup(func() { g.peer.Close() })
+	c, err := NewE2EClientPlain(conn)
+	if err != nil {
+		t.Fatalf("NewE2EClientPlain: %v", err)
+	}
+	t.Cleanup(func() { c.Close() })
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	awaitPath(t, c.Paths(), NodePath{NodeID: "n1", Via: "gateway"})
+	return c, d, g
+}
+
+func TestPlaintextUpgradesToTCP(t *testing.T) {
+	c, d, g := connectPlainP2P(t, "")
+	c.SetP2POptions(P2POptions{Enabled: true, Token: plainTestToken, dialable: alwaysDialable})
+
+	awaitPath(t, c.Paths(), NodePath{NodeID: "n1", Via: "tcp"})
+	if got := c.NodeVias()["n1"]; got != "tcp" {
+		t.Fatalf("via = %q, want tcp", got)
+	}
+	d.mu.Lock()
+	presented := append([]string(nil), d.presented...)
+	chanID := d.chanID
+	d.mu.Unlock()
+	if len(presented) != 1 || presented[0] != plainTestToken {
+		t.Fatalf("presented tokens = %v", presented)
+	}
+	if !directChanIDRe.MatchString(chanID) {
+		t.Fatalf("chan id %q, want p + 16 lowercase hex", chanID)
+	}
+	if d.callCount(api.MethodNodeIdentify) != 1 {
+		t.Fatal("node.identify not sent on the direct link")
+	}
+	before := d.callCount(api.MethodSessionsList)
+	var list []session.Session
+	if err := c.Call(api.MethodSessionsList, nil, &list); err != nil {
+		t.Fatalf("sessions.list: %v", err)
+	}
+	if len(list) != 1 || d.callCount(api.MethodSessionsList) != before+1 {
+		t.Fatalf("sessions.list did not travel over the direct link: %+v", list)
+	}
+	select {
+	case <-g.relayClosed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("relay not closed after the switch")
+	}
+}
+
+func TestPlaintextNeverSendsHash(t *testing.T) {
+	c, d, _ := connectPlainP2P(t, "")
+	c.SetP2POptions(P2POptions{Enabled: true, Token: plainTestToken, dialable: alwaysDialable})
+	awaitPath(t, c.Paths(), NodePath{NodeID: "n1", Via: "tcp"})
+	if got := d.received(); !strings.Contains(got, plainTestToken) {
+		t.Fatal("recorder did not see the token-bearing frame")
+	}
+	if got := d.received(); strings.Contains(got, d.hash) {
+		t.Fatalf("token hash reached the wire: %s", got)
+	}
+}
+
+func TestPlaintextNoTokenWithoutProof(t *testing.T) {
+	for _, mode := range []string{"wrongmac", "close"} {
+		t.Run(mode, func(t *testing.T) {
+			c, d, _ := connectPlainP2P(t, mode)
+			c.SetP2POptions(P2POptions{Enabled: true, Token: plainTestToken, dialable: alwaysDialable})
+			noPath(t, c.Paths(), time.Second)
+			if got := c.NodeVias()["n1"]; got != "gateway" {
+				t.Fatalf("via = %q, want gateway", got)
+			}
+			if got := d.received(); got == "" || strings.Contains(got, plainTestToken) || strings.Contains(got, d.hash) {
+				t.Fatalf("token or hash on the wire (or nothing received): %q", got)
+			}
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			if len(d.presented) != 0 {
+				t.Fatalf("token presented: %v", d.presented)
+			}
+		})
+	}
+}
+
+func TestPlaintextNoUpgradeWhenTailnetDown(t *testing.T) {
+	c, d, _ := connectPlainP2P(t, "")
+	var asked atomic.Int32
+	c.SetP2POptions(P2POptions{Enabled: true, Token: plainTestToken, dialable: func(context.Context, string) bool {
+		asked.Add(1)
+		return false
+	}})
+	noPath(t, c.Paths(), time.Second)
+	if asked.Load() < 2 {
+		t.Fatalf("dialable asked %d times, want retries", asked.Load())
+	}
+	if got := d.received(); got != "" {
+		t.Fatalf("dialed with tailnet down: %q", got)
+	}
+}
+
+func TestPlaintextDropFallsBackToRelay(t *testing.T) {
+	c, d, _ := connectPlainP2P(t, "")
+	c.SetP2POptions(P2POptions{Enabled: true, Token: plainTestToken, dialable: alwaysDialable})
+	awaitPath(t, c.Paths(), NodePath{NodeID: "n1", Via: "tcp"})
+	drainEvents(c, 100*time.Millisecond)
+
+	errc := make(chan error, 1)
+	go func() { errc <- c.callNode("n1", "test.block", nil, nil) }()
+	waitUntil(t, "blocked call on the direct link", func() bool { return d.callCount("test.block") == 1 })
+
+	d.refuse.Store(true)
+	d.peer.Load().Close()
+	select {
+	case err := <-errc:
+		if err == nil {
+			t.Fatal("in-flight call succeeded on a dropped link")
+		}
+	case <-time.After(callTimeout / 2):
+		t.Fatal("in-flight call did not fail promptly on drop")
+	}
+	awaitPath(t, c.Paths(), NodePath{NodeID: "n1", Via: "gateway"})
+	noPath(t, c.Paths(), time.Second)
+	if got := c.NodeVias()["n1"]; got != "gateway" {
+		t.Fatalf("via = %q, want gateway", got)
+	}
+	for _, ev := range sessionEvents(t, drainEvents(c, 200*time.Millisecond)) {
+		if ev.Session.Offline || ev.Type == registry.EventRemoved {
+			t.Fatalf("fallback surfaced %s offline=%v for %s", ev.Type, ev.Session.Offline, ev.Session.ID)
+		}
+	}
+	var list []session.Session
+	if err := c.Call(api.MethodSessionsList, nil, &list); err != nil || len(list) != 1 {
+		t.Fatalf("sessions.list over relay = %+v, %v", list, err)
+	}
+	c.mu.Lock()
+	n := len(c.pending)
+	c.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d pending replies leaked", n)
+	}
 }
