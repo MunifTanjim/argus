@@ -60,6 +60,34 @@ type nodeChan struct {
 	hs          chan error                  // handshake outcome, sent once ch is established
 	decFails    int                         // consecutive decrypt failures; read-loop only, reset on success
 	cbor        atomic.Bool                 // gateway and node both declared cbor; set after node.identify
+
+	out   *api.Peer // the peer this channel's frames travel on; set before the channel is registered
+	via   string    // path name: "gateway"
+	close func()    // releases the link and removes the channel from the maps; idempotent, takes m.mu
+}
+
+// useRelayLink binds nc to the gateway relay channel chanID. Its close tells the
+// gateway to drop the relay (best effort, off the caller's goroutine) and removes
+// nc from the client's maps.
+func (m *E2EClient) useRelayLink(nc *nodeChan, chanID string) {
+	nc.out = m.peer
+	nc.via = "gateway"
+	var once sync.Once
+	nc.close = func() {
+		once.Do(func() {
+			m.mu.Lock()
+			if m.byChanID[chanID] == nc {
+				delete(m.byChanID, chanID)
+			}
+			if m.byNode[nc.nodeID] == nc {
+				delete(m.byNode, nc.nodeID)
+			}
+			m.mu.Unlock()
+			go func() {
+				_ = nc.out.Call(api.MethodRelayClose, api.RelayCloseParams{ChanID: chanID}, nil)
+			}()
+		})
+	}
 }
 
 type pendingReply struct {
@@ -257,7 +285,24 @@ func (m *E2EClient) Close() error {
 		t.Stop()
 		delete(m.offlineTimers, id)
 	}
+	seen := map[*nodeChan]bool{}
+	var chans []*nodeChan
+	for _, nc := range m.byNode {
+		if !seen[nc] {
+			seen[nc] = true
+			chans = append(chans, nc)
+		}
+	}
+	for _, nc := range m.byChanID {
+		if !seen[nc] {
+			seen[nc] = true
+			chans = append(chans, nc)
+		}
+	}
 	m.mu.Unlock()
+	for _, nc := range chans {
+		nc.close()
+	}
 	return m.peer.Close()
 }
 
@@ -364,7 +409,7 @@ func (m *E2EClient) openIfEligible(nd api.NodeDescriptor) error {
 // openChannel runs relay.open then either establishes a plaintext identity channel
 // (when m.plaintext is set) or performs the Noise IK initiator handshake.
 // pub is the decoded identity public key, already checked by Connect.
-func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
+func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) (err error) {
 	// Wait for NewE2EClientWithGate to finish: api.NewPeer starts its read loop
 	// before returning, so a node.event can spawn this goroutine via onPeerNotify
 	// → adoptNode before m.peer is assigned. The channel close is the
@@ -376,6 +421,7 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
 	}
 	if m.plaintext {
 		nc := &nodeChan{nodeID: nd.ID, label: nd.Label, hs: make(chan error, 1)}
+		m.useRelayLink(nc, res.ChanID)
 		nc.ch.Store(api.NewPlainChannel(res.ChanID))
 		m.mu.Lock()
 		m.byNode[nd.ID] = nc
@@ -389,21 +435,28 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) error {
 		return err
 	}
 	nc := &nodeChan{nodeID: nd.ID, label: nd.Label, identityPub: append([]byte(nil), pub...), init: init, hs: make(chan error, 1)}
+	m.useRelayLink(nc, res.ChanID)
 	m.mu.Lock()
 	m.byChanID[res.ChanID] = nc
 	m.mu.Unlock()
+	// The channel is registered; any failure from here releases it and its relay.
+	defer func() {
+		if err != nil {
+			nc.close()
+		}
+	}()
 
 	frame, err := api.MarshalHandshakeFrame(res.ChanID, msg1)
 	if err != nil {
 		return err
 	}
-	if err := m.peer.SendRawFrame(api.EncodingJSON, frame); err != nil {
+	if err := nc.out.SendRawFrame(api.EncodingJSON, frame); err != nil {
 		return err
 	}
 	select {
 	case err := <-nc.hs:
 		return err
-	case <-m.peer.Done():
+	case <-nc.out.Done():
 		return fmt.Errorf("connection closed during handshake")
 	case <-time.After(time.Duration(handshakeTimeoutNs.Load())):
 		return fmt.Errorf("handshake timeout")
@@ -439,11 +492,11 @@ func wedgeWarn(n *int) bool {
 
 // onRelayFrame demuxes inbound relay frames on the Peer read loop. It Opens every
 // sealed frame inline in arrival order (shared dec-nonce) and never blocks.
-func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
+func (m *E2EClient) onRelayFrame(src *api.Peer, f api.RelayFrame) {
 	m.mu.Lock()
 	nc := m.byChanID[f.Route.ChanID]
 	m.mu.Unlock()
-	if nc == nil {
+	if nc == nil || src != nc.out {
 		return
 	}
 	if f.Method == api.MethodE2EHandshake {
@@ -458,13 +511,15 @@ func (m *E2EClient) onRelayFrame(_ *api.Peer, f api.RelayFrame) {
 			// session snapshot) can be processed — ensuring any consumer that reacts
 			// to the resulting session.event already sees this node in byNode.
 			m.mu.Lock()
-			if m.gate.Tripped() {
-				delete(m.byChanID, f.Route.ChanID)
-			} else {
+			tripped := m.gate.Tripped()
+			if !tripped {
 				m.byNode[nc.nodeID] = nc
 				m.everConnected[string(nc.identityPub)] = true
 			}
 			m.mu.Unlock()
+			if tripped {
+				nc.close()
+			}
 		}
 		select {
 		case nc.hs <- err:
@@ -655,6 +710,9 @@ func (m *E2EClient) reevaluateChannels() {
 			delete(m.authTip, key)
 		}
 		m.mu.Unlock()
+		for _, nc := range drop {
+			nc.close()
+		}
 		return
 	}
 	if m.trust == nil || m.trust.Disabled() {
@@ -678,6 +736,9 @@ func (m *E2EClient) reevaluateChannels() {
 		delete(m.authTip, key)
 	}
 	m.mu.Unlock()
+	for _, nc := range drop {
+		nc.close()
+	}
 }
 
 // fanoutSessions calls method on every node channel, stamps composite origin, merges.
@@ -1135,7 +1196,7 @@ func (m *E2EClient) callNode(nodeID, method string, params, out any) error {
 	nc.sendMu.Lock()
 	frame, err := ch.SealRequestFrame(enc, &idRaw, method, nodeID, paramsRaw)
 	if err == nil {
-		err = m.peer.SendRawFrame(enc, frame)
+		err = nc.out.SendRawFrame(enc, frame)
 	}
 	nc.sendMu.Unlock()
 	if err != nil {
@@ -1152,7 +1213,7 @@ func (m *E2EClient) callNode(nodeID, method string, params, out any) error {
 			return nil
 		}
 		return reply.enc.Unmarshal(reply.result, out)
-	case <-m.peer.Done():
+	case <-nc.out.Done():
 		m.forget(id)
 		return fmt.Errorf("client: connection closed")
 	case <-time.After(callTimeoutFor(method)):
@@ -1498,7 +1559,8 @@ func (m *E2EClient) adoptNode(nd api.NodeDescriptor) {
 // report those sessions — the node that owned them is exactly what went away.
 func (m *E2EClient) loseNode(nodeID string, gone bool) {
 	m.mu.Lock()
-	if nc := m.byNode[nodeID]; nc != nil {
+	nc := m.byNode[nodeID]
+	if nc != nil {
 		delete(m.byNode, nodeID)
 		if ch := nc.ch.Load(); ch != nil {
 			delete(m.byChanID, ch.ID())
@@ -1529,6 +1591,9 @@ func (m *E2EClient) loseNode(nodeID string, gone bool) {
 		}
 	}
 	m.mu.Unlock()
+	if nc != nil {
+		nc.close()
+	}
 	m.emitSessionEvents(events)
 }
 

@@ -141,8 +141,9 @@ type fakeMultiGateway struct {
 	// gotHandshake is set when any e2e.handshake frame is received; used to assert
 	// that plaintext clients send none.
 	gotHandshake  bool
-	syncCallCount int  // incremented each time trustlog.sync is dispatched; guarded by mu
-	cbor          bool // reported as capabilities.cbor in server.info
+	syncCallCount int         // incremented each time trustlog.sync is dispatched; guarded by mu
+	cbor          bool        // reported as capabilities.cbor in server.info
+	relayClosed   chan string // chan_ids received in relay.close
 }
 
 func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, net.Conn) {
@@ -151,6 +152,8 @@ func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, n
 	g := &fakeMultiGateway{
 		nodes:  map[string]*fakeNode{},
 		byChan: map[string]*fakeNode{},
+
+		relayClosed: make(chan string, 16),
 	}
 	for _, n := range nodes {
 		g.nodes[n.id] = n
@@ -176,6 +179,14 @@ func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, n
 				chID := "c" + strconv.Itoa(g.nextCh)
 				g.byChan[chID] = n
 				return api.RelayOpenResult{ChanID: chID}, nil
+			case api.MethodRelayClose:
+				var p api.RelayCloseParams
+				_ = json.Unmarshal(params, &p)
+				select {
+				case g.relayClosed <- p.ChanID:
+				default:
+				}
+				return nil, nil
 			case api.MethodTrustLogSync:
 				g.mu.Lock()
 				g.syncCallCount++
