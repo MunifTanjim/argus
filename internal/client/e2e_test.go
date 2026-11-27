@@ -124,6 +124,14 @@ type fakeNode struct {
 	// encodings; guarded by the gateway's mu.
 	identifyParams []json.RawMessage
 	encs           map[string][]api.Encoding
+	// endpoints and p2pCap are advertised in the roster as P2PEndpoints and
+	// capabilities.p2p.
+	endpoints []string
+	p2pCap    bool
+	// silent methods get no reply; their request ids are kept in silentIDs
+	// (guarded by the gateway's mu) so a test can answer them later.
+	silent    map[string]bool
+	silentIDs []*json.RawMessage
 }
 
 // fakeMultiGateway is one peer playing the gateway for several nodes: nodes.list
@@ -143,7 +151,15 @@ type fakeMultiGateway struct {
 	gotHandshake  bool
 	syncCallCount int         // incremented each time trustlog.sync is dispatched; guarded by mu
 	cbor          bool        // reported as capabilities.cbor in server.info
+	p2p           bool        // reported as capabilities.p2p in server.info
 	relayClosed   chan string // chan_ids received in relay.close
+	relayOpens    int         // relay.open calls; guarded by mu
+	// relayOpenHook, when set, runs inside relay.open with the call count,
+	// before the reply is sent; guarded by mu.
+	relayOpenHook func(count int)
+	// sendMu serializes sealing on the node channels between the read loop and
+	// test goroutines that inject frames.
+	sendMu sync.Mutex
 }
 
 func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, net.Conn) {
@@ -175,6 +191,13 @@ func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, n
 				if n == nil {
 					return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown node"}
 				}
+				g.mu.Lock()
+				g.relayOpens++
+				count, hook := g.relayOpens, g.relayOpenHook
+				g.mu.Unlock()
+				if hook != nil {
+					hook(count)
+				}
 				g.nextCh++
 				chID := "c" + strconv.Itoa(g.nextCh)
 				g.byChan[chID] = n
@@ -202,8 +225,8 @@ func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, n
 				return api.TrustLogSyncResult{Entries: entries}, nil
 			case api.MethodServerInfo:
 				info := api.ServerInfo{Version: "test"}
-				if g.cbor {
-					info.Capabilities = &api.PeerCapabilities{CBOR: true}
+				if g.cbor || g.p2p {
+					info.Capabilities = &api.PeerCapabilities{CBOR: g.cbor, P2P: g.p2p}
 				}
 				return info, nil
 			}
@@ -231,6 +254,8 @@ func (g *fakeMultiGateway) nodeDescriptor(n *fakeNode) api.NodeDescriptor {
 		ID: n.id, Label: n.id + "-box", Online: true,
 		IdentityPubKey: base64.StdEncoding.EncodeToString(n.key.Public),
 		LockDisabled:   n.lockDisabled,
+		P2PEndpoints:   n.endpoints,
+		Capabilities:   api.NodeCapabilities{P2P: n.p2pCap},
 	}
 }
 
@@ -260,6 +285,8 @@ func (g *fakeMultiGateway) emitNodeEvent(evType string, n *fakeNode) {
 }
 
 func (g *fakeMultiGateway) onFrame(_ *api.Peer, f api.RelayFrame) {
+	g.sendMu.Lock()
+	defer g.sendMu.Unlock()
 	n := g.byChan[f.Route.ChanID]
 	if n == nil {
 		return
@@ -312,7 +339,14 @@ func (g *fakeMultiGateway) onFrame(_ *api.Peer, f api.RelayFrame) {
 		n.identifyParams = append(n.identifyParams, params)
 	}
 	nodeCBOR := n.cbor
+	silent := n.silent[f.Method]
+	if silent {
+		n.silentIDs = append(n.silentIDs, f.ID)
+	}
 	g.mu.Unlock()
+	if silent {
+		return
+	}
 	if f.Method == api.MethodNodeIdentify {
 		res, _ := json.Marshal(api.IdentifyResult{ID: n.id, Tip: n.tip, Capabilities: api.NodeCapabilities{CBOR: nodeCBOR}})
 		rf, _ := n.ch.SealResponseFrame(api.EncodingJSON, f.ID, res, nil)

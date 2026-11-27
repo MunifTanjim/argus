@@ -145,9 +145,9 @@ func TestUnpinnedClientDropsChannelOnQuarantine(t *testing.T) {
 }
 
 // TestUnpinnedClientAdoptRaceWithTrip is a deterministic test for the TOCTOU fix
-// in openChannel. relay.open is blocked until the gate has been tripped and
+// in openRelay. relay.open is blocked until the gate has been tripped and
 // reevaluateChannels has swept byNode (finding nothing, because the channel is
-// mid-handshake in byChanID). After the handshake completes, the fixed openChannel
+// mid-handshake in byChanID). After the handshake completes, the fixed openRelay
 // must refuse byNode registration because the gate is already tripped.
 func TestUnpinnedClientAdoptRaceWithTrip(t *testing.T) {
 	nodeKP := mustKP(t)
@@ -223,7 +223,7 @@ func TestUnpinnedClientAdoptRaceWithTrip(t *testing.T) {
 	close(relayRelease)
 
 	// Wait for adoptNode to finish. The opening map is cleared by openIfEligible's
-	// defer regardless of whether openChannel registered the channel or refused it.
+	// defer regardless of whether openRelay registered the channel or refused it.
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		m.mu.Lock()
@@ -238,7 +238,7 @@ func TestUnpinnedClientAdoptRaceWithTrip(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// The gate check in openChannel must have refused byNode registration.
+	// The gate check in openRelay must have refused byNode registration.
 	if snap := m.byNodeSnapshot(); len(snap) != 0 {
 		t.Fatalf("channel survived into byNode after quarantine + adopt race: got %v", snap)
 	}

@@ -31,6 +31,16 @@ func connect(ctx context.Context, cfg *config.Config, gatewayURL, token, socket 
 
 // dialClient is connect without the printing: the error text carries what connect prints.
 func dialClient(ctx context.Context, cfg *config.Config, gatewayURL, token, socket string, head []byte) (tui.Client, error) {
+	return dialNodeClient(ctx, cfg, gatewayURL, token, socket, head, false)
+}
+
+// dialOneShotClient is dialClient for a one-shot command: it reaches nodes
+// over SSH when configured, else the relay, and never dials tcp.
+func dialOneShotClient(ctx context.Context, cfg *config.Config, gatewayURL, token, socket string, head []byte) (tui.Client, error) {
+	return dialNodeClient(ctx, cfg, gatewayURL, token, socket, head, true)
+}
+
+func dialNodeClient(ctx context.Context, cfg *config.Config, gatewayURL, token, socket string, head []byte, oneShot bool) (tui.Client, error) {
 	dial, err := gatewayDialer(gatewayURL, token, socket)
 	if err != nil {
 		return nil, err
@@ -52,12 +62,14 @@ func dialClient(ctx context.Context, cfg *config.Config, gatewayURL, token, sock
 			if err != nil {
 				return nil, fmt.Errorf("cannot establish e2e session with gateway at %s: %w", gatewayURL, err)
 			}
+			c.SetP2POptions(p2pOptions(cfg, token, oneShot))
 			return c, nil
 		}
 		c, err := client.NewReconnectingE2EClient(ctx, dial)
 		if err != nil {
 			return nil, fmt.Errorf("cannot connect to gateway at %s: %w", gatewayURL, err)
 		}
+		c.SetP2POptions(p2pOptions(cfg, token, oneShot))
 		return c, nil
 	}
 	c, err := api.NewReconnectingClient(ctx, dial) // local unix socket only
@@ -65,6 +77,19 @@ func dialClient(ctx context.Context, cfg *config.Config, gatewayURL, token, sock
 		return nil, fmt.Errorf("cannot connect to argusd at %s: %w", socket, err)
 	}
 	return c, nil
+}
+
+// p2pOptions is the client's direct-link config; a one-shot client uses SSH
+// links only.
+func p2pOptions(cfg *config.Config, token string, oneShot bool) client.P2POptions {
+	return client.P2POptions{
+		NoTCP:      oneShot,
+		Enabled:    cfg.P2P.Enabled,
+		Endpoints:  cfg.P2P.Endpoints,
+		SSH:        cfg.P2P.SSH,
+		SSHCommand: cfg.P2P.SSHCommand,
+		Token:      token,
+	}
 }
 
 // gatewayDialer builds the Dialer connect uses: WebSocket for a gateway URL, else the

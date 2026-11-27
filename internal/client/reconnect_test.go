@@ -178,3 +178,56 @@ func TestReconnectingE2EClientCallErrorsWhileDisconnected(t *testing.T) {
 		t.Error("Call while disconnected must error")
 	}
 }
+
+// A path the dropped client reported is forwarded even though Done is ready
+// too, so the reset that follows covers its node.
+func TestForwardDrainsPathsOnDrop(t *testing.T) {
+	a, b := net.Pipe()
+	defer b.Close()
+	peer := api.NewPeer(a, api.PeerOptions{})
+	peer.Close()
+	<-peer.Done()
+	for i := range 50 {
+		cur := &E2EClient{peer: peer, paths: make(chan NodePath, 4)}
+		cur.paths <- NodePath{NodeID: "n1", Via: "tcp"}
+		c := &ReconnectingE2EClient{ctx: context.Background(), paths: make(chan NodePath, 4), via: map[string]string{}}
+		c.forward(cur)
+		if c.via["n1"] != "tcp" {
+			t.Fatalf("run %d: buffered path lost on drop", i)
+		}
+	}
+}
+
+// A gateway drop reports every node the client had a link to without one,
+// including nodes on the gateway path; the next client reports gateway again.
+func TestReconnectReportsNoLinkForGatewayNodes(t *testing.T) {
+	n, _ := p2pNode(t, "n1", session.Session{ID: "argus:%1", Agent: "claude"})
+	gws := make(chan *fakeMultiGateway, 4)
+	dial := func(context.Context) (net.Conn, error) {
+		g, conn := newFakeMultiGateway(t, n)
+		t.Cleanup(func() { g.peer.Close() })
+		gws <- g
+		return conn, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c, err := NewReconnectingE2EClient(ctx, dial)
+	if err != nil {
+		t.Fatalf("NewReconnectingE2EClient: %v", err)
+	}
+	defer c.Close()
+	first := <-gws
+	awaitPath(t, c.Paths(), NodePath{NodeID: "n1", Via: "gateway"})
+
+	first.peer.Close()
+	select {
+	case up := <-c.States():
+		if up {
+			t.Fatal("state = up, want down before the reset paths")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no state change on drop")
+	}
+	awaitPath(t, c.Paths(), NodePath{NodeID: "n1"})
+	awaitPath(t, c.Paths(), NodePath{NodeID: "n1", Via: "gateway"})
+}

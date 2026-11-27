@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 
@@ -31,10 +32,13 @@ type ReconnectingE2EClient struct {
 
 	events chan api.Notification
 	states chan bool
+	paths  chan NodePath
 	kick   chan struct{}
+	via    map[string]string // last forwarded via per node; supervise goroutine only
 
 	mu  sync.Mutex
 	cur *E2EClient // nil while disconnected
+	p2p P2POptions // applied to every E2EClient
 }
 
 // NewReconnectingE2EClient dials + handshakes once (so startup failure surfaces),
@@ -75,6 +79,8 @@ func newReconnecting(ctx context.Context, dial api.Dialer, genesisHash []byte, s
 		cancel:      cancel,
 		events:      make(chan api.Notification, 256),
 		states:      make(chan bool, 8),
+		paths:       make(chan NodePath, 256),
+		via:         map[string]string{},
 		kick:        make(chan struct{}, 1),
 	}
 	cur, err := c.connectOnce()
@@ -105,6 +111,10 @@ func (c *ReconnectingE2EClient) connectOnce() (*E2EClient, error) {
 		_ = conn.Close()
 		return nil, err
 	}
+	c.mu.Lock()
+	p2p := c.p2p
+	c.mu.Unlock()
+	cur.SetP2POptions(p2p)
 	if err := cur.Connect(); err != nil {
 		cur.Close()
 		return nil, err
@@ -132,6 +142,7 @@ func (c *ReconnectingE2EClient) supervise() {
 		c.mu.Lock()
 		c.cur = nil
 		c.mu.Unlock()
+		c.resetPaths()
 		c.emitState(false)
 
 		next := c.reconnect()
@@ -151,13 +162,56 @@ func (c *ReconnectingE2EClient) forward(cur *E2EClient) {
 		case <-c.ctx.Done():
 			return
 		case <-cur.Done():
+			c.drainPaths(cur)
 			return
 		case ev := <-cur.Events():
 			select {
 			case c.events <- ev:
 			default: // drop for a slow consumer
 			}
+		case p := <-cur.Paths():
+			c.sendPath(p)
 		}
+	}
+}
+
+// drainPaths forwards the paths cur reported before it dropped, so none is
+// lost to select picking Done first.
+func (c *ReconnectingE2EClient) drainPaths(cur *E2EClient) {
+	for {
+		select {
+		case p := <-cur.Paths():
+			c.sendPath(p)
+		default:
+			return
+		}
+	}
+}
+
+// sendPath forwards p and tracks it; an empty Via (link lost) drops the node,
+// so resetPaths reports only nodes that had a link.
+func (c *ReconnectingE2EClient) sendPath(p NodePath) {
+	if p.Via == "" {
+		delete(c.via, p.NodeID)
+	} else {
+		c.via[p.NodeID] = p.Via
+	}
+	select {
+	case c.paths <- p:
+	default:
+	}
+}
+
+// resetPaths reports every tracked node without a link once the dropped
+// client stops forwarding; the next client reports each node as it opens.
+func (c *ReconnectingE2EClient) resetPaths() {
+	ids := make([]string, 0, len(c.via))
+	for id := range c.via {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		c.sendPath(NodePath{NodeID: id})
 	}
 }
 
@@ -222,6 +276,29 @@ func (c *ReconnectingE2EClient) Events() <-chan api.Notification { return c.even
 
 // States reports connection transitions (false on drop, true on reconnect).
 func (c *ReconnectingE2EClient) States() <-chan bool { return c.states }
+
+// Paths reports node link changes, stable across reconnects.
+func (c *ReconnectingE2EClient) Paths() <-chan NodePath { return c.paths }
+
+// NodeVias returns the link each open node uses (empty while disconnected).
+func (c *ReconnectingE2EClient) NodeVias() map[string]string {
+	if cur := c.current(); cur != nil {
+		return cur.NodeVias()
+	}
+	return map[string]string{}
+}
+
+// SetP2POptions sets the direct-link options for the live client and every
+// reconnect.
+func (c *ReconnectingE2EClient) SetP2POptions(o P2POptions) {
+	c.mu.Lock()
+	c.p2p = o
+	cur := c.cur
+	c.mu.Unlock()
+	if cur != nil {
+		cur.SetP2POptions(o)
+	}
+}
 
 // Reconnect forces an immediate reconnect attempt (resets backoff). No-op while connected.
 func (c *ReconnectingE2EClient) Reconnect() {

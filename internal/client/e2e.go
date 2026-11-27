@@ -61,9 +61,21 @@ type nodeChan struct {
 	decFails    int                         // consecutive decrypt failures; read-loop only, reset on success
 	cbor        atomic.Bool                 // gateway and node both declared cbor; set after node.identify
 
-	out   *api.Peer // the peer this channel's frames travel on; set before the channel is registered
-	via   string    // path name: "gateway"
-	close func()    // releases the link and removes the channel from the maps; idempotent, takes m.mu
+	out   *api.Peer     // the peer this channel's frames travel on; set before the channel is registered
+	via   string        // path name: "gateway" or "tcp"
+	close func()        // releases the link and removes the channel from the maps; idempotent, takes m.mu
+	done  chan struct{} // closed by close, so calls waiting on this link fail at once
+
+	// standby channels are opened to replace a node's current link: the
+	// handshake does not register them in byNode; swapLink does.
+	standby bool
+	// routeNotes gates delivery of the channel's notifications. Off for a
+	// standby channel until its switch reconciles, and for a link being retired.
+	routeNotes atomic.Bool
+	calls      atomic.Int32 // calls awaiting a reply on this channel
+	// replaces is the link a standby channel was opened to replace; swapLink
+	// installs it only while that link is still the node's.
+	replaces *nodeChan
 }
 
 // useRelayLink binds nc to the gateway relay channel chanID. Its close tells the
@@ -72,22 +84,36 @@ type nodeChan struct {
 func (m *E2EClient) useRelayLink(nc *nodeChan, chanID string) {
 	nc.out = m.peer
 	nc.via = "gateway"
+	nc.done = make(chan struct{})
 	var once sync.Once
 	nc.close = func() {
 		once.Do(func() {
-			m.mu.Lock()
-			if m.byChanID[chanID] == nc {
-				delete(m.byChanID, chanID)
-			}
-			if m.byNode[nc.nodeID] == nc {
-				delete(m.byNode, nc.nodeID)
-			}
-			m.mu.Unlock()
+			m.unregister(nc, chanID)
 			go func() {
 				_ = nc.out.Call(api.MethodRelayClose, api.RelayCloseParams{ChanID: chanID}, nil)
 			}()
 		})
 	}
+}
+
+// unregister removes nc from the maps and fails the calls waiting on it.
+func (m *E2EClient) unregister(nc *nodeChan, chanID string) {
+	m.mu.Lock()
+	if m.byChanID[chanID] == nc {
+		delete(m.byChanID, chanID)
+	}
+	if m.byNode[nc.nodeID] == nc {
+		delete(m.byNode, nc.nodeID)
+	}
+	m.mu.Unlock()
+	close(nc.done)
+}
+
+// pendingCall waits for one reply. inline, when set, runs on the read loop
+// before the reply is handed over, ordered with the channel's other frames.
+type pendingCall struct {
+	ch     chan pendingReply
+	inline func(pendingReply)
 }
 
 type pendingReply struct {
@@ -112,14 +138,15 @@ type E2EClient struct {
 	peer      *api.Peer
 	ready     chan struct{} // closed at end of NewE2EClientWithGate; synchronises m.peer init
 	static    e2e.KeyPair
-	plaintext bool // when true, openChannel skips Noise and uses an identity cipher
+	plaintext bool // when true, openRelay skips Noise and uses an identity cipher
 
 	gatewayCBOR atomic.Bool // gateway declared cbor in server.info
+	gatewayP2P  atomic.Bool // gateway declared p2p in server.info
 
 	mu       sync.Mutex
 	byNode   map[string]*nodeChan
 	byChanID map[string]*nodeChan
-	pending  map[uint64]chan pendingReply
+	pending  map[uint64]*pendingCall
 	nextReq  uint64
 	subNode  map[string]string // sub_id  -> nodeID (transcript.subscribe)
 	termNode map[string]string // term_id -> nodeID (terminal.open)
@@ -161,6 +188,14 @@ type E2EClient struct {
 
 	knownSetTip []byte          // caches known-set key; guarded by mu
 	knownSet    map[string]bool // resolved chain entry-hash set for tip checks
+
+	// Direct links (guarded by mu). desc holds each opened node's last roster
+	// descriptor; upgrading marks nodes with a running upgradeLoop.
+	p2p       P2POptions
+	desc      map[string]api.NodeDescriptor
+	upgrading map[string]*upgradeRun
+	p2pWarned map[string]bool // endpoints and errors already logged
+	paths     chan NodePath
 }
 
 // NewE2EClientWithGate is NewE2EClientWithIdentity plus a caller-owned quarantine
@@ -178,7 +213,11 @@ func newE2EClientWithGate(conn net.Conn, static e2e.KeyPair, genesisHash []byte,
 		ready:         make(chan struct{}),
 		byNode:        map[string]*nodeChan{},
 		byChanID:      map[string]*nodeChan{},
-		pending:       map[uint64]chan pendingReply{},
+		pending:       map[uint64]*pendingCall{},
+		desc:          map[string]api.NodeDescriptor{},
+		upgrading:     map[string]*upgradeRun{},
+		p2pWarned:     map[string]bool{},
+		paths:         make(chan NodePath, 256),
 		subNode:       map[string]string{},
 		termNode:      map[string]string{},
 		nodeSessions:  map[string]map[string]session.Session{},
@@ -208,9 +247,9 @@ func newE2EClientWithGate(conn net.Conn, static e2e.KeyPair, genesisHash []byte,
 	// gateway-native Call blocks forever.
 	//
 	// api.NewPeer starts its read loop before returning; a node.event arriving on
-	// the connection can call onPeerNotify → adoptNode → openChannel before the
+	// the connection can call onPeerNotify → adoptNode → openRelay before the
 	// assignment below completes. close(m.ready) establishes the happens-before
-	// that openChannel waits on, so it always reads a fully-set m.peer.
+	// that openRelay waits on, so it always reads a fully-set m.peer.
 	m.peer = api.NewPeer(conn, api.PeerOptions{
 		OnRelayFrame:              m.onRelayFrame,
 		OnNotify:                  m.onPeerNotify,
@@ -237,7 +276,7 @@ func (m *E2EClient) Quarantined() bool { return m.gate.Tripped() }
 
 // newEphemeralE2EClient is the shared base for NewE2EClient and NewE2EClientPlain.
 // It generates a throwaway static key and sets the plaintext flag before the peer
-// read loop starts, so openChannel always sees a consistent plaintext value.
+// read loop starts, so openRelay always sees a consistent plaintext value.
 func newEphemeralE2EClient(conn net.Conn, plaintext bool) (*E2EClient, error) {
 	static, err := e2e.GenerateKeyPair()
 	if err != nil {
@@ -317,6 +356,7 @@ func (m *E2EClient) Connect() error {
 	var info api.ServerInfo
 	if err := m.peer.Call(api.MethodServerInfo, nil, &info); err == nil {
 		m.gatewayCBOR.Store(info.Capabilities != nil && info.Capabilities.CBOR)
+		m.gatewayP2P.Store(info.Capabilities != nil && info.Capabilities.P2P)
 	}
 	// Locked mode: pull the trust log before deciding which nodes to open. The store
 	// is already disk-seeded (last verified HEAD), so enforcement is correct even if
@@ -350,7 +390,7 @@ func (m *E2EClient) openIfEligible(nd api.NodeDescriptor) error {
 		if !m.plaintext {
 			return nil // no key: cannot open an E2E channel to this node
 		}
-		// plaintext: no Noise key needed; pub stays nil and is ignored by openChannel
+		// plaintext: no Noise key needed; pub stays nil and is ignored by openRelay
 	} else {
 		var err error
 		pub, err = base64.StdEncoding.DecodeString(nd.IdentityPubKey)
@@ -388,9 +428,17 @@ func (m *E2EClient) openIfEligible(nd api.NodeDescriptor) error {
 		m.mu.Unlock()
 		close(done)
 	}()
-	if err := m.openChannel(nd, pub); err != nil {
+	relay, err := m.openRelay(nd, pub, false)
+	if err != nil {
 		return err
 	}
+	// Paths are sent under mu, so each is ordered with its byNode change.
+	m.mu.Lock()
+	if m.byNode[nd.ID] == relay {
+		m.sendPath(NodePath{NodeID: nd.ID, Via: relay.via})
+	}
+	m.mu.Unlock()
+	defer m.startUpgrade(nd)
 	var res api.IdentifyResult
 	if err := m.callNode(nd.ID, api.MethodNodeIdentify, api.IdentifyParams{Capabilities: &api.PeerCapabilities{CBOR: true}}, &res); err != nil {
 		log.Printf("client: node %s identify failed: %v", nd.ID, err)
@@ -406,10 +454,11 @@ func (m *E2EClient) openIfEligible(nd api.NodeDescriptor) error {
 	return nil
 }
 
-// openChannel runs relay.open then either establishes a plaintext identity channel
+// openRelay runs relay.open then either establishes a plaintext identity channel
 // (when m.plaintext is set) or performs the Noise IK initiator handshake.
-// pub is the decoded identity public key, already checked by Connect.
-func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) (err error) {
+// pub is the decoded identity public key, already checked by Connect. A
+// standby channel is left for swapLink to register as the node's link.
+func (m *E2EClient) openRelay(nd api.NodeDescriptor, pub []byte, standby bool) (_ *nodeChan, err error) {
 	// Wait for NewE2EClientWithGate to finish: api.NewPeer starts its read loop
 	// before returning, so a node.event can spawn this goroutine via onPeerNotify
 	// → adoptNode before m.peer is assigned. The channel close is the
@@ -417,25 +466,29 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) (err error) {
 	<-m.ready
 	var res api.RelayOpenResult
 	if err := m.peer.Call(api.MethodRelayOpen, api.RelayOpenParams{NodeID: nd.ID}, &res); err != nil {
-		return err
+		return nil, err
 	}
 	if m.plaintext {
-		nc := &nodeChan{nodeID: nd.ID, label: nd.Label, hs: make(chan error, 1)}
+		nc := &nodeChan{nodeID: nd.ID, label: nd.Label, hs: make(chan error, 1), standby: standby}
 		m.useRelayLink(nc, res.ChanID)
+		nc.routeNotes.Store(!standby)
 		nc.ch.Store(api.NewPlainChannel(res.ChanID))
 		m.mu.Lock()
-		m.byNode[nd.ID] = nc
+		if !standby {
+			m.byNode[nd.ID] = nc
+		}
 		m.byChanID[res.ChanID] = nc
 		m.mu.Unlock()
 		nc.hs <- nil
-		return nil
+		return nc, nil
 	}
 	init, msg1, err := e2e.NewInitiator(m.static, pub, api.ChannelPrologue(nd.ID, res.ChanID))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	nc := &nodeChan{nodeID: nd.ID, label: nd.Label, identityPub: append([]byte(nil), pub...), init: init, hs: make(chan error, 1)}
+	nc := &nodeChan{nodeID: nd.ID, label: nd.Label, identityPub: append([]byte(nil), pub...), init: init, hs: make(chan error, 1), standby: standby}
 	m.useRelayLink(nc, res.ChanID)
+	nc.routeNotes.Store(!standby)
 	m.mu.Lock()
 	m.byChanID[res.ChanID] = nc
 	m.mu.Unlock()
@@ -446,7 +499,15 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) (err error) {
 		}
 	}()
 
-	frame, err := api.MarshalHandshakeFrame(res.ChanID, msg1)
+	if err := m.handshake(nc, res.ChanID, msg1); err != nil {
+		return nil, err
+	}
+	return nc, nil
+}
+
+// handshake sends msg1 on nc's link and waits for the read loop to finish it.
+func (m *E2EClient) handshake(nc *nodeChan, chanID string, msg1 []byte) error {
+	frame, err := api.MarshalHandshakeFrame(chanID, msg1)
 	if err != nil {
 		return err
 	}
@@ -458,6 +519,8 @@ func (m *E2EClient) openChannel(nd api.NodeDescriptor, pub []byte) (err error) {
 		return err
 	case <-nc.out.Done():
 		return fmt.Errorf("connection closed during handshake")
+	case <-nc.done:
+		return fmt.Errorf("channel closed during handshake")
 	case <-time.After(time.Duration(handshakeTimeoutNs.Load())):
 		return fmt.Errorf("handshake timeout")
 	}
@@ -505,7 +568,7 @@ func (m *E2EClient) onRelayFrame(src *api.Peer, f api.RelayFrame) {
 		// arriving before ch is stored would be dropped — losing that state and
 		// desyncing the shared dec-nonce for everything after it.
 		err := m.finishHandshake(nc, f)
-		if err == nil {
+		if err == nil && !nc.standby {
 			// Register in byNode here, before signalling nc.hs. The read loop is
 			// single-threaded, so byNode is written before the next frame (the node's
 			// session snapshot) can be processed — ensuring any consumer that reacts
@@ -552,7 +615,11 @@ func (m *E2EClient) onRelayFrame(src *api.Peer, f api.RelayFrame) {
 		delete(m.pending, id)
 		m.mu.Unlock()
 		if waiter != nil {
-			waiter <- pendingReply{result: result, rpcErr: rpcErr, enc: f.Enc}
+			reply := pendingReply{result: result, rpcErr: rpcErr, enc: f.Enc}
+			if waiter.inline != nil {
+				waiter.inline(reply)
+			}
+			waiter.ch <- reply
 		}
 	case f.Method != "" && f.ID == nil:
 		params, err := ch.OpenParams(f)
@@ -563,6 +630,9 @@ func (m *E2EClient) onRelayFrame(src *api.Peer, f api.RelayFrame) {
 			return
 		}
 		nc.decFails = 0
+		if !nc.routeNotes.Load() {
+			return // decrypted to keep the nonce in step, but not this link's to deliver
+		}
 		if f.Enc == api.EncodingCBOR {
 			// CBOR methods need no stamping; anything else is transcoded so it
 			// gets stamped like JSON.
@@ -702,12 +772,14 @@ func (m *E2EClient) reevaluateChannels() {
 		}
 		for _, nc := range drop {
 			delete(m.byNode, nc.nodeID)
+			delete(m.upgrading, nc.nodeID)
 			if ch := nc.ch.Load(); ch != nil {
 				delete(m.byChanID, ch.ID())
 			}
 			key := string(nc.identityPub)
 			delete(m.tipMiss, key)
 			delete(m.authTip, key)
+			m.sendPath(NodePath{NodeID: nc.nodeID})
 		}
 		m.mu.Unlock()
 		for _, nc := range drop {
@@ -727,6 +799,7 @@ func (m *E2EClient) reevaluateChannels() {
 	}
 	for _, nc := range drop {
 		delete(m.byNode, nc.nodeID)
+		delete(m.upgrading, nc.nodeID)
 		if ch := nc.ch.Load(); ch != nil {
 			delete(m.byChanID, ch.ID())
 		}
@@ -734,6 +807,7 @@ func (m *E2EClient) reevaluateChannels() {
 		key := string(nc.identityPub)
 		delete(m.tipMiss, key)
 		delete(m.authTip, key)
+		m.sendPath(NodePath{NodeID: nc.nodeID})
 	}
 	m.mu.Unlock()
 	for _, nc := range drop {
@@ -1176,10 +1250,19 @@ func (m *E2EClient) callNode(nodeID, method string, params, out any) error {
 	if nc == nil {
 		return fmt.Errorf("client: no channel to node %q", nodeID)
 	}
+	return m.callChan(nc, method, params, out, nil)
+}
+
+// callChan is callNode on a given channel. inline, when set, sees the reply
+// on the read loop (see pendingCall).
+func (m *E2EClient) callChan(nc *nodeChan, method string, params, out any, inline func(pendingReply)) error {
+	nodeID := nc.nodeID
 	ch := nc.ch.Load()
 	if ch == nil {
 		return fmt.Errorf("client: channel to node %q not established", nodeID)
 	}
+	nc.calls.Add(1)
+	defer nc.calls.Add(-1)
 
 	enc, paramsRaw, err := api.EncodeParams(method, params, nc.cbor.Load())
 	if err != nil {
@@ -1190,7 +1273,7 @@ func (m *E2EClient) callNode(nodeID, method string, params, out any) error {
 	idRaw := json.RawMessage(strconv.FormatUint(id, 10))
 	replyCh := make(chan pendingReply, 1)
 	m.mu.Lock()
-	m.pending[id] = replyCh
+	m.pending[id] = &pendingCall{ch: replyCh, inline: inline}
 	m.mu.Unlock()
 
 	nc.sendMu.Lock()
@@ -1216,6 +1299,9 @@ func (m *E2EClient) callNode(nodeID, method string, params, out any) error {
 	case <-nc.out.Done():
 		m.forget(id)
 		return fmt.Errorf("client: connection closed")
+	case <-nc.done:
+		m.forget(id)
+		return fmt.Errorf("client: link to node %q closed", nodeID)
 	case <-time.After(callTimeoutFor(method)):
 		m.forget(id)
 		return fmt.Errorf("client: call timeout")
@@ -1528,7 +1614,7 @@ func (m *E2EClient) onPeerNotify(n api.Notification) {
 	}
 	switch ev.Type {
 	case api.NodeEventAdded, api.NodeEventOnline:
-		// Off the read loop: openChannel calls the gateway and waits for msg2, both
+		// Off the read loop: openRelay calls the gateway and waits for msg2, both
 		// of which are answered on this very loop.
 		go m.adoptNode(ev.Node)
 	case api.NodeEventOffline:
@@ -1558,8 +1644,20 @@ func (m *E2EClient) adoptNode(nd api.NodeDescriptor) {
 // otherwise grey them and sweep once the grace window passes. Nothing else can
 // report those sessions — the node that owned them is exactly what went away.
 func (m *E2EClient) loseNode(nodeID string, gone bool) {
+	m.loseNodeIf(nodeID, nil, gone)
+}
+
+// loseNodeIf is loseNode when expected is nil; otherwise it does nothing
+// unless expected is still the node's link, checked under the same lock as the
+// removal. A lost link is reported on Paths with an empty Via.
+func (m *E2EClient) loseNodeIf(nodeID string, expected *nodeChan, gone bool) {
 	m.mu.Lock()
 	nc := m.byNode[nodeID]
+	if expected != nil && nc != expected {
+		m.mu.Unlock()
+		return
+	}
+	delete(m.upgrading, nodeID)
 	if nc != nil {
 		delete(m.byNode, nodeID)
 		if ch := nc.ch.Load(); ch != nil {
@@ -1568,6 +1666,7 @@ func (m *E2EClient) loseNode(nodeID string, gone bool) {
 		key := string(nc.identityPub)
 		delete(m.authTip, key)
 		delete(m.tipMiss, key) // stale tip must not accumulate misses while the node is gone
+		m.sendPath(NodePath{NodeID: nodeID})
 	}
 	if t := m.offlineTimers[nodeID]; t != nil {
 		t.Stop()
