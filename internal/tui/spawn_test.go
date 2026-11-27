@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/client"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -83,6 +84,7 @@ func (c *spawnPickClient) States() <-chan bool             { return make(chan bo
 func (c *spawnPickClient) Reconnect()                      {}
 func (c *spawnPickClient) Close() error                    { return nil }
 func (c *spawnPickClient) Quarantined() bool               { return false }
+func (c *spawnPickClient) Paths() <-chan client.NodePath   { return nil }
 
 // replyLoneAgent answers the agents probe on nodeID with a lone claude that
 // offers no models, so the flow skips both steps.

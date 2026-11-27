@@ -6,11 +6,13 @@ import (
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/client"
 )
 
 type swapFakeClient struct {
 	events      chan api.Notification
 	states      chan bool
+	paths       chan client.NodePath
 	quarantined bool
 
 	mu     sync.Mutex
@@ -22,6 +24,7 @@ func newSwapFakeClient(quarantined bool) *swapFakeClient {
 	return &swapFakeClient{
 		events:      make(chan api.Notification, 4),
 		states:      make(chan bool, 4),
+		paths:       make(chan client.NodePath, 4),
 		quarantined: quarantined,
 	}
 }
@@ -36,6 +39,7 @@ func (c *swapFakeClient) Events() <-chan api.Notification { return c.events }
 func (c *swapFakeClient) States() <-chan bool             { return c.states }
 func (c *swapFakeClient) Reconnect()                      {}
 func (c *swapFakeClient) Quarantined() bool               { return c.quarantined }
+func (c *swapFakeClient) Paths() <-chan client.NodePath   { return c.paths }
 func (c *swapFakeClient) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -200,5 +204,34 @@ func TestSwapClientLatestInnerStateWinsOverThePendingConnected(t *testing.T) {
 	case st := <-s.States():
 		t.Fatalf("got a second state %v, want one", st)
 	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestSwapClientForgetsOldNodePaths(t *testing.T) {
+	old, next := newSwapFakeClient(false), newSwapFakeClient(false)
+	s := newSwapClient(old)
+	defer s.Close()
+	recv := func() client.NodePath {
+		t.Helper()
+		select {
+		case p := <-s.Paths():
+			return p
+		case <-time.After(time.Second):
+			t.Fatal("no path")
+			return client.NodePath{}
+		}
+	}
+
+	old.paths <- client.NodePath{NodeID: "n1", Via: "tcp"}
+	if p := recv(); p.NodeID != "n1" || p.Via != "tcp" {
+		t.Fatalf("got %+v", p)
+	}
+	s.swap(next)
+	next.paths <- client.NodePath{NodeID: "n2", Via: "gateway"}
+	if p := recv(); p.NodeID != "n1" || p.Via != "" {
+		t.Fatalf("old node must be forgotten first, got %+v", p)
+	}
+	if p := recv(); p.NodeID != "n2" || p.Via != "gateway" {
+		t.Fatalf("got %+v", p)
 	}
 }

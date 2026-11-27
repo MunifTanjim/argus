@@ -10,6 +10,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/adapters"
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/bundle"
+	"github.com/MunifTanjim/argus/internal/client"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -120,6 +121,7 @@ func (c *fileClient) Call(method string, params, out any) error {
 
 func (c *fileClient) Events() <-chan api.Notification { return c.events }
 func (c *fileClient) States() <-chan bool             { return c.states }
+func (c *fileClient) Paths() <-chan client.NodePath   { return nil }
 func (c *fileClient) Reconnect()                      {}
 func (c *fileClient) Quarantined() bool               { return false }
 

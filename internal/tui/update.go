@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/glamour"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/client"
 	"github.com/MunifTanjim/argus/internal/registry"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/shell"
@@ -143,6 +144,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.reconnecting = true // keep the last-known list visible meanwhile
 		return m.updateScreens(msg)
+	case nodePathMsg:
+		return m.applyNodePath(client.NodePath(msg))
 	case sessionsRefreshedMsg:
 		m.refreshes--
 		return m, nil
@@ -843,4 +846,41 @@ func (m model) quit() (tea.Model, tea.Cmd) {
 	}
 	cmds = append(cmds, m.apply(c), tea.Quit)
 	return m, tea.Batch(cmds...)
+}
+
+// applyNodePath follows a node's link change. On a switch between two links
+// the node drops every subscription and terminal attach of the old link
+// without telling the UI, so the ones on this node are opened again. A node's
+// first link needs nothing: startup and the reconnect resync load everything.
+func (m model) applyNodePath(p client.NodePath) (tea.Model, tea.Cmd) {
+	if p.Via == "" {
+		delete(m.nodeVias, p.NodeID)
+		return m, nil
+	}
+	if m.nodeVias == nil {
+		m.nodeVias = make(map[string]string)
+	}
+	prev := m.nodeVias[p.NodeID]
+	m.nodeVias[p.NodeID] = p.Via
+	if prev == "" || prev == p.Via || m.reconnecting {
+		// While the client is down, a call would go to a dead link and the
+		// reconnect resyncs everything anyway.
+		return m, nil
+	}
+	cmds := []tea.Cmd{m.loadTerminalsCmd()}
+	if t, ok := m.baseComp().(transcriptComp); ok && m.sessionNode(t.sessionID) == p.NodeID {
+		cmds = append(cmds, m.resubscribeLive(t.sessionID))
+	}
+	var cmd tea.Cmd
+	m, cmd = m.reopenScreens(p.NodeID)
+	return m, tea.Batch(append(cmds, cmd)...)
+}
+
+// sessionNode is the id of the node that holds the session.
+func (m model) sessionNode(id string) string {
+	if s, ok := m.sessions[id]; ok && s.NodeID != "" {
+		return s.NodeID
+	}
+	nodeID, _, _ := session.SplitCompositeID(id)
+	return nodeID
 }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -50,6 +51,7 @@ type screenComp struct {
 	terminalID  string
 	title       string
 	node        string
+	nodeID      string // the node that holds the terminal
 	row         string
 	term        *vt.Emulator
 	cursorState *screenCursor // nil without an attach
@@ -316,3 +318,42 @@ func isScreenLeave(msg tea.KeyPressMsg) bool {
 }
 
 func (s screenComp) workspace(c *ctx) string { return c.m.sessions[s.sessionID].WorkspaceID }
+
+// reopenScreens attaches again every live screen on the node. Each gets a new
+// attach id, so the eviction of its pre-switch attach reaches no screen.
+func (m model) reopenScreens(nodeID string) (model, tea.Cmd) {
+	var cmds []tea.Cmd
+	cols, rows := m.termDims()
+	host, _ := os.Hostname()
+	for i, comp := range m.main {
+		s, ok := comp.(screenComp)
+		if !ok || s.gone || s.term == nil {
+			continue
+		}
+		p := api.TerminalOpenParams{Cols: cols, Rows: rows}
+		switch {
+		case s.terminalID != "":
+			if s.nodeID != nodeID {
+				continue
+			}
+			t, _ := m.terminalByID(s.terminalID)
+			p.TerminalID = s.terminalID
+			p.ClientPane = terminalClientPane(t, host, os.Getenv("TMUX"), os.Getenv("TMUX_PANE"))
+		default:
+			if m.sessionNode(s.sessionID) != nodeID {
+				continue
+			}
+			p.SessionID = s.sessionID
+			p.ClientPane = clientPaneFor(m.sessions[s.sessionID], host, os.Getenv("TMUX"), os.Getenv("TMUX_PANE"))
+		}
+		s.termID, s.err = newTermID(), nil
+		p.TermID = s.termID
+		m.main = m.main.replaceAt(i, s)
+		client := m.client
+		cmds = append(cmds, func() tea.Msg {
+			_ = client.Call(api.MethodTerminalOpen, p, nil) // a failure leaves the next resync to retry
+			return nil
+		})
+	}
+	return m, tea.Batch(cmds...)
+}

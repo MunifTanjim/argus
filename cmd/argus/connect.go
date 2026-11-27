@@ -77,8 +77,13 @@ func dialNodeClient(ctx context.Context, cfg *config.Config, gatewayURL, token, 
 	if err != nil {
 		return nil, fmt.Errorf("cannot connect to argusd at %s: %w", socket, err)
 	}
-	return c, nil
+	return localClient{c}, nil
 }
+
+// localClient is the local socket client: it has no direct links to report.
+type localClient struct{ *api.ReconnectingClient }
+
+func (localClient) Paths() <-chan client.NodePath { return nil }
 
 // p2pOptions is the client's direct-link config; a one-shot client uses SSH
 // links only.

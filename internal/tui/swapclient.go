@@ -4,14 +4,20 @@ import (
 	"sync"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/client"
 )
 
-// swapClient lets the TUI replace its connection while it runs. Events and
-// States stay the same channels across swaps; only one forwarder goroutine
+// swapClient lets the TUI replace its connection while it runs. Events,
+// States and Paths stay the same channels across swaps; only one forwarder goroutine
 // writes to them at a time.
 type swapClient struct {
 	events chan api.Notification
 	states chan bool
+	paths  chan client.NodePath
+
+	// vias is the nodes the forwarder has reported a link for. Only the
+	// forwarder writes it; swap reads it once the forwarder has stopped.
+	vias map[string]bool
 
 	mu     sync.RWMutex
 	cur    Client
@@ -24,9 +30,11 @@ func newSwapClient(c Client) *swapClient {
 	s := &swapClient{
 		events: make(chan api.Notification),
 		states: make(chan bool),
+		paths:  make(chan client.NodePath),
+		vias:   map[string]bool{},
 		cur:    c,
 	}
-	s.forward(c, false)
+	s.forward(c, false, nil)
 	return s
 }
 
@@ -42,6 +50,7 @@ func (s *swapClient) Call(method string, params, out any) error {
 
 func (s *swapClient) Events() <-chan api.Notification { return s.events }
 func (s *swapClient) States() <-chan bool             { return s.states }
+func (s *swapClient) Paths() <-chan client.NodePath   { return s.paths }
 func (s *swapClient) Reconnect()                      { s.current().Reconnect() }
 func (s *swapClient) Quarantined() bool               { return s.current().Quarantined() }
 
@@ -55,7 +64,13 @@ func (s *swapClient) swap(next Client) {
 	old := s.cur
 	s.stopForwarding()
 	s.cur = next
-	s.forward(next, true)
+	// The new client reports its own links; the old one's are forgotten.
+	var resets []client.NodePath
+	for id := range s.vias {
+		resets = append(resets, client.NodePath{NodeID: id})
+	}
+	clear(s.vias)
+	s.forward(next, true, resets)
 	s.mu.Unlock()
 	_ = old.Close()
 }
@@ -72,6 +87,7 @@ func (s *swapClient) Close() error {
 	s.mu.Unlock()
 	close(s.events)
 	close(s.states)
+	close(s.paths)
 	return cur.Close()
 }
 
@@ -83,16 +99,24 @@ func (s *swapClient) stopForwarding() {
 
 // forward must be called with mu held. When connected is set, true is sent on
 // States before any later state from c, so the program resyncs after a swap.
-func (s *swapClient) forward(c Client, connected bool) {
+// resets are sent on Paths before any path from c.
+func (s *swapClient) forward(c Client, connected bool, resets []client.NodePath) {
 	stop, done := make(chan struct{}), make(chan struct{})
 	s.stop, s.done = stop, done
 	go func() {
 		defer close(done)
-		events, states := c.Events(), c.States()
+		events, states, paths := c.Events(), c.States(), c.Paths()
 		var out chan bool
 		var pending bool
 		if connected {
 			out, pending = s.states, true
+		}
+		for _, r := range resets {
+			select {
+			case s.paths <- r:
+			case <-stop:
+				return
+			}
 		}
 		for {
 			select {
@@ -106,6 +130,21 @@ func (s *swapClient) forward(c Client, connected bool) {
 				}
 				select {
 				case s.events <- ev:
+				case <-stop:
+					return
+				}
+			case np, ok := <-paths:
+				if !ok {
+					paths = nil
+					continue
+				}
+				select {
+				case s.paths <- np:
+					if np.Via == "" {
+						delete(s.vias, np.NodeID)
+					} else {
+						s.vias[np.NodeID] = true
+					}
 				case <-stop:
 					return
 				}

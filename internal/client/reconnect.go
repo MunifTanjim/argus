@@ -142,8 +142,10 @@ func (c *ReconnectingE2EClient) supervise() {
 		c.mu.Lock()
 		c.cur = nil
 		c.mu.Unlock()
-		c.resetPaths()
+		// The state goes first, so a consumer never acts on the reset paths
+		// while it still thinks the connection is up.
 		c.emitState(false)
+		c.resetPaths()
 
 		next := c.reconnect()
 		if next == nil {

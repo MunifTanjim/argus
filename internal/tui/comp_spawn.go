@@ -366,9 +366,9 @@ func (s spawnComp) view(c *ctx, w, h int) string {
 	case spawnStepNode:
 		cards := make([]string, len(s.nodes))
 		for i, n := range s.nodes {
-			sub := ""
-			if !n.Capabilities.SpawnSession {
-				sub = "no tmux" // disabled: can't spawn here
+			sub := m.nodeVias[n.ID]
+			if !n.Capabilities.SpawnSession { // disabled: can't spawn here
+				sub = strings.TrimSuffix("no tmux · "+sub, " · ")
 			}
 			cards[i] = spawnChoiceRow(nodeName(n.Label, n.ID), sub, i == s.cursor, cardW)
 		}

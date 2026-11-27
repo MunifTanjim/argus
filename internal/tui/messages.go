@@ -2,6 +2,7 @@ package tui
 
 import (
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/client"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
@@ -10,6 +11,9 @@ type notificationMsg api.Notification
 
 // connStateMsg reports a connection-state transition from the reconnecting client.
 type connStateMsg struct{ connected bool }
+
+// nodePathMsg reports the link a node now uses; an empty Via means it has none.
+type nodePathMsg client.NodePath
 
 // sessionsReplacedMsg carries an authoritative session list for a post-reconnect resync.
 type sessionsReplacedMsg []session.Session
