@@ -55,6 +55,7 @@ type Node struct {
 	version string // binary version, reported to clients via identify/server.info
 
 	identity       e2e.KeyPair // node's Noise static keypair (E2E channel responder)
+	p2pEndpoints   []string    // direct URLs announced to the gateway
 	identityPubB64 string      // base64 public half, announced to the gateway
 	e2ee           bool
 
@@ -330,6 +331,9 @@ func (d *Node) SetIdentityKey(kp e2e.KeyPair) {
 	d.identity = kp
 	d.identityPubB64 = base64.StdEncoding.EncodeToString(kp.Public)
 }
+
+// SetP2PEndpoints sets the direct URLs announced in node.identify. Call before ConnectGateway.
+func (d *Node) SetP2PEndpoints(urls []string) { d.p2pEndpoints = urls }
 
 // SetE2EE toggles the blind-relay uplink; default false uses the plaintext uplink. Call before ConnectGateway.
 func (d *Node) SetE2EE(enabled bool) { d.e2ee = enabled }

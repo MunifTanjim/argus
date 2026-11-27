@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +23,7 @@ type fakeSource struct {
 	snap      []session.Session
 	events    chan registry.Event
 	done      chan struct{}
+	p2p       []string
 
 	mu       sync.Mutex
 	calls    []callRecord
@@ -48,6 +50,7 @@ func (f *fakeSource) Done() <-chan struct{}                      { return f.done
 func (f *fakeSource) IdentityPubKey() string                     { return "" }
 func (f *fakeSource) SignerPubKey() string                       { return "" }
 func (f *fakeSource) LockDisabled() bool                         { return false }
+func (f *fakeSource) P2PEndpoints() []string                     { return f.p2p }
 
 func (f *fakeSource) Call(_ context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
 	f.mu.Lock()
@@ -154,5 +157,17 @@ func TestRosterAndSubscribeRoster(t *testing.T) {
 	}
 	if !roster[0].Online {
 		t.Fatal("roster entry should be online")
+	}
+}
+
+func TestRosterCopiesP2PEndpoints(t *testing.T) {
+	a := New(0)
+	src := newFakeSource("home", "home-box")
+	src.p2p = []string{"wss://home.example:7443"}
+	a.AddSource(src)
+
+	roster := a.Roster()
+	if len(roster) != 1 || !reflect.DeepEqual(roster[0].P2PEndpoints, src.p2p) {
+		t.Fatalf("roster p2p endpoints = %+v, want %v", roster, src.p2p)
 	}
 }

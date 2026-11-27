@@ -148,7 +148,7 @@ func (d *Node) handleNodeIdentify(ctx context.Context, params json.RawMessage) (
 			}
 		}
 	}
-	res := api.IdentifyResult{ID: d.id, Label: d.label, Version: d.version, Capabilities: d.caps, IdentityPubKey: d.identityPubB64, SignerPubKey: d.signerPubB64, LockDisabled: d.localDisabled()}
+	res := api.IdentifyResult{ID: d.id, Label: d.label, Version: d.version, Capabilities: d.caps, IdentityPubKey: d.identityPubB64, SignerPubKey: d.signerPubB64, LockDisabled: d.localDisabled(), P2PEndpoints: d.p2pEndpoints}
 	if st := d.trust.Load(); st != nil {
 		res.Tip = st.Tip()
 	}

@@ -742,6 +742,7 @@ type IdentifyResult struct {
 	SignerPubKey   string           `json:"signer_pubkey,omitempty"`   // base64 Ed25519 signer public (locked-mode trust log)
 	Tip            []byte           `json:"tip,omitempty"`             // resolved trust-log tip (nil when locked mode is off)
 	LockDisabled   bool             `json:"lock_disabled,omitempty"`   // see NodeDescriptor.LockDisabled
+	P2PEndpoints   []string         `json:"p2p_endpoints,omitempty"`   // direct URLs clients may dial; see NodeDescriptor.P2PEndpoints
 }
 
 // NodeInfo identifies a node connected to the gateway (the unit in server.info).
@@ -1311,6 +1312,9 @@ type NodeDescriptor struct {
 	// itself (`argus lock local-disable`), so it accepts channels from any device.
 	// Gateway-forgeable: a hint for which nodes to try, never a trust decision.
 	LockDisabled bool `json:"lock_disabled,omitempty"`
+	// P2PEndpoints are direct URLs the node accepts clients on. Gateway-forgeable:
+	// a hint for where to dial; the Noise handshake still authenticates the node.
+	P2PEndpoints []string `json:"p2p_endpoints,omitempty"`
 }
 
 type NodesListResult struct {
