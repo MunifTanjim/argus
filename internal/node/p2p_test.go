@@ -2,6 +2,8 @@ package node
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -19,6 +21,7 @@ import (
 	"tailscale.com/tailcfg"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/e2e"
 	"github.com/MunifTanjim/argus/internal/gateway"
 	"github.com/MunifTanjim/argus/internal/session"
@@ -739,3 +742,499 @@ func (d *Node) directAdmittedForTest() int {
 }
 
 func (d *Node) directRespondersForTest() []*relayResponder { return d.directResponders() }
+
+const (
+	plainTok  = "client-token-one"
+	plainTok2 = "client-token-two"
+	masterTok = "master-token"
+)
+
+// plainDirectNode returns a plaintext node with a fake uplink that pairs
+// plainTok and plainTok2, its master token set, and a /p2p server.
+func plainDirectNode(t *testing.T) (d *Node, gw *api.Peer, url string) {
+	t.Helper()
+	d = newE2ETestNode(t)
+	d.SetMasterToken(masterTok)
+	d.SetTailnet(&fakeTailnet{})
+	r := d.newRelayResponder(nil)
+	gw, _ = gatewayUplink(t, r)
+	d.activeResponder.Store(r)
+	t.Cleanup(func() { d.activeResponder.CompareAndSwap(r, nil) })
+	r.binds.setValid([]string{clienttoken.HashToken(plainTok), clienttoken.HashToken(plainTok2)})
+	return d, gw, serveDirectForTest(t, d)
+}
+
+type plainClient struct {
+	t      *testing.T
+	d      *Node
+	peer   *api.Peer
+	ch     *api.Channel
+	frames chan api.RelayFrame
+}
+
+// dialPlain connects to url; dispatch, when set, answers the node's requests.
+func dialPlain(t *testing.T, d *Node, url string, dispatch api.DispatchFunc) *plainClient {
+	t.Helper()
+	c := &plainClient{t: t, d: d, frames: make(chan api.RelayFrame, 64), ch: api.NewPlainChannel(directChanID)}
+	peer, err := api.DialWSPeer(context.Background(), url, "", nil, api.PeerOptions{
+		Dispatch: dispatch,
+		OnRelayFrame: func(_ *api.Peer, f api.RelayFrame) {
+			select {
+			case c.frames <- f:
+			default:
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("dial %s: %v", url, err)
+	}
+	c.peer = peer
+	t.Cleanup(func() { peer.Close() })
+	return c
+}
+
+func newNonce(t *testing.T) string {
+	t.Helper()
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+// challenge sends token.challenge for tok and returns the raw result.
+func (c *plainClient) challenge(tok, nonce string) (json.RawMessage, error) {
+	c.t.Helper()
+	tag, err := api.P2PTag(clienttoken.HashToken(tok), nonce)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	var raw json.RawMessage
+	err = c.callTimeout(api.MethodTokenChallenge, api.TokenChallengeParams{ChanID: directChanID, Nonce: nonce, Tag: tag}, &raw)
+	return raw, err
+}
+
+func (c *plainClient) present(tok string) error {
+	c.t.Helper()
+	return c.callTimeout(api.MethodTokenPresent, api.TokenPresentParams{ChanID: directChanID, Token: tok}, nil)
+}
+
+func (c *plainClient) callTimeout(method string, params, out any) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return c.peer.CallContext(ctx, method, params, out)
+}
+
+// admit runs the full exchange for tok and checks the node's MAC.
+func (c *plainClient) admit(tok string) {
+	c.t.Helper()
+	nonce := newNonce(c.t)
+	raw, err := c.challenge(tok, nonce)
+	if err != nil {
+		c.t.Fatalf("token.challenge: %v", err)
+	}
+	var res api.TokenChallengeResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		c.t.Fatal(err)
+	}
+	want, _ := api.P2PMAC(clienttoken.HashToken(tok), c.d.id, directChanID, nonce)
+	if res.MAC != want {
+		c.t.Fatalf("mac = %q, want %q", res.MAC, want)
+	}
+	if err := c.present(tok); err != nil {
+		c.t.Fatalf("token.present: %v", err)
+	}
+}
+
+func (c *plainClient) call(method string, params json.RawMessage) (json.RawMessage, *api.RPCError) {
+	c.t.Helper()
+	return callOver(c.t, c.ch, c.peer, c.frames, c.d.id, method, params)
+}
+
+func (c *plainClient) waitClosed() {
+	c.t.Helper()
+	select {
+	case <-c.peer.Done():
+	case <-time.After(5 * time.Second):
+		c.t.Fatal("direct connection still open, want closed")
+	}
+}
+
+// expectEchoAndSnapshot opens the channel with a test.echo request and waits
+// for both its reply and the session snapshot (argus:%1) the channel streams.
+func (c *plainClient) expectEchoAndSnapshot() {
+	t, d := c.t, c.d
+	t.Helper()
+	// The first channel frame opens the channel, which streams the snapshot.
+	id := json.RawMessage("1")
+	req, _ := c.ch.SealRequestFrame(api.EncodingJSON, &id, "test.echo", d.id, json.RawMessage(`{"a":1}`))
+	if err := c.peer.SendRawFrame(api.EncodingJSON, req); err != nil {
+		t.Fatal(err)
+	}
+	var echoed, snapshot bool
+	for deadline := time.After(5 * time.Second); !echoed || !snapshot; {
+		select {
+		case f := <-c.frames:
+			if f.Method == "" {
+				res, rpcErr, err := c.ch.OpenResponse(f)
+				if err != nil || rpcErr != nil || string(res) != `{"a":1}` {
+					t.Fatalf("echo = %s, %v, %v", res, rpcErr, err)
+				}
+				echoed = true
+				continue
+			}
+			p, err := c.ch.OpenParams(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if f.Method == api.MethodSessionEvent && strings.Contains(string(p), `"argus:%1"`) {
+				snapshot = true
+			}
+		case <-deadline:
+			t.Fatalf("echoed %v, snapshot %v; want both", echoed, snapshot)
+		}
+	}
+}
+
+// identifyAs answers node.identify with id.
+func identifyAs(id string) api.DispatchFunc {
+	return func(_ context.Context, method string, _ json.RawMessage) (any, error) {
+		if method != api.MethodNodeIdentify {
+			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+		}
+		return api.IdentifyResult{ID: id}, nil
+	}
+}
+
+func rosterPlain(d *Node, id string) {
+	d.roster.apply(api.NodeEvent{Type: api.NodeEventAdded, Node: api.NodeDescriptor{ID: id, Online: true}})
+}
+
+func TestPlainUnknownTagClosed(t *testing.T) {
+	d, _, url := plainDirectNode(t)
+	c := dialPlain(t, d, url, nil)
+	if _, err := c.challenge("unknown-token", newNonce(t)); err == nil {
+		t.Fatal("token.challenge with an unknown tag answered")
+	}
+	c.waitClosed()
+}
+
+func TestPlainChallengeNeverEchoesHash(t *testing.T) {
+	d, _, url := plainDirectNode(t)
+	c := dialPlain(t, d, url, nil)
+	nonce := newNonce(t)
+	raw, err := c.challenge(plainTok, nonce)
+	if err != nil {
+		t.Fatalf("token.challenge: %v", err)
+	}
+	h := clienttoken.HashToken(plainTok)
+	if strings.Contains(string(raw), h) {
+		t.Fatalf("challenge reply %s carries the token hash", raw)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || len(fields) != 1 || fields["mac"] == nil {
+		t.Fatalf("challenge reply %s, want only mac", raw)
+	}
+	want, _ := api.P2PMAC(h, d.id, directChanID, nonce)
+	if string(fields["mac"]) != `"`+want+`"` {
+		t.Fatalf("mac = %s, want %q", fields["mac"], want)
+	}
+}
+
+func TestPlainWrongTokenClosed(t *testing.T) {
+	d, _, url := plainDirectNode(t)
+	c := dialPlain(t, d, url, nil)
+	if _, err := c.challenge(plainTok, newNonce(t)); err != nil {
+		t.Fatalf("token.challenge: %v", err)
+	}
+	// plainTok2 is valid too, but not the token the challenge matched.
+	if err := c.present(plainTok2); err == nil {
+		t.Fatal("token.present with another token answered")
+	}
+	c.waitClosed()
+
+	// A token.present for another channel id is refused as well.
+	c = dialPlain(t, d, url, nil)
+	if _, err := c.challenge(plainTok, newNonce(t)); err != nil {
+		t.Fatalf("token.challenge: %v", err)
+	}
+	err := c.callTimeout(api.MethodTokenPresent, api.TokenPresentParams{ChanID: "pfedcba9876543210", Token: plainTok}, nil)
+	if err == nil {
+		t.Fatal("token.present on another chan_id answered")
+	}
+	c.waitClosed()
+}
+
+func TestPlainAdmitsValidToken(t *testing.T) {
+	d, _, url := plainDirectNode(t)
+	d.reg.ReconcileSessions("claude", discovered("%1"))
+	handleEcho(d)
+	d.server.Handle("orch.test", func(context.Context, json.RawMessage) (any, error) { return "ok", nil })
+	c := dialPlain(t, d, url, nil)
+	c.admit(plainTok)
+
+	c.expectEchoAndSnapshot()
+	if _, rpcErr := c.call("orch.test", nil); rpcErr == nil || rpcErr.Code != api.CodeMethodNotFound {
+		t.Fatalf("orch.test on a plaintext direct client channel: %v, want method not found", rpcErr)
+	}
+	if d.directAdmittedForTest() != 1 {
+		t.Fatalf("admitted = %d, want 1", d.directAdmittedForTest())
+	}
+	// Other frames on the channel id are refused.
+	if err := c.callTimeout(api.MethodNodeIdentify, nil, nil); !isCode(err, api.CodeMethodNotFound) {
+		t.Fatalf("plain node.identify after admission: %v, want method not found", err)
+	}
+}
+
+func TestPlainListenP2P(t *testing.T) {
+	d := newE2ETestNode(t)
+	d.SetTailnet(&fakeTailnet{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d.ListenP2P(ctx, []string{"127.0.0.1:0"})
+}
+
+func TestPlainRevokedTokenClosed(t *testing.T) {
+	d, gw, url := plainDirectNode(t)
+	c := dialPlain(t, d, url, nil)
+	c.admit(plainTok)
+	keep := dialPlain(t, d, url, nil)
+	keep.admit(plainTok2)
+	if _, rpcErr := keep.call(api.MethodPing, nil); rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	// Admitted but no channel frame yet: revocation must still reach it.
+	pending := dialPlain(t, d, url, nil)
+	pending.admit(plainTok)
+
+	notifyGW(t, gw, api.MethodTokenListChanged, api.TokenListChangedParams{Hashes: []string{clienttoken.HashToken(plainTok2)}})
+	c.waitClosed()
+	pending.waitClosed()
+	if _, rpcErr := keep.call(api.MethodPing, nil); rpcErr != nil {
+		t.Fatalf("ping on a still-valid plaintext direct channel: %v", rpcErr)
+	}
+}
+
+func TestPlainQuarantineClosesDirect(t *testing.T) {
+	d, _, url := plainDirectNode(t)
+	c := dialPlain(t, d, url, nil)
+	c.admit(plainTok)
+	if _, rpcErr := c.call(api.MethodPing, nil); rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	d.trustGate.Trip([]byte("genesis"))
+	d.reevaluateTrustChannels()
+	c.waitClosed()
+
+	c = dialPlain(t, d, url, nil)
+	if _, err := c.challenge(plainTok, newNonce(t)); err != nil {
+		t.Fatalf("token.challenge: %v", err)
+	}
+	if err := c.present(plainTok); err == nil {
+		t.Fatal("token.present on a quarantined node answered")
+	}
+	c.waitClosed()
+}
+
+func TestPlainPeerViaIdentify(t *testing.T) {
+	d, _, url := plainDirectNode(t)
+	rosterPlain(d, "b")
+	d.server.Handle("orch.test", func(ctx context.Context, _ json.RawMessage) (any, error) {
+		id, _ := peerNodeFrom(ctx)
+		return id, nil
+	})
+	c := dialPlain(t, d, url, identifyAs("b"))
+	c.admit(masterTok)
+	res, rpcErr := c.call("orch.test", nil)
+	if rpcErr != nil || string(res) != `"b"` {
+		t.Fatalf("orch.test on a plaintext direct peer channel = %s, %v; want \"b\"", res, rpcErr)
+	}
+
+	// Leaving the roster closes the peer channel; it is never demoted.
+	d.roster.apply(api.NodeEvent{Type: api.NodeEventRemoved, Node: api.NodeDescriptor{ID: "b"}})
+	c.waitClosed()
+}
+
+// TestPlainPeerNotInRosterServedAsClient: a master-token opener naming a
+// node outside the roster is an admin client, never a peer.
+func TestPlainPeerNotInRosterServedAsClient(t *testing.T) {
+	d, _, url := plainDirectNode(t)
+	rosterPlain(d, "b")
+	d.reg.ReconcileSessions("claude", discovered("%1"))
+	handleEcho(d)
+	c := dialPlain(t, d, url, identifyAs("zzz"))
+	c.admit(masterTok)
+	c.expectClientChannel()
+}
+
+// TestPlainMasterTokenClientServedAsClient: an admin client holds the master
+// token and does not serve node.identify; it gets a client channel.
+func TestPlainMasterTokenClientServedAsClient(t *testing.T) {
+	t.Run("identify refused", func(t *testing.T) {
+		d, _, url := plainDirectNode(t)
+		d.reg.ReconcileSessions("claude", discovered("%1"))
+		handleEcho(d)
+		c := dialPlain(t, d, url, nil)
+		c.admit(masterTok)
+		c.expectClientChannel()
+	})
+	t.Run("identify unanswered", func(t *testing.T) {
+		d, _, url := plainDirectNode(t)
+		d.direct.limits.identifyTimeout = 50 * time.Millisecond
+		d.reg.ReconcileSessions("claude", discovered("%1"))
+		handleEcho(d)
+		stall := make(chan struct{})
+		t.Cleanup(func() { close(stall) })
+		c := dialPlain(t, d, url, func(context.Context, string, json.RawMessage) (any, error) {
+			<-stall
+			return nil, nil
+		})
+		start := time.Now()
+		c.admit(masterTok)
+		if el := time.Since(start); el > 2*time.Second {
+			t.Fatalf("admission took %v with an unanswered node.identify", el)
+		}
+		c.expectClientChannel()
+	})
+}
+
+// expectClientChannel checks the admitted channel is a client channel: it
+// streams the session snapshot and refuses peer-only methods.
+func (c *plainClient) expectClientChannel() {
+	c.t.Helper()
+	c.expectEchoAndSnapshot()
+	if _, rpcErr := c.call(api.MethodOrchPeerDeliver, json.RawMessage(`{}`)); rpcErr == nil || rpcErr.Code != api.CodeMethodNotFound {
+		c.t.Fatalf("orch.peer.deliver on a client channel: %v, want method not found", rpcErr)
+	}
+}
+
+func TestPlainPeerSelfIDClosed(t *testing.T) {
+	d, _, url := plainDirectNode(t)
+	rosterPlain(d, d.id)
+	c := dialPlain(t, d, url, identifyAs(d.id))
+	if _, err := c.challenge(masterTok, newNonce(t)); err != nil {
+		t.Fatalf("token.challenge: %v", err)
+	}
+	if err := c.present(masterTok); err == nil {
+		t.Fatal("token.present by an opener claiming the node's own id answered")
+	}
+	c.waitClosed()
+}
+
+func TestPlainNeverLogsToken(t *testing.T) {
+	var logs syncBuffer
+	d, _, url := plainDirectNode(t)
+	d.SetLogger(debugLogger(&logs))
+	rosterPlain(d, "b")
+
+	c := dialPlain(t, d, url, nil)
+	c.admit(plainTok)
+	if _, rpcErr := c.call(api.MethodPing, nil); rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	bad := dialPlain(t, d, url, nil)
+	_, _ = bad.challenge(plainTok2, newNonce(t))
+	_ = bad.present(plainTok)
+	bad.waitClosed()
+	peer := dialPlain(t, d, url, identifyAs(d.id))
+	_, _ = peer.challenge(masterTok, newNonce(t))
+	_ = peer.present(masterTok)
+	peer.waitClosed()
+
+	out := logs.String()
+	for _, s := range []string{plainTok, plainTok2, masterTok, clienttoken.HashToken(plainTok), clienttoken.HashToken(plainTok2), clienttoken.HashToken(masterTok)} {
+		if strings.Contains(out, s) {
+			t.Fatalf("log carries %q:\n%s", s, out)
+		}
+	}
+}
+
+func TestPlainRequiresChallengeFirst(t *testing.T) {
+	t.Run("present first", func(t *testing.T) {
+		d, _, url := plainDirectNode(t)
+		c := dialPlain(t, d, url, nil)
+		if err := c.present(plainTok); err == nil {
+			t.Fatal("token.present before token.challenge answered")
+		}
+		c.waitClosed()
+	})
+	t.Run("other request first", func(t *testing.T) {
+		d, _, url := plainDirectNode(t)
+		c := dialPlain(t, d, url, nil)
+		_ = c.callTimeout(api.MethodNodeIdentify, nil, nil)
+		c.waitClosed()
+	})
+	t.Run("channel frame first", func(t *testing.T) {
+		d, _, url := plainDirectNode(t)
+		c := dialPlain(t, d, url, nil)
+		id := json.RawMessage("1")
+		req, _ := c.ch.SealRequestFrame(api.EncodingJSON, &id, api.MethodPing, d.id, nil)
+		if err := c.peer.SendRawFrame(api.EncodingJSON, req); err != nil {
+			t.Fatal(err)
+		}
+		c.waitClosed()
+	})
+	t.Run("channel frame before present", func(t *testing.T) {
+		d, _, url := plainDirectNode(t)
+		c := dialPlain(t, d, url, nil)
+		if _, err := c.challenge(plainTok, newNonce(t)); err != nil {
+			t.Fatal(err)
+		}
+		id := json.RawMessage("1")
+		req, _ := c.ch.SealRequestFrame(api.EncodingJSON, &id, api.MethodPing, d.id, nil)
+		if err := c.peer.SendRawFrame(api.EncodingJSON, req); err != nil {
+			t.Fatal(err)
+		}
+		c.waitClosed()
+	})
+	t.Run("second challenge", func(t *testing.T) {
+		d, _, url := plainDirectNode(t)
+		c := dialPlain(t, d, url, nil)
+		if _, err := c.challenge(plainTok, newNonce(t)); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = c.challenge(plainTok, newNonce(t))
+		c.waitClosed()
+	})
+	t.Run("bad chan id", func(t *testing.T) {
+		d, _, url := plainDirectNode(t)
+		c := dialPlain(t, d, url, nil)
+		nonce := newNonce(t)
+		tag, _ := api.P2PTag(clienttoken.HashToken(plainTok), nonce)
+		_ = c.callTimeout(api.MethodTokenChallenge, api.TokenChallengeParams{ChanID: "c1", Nonce: nonce, Tag: tag}, nil)
+		c.waitClosed()
+	})
+}
+
+// bindMany binds n fresh keys to h1, enough to push older keys past the
+// per-token cap.
+func bindMany(d *Node, n int) {
+	for range n {
+		kp, _ := e2e.GenerateKeyPair()
+		d.bindings().bind(kp.Public, "h1")
+	}
+}
+
+func TestTokenRevokeClosesDirectAfterManyBinds(t *testing.T) {
+	d, gw, url, _ := directNode(t)
+	kp := mustKeyPair(t)
+	bindClient(t, d, kp)
+	c := mustAdmit(t, d, url, kp)
+	bindMany(d, maxBindingsPerToken)
+
+	notifyGW(t, gw, api.MethodTokenListChanged, api.TokenListChangedParams{Hashes: []string{"h2"}})
+	c.waitClosed()
+}
+
+func TestLiveDirectBindingSurvivesManyBinds(t *testing.T) {
+	d, _, url, _ := directNode(t)
+	kp := mustKeyPair(t)
+	bindClient(t, d, kp)
+	c := mustAdmit(t, d, url, kp)
+	bindMany(d, maxBindingsPerToken)
+
+	d.reevaluateTrustChannels()
+	if _, rpcErr := c.call(api.MethodPing, nil); rpcErr != nil {
+		t.Fatalf("ping after a trust recheck: %v", rpcErr)
+	}
+}

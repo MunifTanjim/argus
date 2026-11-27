@@ -503,9 +503,8 @@ func (d *Node) uplinkNotify(r *relayResponder) func(api.Notification) {
 		}
 		if n.Method == api.MethodTokenListChanged {
 			if p, err := api.Decode[api.TokenListChangedParams](n.Params); err == nil {
-				if revoked := r.binds.setValid(p.Hashes); len(revoked) > 0 {
-					d.closeDirectFor(revoked)
-				}
+				r.binds.setValid(p.Hashes)
+				d.closeRevokedDirect(r.binds)
 			}
 			return
 		}

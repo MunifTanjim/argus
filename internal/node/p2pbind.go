@@ -8,7 +8,8 @@ import (
 
 // maxBindingsPerToken bounds the keys bound to one token; past it the oldest
 // is evicted. maxBindings bounds the store; past it the oldest binding overall
-// is evicted.
+// is evicted. A key with a live direct channel is never evicted, so the caps
+// may be exceeded by at most the number of direct channels.
 const (
 	maxBindingsPerToken = 8
 	maxBindings         = 1024
@@ -23,6 +24,7 @@ type bindingStore struct {
 	byKey  map[string]binding
 	byHash map[string][]string // keys per token hash, oldest first
 	valid  map[string]bool     // paired client token hashes
+	pinned map[string]int      // keys with live direct channels, by channel count
 	master string              // hash of the node's master token; "" when unknown
 	seq    uint64
 }
@@ -37,6 +39,7 @@ func newBindingStore(masterHash string) *bindingStore {
 		byKey:  map[string]binding{},
 		byHash: map[string][]string{},
 		valid:  map[string]bool{},
+		pinned: map[string]int{},
 		master: masterHash,
 	}
 }
@@ -54,13 +57,18 @@ func (s *bindingStore) bind(key []byte, tokenHash string) {
 		s.removeLocked(k)
 	}
 	if keys := s.byHash[tokenHash]; len(keys) >= maxBindingsPerToken {
-		s.removeLocked(keys[0])
+		for _, kk := range keys {
+			if s.pinned[kk] == 0 {
+				s.removeLocked(kk)
+				break
+			}
+		}
 	}
 	if len(s.byKey) >= maxBindings {
 		var oldest string
 		var oldestSeq uint64
 		for ok, b := range s.byKey {
-			if oldest == "" || b.seq < oldestSeq {
+			if s.pinned[ok] == 0 && (oldest == "" || b.seq < oldestSeq) {
 				oldest, oldestSeq = ok, b.seq
 			}
 		}
@@ -88,6 +96,25 @@ func (s *bindingStore) removeLocked(k string) {
 		delete(s.byHash, b.hash)
 	} else {
 		s.byHash[b.hash] = keys
+	}
+}
+
+// pin keeps key's binding from eviction while a direct channel it opened is
+// live; unpin releases it.
+func (s *bindingStore) pin(key []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pinned[string(key)]++
+}
+
+func (s *bindingStore) unpin(key []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := string(key)
+	if s.pinned[k] <= 1 {
+		delete(s.pinned, k)
+	} else {
+		s.pinned[k]--
 	}
 }
 
@@ -126,12 +153,36 @@ func (s *bindingStore) tokenValidLocked(hash string) bool {
 	return hash != "" && (s.valid[hash] || hash == s.master)
 }
 
+// hashes returns every valid token hash: the paired client tokens and the
+// master token.
+func (s *bindingStore) hashes() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.valid)+1)
+	for h := range s.valid {
+		out = append(out, h)
+	}
+	if s.master != "" && !s.valid[s.master] {
+		out = append(out, s.master)
+	}
+	return out
+}
+
 // admits reports whether key is bound to a valid token.
 func (s *bindingStore) admits(key []byte) bool {
+	_, ok := s.validHash(key)
+	return ok
+}
+
+// validHash returns the valid token key is bound to, or false when it is not.
+func (s *bindingStore) validHash(key []byte) (hash string, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b, ok := s.byKey[string(key)]
-	return ok && s.tokenValidLocked(b.hash)
+	if !ok || !s.tokenValidLocked(b.hash) {
+		return "", false
+	}
+	return b.hash, true
 }
 
 // clear drops every binding and the token list.
@@ -141,6 +192,7 @@ func (s *bindingStore) clear() {
 	clear(s.byKey)
 	clear(s.byHash)
 	clear(s.valid)
+	clear(s.pinned)
 }
 
 func (s *bindingStore) countForTest() int {

@@ -4,6 +4,9 @@
 package api
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"sort"
@@ -127,6 +130,11 @@ const (
 	// token.list.changed gives a p2p-capable node the hashes of the paired client
 	// tokens, on identify and whenever the set changes.
 	MethodTokenListChanged = "token.list.changed" // gateway->node notification: TokenListChangedParams
+	// Plaintext direct admission. The client proves which token it holds
+	// without sending its hash, the node proves it knows that hash, and only
+	// then does the client send the token.
+	MethodTokenChallenge = "token.challenge" // client->node request on a direct link: TokenChallengeParams; result: TokenChallengeResult
+	MethodTokenPresent   = "token.present"   // client->node request on a direct link: TokenPresentParams; result: null
 	// Trust-log distribution (locked mode). Cleartext, self-authenticating chain
 	// bytes the blind gateway relays but cannot forge/roll back.
 	MethodTrustLogSync = "trustlog.sync" // request: TrustLogSyncParams; result: TrustLogSyncResult (offer: known hashes; gateway set-subtracts diff)
@@ -678,6 +686,48 @@ type ChannelOpenedParams struct {
 // TokenListChangedParams carries the hashes of the paired client tokens.
 type TokenListChangedParams struct {
 	Hashes []string `json:"hashes"`
+}
+
+// TokenChallengeParams opens plaintext direct admission. Nonce is 32 random
+// bytes, base64; Tag is P2PTag of the client's token hash.
+type TokenChallengeParams struct {
+	ChanID string `json:"chan_id"`
+	Nonce  string `json:"nonce"`
+	Tag    string `json:"tag"`
+}
+
+// TokenChallengeResult carries P2PMAC of the matched token hash.
+type TokenChallengeResult struct {
+	MAC string `json:"mac"`
+}
+
+// TokenPresentParams carries the client's token, sent only after it verified
+// the node's MAC.
+type TokenPresentParams struct {
+	ChanID string `json:"chan_id"`
+	Token  string `json:"token"`
+}
+
+// P2PTag is the client's proof of its token hash in token.challenge:
+// hex(HMAC-SHA256(key = hex-decoded tokenHash, "client|" + nonce)).
+func P2PTag(tokenHash, nonce string) (string, error) {
+	return p2pHMAC(tokenHash, "client|"+nonce)
+}
+
+// P2PMAC is the node's proof of the same hash, bound to its id and the channel:
+// hex(HMAC-SHA256(key = hex-decoded tokenHash, "node|" + nodeID + "|" + chanID + "|" + nonce)).
+func P2PMAC(tokenHash, nodeID, chanID, nonce string) (string, error) {
+	return p2pHMAC(tokenHash, "node|"+nodeID+"|"+chanID+"|"+nonce)
+}
+
+func p2pHMAC(tokenHash, msg string) (string, error) {
+	key, err := hex.DecodeString(tokenHash)
+	if err != nil || len(key) == 0 {
+		return "", errors.New("api: token hash is not hex")
+	}
+	m := hmac.New(sha256.New, key)
+	m.Write([]byte(msg))
+	return hex.EncodeToString(m.Sum(nil)), nil
 }
 
 // IdentifyParams is what a client sends to declare its capabilities.

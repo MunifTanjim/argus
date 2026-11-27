@@ -98,6 +98,27 @@ func TestBindCapsPerHash(t *testing.T) {
 	}
 }
 
+func TestBindNeverEvictsPinned(t *testing.T) {
+	s := newBindingStore("master")
+	s.setValid([]string{"h1"})
+	s.bind(testKey(0), "h1")
+	s.pin(testKey(0))
+	for i := 1; i <= maxBindingsPerToken; i++ {
+		s.bind(testKey(i), "h1")
+	}
+	if !s.admits(testKey(0)) {
+		t.Fatal("a pinned key must not be evicted")
+	}
+	if s.admits(testKey(1)) {
+		t.Fatal("the oldest unpinned key must be evicted instead")
+	}
+	s.unpin(testKey(0))
+	s.bind(testKey(maxBindingsPerToken+1), "h1")
+	if s.admits(testKey(0)) {
+		t.Fatal("an unpinned key is evicted again")
+	}
+}
+
 func TestBindCapsTotal(t *testing.T) {
 	s := newBindingStore("master")
 	var hashes []string

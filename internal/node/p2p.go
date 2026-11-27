@@ -3,13 +3,16 @@ package node
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"encoding/base64"
+	"encoding/json"
 	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/clienttoken"
 	"github.com/MunifTanjim/argus/internal/tailnet"
 )
 
@@ -20,6 +23,7 @@ const (
 	directPreAuthTotal     = 16
 	directPreAuthPerCaller = 4
 	directHandshakeTimeout = 10 * time.Second
+	directIdentifyTimeout  = 3 * time.Second
 	directPreAuthReadLimit = 64 << 10
 	maxDirectChannels      = 64
 )
@@ -28,6 +32,7 @@ type directLimits struct {
 	preAuthTotal      int
 	preAuthPerCaller  int
 	handshakeTimeout  time.Duration
+	identifyTimeout   time.Duration // node.identify on a master-token opener; under handshakeTimeout
 	maxAdmitted       int
 	keepalive         time.Duration
 	keepaliveTimeout  time.Duration
@@ -39,6 +44,7 @@ func defaultDirectLimits() directLimits {
 		preAuthTotal:      directPreAuthTotal,
 		preAuthPerCaller:  directPreAuthPerCaller,
 		handshakeTimeout:  directHandshakeTimeout,
+		identifyTimeout:   directIdentifyTimeout,
 		maxAdmitted:       maxDirectChannels,
 		keepalive:         api.DefaultKeepaliveInterval,
 		keepaliveTimeout:  api.DefaultKeepaliveTimeout,
@@ -83,6 +89,49 @@ type directConn struct {
 	peer   *api.Peer
 	resp   *relayResponder
 	state  directState // guarded by directSet.mu
+
+	// plaintext connections admit by token (token.challenge, token.present)
+	// instead of a Noise handshake.
+	plaintext bool
+	plain     plainAuth
+}
+
+type plainStage int
+
+const (
+	plainNone plainStage = iota
+	plainChallenged
+	plainPresenting
+	plainAdmitted
+	plainFailed
+)
+
+// plainAuth is a plaintext direct connection's token admission. hash is the
+// token hash token.challenge matched; the token itself is never kept.
+type plainAuth struct {
+	mu     sync.Mutex
+	stage  plainStage
+	chanID string
+	hash   string
+	opener string // peer node, set when the master token was presented
+	opened bool   // the channel was created
+}
+
+func (a *plainAuth) tokenHash() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.stage == plainFailed {
+		return ""
+	}
+	return a.hash
+}
+
+// admitted returns the admitted token hash and opener, ok false before
+// admission.
+func (a *plainAuth) admitted() (hash, opener string, ok bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.hash, a.opener, a.stage == plainAdmitted
 }
 
 // close ends the connection without waiting: a WebSocket close waits for the
@@ -191,12 +240,9 @@ var (
 
 // ListenP2P serves the direct listener on addrs until ctx ends. Every address
 // that binds is served when it returns; one that fails is logged and bound
-// again in the background with capped backoff. Only E2EE nodes may listen.
+// again in the background with capped backoff. E2EE nodes admit by Noise
+// handshake, plaintext nodes by token.
 func (d *Node) ListenP2P(ctx context.Context, addrs []string) {
-	if !d.e2ee {
-		d.log.Warn("p2p listener requires e2ee")
-		return
-	}
 	if d.tailnetD == nil {
 		d.tailnetD = tailnet.Local()
 	}
@@ -303,11 +349,12 @@ func (d *Node) tailnetCaller(ctx context.Context, remoteAddr string) string {
 func (d *Node) serveDirect(dc *directConn, conn net.Conn) {
 	l := d.direct.limits
 	dc.conn = conn
+	dc.plaintext = !d.e2ee
 	dc.resp = d.newDirectResponder(dc)
 	// Hold frames until the connection is registered, so every re-check that
 	// walks the set sees it before its handshake runs.
 	ready := make(chan struct{})
-	dc.peer = api.NewPeer(conn, api.PeerOptions{
+	opts := api.PeerOptions{
 		OnRelayFrame: func(p *api.Peer, f api.RelayFrame) {
 			<-ready
 			dc.resp.onFrame(p, f)
@@ -315,7 +362,15 @@ func (d *Node) serveDirect(dc *directConn, conn net.Conn) {
 		KeepaliveInterval:         l.keepalive,
 		KeepaliveTimeout:          l.keepaliveTimeout,
 		KeepaliveFailureThreshold: l.keepaliveFailures,
-	})
+	}
+	if dc.plaintext {
+		dispatch := d.plainDirectDispatch(dc)
+		opts.Dispatch = func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+			<-ready
+			return dispatch(ctx, method, params)
+		}
+	}
+	dc.peer = api.NewPeer(conn, opts)
 	dc.resp.peer.Store(dc.peer)
 	d.direct.add(dc)
 	close(ready)
@@ -347,23 +402,269 @@ func (d *Node) newDirectResponder(dc *directConn) *relayResponder {
 
 // directAdmission decides whether a direct channel may serve key: as the peer
 // node whose roster key it is (opener), or as a client whose key is bound to a
-// valid token (opener ""). Both need a live uplink, and locked mode needs the
-// trust log to authorize key. A quarantined node admits nothing.
-func (d *Node) directAdmission(key []byte) (opener string, ok bool) {
+// valid token (opener "", hash that token). Both need a live uplink, and locked
+// mode needs the trust log to authorize key. A quarantined node admits nothing.
+func (d *Node) directAdmission(key []byte) (opener, hash string, ok bool) {
+	b := d.directGate(key)
+	if b == nil {
+		return "", "", false
+	}
+	if id := d.rosterNodeWithKey(key); id != "" {
+		return id, "", true
+	}
+	hash, ok = b.validHash(key)
+	return "", hash, ok
+}
+
+// directGate returns the uplink's binding store when nothing refuses key
+// outright: quarantine, no uplink, or a locked trust log without key.
+func (d *Node) directGate(key []byte) *bindingStore {
 	if d.rejectsChannels() {
-		return "", false
+		return nil
 	}
 	if st := d.trust.Load(); st != nil && !st.Disabled() && !d.localDisabled() && !st.DeviceAuthorized(key) {
-		return "", false
+		return nil
+	}
+	return d.bindings()
+}
+
+// directStillAdmitted re-runs admission for cs, a live E2EE direct channel. A
+// client channel is judged by the token it was admitted with, not its current
+// binding: the key may since have been bound to another token.
+func (d *Node) directStillAdmitted(cs *chanState) bool {
+	if cs.opener != "" {
+		opener, _, ok := d.directAdmission(cs.clientStatic)
+		return ok && opener == cs.opener
+	}
+	b := d.directGate(cs.clientStatic)
+	return b != nil && d.rosterNodeWithKey(cs.clientStatic) == "" && b.tokenValid(cs.tokenHash)
+}
+
+var errDirectRefused = &api.RPCError{Code: api.CodeInvalidRequest, Message: "not admitted"}
+
+// plainDirectDispatch serves the plaintext admission requests. Any other
+// request before admission ends the connection; after it, the connection
+// still serves nothing outside its channel. Params are never logged: they
+// carry the token.
+func (d *Node) plainDirectDispatch(dc *directConn) api.DispatchFunc {
+	return func(_ context.Context, method string, params json.RawMessage) (any, error) {
+		switch method {
+		case api.MethodTokenChallenge:
+			return d.tokenChallenge(dc, params)
+		case api.MethodTokenPresent:
+			return d.tokenPresent(dc, params)
+		}
+		if _, _, ok := dc.plain.admitted(); ok {
+			return nil, &api.RPCError{Code: api.CodeMethodNotFound, Message: "method not found: " + method}
+		}
+		return d.refuseDirect(dc)
+	}
+}
+
+// refuseDirect fails dc's admission and closes it.
+func (d *Node) refuseDirect(dc *directConn) (any, error) {
+	dc.plain.mu.Lock()
+	dc.plain.stage = plainFailed
+	dc.plain.mu.Unlock()
+	dc.close()
+	return nil, errDirectRefused
+}
+
+// tokenChallenge finds the valid token hash whose tag the client sent and
+// answers with the node's MAC over it. The hash never crosses the wire.
+func (d *Node) tokenChallenge(dc *directConn, params json.RawMessage) (any, error) {
+	p, err := api.Decode[api.TokenChallengeParams](params)
+	if err != nil || !validDirectChanID(p.ChanID) || !validNonce(p.Nonce) {
+		return d.refuseDirect(dc)
 	}
 	b := d.bindings()
 	if b == nil {
+		return d.refuseDirect(dc)
+	}
+	var matched string
+	for _, h := range b.hashes() {
+		if tag, err := api.P2PTag(h, p.Nonce); err == nil && hmac.Equal([]byte(tag), []byte(p.Tag)) {
+			matched = h
+		}
+	}
+	if matched == "" {
+		d.log.Warn("rejected direct connection: unknown token")
+		return d.refuseDirect(dc)
+	}
+	mac, err := api.P2PMAC(matched, d.id, p.ChanID, p.Nonce)
+	if err != nil {
+		return d.refuseDirect(dc)
+	}
+	dc.plain.mu.Lock()
+	if dc.plain.stage != plainNone {
+		dc.plain.mu.Unlock()
+		return d.refuseDirect(dc)
+	}
+	dc.plain.stage, dc.plain.chanID, dc.plain.hash = plainChallenged, p.ChanID, matched
+	dc.plain.mu.Unlock()
+	return api.TokenChallengeResult{MAC: mac}, nil
+}
+
+// tokenPresent admits dc when the token hashes to the challenged hash. The
+// master token admits only another roster node, named by node.identify.
+func (d *Node) tokenPresent(dc *directConn, params json.RawMessage) (any, error) {
+	p, err := api.Decode[api.TokenPresentParams](params)
+	dc.plain.mu.Lock()
+	ok := err == nil && dc.plain.stage == plainChallenged && p.ChanID == dc.plain.chanID &&
+		hmac.Equal([]byte(clienttoken.HashToken(p.Token)), []byte(dc.plain.hash))
+	if ok {
+		dc.plain.stage = plainPresenting
+	}
+	hash, chanID := dc.plain.hash, dc.plain.chanID
+	dc.plain.mu.Unlock()
+	if !ok {
+		d.log.Warn("rejected direct connection: token does not match its challenge")
+		return d.refuseDirect(dc)
+	}
+	var opener string
+	if hash == d.masterTokenHash() {
+		var self bool
+		if opener, self = d.identifyOpener(dc); self {
+			d.log.Warn("rejected direct channel: opener claims this node's id", "chan", chanID)
+			return d.refuseDirect(dc)
+		}
+	}
+	if !d.plainAdmissible(hash, opener) {
+		d.log.Warn("rejected direct channel: token not admitted", "chan", chanID)
+		return d.refuseDirect(dc)
+	}
+	if !d.direct.admit(dc) {
+		d.log.Warn("rejected direct channel: no free channel slot", "chan", chanID)
+		return d.refuseDirect(dc)
+	}
+	dc.plain.mu.Lock()
+	dc.plain.stage, dc.plain.opener = plainAdmitted, opener
+	dc.plain.mu.Unlock()
+	// Re-check now that re-checks see dc admitted: one that ran during the
+	// exchange found nothing to close.
+	if !d.plainAdmissible(hash, opener) {
+		return d.refuseDirect(dc)
+	}
+	api.ResetReadLimit(dc.conn)
+	return nil, nil
+}
+
+// identifyOpener asks a master-token opener for its node id, as the gateway
+// does on /node. It returns the id when it names another roster node, and ""
+// otherwise: an admin client holds the master token too, and is served as a
+// client. self reports an opener claiming this node's own id.
+func (d *Node) identifyOpener(dc *directConn) (opener string, self bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), d.direct.limits.identifyTimeout)
+	defer cancel()
+	var res api.IdentifyResult
+	if err := dc.peer.CallContext(ctx, api.MethodNodeIdentify, nil, &res); err != nil {
 		return "", false
 	}
-	if id := d.rosterNodeWithKey(key); id != "" {
-		return id, true
+	if res.ID == d.id {
+		return "", true
 	}
-	return "", b.admits(key)
+	if !d.rosterHasPeer(res.ID) {
+		return "", false
+	}
+	return res.ID, false
+}
+
+// plainAdmissible decides whether a plaintext direct channel admitted with
+// token hash may still be served: a client by a paired or the master token, or
+// opener by the master token while it is another roster node. Both need a live uplink; a
+// quarantined node admits nothing.
+func (d *Node) plainAdmissible(hash, opener string) bool {
+	if d.rejectsChannels() {
+		return false
+	}
+	b := d.bindings()
+	if b == nil || !b.tokenValid(hash) {
+		return false
+	}
+	if opener != "" {
+		return hash == d.masterTokenHash() && d.rosterHasPeer(opener)
+	}
+	return true
+}
+
+// rosterHasPeer reports whether id is a roster node other than this one.
+func (d *Node) rosterHasPeer(id string) bool {
+	if id == "" || id == d.id {
+		return false
+	}
+	_, ok := d.roster.get(id)
+	return ok
+}
+
+// validNonce reports whether n is 32 bytes, standard padded base64.
+func validNonce(n string) bool {
+	b, err := base64.StdEncoding.DecodeString(n)
+	return err == nil && len(b) == 32
+}
+
+// openDirectPlain creates the channel of an admitted plaintext direct
+// connection on its first frame, like a plaintext relay channel. A frame
+// before admission or for another id ends the connection.
+func (r *relayResponder) openDirectPlain(chanID string) *chanState {
+	dc := r.direct
+	dc.plain.mu.Lock()
+	ok := dc.plain.stage == plainAdmitted && !dc.plain.opened && chanID == dc.plain.chanID
+	if ok {
+		dc.plain.opened = true
+	}
+	hash, opener := dc.plain.hash, dc.plain.opener
+	dc.plain.mu.Unlock()
+	if !ok {
+		dc.close()
+		return nil
+	}
+	cs, cn := r.insertPlain(chanID, opener)
+	if !r.d.plainAdmissible(hash, opener) {
+		r.closeChan(chanID)
+		return nil
+	}
+	if opener != "" {
+		go r.watchPeerRoster(cs)
+	}
+	r.startStream(chanID, cs, cn)
+	return cs
+}
+
+// directPeerValid reports whether cs, a direct peer channel, may still serve
+// its opener: by roster key with E2EE, by roster membership in plaintext.
+func (r *relayResponder) directPeerValid(cs *chanState) bool {
+	if r.direct.plaintext {
+		return r.d.rosterHasPeer(cs.opener)
+	}
+	return r.peerKeyMatches(cs.opener, cs.clientStatic)
+}
+
+// closeRevokedDirect ends direct client connections whose admitting token is
+// no longer valid in b.
+func (d *Node) closeRevokedDirect(b *bindingStore) {
+	for _, dc := range d.direct.snapshot() {
+		if dc.plaintext {
+			if h := dc.plain.tokenHash(); h != "" && !b.tokenValid(h) {
+				d.log.Info("closing direct connection: token revoked")
+				dc.resp.closeAll()
+				dc.close()
+			}
+			continue
+		}
+		r := dc.resp
+		r.mu.Lock()
+		var ids []string
+		for id, cs := range r.chans {
+			if cs.opener == "" && !b.tokenValid(cs.tokenHash) {
+				ids = append(ids, id)
+			}
+		}
+		r.mu.Unlock()
+		for _, id := range ids {
+			d.log.Info("closing direct channel: token revoked", "chan", id)
+			r.closeChan(id)
+		}
+	}
 }
 
 // rosterNodeWithKey returns the other roster node whose identity key is key.
@@ -401,7 +702,7 @@ func (r *relayResponder) watchPeerRoster(cs *chanState) {
 	events, cancel := r.d.roster.subscribe()
 	defer cancel()
 	for {
-		if !r.peerKeyMatches(cs.opener, cs.clientStatic) {
+		if !r.directPeerValid(cs) {
 			r.d.log.Warn("closing direct peer channel: opener left the roster or its key changed", "chan", cs.ch.ID(), "node", cs.opener)
 			r.closeChan(cs.ch.ID())
 			return
@@ -417,6 +718,14 @@ func (r *relayResponder) watchPeerRoster(cs *chanState) {
 // recheckDirect re-runs admission for every channel on a direct responder and
 // closes the ones that no longer pass or whose role changed.
 func (r *relayResponder) recheckDirect() {
+	if r.direct.plaintext {
+		if hash, opener, ok := r.direct.plain.admitted(); ok && !r.d.plainAdmissible(hash, opener) {
+			r.d.log.Warn("closing direct connection: no longer admitted")
+			r.closeAll()
+			r.direct.close()
+		}
+		return
+	}
 	r.mu.Lock()
 	var live []*chanState
 	for _, cs := range r.chans {
@@ -424,7 +733,7 @@ func (r *relayResponder) recheckDirect() {
 	}
 	r.mu.Unlock()
 	for _, cs := range live {
-		if opener, ok := r.d.directAdmission(cs.clientStatic); !ok || opener != cs.opener {
+		if !r.d.directStillAdmitted(cs) {
 			r.d.log.Warn("closing direct channel: no longer admitted", "chan", cs.ch.ID())
 			r.closeChan(cs.ch.ID())
 		}
@@ -438,31 +747,6 @@ func (d *Node) directResponders() []*relayResponder {
 		out = append(out, dc.resp)
 	}
 	return out
-}
-
-// closeDirectFor ends direct channels authenticated by any of keys.
-func (d *Node) closeDirectFor(keys [][]byte) {
-	if len(keys) == 0 {
-		return
-	}
-	set := make(map[string]bool, len(keys))
-	for _, k := range keys {
-		set[string(k)] = true
-	}
-	for _, r := range d.directResponders() {
-		r.mu.Lock()
-		var ids []string
-		for id, cs := range r.chans {
-			if set[string(cs.clientStatic)] {
-				ids = append(ids, id)
-			}
-		}
-		r.mu.Unlock()
-		for _, id := range ids {
-			r.d.log.Info("closing direct channel: token revoked", "chan", id)
-			r.closeChan(id)
-		}
-	}
 }
 
 // closeAllDirect ends every direct connection. Channels close at once; the

@@ -181,12 +181,8 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 			return fail(cmd, err)
 		}
 		if len(cfg.P2P.Listen) > 0 {
-			if cfg.E2EE.Enabled {
-				d.SetTailnet(tailnet.Local())
-				d.ListenP2P(ctx, cfg.P2P.Listen)
-			} else {
-				logger.Scoped("p2p").L.Warn("p2p.listen ignored: direct connections need e2ee")
-			}
+			d.SetTailnet(tailnet.Local())
+			d.ListenP2P(ctx, cfg.P2P.Listen)
 		}
 	}
 
