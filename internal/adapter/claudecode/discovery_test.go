@@ -337,3 +337,25 @@ func TestBuildDiscovered(t *testing.T) {
 		t.Error("dead-1 (pid absent from procs) should be skipped")
 	}
 }
+
+// TestBuildDiscoveredResumedInOtherDir: the transcript is found in the project dir
+// where the session started, not the one for its current cwd.
+func TestBuildDiscoveredResumedInOtherDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	startedIn := filepath.Join(home, ".claude", "projects", "-repo--worktrees-feature")
+	if err := os.MkdirAll(startedIn, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(startedIn, "resumed-1.jsonl")
+	if err := os.WriteFile(want, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	procs := map[int]string{100: ""}
+	entries := []procSession{{PID: 100, SessionID: "resumed-1", Entrypoint: "cli", Cwd: "/repo"}}
+	got := buildDiscovered(procs, nil, entries)
+	if len(got) != 1 || got[0].TranscriptPath != want {
+		t.Fatalf("transcript path: want %q, got %+v", want, got)
+	}
+}

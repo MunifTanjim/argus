@@ -119,7 +119,7 @@ func buildDiscovered(procs map[int]string, paneByTTY map[string]paneInfo, entrie
 			d.Frontend = frontendFor(ps.Entrypoint, false)
 		}
 		if projDir != "" {
-			d.TranscriptPath = filepath.Join(projDir, sid+".jsonl")
+			d.TranscriptPath = transcriptPathFor(projDir, sid)
 		}
 		out = append(out, d)
 	}
@@ -273,4 +273,18 @@ func SetRunPSForTest(fn func() (string, error)) (restore func()) {
 	prev := runPS
 	runPS = fn
 	return func() { runPS = prev }
+}
+
+// transcriptPathFor returns sid's transcript. A session resumed from another
+// directory keeps writing to the project dir where it started, so a miss in projDir
+// falls back to a unique match among sibling project dirs, else keeps projDir.
+func transcriptPathFor(projDir, sid string) string {
+	p := filepath.Join(projDir, sid+".jsonl")
+	if _, err := os.Stat(p); err == nil || sid == "" {
+		return p
+	}
+	if matches, _ := filepath.Glob(filepath.Join(filepath.Dir(projDir), "*", sid+".jsonl")); len(matches) == 1 {
+		return matches[0]
+	}
+	return p
 }
