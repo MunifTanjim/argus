@@ -331,22 +331,30 @@ class SessionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = session.displayName;
-    final first = Row(
-      children: [
-        SizedBox(width: kLeadWidth, child: mark),
-        const SizedBox(width: kLeadGap),
-        Expanded(
-          child: Text(
-            session.displayTitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: name == null
-                ? style
-                : mono.copyWith(color: context.tokens.textDim, fontSize: 11),
+    // The trailing group hugs the right edge and takes at most half the
+    // width; a flexible node beside an expanded title would leave a gap.
+    final first = LayoutBuilder(
+      builder: (context, constraints) => Row(
+        children: [
+          SizedBox(width: kLeadWidth, child: mark),
+          const SizedBox(width: kLeadGap),
+          Expanded(
+            child: Text(
+              session.displayTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: name == null
+                  ? style
+                  : mono.copyWith(color: context.tokens.textDim, fontSize: 11),
+            ),
           ),
-        ),
-        ...trailing,
-      ],
+          if (trailing.isNotEmpty)
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: constraints.maxWidth / 2),
+              child: Row(mainAxisSize: MainAxisSize.min, children: trailing),
+            ),
+        ],
+      ),
     );
     if (name == null) return first;
     return Column(

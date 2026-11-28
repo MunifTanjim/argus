@@ -275,6 +275,21 @@ void main() {
     });
   }
 
+  for (final style in StatusStyle.values) {
+    testWidgets('${style.name}: a short node sits at the right edge',
+        (tester) async {
+      final s = _session('{"id":"mac:%1","status":"working",$base,'
+          '"node_label":"mac"}');
+      await tester.pumpWidget(MaterialApp(
+        theme: buildArgusTheme(prefs: AppearancePrefs(statusStyle: style)),
+        home: Scaffold(body: SessionCard(session: s, showNode: true)),
+      ));
+      // The card's right padding is 12.
+      expect(tester.getTopRight(find.text('mac')).dx,
+          closeTo(tester.getTopRight(find.byType(SessionCard)).dx - 12, 1));
+    });
+  }
+
   testWidgets('without a name the mark is centered on the title',
       (tester) async {
     final s = _session('{"id":"mac:%1","status":"working",$base,'
