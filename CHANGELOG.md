@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.5](https://github.com/MunifTanjim/argus/compare/0.1.4...0.1.5) (2026-11-28)
+
+
+### Features
+
+* **node:** name pr workspaces after head branch ([f004dbe](https://github.com/MunifTanjim/argus/commit/f004dbe7f9fa359657880a9e97a98906093f8cff))
+
+
+### Bug Fixes
+
+* **claude:** show narration blocks as text ([81d86f0](https://github.com/MunifTanjim/argus/commit/81d86f041f0545b6b086f0624cf0509f23e134f7))
+* **tui:** go back from a session to a view that lists it ([9cd852a](https://github.com/MunifTanjim/argus/commit/9cd852a429b5f59d333e1a5240a07b89a646cbd3))
+
 ## [0.1.4](https://github.com/MunifTanjim/argus/compare/0.1.3...0.1.4) (2026-11-21)
 
 
