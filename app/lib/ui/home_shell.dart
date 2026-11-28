@@ -62,10 +62,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final session = ref.read(sessionsProvider)[pending.sessionId];
     if (session == null) return;
     final scope = ref.read(scopeProvider);
-    if (pending.inHome && scope != null) {
-      ref.read(scopeProvider.notifier).state = null;
-    }
-    final target = pending.inHome ? null : scope;
+    final target = pending.inHome ? null : _scopeFor(session, scope);
+    if (target != scope) ref.read(scopeProvider.notifier).state = target;
     final nav = _nav?.scope == target ? _nav?.key.currentState : null;
     if (nav == null) {
       // The scope's navigator is built on the next frame.
@@ -83,6 +81,16 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     }
     _remember(shownId);
     nav.pushReplacement(sessionDetailRoute(session));
+  }
+
+  // A session opens in a scope that lists it, so back leads to that list: the
+  // current scope if it lists the session (Home lists all), else the session's
+  // workspace, else Home.
+  String? _scopeFor(Session session, String? scope) {
+    final ws = session.workspaceId;
+    if (scope == null || ws == scope) return scope;
+    if (ws == null || ws.isEmpty) return null;
+    return _available(ref.read(projectsProvider).projects, ws) ? ws : null;
   }
 
   // Navigator callbacks run mid-build, so the provider is set after the frame.
@@ -126,22 +134,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   }
 
   // A pop in the current scope's navigator (back or the app bar) forgets the
-  // session detail it closes. As in the TUI, it then shows the session's
-  // workspace, whatever scope opened the session.
+  // session detail it closes. The scope stays.
   void _onPop(_ScopeNavigator nav, Route<dynamic> route) {
     if (nav != _nav || nav.scope != ref.read(scopeProvider)) return;
     final id = sessionDetailRouteId(route);
     if (id == null) return;
     ref.read(rememberedSessionsProvider.notifier).forget(id);
-    final ws = ref.read(sessionsProvider)[id]?.workspaceId;
-    if (ws == null || ws == nav.scope) return;
-    if (!_available(ref.read(projectsProvider).projects, ws)) return;
-    // Navigator callbacks run mid-build, so the scope is set after the frame.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      ref.read(rememberedSessionsProvider.notifier).clear(ws);
-      ref.read(scopeProvider.notifier).state = ws;
-    });
   }
 
   static bool _available(List<ProjectNode> projects, String scope) {

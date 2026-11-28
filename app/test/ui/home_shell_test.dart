@@ -603,7 +603,7 @@ void main() {
     await tester.binding.handlePopRoute();
     await _pumpRoute(tester);
     expect(_detailInShell, findsNothing);
-    expect(c.read(scopeProvider), 'A:w2');
+    expect(c.read(scopeProvider), isNull);
 
     await _switchTo(tester, c, null);
     expect(_detailInShell, findsNothing);
@@ -612,7 +612,7 @@ void main() {
     expect(find.byType(WorkspaceScreen), findsOneWidget);
   });
 
-  testWidgets('back from a session opened in Home shows its workspace', (tester) async {
+  testWidgets('back from a session opened in Home stays in Home', (tester) async {
     final c = await _shell(tester);
     c.read(sessionsProvider.notifier).replaceAll([
       _session('s1', workspaceId: 'A:w1'),
@@ -623,27 +623,56 @@ void main() {
     await _pumpRoute(tester);
     await tester.tap(find.byType(BackButton));
     await _pumpRoute(tester);
-    expect(c.read(scopeProvider), 'A:w1');
-    expect(find.byType(WorkspaceScreen), findsOneWidget);
+    expect(c.read(scopeProvider), isNull);
+    expect(find.byType(SessionListScreen), findsOneWidget);
     expect(_detailInShell, findsNothing);
   });
 
-  testWidgets('back from a drawer session shows its workspace, not the one it opened over', (tester) async {
+  testWidgets('a drawer session of another workspace opens in its workspace', (tester) async {
     final c = await _shell(tester);
     await _openSessionIn(tester, c, 'A:w1');
     await _switchTo(tester, c, 'A:w2');
     expect(_detailInShell, findsNothing);
-    // The drawer opens a session in the scope on screen.
     c.read(pendingOpenSessionProvider.notifier).state = const PendingOpen('s1');
+    // The new scope's navigator is built first, then the session opens.
     await _pumpRoute(tester);
+    await _pumpRoute(tester);
+    expect(c.read(scopeProvider), 'A:w1');
     expect(_shownSession(tester), 's1');
 
     await tester.binding.handlePopRoute();
     await _pumpRoute(tester);
     expect(c.read(scopeProvider), 'A:w1');
-    // s1 was remembered by A:w1; back from it leaves the bare workspace.
     expect(_detailInShell, findsNothing);
     expect(find.byType(WorkspaceScreen), findsOneWidget);
+  });
+
+  testWidgets('a drawer session opened in Home stays in Home', (tester) async {
+    final c = await _shell(tester);
+    c.read(sessionsProvider.notifier).replaceAll([
+      _session('s1', workspaceId: 'A:w1'),
+    ]);
+    await tester.pump();
+    c.read(pendingOpenSessionProvider.notifier).state = const PendingOpen('s1');
+    await _pumpRoute(tester);
+    expect(c.read(scopeProvider), isNull);
+    expect(_shownSession(tester), 's1');
+
+    await tester.binding.handlePopRoute();
+    await _pumpRoute(tester);
+    expect(c.read(scopeProvider), isNull);
+    expect(find.byType(SessionListScreen), findsOneWidget);
+  });
+
+  testWidgets('a drawer session with no workspace opens in Home', (tester) async {
+    final c = await _shell(tester);
+    await _switchTo(tester, c, 'A:w1');
+    c.read(sessionsProvider.notifier).replaceAll([_session('s0')]);
+    await tester.pump();
+    c.read(pendingOpenSessionProvider.notifier).state = const PendingOpen('s0');
+    await _pumpRoute(tester);
+    expect(c.read(scopeProvider), isNull);
+    expect(_shownSession(tester), 's0');
   });
 
   testWidgets('back from a session with no workspace stays in Home', (tester) async {
