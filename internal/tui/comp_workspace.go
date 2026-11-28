@@ -67,8 +67,10 @@ func (p workspaceComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 	switch {
 	case m.matches(msg, projectsKeys.Spawn):
 		return p, spawnSession(c, p.row(c)), true
-	case (m.matches(msg, listKeys.TabNext) || m.matches(msg, listKeys.TabPrev)) && m.wsHasTerminals(p.ws):
-		return p, openWorkspaceTerminals(c, p.ws), true
+	case m.matches(msg, listKeys.TabNext):
+		return p, stepWsTab(c, p.ws, wsTabSessions, 1), true
+	case m.matches(msg, listKeys.TabPrev):
+		return p, stepWsTab(c, p.ws, wsTabSessions, -1), true
 	case m.matches(msg, projectsKeys.SetupLog):
 		return p, openSetupLog(c, p.ws), true
 	case m.matches(msg, projectsKeys.Refresh):
@@ -141,8 +143,8 @@ func (p workspaceComp) click(c *ctx, t hitTarget, focused bool) (component, tea.
 	ss := c.m.wsSessions(p.ws)
 	switch {
 	case t.kind == hitTab:
-		if wsTab(t.index) == wsTabTerminals {
-			return p, openWorkspaceTerminals(c, p.ws)
+		if wsTab(t.index) != wsTabSessions {
+			return p, openWsTab(c, p.ws, wsTab(t.index))
 		}
 	case t.index >= len(ss):
 	case focused && t.index == p.cursor:
@@ -246,10 +248,7 @@ func (p workspaceComp) footer(c *ctx) []binding {
 	k := projectsKeys
 	out := []binding{listKeys.Jump, k.Spawn, listKeys.Kill, listKeys.ActiveOnly, listKeys.Filter,
 		clearFilterKey(k.Back, c.m.sessionFilter != "")}
-	if c.m.wsHasTerminals(p.ws) {
-		out = append(out, listKeys.TabNext)
-	}
-	return append(out, k.Help)
+	return append(out, listKeys.TabNext, k.Help)
 }
 
 // disarmRoot drops a kill confirmation on the root pane before a component

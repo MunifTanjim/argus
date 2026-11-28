@@ -184,8 +184,11 @@ func (t transcriptComp) view(c *ctx, w, _ int) string {
 	return t.bind(c).historyBody()
 }
 
-func (t transcriptComp) paneHeader(c *ctx, _ int) (string, int) {
+func (t transcriptComp) paneHeader(c *ctx, w int) (string, int) {
 	if !t.live {
+		if h, ok := c.m.scopedHistoryUnder(); ok {
+			return h.paneHeader(c, w)
+		}
 		return "", 0
 	}
 	return sessionHeader(c.m.sessions[t.sessionID], c.m.paneHeadStyle()), c.m.transcriptTextX()
@@ -585,7 +588,8 @@ func (m model) redactTyping() bool {
 
 func (t transcriptComp) workspace(c *ctx) string {
 	if !t.live {
-		return ""
+		h, _ := c.m.scopedHistoryUnder()
+		return h.ws
 	}
 	return c.m.sessions[t.sessionID].WorkspaceID
 }

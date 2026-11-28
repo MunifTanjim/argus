@@ -62,8 +62,13 @@ func (m *model) remember() {
 		b.killID = ""
 		m.memory.home.view, m.memory.home.session, m.memory.home.home = homeSessions, "", b
 	case historyComp:
-		m.memory.home.view, m.memory.home.session = homeHistory, ""
-		m.memory.home.historyCursor = b.projCursor
+		switch {
+		case b.ws != "":
+			delete(m.memory.ws, b.ws)
+		case b.projectID == "":
+			m.memory.home.view, m.memory.home.session = homeHistory, ""
+			m.memory.home.historyCursor = b.projCursor
+		}
 	case logsComp:
 		m.memory.home.view, m.memory.home.session = homeLogs, ""
 	case terminalsComp:
@@ -136,6 +141,10 @@ func (m model) mainRow() string {
 		return b.ws
 	case summaryComp:
 		return b.id
+	case historyComp:
+		if r := b.row(); r != "" {
+			return r
+		}
 	case terminalsComp:
 		if !b.onHome() {
 			return b.row()
@@ -143,6 +152,9 @@ func (m model) mainRow() string {
 	case transcriptComp:
 		if b.live {
 			return m.sessionRow(b.sessionID)
+		}
+		if h, ok := m.scopedHistoryUnder(); ok {
+			return h.row()
 		}
 	case screenComp:
 		if b.row != "" {
@@ -254,6 +266,8 @@ func (m model) onRowPane() bool {
 		return true
 	case terminalsComp:
 		return !b.onHome()
+	case historyComp:
+		return b.scoped()
 	}
 	return false
 }
@@ -269,6 +283,14 @@ func (m model) rowGone() bool {
 	case summaryComp:
 		_, ok := b.row(&ctx{m: &m})
 		return !ok
+	case historyComp:
+		switch {
+		case b.ws != "":
+			return !listed[b.ws]
+		case b.projectID != "":
+			_, ok := summaryComp{kind: rowProject, id: b.projectID}.row(&ctx{m: &m})
+			return !ok
+		}
 	case terminalsComp:
 		switch {
 		case b.ws != "":

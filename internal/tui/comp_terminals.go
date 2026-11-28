@@ -151,8 +151,7 @@ func (t terminalsComp) handleKey(c *ctx, msg tea.KeyPressMsg) (component, tea.Cm
 func (t terminalsComp) stepTab(c *ctx, d int) tea.Cmd {
 	switch {
 	case t.ws != "":
-		openWorkspaceSessions(c, t.ws)
-		return nil
+		return stepWsTab(c, t.ws, wsTabTerminals, d)
 	case t.nodeID != "":
 		return openNodeSummary(c, t.nodeID)
 	}
@@ -201,8 +200,8 @@ func (t terminalsComp) tabsHeader(c *ctx, x int) string {
 func (t terminalsComp) clickTab(c *ctx, i int) tea.Cmd {
 	switch {
 	case t.ws != "":
-		if wsTab(i) == wsTabSessions {
-			openWorkspaceSessions(c, t.ws)
+		if wsTab(i) != wsTabTerminals {
+			return openWsTab(c, t.ws, wsTab(i))
 		}
 		return nil
 	case t.nodeID != "":

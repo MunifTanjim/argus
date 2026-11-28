@@ -87,9 +87,9 @@ func histPage(ids ...string) session.HistorySessionPage {
 	return p
 }
 
-// A reply for a project the user has left still lands in the sessions of the
-// project open now: the reply carries its project, but nothing checks it.
-func TestHistoryReplyForAnOldProjectApplies(t *testing.T) {
+// A reply for a project the user has left is dropped: the project open now
+// keeps loading its own sessions.
+func TestHistoryReplyForAnOldProjectIsDropped(t *testing.T) {
 	m := typeKeys(testModel(), "gt")
 	m, _ = upd(m, histProjectsMsg{projects: historyProjectsAB()})
 	m, _ = upd(m, keyMsg("enter"))
@@ -100,8 +100,8 @@ func TestHistoryReplyForAnOldProjectApplies(t *testing.T) {
 		t.Fatalf("enter should open b and load it: project=%q loading=%v", h.project.ProjectDir, h.loading)
 	}
 	m, _ = upd(m, histSessionsMsg{projectDir: "/a", page: histPage("a1")})
-	if h := historyOf(m); len(h.sessions) != 1 || h.sessions[0].SessionID != "a1" || h.loading {
-		t.Errorf("the reply for a lands in b's list: sessions=%v loading=%v", h.sessions, h.loading)
+	if h := historyOf(m); len(h.sessions) != 0 || !h.loading {
+		t.Errorf("the reply for a landed in b's list: sessions=%v loading=%v", h.sessions, h.loading)
 	}
 }
 
