@@ -293,6 +293,7 @@ class MultiNodeLoopbackLink implements RpcLink {
     Set<String>? lockDisabled,
     this.serverInfo,
     this.p2pEndpoints = const {},
+    this.labels = const {},
   }) : _offline = offline ?? const {},
        _failRelayOpen = failRelayOpen ?? const {},
        _lockDisabled = lockDisabled ?? const {} {
@@ -326,6 +327,9 @@ class MultiNodeLoopbackLink implements RpcLink {
   /// Direct endpoints by node id. A node listed here is reported with them and
   /// with the p2p capability in nodes.list.
   final Map<String, List<String>> p2pEndpoints;
+
+  /// Labels by node id; `<id>-box` otherwise.
+  final Map<String, String> labels;
 
   /// Every chan id passed to relay.close, in order.
   final relayCloseCalls = <String>[];
@@ -403,7 +407,7 @@ class MultiNodeLoopbackLink implements RpcLink {
           for (final e in _nodes.entries)
             {
               'id': e.key,
-              'label': '${e.key}-box',
+              'label': labels[e.key] ?? '${e.key}-box',
               'identity_pubkey':
                   e.value.advertisedIdentity ??
                   base64.encode(e.value.keyPair.publicKey),

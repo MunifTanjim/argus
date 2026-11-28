@@ -193,4 +193,42 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('form-error')), findsOneWidget);
   });
+
+  testWidgets('node ssh links are saved with the profile', (tester) async {
+    final keys = KeyLibraryStore(MemKv());
+    Profile? out;
+    await _pump(tester,
+        ProfileEditScreen(submitLabel: 'Save', onSubmit: (p) => out = p),
+        keys: keys);
+
+    await tester.tap(find.byKey(const Key('mode-direct')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('profile-name')), 'home');
+    await tester.enterText(find.byKey(const Key('url')), 'ws://gw:8443');
+    await tester.enterText(find.byKey(const Key('token')), 'tok');
+    await tester.ensureVisible(find.byKey(const Key('node-ssh-section')));
+    await tester.tap(find.byKey(const Key('node-ssh-section')));
+    await tester.pumpAndSettle();
+
+    // A destination that would be read as an ssh option is refused.
+    await tester.enterText(find.byKey(const Key('node-ssh-targets')),
+        'laptop = ssh://-oProxyCommand=x@host');
+    await tester.ensureVisible(find.byKey(const Key('profile-submit')));
+    await tester.tap(find.byKey(const Key('profile-submit')));
+    await tester.pumpAndSettle();
+    expect(out, isNull);
+    expect(find.byKey(const Key('form-error')), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('node-ssh-targets')),
+        'laptop = ssh://me@laptop:2222\n\nn-1 = ssh://box');
+    await tester.enterText(
+        find.byKey(const Key('node-ssh-command')), '/opt/argus bridge');
+    await tester.ensureVisible(find.byKey(const Key('profile-submit')));
+    await tester.tap(find.byKey(const Key('profile-submit')));
+    await tester.pumpAndSettle();
+    expect(out, isNotNull);
+    expect(out!.nodeSsh,
+        {'laptop': 'ssh://me@laptop:2222', 'n-1': 'ssh://box'});
+    expect(out!.nodeSshCommand, '/opt/argus bridge');
+  });
 }

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/gateway.dart';
 import '../state/profiles.dart';
+import '../transport/ssh_bridge.dart';
 import '../transport/ssh_gateway.dart';
 import '../ui/responsive.dart';
 import '../util/id.dart';
@@ -36,6 +37,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   bool _showToken = false;
   bool _testing = false;
   String? _keyId;
+  String? _nodeSshKeyId;
   String? _error;
 
   late final _name = TextEditingController(text: widget.initial?.name ?? '');
@@ -47,6 +49,10 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
       TextEditingController(text: widget.initial?.sshPort?.toString() ?? '');
   late final _gatewayPort = TextEditingController(
       text: (widget.initial?.gatewayPort ?? kDefaultGatewayPort).toString());
+  late final _nodeSsh = TextEditingController(
+      text: formatNodeSshLines(widget.initial?.nodeSsh ?? const {}));
+  late final _nodeSshCommand =
+      TextEditingController(text: widget.initial?.nodeSshCommand ?? '');
 
   @override
   void initState() {
@@ -54,11 +60,22 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
     _mode = widget.initial?.mode ?? ProfileMode.ssh;
     _e2eEnabled = widget.initial?.e2eEnabled ?? false;
     _keyId = widget.initial?.keyId;
+    _nodeSshKeyId = widget.initial?.nodeSshKeyId;
   }
 
   @override
   void dispose() {
-    for (final c in [_name, _token, _url, _host, _user, _sshPort, _gatewayPort]) {
+    for (final c in [
+      _name,
+      _token,
+      _url,
+      _host,
+      _user,
+      _sshPort,
+      _gatewayPort,
+      _nodeSsh,
+      _nodeSshCommand,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -73,6 +90,15 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
       return null;
     }
     final id = widget.initial?.id ?? newId();
+    final Map<String, String> nodeSsh;
+    try {
+      nodeSsh = parseNodeSshLines(_nodeSsh.text);
+    } on FormatException catch (e) {
+      setState(() => _error = 'Node SSH links: ${e.message} (${e.source})');
+      return null;
+    }
+    final command = _nodeSshCommand.text.trim();
+    final nodeSshCommand = command.isEmpty ? null : command;
 
     if (_mode == ProfileMode.direct) {
       final url = _url.text.trim();
@@ -82,7 +108,10 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
       }
       return Profile(
           id: id, name: name, mode: ProfileMode.direct, token: token, url: url,
-          e2eEnabled: _e2eEnabled);
+          e2eEnabled: _e2eEnabled,
+          nodeSsh: nodeSsh,
+          nodeSshCommand: nodeSshCommand,
+          nodeSshKeyId: _nodeSshKeyId);
     }
 
     final host = _host.text.trim();
@@ -119,6 +148,9 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
       gatewayPort: gatewayPort,
       keyId: _keyId,
       e2eEnabled: _e2eEnabled,
+      nodeSsh: nodeSsh,
+      nodeSshCommand: nodeSshCommand,
+      nodeSshKeyId: _nodeSshKeyId,
     );
   }
 
@@ -275,6 +307,57 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
                     onChanged: (v) => setState(() => _e2eEnabled = v),
                     title: const Text('End-to-end encryption'),
                     contentPadding: EdgeInsets.zero,
+                  ),
+                  ExpansionTile(
+                    key: const Key('node-ssh-section'),
+                    title: const Text('Node SSH links'),
+                    tilePadding: EdgeInsets.zero,
+                    initiallyExpanded:
+                        widget.initial?.nodeSsh.isNotEmpty ?? false,
+                    children: [
+                      TextField(
+                        key: const Key('node-ssh-targets'),
+                        controller: _nodeSsh,
+                        minLines: 2,
+                        maxLines: 6,
+                        decoration: const InputDecoration(
+                          labelText: 'Destinations',
+                          hintText: 'node = ssh://user@host:22',
+                          helperText: 'One per line, by node id or label',
+                        ),
+                      ),
+                      TextField(
+                        key: const Key('node-ssh-command'),
+                        controller: _nodeSshCommand,
+                        decoration: const InputDecoration(
+                          labelText: 'Remote command (optional)',
+                          hintText: defaultNodeSshCommand,
+                        ),
+                      ),
+                      keys.maybeWhen(
+                        data: (list) => DropdownButtonFormField<String?>(
+                          key: const Key('node-ssh-key-picker'),
+                          initialValue: list.any((k) => k.id == _nodeSshKeyId)
+                              ? _nodeSshKeyId
+                              : null,
+                          decoration:
+                              const InputDecoration(labelText: 'SSH key'),
+                          items: [
+                            DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text(_mode == ProfileMode.ssh
+                                  ? 'Same as connection'
+                                  : 'None'),
+                            ),
+                            for (final k in list)
+                              DropdownMenuItem<String?>(
+                                  value: k.id, child: Text(k.name)),
+                          ],
+                          onChanged: (v) => setState(() => _nodeSshKeyId = v),
+                        ),
+                        orElse: () => const LinearProgressIndicator(),
+                      ),
+                    ],
                   ),
                   if (_error != null) ...[
                     const SizedBox(height: 12),

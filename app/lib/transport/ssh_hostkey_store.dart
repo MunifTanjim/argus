@@ -41,21 +41,27 @@ class HostKeyStore {
   Future<void> forget(String hostPort) => _kv.delete(_k(hostPort));
 }
 
-enum HostKeyDecision { accept, reject }
+/// [declined]: the user did not trust an unseen key.
+enum HostKeyDecision { accept, reject, declined }
 
 /// Trust-on-first-use: pin an unseen (host, type), accept a matching one, reject
 /// a changed one (a changed key is never silently accepted or re-pinned). With
 /// [pinUnseen] false, an unseen key is accepted for this session but not
 /// persisted — used by "Test connection" so a probe never mutates trust state.
+/// With [confirmUnseen], an unseen key is accepted only once it returns true.
 Future<HostKeyDecision> verifyHostKey(
   HostKeyStore store,
   String hostPort,
   String type,
   String fingerprint, {
   bool pinUnseen = true,
+  Future<bool> Function(String fingerprint)? confirmUnseen,
 }) async {
   final existing = await store.pinned(hostPort, type);
   if (existing == null) {
+    if (confirmUnseen != null && !await confirmUnseen(fingerprint)) {
+      return HostKeyDecision.declined;
+    }
     if (pinUnseen) await store.pin(hostPort, type, fingerprint);
     return HostKeyDecision.accept;
   }

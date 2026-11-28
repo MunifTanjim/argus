@@ -14,9 +14,11 @@ import '../pairing/pairing_uri.dart';
 import '../transport/connection.dart';
 import '../transport/jsonrpc.dart';
 import '../transport/gateway_client.dart';
+import '../transport/ssh_bridge.dart';
 import '../transport/ssh_gateway.dart';
 import '../transport/ssh_hostkey_store.dart';
 import '../transport/ssh_key_store.dart';
+import '../transport/ssh_tunnel.dart' show HostKeyChangedException;
 import '../transport/ssh_ws_link.dart';
 import '../transport/ws_link.dart';
 import 'control.dart';
@@ -55,6 +57,8 @@ Future<GatewayClient> buildE2EClient(
   void Function(GatewayClient client)? onTrustAdvance,
   void Function(Uint8List)? sendBytes,
   DirectDialer? directDialer,
+  SshOpener? sshOpener,
+  NodeSshSettings? nodeSsh,
 }) async {
   final identity = await identityStore.loadOrCreate();
   final Uint8List? seed;
@@ -81,6 +85,9 @@ Future<GatewayClient> buildE2EClient(
     trustStore: trust,
     sendBytes: sendBytes,
     directDialer: directDialer,
+    sshOpener: sshOpener,
+    sshTargets: nodeSsh?.targets ?? const {},
+    sshCommand: nodeSsh?.effectiveCommand ?? defaultNodeSshCommand,
     // Re-sync the trust log periodically so mid-session revocations take effect
     // (channels to now-unauthorized nodes are dropped), persisting each advance.
     trustResyncInterval: const Duration(seconds: 30),
@@ -143,8 +150,8 @@ final trustChainStoreProvider = Provider<TrustChainStore>(
 
 final credentialsProvider = StateProvider<GatewayCredentials?>((ref) => null);
 
-/// The link each open node's channel uses (`gateway`, `tcp`), by node id. A
-/// node without a link is absent.
+/// The link each open node's channel uses (`gateway`, `tcp`, `ssh`), by node
+/// id. A node without a link is absent.
 final nodeViasProvider = StateProvider<Map<String, String>>((ref) => const {});
 
 /// Retries the upgrade of every node on the relay now: the retry timer is
@@ -156,6 +163,121 @@ void resumeDirectLinks(GatewayClient? client) {
 /// Dials a node's direct endpoint.
 Future<RpcLink> dialDirect(String url, Duration timeout) =>
     WebSocketRpcLink.connectDirect(url, timeout: timeout);
+
+/// The user's answers for node SSH links, implemented by the UI.
+abstract interface class NodeSshPrompter {
+  /// Whether to trust a node host's first-seen key: true to trust, false for
+  /// an explicit decline, null when the user dismissed the prompt. Throws when
+  /// it cannot ask.
+  Future<bool?> confirmHostKey(String hostPort, String fingerprint);
+
+  /// Tells the user a node host's pinned key changed; returns whether to
+  /// forget the pinned key.
+  Future<bool> hostKeyChanged(String hostPort, String message);
+}
+
+final nodeSshPrompterProvider = Provider<NodeSshPrompter?>((ref) => null);
+
+/// How long a dismissed node host-key prompt stays quiet, unless the app
+/// resumes first.
+const nodeSshDismissCooldown = Duration(minutes: 10);
+
+var _appResumes = 0;
+
+/// Records that the app came back to the foreground: dismissed node host-key
+/// prompts may be asked again.
+void noteAppResumed() => _appResumes++;
+
+/// Opens node SSH links with the profile's key and the pinned host keys. A
+/// first-seen host key fails the dial at once and asks the user in the
+/// background; once trusted, [onTrusted] retries the upgrades and the key is
+/// pinned on that dial. An explicitly declined key is not asked again while
+/// these credentials stay active. A dismissed prompt is not asked again for
+/// [dismissCooldown] or until the app resumes. A prompt that could not be
+/// shown (no UI, failed) is asked again on a later dial. A changed key is
+/// reported once per host.
+SshOpener nodeSshOpener({
+  required Future<SshKey?> Function() loadKey,
+  required HostKeyStore hostKeys,
+  required NodeSshPrompter? Function() prompter,
+  required void Function() onTrusted,
+  SshBridgeOpen open = SshBridge.open,
+  Duration dismissCooldown = nodeSshDismissCooldown,
+  DateTime Function() now = DateTime.now,
+  int Function() resumes = _resumeCount,
+}) {
+  final trusted = <String>{};
+  final declined = <String>{};
+  final asking = <String>{};
+  final reported = <String>{};
+  final dismissed = <String, ({DateTime until, int resumes})>{};
+
+  bool quiet(String k) {
+    final d = dismissed[k];
+    if (d == null) return false;
+    if (d.resumes == resumes() && now().isBefore(d.until)) return true;
+    dismissed.remove(k);
+    return false;
+  }
+
+  Future<void> ask(String hostPort, String fingerprint, String k) async {
+    final p = prompter();
+    bool? answer;
+    var shown = p != null;
+    try {
+      answer = await p?.confirmHostKey(hostPort, fingerprint);
+    } catch (_) {
+      shown = false;
+    }
+    asking.remove(k);
+    if (answer == true) {
+      trusted.add(k);
+      onTrusted();
+    } else if (answer == false) {
+      declined.add(k);
+    } else if (shown) {
+      dismissed[k] = (until: now().add(dismissCooldown), resumes: resumes());
+    }
+  }
+
+  Future<void> report(String hostPort, String message) async {
+    try {
+      if (await prompter()?.hostKeyChanged(hostPort, message) ?? false) {
+        await hostKeys.forget(hostPort);
+        reported.remove(hostPort);
+        onTrusted();
+      }
+    } catch (_) {}
+  }
+
+  return (target, command, timeout) async {
+    final key = await loadKey();
+    if (key == null) throw StateError('no SSH key for node links');
+    final hostPort = target.hostPort;
+    try {
+      return await open(
+        target,
+        key,
+        hostKeys,
+        command: command,
+        timeout: timeout,
+        confirmHostKey: (fingerprint) async {
+          final k = '$hostPort $fingerprint';
+          if (trusted.contains(k)) return true;
+          if (!declined.contains(k) && !quiet(k) && asking.add(k)) {
+            unawaited(ask(hostPort, fingerprint, k));
+          }
+          return false;
+        },
+      );
+    } on HostKeyChangedException catch (e) {
+      if (reported.add(hostPort)) unawaited(report(hostPort, e.message));
+      rethrow;
+    }
+  };
+}
+
+int _resumeCount() => _appResumes;
 
 final sshKeyStoreProvider = Provider<SshKeyStore>(
   (ref) => SshKeyStore(const FlutterSecureKv()),
@@ -256,6 +378,22 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   final testResults = ref.read(connectionTestResultsProvider.notifier);
   final identityStore = ref.read(clientIdentityStoreProvider);
   final chainStore = ref.read(trustChainStoreProvider);
+  final keyLibrary = ref.read(keyLibraryStoreProvider);
+  final prompter = ref.read(nodeSshPrompterProvider);
+  ConnectionManager? current;
+  final nodeSsh = creds.nodeSsh;
+  final SshOpener? sshOpener = (nodeSsh == null || nodeSsh.targets.isEmpty)
+      ? null
+      : nodeSshOpener(
+          loadKey: () async {
+            final id = nodeSsh.keyId;
+            final k = id == null ? null : await keyLibrary.get(id);
+            return k == null ? null : SshKey(k.pem, k.passphrase);
+          },
+          hostKeys: hostKeys,
+          prompter: () => prompter,
+          onTrusted: () => resumeDirectLinks(current?.client),
+        );
   final manager = ConnectionManager(
     connect: () => connectForCredentials(creds, keyStore, hostKeys),
     clientFactory: (incoming, send, sendBytes) => creds.e2eEnabled
@@ -266,10 +404,12 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
             chainStore,
             // Refresh the trust status now, not on the next poll, so the home
             // banner clears when the device's channels open.
-            onTrustAdvance: (client) => trustSignature.state =
-                trustSignatureOf(trustSummaryOf(client)),
+            onTrustAdvance: (client) =>
+                trustSignature.state = trustSignatureOf(trustSummaryOf(client)),
             sendBytes: sendBytes,
             directDialer: dialDirect,
+            sshOpener: sshOpener,
+            nodeSsh: nodeSsh,
           )
         : Future(() async {
             final client = E2EClient(
@@ -280,6 +420,9 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
               sendBytes: sendBytes,
               directDialer: dialDirect,
               p2pToken: creds.token,
+              sshOpener: sshOpener,
+              sshTargets: nodeSsh?.targets ?? const {},
+              sshCommand: nodeSsh?.effectiveCommand ?? defaultNodeSshCommand,
             );
             await client.connect();
             return client;
@@ -367,6 +510,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
       terminals.clear();
     });
   });
+  current = manager;
   manager.start();
   return manager;
 });

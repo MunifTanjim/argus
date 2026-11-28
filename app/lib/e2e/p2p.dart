@@ -3,13 +3,14 @@ part of 'e2e_client.dart';
 /// The link a node's channel travels on.
 const viaGateway = 'gateway';
 const viaTcp = 'tcp';
+const viaSsh = 'ssh';
 
 /// Dials a direct endpoint (a ws/wss URL) within [timeout], following no
 /// redirects.
 typedef DirectDialer = Future<RpcLink> Function(String url, Duration timeout);
 
-/// A node's link: [via] is `gateway` or `tcp`, or empty when the node lost its
-/// link.
+/// A node's link: [via] is `gateway`, `tcp` or `ssh`, or empty when the node
+/// lost its link.
 typedef NodePath = ({String nodeId, String via});
 
 /// A node's sessions from `sessions.list` on its new link after a switch,
@@ -202,7 +203,7 @@ extension _P2P on E2EClient {
   /// Runs [nodeId]'s upgrade loop unless one is running.
   void _startUpgrade(String nodeId) {
     if (_closed ||
-        _directDialer == null ||
+        (_directDialer == null && !_sshEnabled) ||
         _upgrading.containsKey(nodeId) ||
         _byNodeId[nodeId] == null) {
       return;
@@ -228,26 +229,32 @@ extension _P2P on E2EClient {
   /// is lost.
   Future<void> _upgradeLoop(String id, Object run) async {
     await _serverInfo;
-    if (!_gatewayP2P) {
+    // SSH needs no p2p capability on the gateway.
+    if (!_gatewayP2P && !_sshEnabled) {
       _upgrading.remove(id);
       return;
     }
     while (true) {
       final desc = _upgradeTarget(id, run);
       if (desc == null) return;
+      final gen = _wakeGen;
       final direct = await _tryUpgrade(desc);
-      if (direct != null && !await _holdDirect(desc, direct)) {
+      if (direct != null && !await _holdDirect(desc, direct, gen)) {
         if (_upgrading[id] == run) _upgrading.remove(id);
         return;
       }
       if (_upgradeTarget(id, run) == null) return;
-      await _waitRetry(id);
+      if (gen == _wakeGen) await _waitRetry(id);
     }
   }
 
-  Future<void> _waitRetry(String id) async {
+  /// Waits [p2pRetryInterval], a wake, or [until], whichever comes first.
+  Future<void> _waitRetry(String id, {Future<void>? until}) async {
     final c = Completer<void>();
     _upgradeWake[id] = c;
+    until?.then((_) {
+      if (!c.isCompleted) c.complete();
+    });
     final t = Timer(E2EClient.p2pRetryInterval, () {
       if (!c.isCompleted) c.complete();
     });
@@ -263,7 +270,10 @@ extension _P2P on E2EClient {
     _upgradeWake.clear();
   }
 
+  /// SSH if configured for the node, then TCP direct.
   Future<NodeChannel?> _tryUpgrade(NodeDescriptor desc) async {
+    final ssh = await _trySsh(desc);
+    if (ssh != null) return ssh;
     final direct = await dialTcp(desc);
     if (direct == null) return null;
     return await _swapLink(desc.id, direct) ? direct : null;
@@ -288,10 +298,25 @@ extension _P2P on E2EClient {
     return desc.p2pEndpoints;
   }
 
-  /// Waits for [direct] to end. A remote drop falls back to the relay; a link
-  /// closed by the client (roster, trust, close) does not. Reports whether
-  /// the upgrade loop goes on.
-  Future<bool> _holdDirect(NodeDescriptor desc, NodeChannel direct) async {
+  /// Waits for [direct] to end. While it is a tcp link and the node has an SSH
+  /// destination, SSH is retried on the retry cadence and on a wake (one
+  /// since [gen] included) and replaces it, as SSH is preferred. A remote
+  /// drop falls back to the relay; a link closed by the client (roster,
+  /// trust, close) does not. Reports whether the upgrade loop goes on.
+  Future<bool> _holdDirect(
+    NodeDescriptor desc,
+    NodeChannel link,
+    int gen,
+  ) async {
+    var direct = link;
+    while (direct.via == viaTcp &&
+        _sshTargetFor(_roster[desc.id] ?? desc) != null) {
+      if (gen == _wakeGen) await _waitRetry(desc.id, until: direct.done);
+      gen = _wakeGen;
+      if (_closed || direct.isDone || _byNodeId[desc.id] != direct) break;
+      final ssh = await _trySsh(_roster[desc.id] ?? desc);
+      if (ssh != null) direct = ssh;
+    }
     await direct.done;
     if (_closed) return false;
     if (_byNodeId[desc.id] != direct) return true;
@@ -372,14 +397,15 @@ extension _P2P on E2EClient {
     String nodeId,
     String chanId,
     Channel channel,
-    DirectLink link,
-  ) {
+    DirectLink link, {
+    String via = viaTcp,
+  }) {
     late final NodeChannel nc;
     nc = NodeChannel._(
       nodeId,
       chanId,
       channel,
-      via: viaTcp,
+      via: via,
       link: link,
       send: link.sendLine,
       sendBytes: link.sendBytes,

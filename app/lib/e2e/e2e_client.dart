@@ -11,10 +11,13 @@ import 'package:pointycastle/macs/hmac.dart';
 import 'package:pointycastle/api.dart' show KeyParameter;
 
 import '../transport/connection.dart' show RpcLink;
+import '../transport/frame_reader.dart' show FrameReader, JsonFrame;
 import '../transport/gateway_client.dart';
 import '../transport/jsonrpc.dart'
     show RpcError, RpcMessage, cborToDart, encodeRequest, jsonSafe;
 import '../transport/rpc_client.dart';
+import '../transport/ssh_bridge.dart'
+    show NodeBridge, SshNodeTarget, defaultNodeSshCommand, parseSshNodeTarget;
 import 'aggregate.dart';
 import 'bytes.dart' show bytesEqual, hexDecode, hexEncode;
 import 'channel.dart';
@@ -28,6 +31,7 @@ import 'trustlog/superseding.dart' show detectSupersession;
 import 'trustlog/trust_store.dart';
 
 part 'p2p.dart';
+part 'ssh_link.dart';
 
 /// A node reachable through the blind gateway. [identityPubKey] is the node's
 /// base64 Curve25519 static key (its Noise responder identity).
@@ -89,7 +93,7 @@ class NodeChannel {
   final String chanId;
   final Channel channel;
 
-  /// The link this channel travels on: `gateway` or `tcp`.
+  /// The link this channel travels on: `gateway`, `tcp` or `ssh`.
   final String via;
 
   // Frames are accepted only from this link.
@@ -170,9 +174,15 @@ class E2EClient implements GatewayClient {
     void Function(Uint8List)? sendBytes,
     DirectDialer? directDialer,
     String? p2pToken,
+    SshOpener? sshOpener,
+    Map<String, String> sshTargets = const {},
+    String sshCommand = defaultNodeSshCommand,
   }) : _sendBytes = sendBytes,
        _directDialer = directDialer,
        _p2pToken = p2pToken,
+       _sshOpener = sshOpener,
+       _sshTargets = sshTargets,
+       _sshCommand = sshCommand,
        _trust =
            trustStore ??
            (tofu
@@ -204,6 +214,15 @@ class E2EClient implements GatewayClient {
   /// The client token plaintext direct admission presents.
   final String? _p2pToken;
 
+  /// Opens node SSH links; null or no [_sshTargets] keeps SSH off.
+  final SshOpener? _sshOpener;
+
+  /// SSH destinations by node id or label.
+  final Map<String, String> _sshTargets;
+
+  /// The remote command node SSH links run.
+  final String _sshCommand;
+
   /// How often a node on the relay retries its upgrade.
   static Duration p2pRetryInterval = const Duration(seconds: 60);
 
@@ -221,6 +240,8 @@ class E2EClient implements GatewayClient {
   Future<void> _serverInfo = Future.value();
   final _upgrading = <String, Object>{};
   final _upgradeWake = <String, Completer<void>>{};
+  // Bumped by retryUpgradesNow, so a wake during an attempt is not lost.
+  int _wakeGen = 0;
   final _p2pWarned = <String>{};
   final _paths = StreamController<NodePath>.broadcast();
   final _reconciles = StreamController<NodeSessions>.broadcast();
@@ -239,8 +260,12 @@ class E2EClient implements GatewayClient {
     for (final e in _byNodeId.entries) e.key: e.value.via,
   };
 
-  /// Retries every relay node's upgrade now (app resume).
-  void retryUpgradesNow() => _wakeUpgrades();
+  /// Retries every relay node's upgrade, and SSH for nodes on tcp, now (app
+  /// resume, a trusted host key).
+  void retryUpgradesNow() {
+    _wakeGen++;
+    _wakeUpgrades();
+  }
 
   /// Opens and identifies a direct link to [node] on the first endpoint that
   /// admits it, without switching the node onto it. Null when the node may
