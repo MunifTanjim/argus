@@ -33,6 +33,27 @@ devices may connect.
 TOFU (trust on first use) is the default once E2EE is on. Locked mode adds the
 allow-list, covered below.
 
+## Direct connections
+
+[Direct connections](/guide/multi-machine#direct-connections) work with E2EE. A
+direct link runs the same encrypted handshake as a gateway link, so a direct
+connection is as private as a relayed one.
+
+- A node admits a client on a direct link only if the client already connected
+  to it through the gateway with a token that is still valid. In locked mode,
+  the trust log must also authorize the client key. As a result, the first
+  connection of a client to a node goes through the gateway.
+- Removing a client token closes its direct connections too.
+- Direct links between nodes use the node keys from the roster. In locked mode,
+  the trust log must authorize them.
+- A quarantined node admits no direct connection.
+
+An [SSH link](/guide/multi-machine#ssh) does not use the Noise handshake. It
+trusts the SSH host key, and the SSH login is owner access to the node,
+including the `lock.*` commands. Revoking a device with `argus lock
+revoke-device` does not remove its SSH access. Remove its SSH keys as well as
+its token.
+
 ## Locked mode
 
 In locked mode, only the devices and nodes you approve can connect. Approvals are

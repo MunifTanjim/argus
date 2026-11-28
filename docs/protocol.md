@@ -97,7 +97,10 @@ per WebSocket message.
   `127.0.0.1:N` on the gateway host and speaks WebSocket through that tunnel.
   `port` is `8443` by default. This form takes no path.
 
-The Flutter app accepts only `ws://` and `wss://` URLs without a path.
+The Flutter app accepts `ws://` and `wss://` URLs without a path, and
+`ssh://[user@]host[:sshport][?port=N]` URLs. The app logs in as `root` when the
+URL has no user. The app does not trust an SSH host key that it has not seen
+until the user accepts it.
 
 ### Framing
 
@@ -390,6 +393,9 @@ The client sends a normal request to the gateway:
 {"jsonrpc":"2.0","id":7,"method":"relay.open","params":{"node_id":"home"}}
 ```
 
+If the client connected with a client token, the gateway checks that the token
+is still paired. A revoked token gets `-32600 unauthorized: token revoked`.
+
 The gateway answers with a channel id:
 
 ```json
@@ -515,8 +521,10 @@ client. Other nodes use these channels for the `orch.*` methods (see
 [Cross-node orchestration](#cross-node-orchestration)).
 
 - Before the first relayed frame, the gateway sends the target node a
-  `relay.peer_opened` notification with `{ chan_id, from_node }`. It names the
-  node that opened the channel.
+  `channel.opened` notification that names the node that opened the channel in
+  `node_id`. A node that does not declare the `p2p` capability gets the legacy
+  `relay.peer_opened` notification with `{ chan_id, from_node }` instead. See
+  [Direct connections](#direct-connections).
 - The gateway sends `relay.closed` to both ends of a node-opened channel.
 - A node holds at most 64 channels that it opened. The next `relay.open`
   fails with `-32600 too many open channels for this node`.
@@ -527,6 +535,217 @@ client. Other nodes use these channels for the `orch.*` methods (see
 
 The channel is a normal relay channel. In E2EE mode, the opener runs the Noise
 handshake as the initiator.
+
+## Direct connections
+
+A client or a node can reach a node without the gateway on the data path.
+There are two direct paths: a WebSocket over Tailscale, and an SSH session
+that runs a command on the node's machine. The gateway still handles the
+roster, pairing, and the first connection. A direct link serves the same
+methods as a relay channel.
+
+### The `p2p` capability
+
+A node declares `capabilities.p2p` in its `IdentifyResult` when it speaks this
+protocol. A gateway declares `capabilities.p2p` in `server.info`, and in the
+`node.identify` params that it sends to a node on the uplink. A client dials
+a node directly only if the gateway and the node both declared it. Every
+current node declares it.
+
+A node lists the URLs where it accepts direct connections in `p2p_endpoints`
+in its `IdentifyResult`. The gateway copies the field to the roster. The gateway
+can replace it, so it only tells a client where to dial. The node still
+authenticates the client, and the client authenticates the node.
+
+### TCP direct
+
+A node listens for direct connections only if `p2p.listen` is set. It serves
+one WebSocket route, `/p2p`. A node accepts direct connections only over
+Tailscale, in every fleet mode:
+
+- The node asks the local Tailscale daemon which tailnet device owns the
+  source address of each incoming connection. It refuses a connection that
+  does not come from a tailnet device with `403`.
+- If the daemon is unavailable, the node refuses every direct connection.
+- A node that has no gateway connection refuses direct connections with
+  `503`, and closes the ones that are open.
+
+A node that cannot bind a listen address keeps running and binds it again in
+the background. A node works out `p2p_endpoints` before each connection to the
+gateway, so an address that Tailscale assigns after startup is announced on
+the next connection.
+
+A node announces only the addresses that are its own Tailscale addresses or
+its MagicDNS name. It drops any other address from `p2p_endpoints`. By default,
+it announces `ws://<address>/p2p` for each listen address. `p2p.advertise` sets
+the URLs instead. Use it when the listen address is not the tailnet address,
+for example in userspace-networking mode, where the node listens on loopback.
+Tailscale forwards incoming tailnet connections to the same port on loopback.
+A machine in that mode cannot dial direct endpoints, because direct dials
+ignore proxy settings. Its own outgoing links use the relay, or SSH if
+configured.
+
+A client dials only the endpoints whose host is a device on its tailnet. It
+ignores HTTP proxy environment variables, and it refuses redirects. A client
+can override the endpoints of a node in its configuration.
+
+#### Channel ids
+
+The dialer picks the channel id of a direct link: `p` and 16 lowercase hex
+characters, for example `p0123456789abcdef`. A relay id is still `c<N>`. A
+direct connection carries one channel. Its frames use the same shapes as relay
+frames, with the `route` and the `body` that
+[Frame shapes](#frame-shapes) describes.
+
+#### Telling the node who opened a relay channel
+
+A node that declares `p2p` gets `channel.opened` instead of
+`relay.peer_opened`:
+
+```json
+{"jsonrpc":"2.0","method":"channel.opened","params":{"chan_id":"c12","token_hash":"<sha256 hex>","node_id":"work"}}
+```
+
+- The gateway sends it before the first frame of every relay channel, for
+  channels that clients open and for channels that nodes open.
+- `token_hash` is the SHA-256 hex of the token that the opener connected to
+  the gateway with. It is the same value that `clients.list` returns as
+  `token`.
+- `node_id` is set only for a channel that another node opened. It is the same
+  value as `from_node` in `relay.peer_opened`.
+
+A node that does not declare `p2p` still gets `relay.peer_opened`. That
+notification is legacy.
+
+The gateway also sends a `token.list.changed` notification with
+`{ hashes: string[] }`. The list holds the token hashes of all paired clients.
+The gateway sends it when a node connects, and every time the list changes. It
+never includes the hash of the master token. A node hashes its own master
+token itself.
+
+#### Admission in E2EE mode
+
+A direct connection uses the same Noise handshake as a relay channel, with the
+same prologue, `argus-e2e/v1|<node_id>|<chan_id>`. The `chan_id` is the `p...`
+id. The node admits a key like this:
+
+- **A client key** is admitted only if the client completed a relay handshake
+  with this key on the current gateway connection, and the token of that relay
+  channel is still valid. A token is valid if it is a paired client token, or
+  the master token. In locked mode, the trust log must also authorize the key.
+  A node forgets the keys bound to a token when the token stops being valid.
+- **A peer node key** is admitted if it is the `identity_pubkey` of another
+  node in the roster. In locked mode, the trust log must also authorize it.
+- A quarantined node admits no key.
+
+As a result, the first connection of a client to a node goes through the
+relay. The client then upgrades the link.
+
+The node closes a direct client channel when its token is revoked, when its
+key is not authorized anymore, or when the gateway connection of the node
+drops. It closes a direct peer channel when its key stops matching the roster
+key, or when its node leaves the roster.
+
+#### Admission in plaintext mode
+
+A plaintext direct connection has no handshake. The client proves that it knows
+a token before it sends the token:
+
+1. The client sends `token.challenge` with `{ chan_id, nonce, tag }`.
+   `nonce` is 32 random bytes in standard base64 with padding.
+2. The node finds the valid token hash for which `tag` matches. It answers
+   `{ mac }`.
+3. The client checks `mac`. Only then does it send `token.present` with
+   `{ chan_id, token }`. The node answers `null`.
+
+Both proofs are `HMAC-SHA256` with the hex-decoded token hash as the key, and
+the output in lowercase hex. The message of each is:
+
+- `tag` signs `"client|" + nonce`.
+- `mac` signs `"node|" + node_id + "|" + chan_id + "|" + nonce`.
+
+The token hash never crosses the wire. The node checks that the token hashes
+to the hash that it matched. Any other request before admission, a request out
+of order, or a failed check closes the connection. After admission, the
+channel starts when the first frame arrives, like a plaintext relay channel.
+
+If the token is the master token, the node calls `node.identify` on the
+opener, like the gateway does on `/node`:
+
+- If the `id` in the result is another node in the roster, the channel is a
+  peer channel.
+- If the `id` is the id of this node, the node closes the connection.
+- Otherwise, the node serves the connection as a client channel. Clients answer
+  that `node.identify` with `-32601`, so an admin client gets a client channel.
+
+The node closes the connection if the token is revoked, or if a peer node
+leaves the roster.
+
+#### Limits
+
+| Limit                                           | Value       |
+| ----------------------------------------------- | ----------- |
+| connections before admission, per tailnet device | 4           |
+| connections before admission, total             | 16          |
+| bytes read before admission                     | 64 KiB      |
+| time from connect to admission                  | 10 seconds  |
+| `node.identify` call on a master-token opener   | 3 seconds   |
+| admitted channels                               | 64          |
+| keepalive interval, timeout, failures           | 15 s, 5 s, 2 |
+
+A connection over a limit gets `503` with the body `busy`. The node closes a
+connection that is not admitted in time. After admission, the read limit is
+the normal one.
+
+### SSH
+
+A client can reach a node over SSH instead. The client runs a command on the
+node's machine, and the command connects its input and output to the node's
+unix socket. The client configures an SSH destination per node. See
+[Configuration](/getting-started/configuration#direct-connections).
+
+The link speaks the unix-socket protocol: plain JSON-RPC and CBOR frames, with
+no relay channel, no `route`, and no handshake. The client then calls
+`node.identify` and checks the result:
+
+- The `id` must be the node that the client expects.
+- In E2EE mode, `identity_pubkey` must equal the key in the roster.
+
+The SSH link trusts the SSH host key of the destination, and the SSH login is
+owner access to the node, the same as the unix socket. It includes the `lock.*`
+methods. To revoke the access of a client, revoke its SSH keys as well as its
+tokens.
+
+The Go client runs `ssh` with strict host key checking and no prompts, with no
+agent, X11 or other forwarding, and without a shared control connection, so
+the host key must already be known. SSH keepalives detect a dead link within
+about 30 seconds. The app does not trust a host key that it has not seen until the user
+accepts it. The app logs in as `root` when the destination has no user. A destination whose
+user or host starts with `-` is refused, for node destinations and for
+`ssh://` gateway URLs.
+
+A non-interactive SSH session can have a different `PATH`. If the command is
+not found, set an absolute path in the configuration.
+
+### Paths and switching
+
+- A client opens every node on the relay first. It then upgrades the link in
+  the background: SSH if the node has an SSH destination, else TCP direct. If
+  that fails, the node stays on the relay. The client tries again every 60
+  seconds while a node is not on its best path.
+- A one-shot Go client (for example `argus ping`) never dials TCP direct. It
+  uses SSH if the node has an SSH destination, else the relay.
+- A node dials a peer node over TCP direct first, with a 3 second limit. If
+  that fails, it uses the relay.
+- A client switches a node to the new link before it closes the old one. The
+  old link has up to 5 seconds to finish its calls.
+- If a direct link drops, the client moves the node back to the relay at once.
+  The calls that were in flight on the dropped link fail.
+- The roster decides. When a node goes offline or is removed, or the client
+  loses the gateway connection, the client closes its direct links.
+- The `p2p.enabled` setting turns off all direct paths, TCP and SSH, on Go
+  clients (the TUI and the CLI). The app has no such setting, and uses SSH
+  whenever SSH destinations are configured for a node.
 
 ## End-to-end encryption
 
@@ -731,7 +950,9 @@ A node calls another node on a channel that it opened with `relay.open` (see
 [Channels opened by a node](#channels-opened-by-a-node)). The receiving node
 serves `orch.*` on the channel only if both conditions hold:
 
-- The gateway named the opener in `relay.peer_opened`.
+- The gateway named the opener in `channel.opened` (`relay.peer_opened` for a
+  node without the `p2p` capability), or the opener proved the master token on a
+  [direct connection](#direct-connections).
 - In E2EE mode, the key of the Noise handshake equals the `identity_pubkey` of
   that node in the roster. In locked mode, the trust log also authorizes the
   key.
@@ -1289,7 +1510,7 @@ are standard base64 strings in JSON and byte strings in CBOR.
 | Method                | Kind               | Served by        | Params                  | Result                                |
 | --------------------- | ------------------ | ---------------- | ----------------------- | ------------------------------------- |
 | `ping`                | request            | all              | none                    | `null`                                |
-| `node.identify`       | request            | node             | `{ capabilities?: { cbor: boolean } }` | `IdentifyResult` |
+| `node.identify`       | request            | node             | `{ capabilities?: { cbor: boolean, p2p?: boolean } }` | `IdentifyResult` |
 | `server.info`         | request            | gateway, node    | none                    | `ServerInfo`                          |
 | `server.checkUpgrade` | request            | gateway, node    | `{ node_id?: string }`  | `{ current: string, latest: string }` |
 | `server.upgrade`      | request            | gateway, node    | `{ node_id?: string }`  | `{ from: string, to: string }`        |
@@ -1300,7 +1521,11 @@ are standard base64 strings in JSON and byte strings in CBOR.
 | `relay.open`          | request            | gateway (client or node) | `{ node_id: string }` | `{ chan_id: string }`                 |
 | `relay.close`         | request            | gateway (client or node) | `{ chan_id: string }` | `null`                                |
 | `relay.closed`        | notification       | gateway → node   | `{ chan_id: string }`   | —                                     |
-| `relay.peer_opened`   | notification       | gateway → node   | `{ chan_id: string, from_node: string }` | —                    |
+| `relay.peer_opened`   | notification       | gateway → node   | `{ chan_id: string, from_node: string }` | — (legacy: nodes without `p2p`) |
+| `channel.opened`      | notification       | gateway → node   | `{ chan_id: string, token_hash: string, node_id?: string }` | —              |
+| `token.list.changed`  | notification       | gateway → node   | `{ hashes: string[] }`  | —                                     |
+| `token.challenge`     | request            | client or node → node (direct) | `{ chan_id: string, nonce: string, tag: string }` | `{ mac: string }` |
+| `token.present`       | request            | client or node → node (direct) | `{ chan_id: string, token: string }` | `null`          |
 | `e2e.handshake`       | relay notification | client ↔ node    | Noise message in `body` | —                                     |
 
 ```ts
@@ -1310,6 +1535,7 @@ IdentifyResult {
   version:          string
   capabilities:     Capabilities
   identity_pubkey?: string   // base64 Curve25519
+  p2p_endpoints?:   string[] // URLs for direct connections
   signer_pubkey?:   string   // base64 Ed25519 (locked mode)
   tip?:             bytes    // trust-log tip (locked mode)
   lock_disabled?:   boolean  // the node accepts any device
@@ -1321,6 +1547,7 @@ Capabilities {
   host_wakelock:   boolean   // the node serves host.setWakelock
   cbor:            boolean   // the side accepts CBOR frames
   cross_node_orch: number    // the node-to-node orch protocol version; 0 means none (see Cross-node orchestration)
+  p2p:             boolean   // the node speaks the direct-connection protocol (see Direct connections)
 }
 
 ServerInfo {
@@ -1328,13 +1555,14 @@ ServerInfo {
   started_at?:        string   // RFC3339; server.restart changes it
   nodes:              { id, label, version, capabilities }[]
   pushPortConfigured: boolean
-  capabilities?:      { cbor: boolean }   // the gateway's own
+  capabilities?:      { cbor: boolean, p2p?: boolean }   // the gateway's own
 }
 
 NodeDescriptor {
   id, label, version: string
   capabilities:     Capabilities
   identity_pubkey?: string
+  p2p_endpoints?:   string[] // from the node via the gateway; a hint for where to dial
   signer_pubkey?:   string   // from the gateway; discovery only
   lock_disabled?:   boolean  // from the gateway; a hint only
   online:           boolean
@@ -1872,6 +2100,11 @@ connection.
 
 In `clients.list` and `clients.remove`, `token` is the SHA-256 id of the
 token.
+
+`clients.remove` also closes the live connections of the removed token, and
+every relay channel that they opened. It sends the new token list to the nodes
+(see [Direct connections](#direct-connections)), so each node closes the
+direct connections of the token too.
 
 ### Trust log distribution
 

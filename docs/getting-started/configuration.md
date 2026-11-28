@@ -236,6 +236,40 @@ A non-zero exit is a result, not an error. If the program does not start,
 or option of the wrong type, and a `timeout` that is not a positive number
 raise an error.
 
+## Direct connections
+
+Direct connections let a client reach a node without the gateway on the data
+path. See [Direct connections](/guide/multi-machine#direct-connections) for
+setup. These keys have no command-line flags. Set them in the config file.
+
+| Key               | Default        | Used by | Meaning                                                              |
+| ----------------- | -------------- | ------- | -------------------------------------------------------------------- |
+| `p2p.listen`      | none           | node    | Addresses (`host:port`) where the node accepts direct connections over Tailscale. Without it, the node does not listen. |
+| `p2p.advertise`   | none           | node    | URLs that the node announces instead of the ones derived from `p2p.listen`, for example `ws://100.64.0.1:7800/p2p`. |
+| `p2p.enabled`     | `true`         | client  | Turns all direct paths, TCP and SSH, on or off. It applies to the TUI and the CLI only. The app has no such switch.                      |
+| `p2p.endpoints`   | none           | client  | Maps a node id or label to a list of `ws://` or `wss://` URLs. It replaces the URLs that the node announces. |
+| `p2p.ssh`         | none           | client  | Maps a node id or label to an `ssh://[user@]host[:port]` destination. |
+| `p2p.ssh-command` | `argus bridge` | client  | The command that runs on the node's machine over SSH. One value for all nodes. |
+
+A node id or label in `p2p.endpoints` and `p2p.ssh` is not case-sensitive. A label
+that several nodes share does not match in `p2p.ssh`.
+
+On a node:
+
+```yaml
+p2p:
+  listen: ["100.64.0.1:7800"]
+```
+
+On a client:
+
+```yaml
+p2p:
+  ssh:
+    work: ssh://dev@work.example.com
+  ssh-command: /usr/local/bin/argus bridge
+```
+
 ## End-to-End Encryption
 
 `e2ee.enabled` (default `false`) turns on the blind-relay encrypted transport.
