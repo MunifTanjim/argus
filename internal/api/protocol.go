@@ -4,6 +4,9 @@
 package api
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"sort"
@@ -120,6 +123,18 @@ const (
 	// relay.peer_opened tells a node that another node opened a channel to it,
 	// sent before the channel's first relayed frame.
 	MethodRelayPeerOpened = "relay.peer_opened" // gateway->node notification: RelayPeerOpenedParams
+	// channel.opened tells a p2p-capable node who opened a relay channel, sent
+	// before the channel's first relayed frame. It replaces relay.peer_opened for
+	// such nodes.
+	MethodChannelOpened = "channel.opened" // gateway->node notification: ChannelOpenedParams
+	// token.list.changed gives a p2p-capable node the hashes of the paired client
+	// tokens, on identify and whenever the set changes.
+	MethodTokenListChanged = "token.list.changed" // gateway->node notification: TokenListChangedParams
+	// Plaintext direct admission. The client proves which token it holds
+	// without sending its hash, the node proves it knows that hash, and only
+	// then does the client send the token.
+	MethodTokenChallenge = "token.challenge" // client->node request on a direct link: TokenChallengeParams; result: TokenChallengeResult
+	MethodTokenPresent   = "token.present"   // client->node request on a direct link: TokenPresentParams; result: null
 	// Trust-log distribution (locked mode). Cleartext, self-authenticating chain
 	// bytes the blind gateway relays but cannot forge/roll back.
 	MethodTrustLogSync = "trustlog.sync" // request: TrustLogSyncParams; result: TrustLogSyncResult (offer: known hashes; gateway set-subtracts diff)
@@ -593,6 +608,8 @@ type NodeCapabilities struct {
 	// CrossNodeOrch is the version of the node-to-node orch protocol the node
 	// speaks; 0 means none. Version 2 adds orch.peer.state.
 	CrossNodeOrch int `json:"cross_node_orch"`
+	// P2P reports whether the node accepts channel.opened and token.list.changed.
+	P2P bool `json:"p2p"`
 
 	// unknown keeps the keys this build does not know, so a gateway relays the
 	// capabilities of a newer node unchanged.
@@ -654,6 +671,63 @@ func capabilityKeys(known knownCapabilities) (map[string]json.RawMessage, error)
 // handshake and echoed in server.info.
 type PeerCapabilities struct {
 	CBOR bool `json:"cbor"`
+	P2P  bool `json:"p2p,omitempty"`
+}
+
+// ChannelOpenedParams tells a p2p-capable node who opened a relay channel.
+// TokenHash is the opener's client token hash; NodeID is set only when another
+// node opened the channel.
+type ChannelOpenedParams struct {
+	ChanID    string `json:"chan_id"`
+	TokenHash string `json:"token_hash"`
+	NodeID    string `json:"node_id,omitempty"`
+}
+
+// TokenListChangedParams carries the hashes of the paired client tokens.
+type TokenListChangedParams struct {
+	Hashes []string `json:"hashes"`
+}
+
+// TokenChallengeParams opens plaintext direct admission. Nonce is 32 random
+// bytes, base64; Tag is P2PTag of the client's token hash.
+type TokenChallengeParams struct {
+	ChanID string `json:"chan_id"`
+	Nonce  string `json:"nonce"`
+	Tag    string `json:"tag"`
+}
+
+// TokenChallengeResult carries P2PMAC of the matched token hash.
+type TokenChallengeResult struct {
+	MAC string `json:"mac"`
+}
+
+// TokenPresentParams carries the client's token, sent only after it verified
+// the node's MAC.
+type TokenPresentParams struct {
+	ChanID string `json:"chan_id"`
+	Token  string `json:"token"`
+}
+
+// P2PTag is the client's proof of its token hash in token.challenge:
+// hex(HMAC-SHA256(key = hex-decoded tokenHash, "client|" + nonce)).
+func P2PTag(tokenHash, nonce string) (string, error) {
+	return p2pHMAC(tokenHash, "client|"+nonce)
+}
+
+// P2PMAC is the node's proof of the same hash, bound to its id and the channel:
+// hex(HMAC-SHA256(key = hex-decoded tokenHash, "node|" + nodeID + "|" + chanID + "|" + nonce)).
+func P2PMAC(tokenHash, nodeID, chanID, nonce string) (string, error) {
+	return p2pHMAC(tokenHash, "node|"+nodeID+"|"+chanID+"|"+nonce)
+}
+
+func p2pHMAC(tokenHash, msg string) (string, error) {
+	key, err := hex.DecodeString(tokenHash)
+	if err != nil || len(key) == 0 {
+		return "", errors.New("api: token hash is not hex")
+	}
+	m := hmac.New(sha256.New, key)
+	m.Write([]byte(msg))
+	return hex.EncodeToString(m.Sum(nil)), nil
 }
 
 // IdentifyParams is what a client sends to declare its capabilities.
@@ -718,6 +792,7 @@ type IdentifyResult struct {
 	SignerPubKey   string           `json:"signer_pubkey,omitempty"`   // base64 Ed25519 signer public (locked-mode trust log)
 	Tip            []byte           `json:"tip,omitempty"`             // resolved trust-log tip (nil when locked mode is off)
 	LockDisabled   bool             `json:"lock_disabled,omitempty"`   // see NodeDescriptor.LockDisabled
+	P2PEndpoints   []string         `json:"p2p_endpoints,omitempty"`   // direct URLs clients may dial; see NodeDescriptor.P2PEndpoints
 }
 
 // NodeInfo identifies a node connected to the gateway (the unit in server.info).
@@ -1287,6 +1362,9 @@ type NodeDescriptor struct {
 	// itself (`argus lock local-disable`), so it accepts channels from any device.
 	// Gateway-forgeable: a hint for which nodes to try, never a trust decision.
 	LockDisabled bool `json:"lock_disabled,omitempty"`
+	// P2PEndpoints are direct URLs the node accepts clients on. Gateway-forgeable:
+	// a hint for where to dial; the Noise handshake still authenticates the node.
+	P2PEndpoints []string `json:"p2p_endpoints,omitempty"`
 }
 
 type NodesListResult struct {

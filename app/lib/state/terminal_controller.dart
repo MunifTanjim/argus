@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:typed_data';
 
+import '../e2e/aggregate.dart' show splitCompositeId;
+import '../e2e/e2e_client.dart' show followNodeSwitches;
 import '../models/enums.dart';
 import '../transport/jsonrpc.dart';
 import '../transport/gateway_client.dart';
@@ -53,14 +55,31 @@ class TerminalAttach implements TerminalSession {
 
   // Unique per attach so a fresh open doesn't collide with the outgoing one in
   // the gateway term table or node mirror (the node boots the prior viewer).
-  final String termId = newHexId();
+  String _termId = newHexId();
+  String get termId => _termId;
   int _cols = 0;
   int _rows = 0;
   StreamSubscription<RpcMessage>? _sub;
+  StreamSubscription<Object?>? _switchSub;
   bool _disposed = false;
 
   void start() {
     _sub = client.notifications.listen(_onNotify);
+    // The node drops the old link's attaches when it moves to another, so
+    // attach again with a new id.
+    _switchSub = followNodeSwitches(
+      client,
+      splitCompositeId(sessionId ?? terminalId!).$1,
+      () {
+        if (_disposed) return;
+        _termId = newHexId();
+        _open();
+      },
+    );
+    _open();
+  }
+
+  void _open() {
     client.call('terminal.open', {
       'term_id': termId,
       if (sessionId != null) 'session_id': sessionId,
@@ -132,6 +151,7 @@ class TerminalAttach implements TerminalSession {
     if (_disposed) return;
     _disposed = true;
     _sub?.cancel();
+    _switchSub?.cancel();
   }
 
   @override

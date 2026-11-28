@@ -481,8 +481,8 @@ func ResetTriggeredPullIntervalForTest() {
 	setTriggeredPullIntervalForTest(DefaultTriggeredPullInterval)
 }
 
-// uplinkNotify returns the OnNotify handler for one uplink. relay.peer_opened goes
-// straight to that uplink's responder, not via activeResponder: api.Peer calls
+// uplinkNotify returns the OnNotify handler for one uplink. relay.peer_opened,
+// channel.opened and token.list.changed go straight to that uplink's responder, not via activeResponder: api.Peer calls
 // OnNotify synchronously on the read loop, the same loop that delivers relay
 // frames, so the record is stored before the gateway's next frame (the channel's
 // first) is processed — including frames that arrive before runUplink publishes
@@ -491,7 +491,20 @@ func (d *Node) uplinkNotify(r *relayResponder) func(api.Notification) {
 	return func(n api.Notification) {
 		if n.Method == api.MethodRelayPeerOpened {
 			if p, err := api.Decode[api.RelayPeerOpenedParams](n.Params); err == nil {
-				r.notePeerOpened(p.ChanID, p.FromNode)
+				r.notePeerOpened(p.ChanID, p.FromNode, "")
+			}
+			return
+		}
+		if n.Method == api.MethodChannelOpened {
+			if p, err := api.Decode[api.ChannelOpenedParams](n.Params); err == nil {
+				r.notePeerOpened(p.ChanID, p.NodeID, p.TokenHash)
+			}
+			return
+		}
+		if n.Method == api.MethodTokenListChanged {
+			if p, err := api.Decode[api.TokenListChangedParams](n.Params); err == nil {
+				r.binds.setValid(p.Hashes)
+				d.closeRevokedDirect(r.binds)
 			}
 			return
 		}

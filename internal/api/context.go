@@ -44,6 +44,9 @@ func NotifierFrom(ctx context.Context) (Notifier, bool) {
 // gating connection-management methods.
 type Principal struct {
 	Admin bool
+	// TokenHash is clienttoken.HashToken of the presented token; empty when the
+	// gateway accepted the connection without one.
+	TokenHash string
 }
 
 // WithPrincipal attaches the connection's authenticated Principal to ctx so

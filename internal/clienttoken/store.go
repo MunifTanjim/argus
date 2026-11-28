@@ -84,15 +84,15 @@ func validToken(tok string) bool {
 	return true
 }
 
-// hashToken maps a raw token to its at-rest id. A 256-bit random secret needs no
+// HashToken maps a raw token to its at-rest id. A 256-bit random secret needs no
 // salt/KDF (those defend low-entropy passwords), so a fast unsalted hash suffices.
-func hashToken(tok string) string {
+func HashToken(tok string) string {
 	sum := sha256.Sum256([]byte(tok))
 	return hex.EncodeToString(sum[:])
 }
 
 // path takes an on-disk id (hashed token); a caller holding a raw token must
-// hashToken first.
+// HashToken first.
 func (s *Store) path(id string) string { return filepath.Join(s.dir, id+".json") }
 
 // Pend registers a minted token as accepted for the pairing window and returns a
@@ -156,7 +156,16 @@ func (s *Store) Authorize(tok string) bool {
 	}
 	s.mu.Unlock()
 
-	_, err := os.Stat(s.path(hashToken(tok)))
+	_, err := os.Stat(s.path(HashToken(tok)))
+	return err == nil
+}
+
+// Has reports whether a token with on-disk id (see HashToken) is stored.
+func (s *Store) Has(id string) bool {
+	if !validToken(id) {
+		return false
+	}
+	_, err := os.Stat(s.path(id))
 	return err == nil
 }
 
@@ -169,7 +178,7 @@ func (s *Store) persist(tok string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path(hashToken(tok)), b, 0o600)
+	return os.WriteFile(s.path(HashToken(tok)), b, 0o600)
 }
 
 // List returns the persisted tokens, newest first.

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/host_info.dart';
 import '../state/control.dart';
+import '../state/gateway.dart' show nodeViasProvider;
 import '../state/host_api.dart';
 import '../state/projects_api.dart' show actionError;
 import 'duration_sheet.dart';
@@ -141,6 +142,7 @@ class _NodeScreenState extends ConsumerState<NodeScreen> {
         .firstOrNull;
     final wakelock = node?.hostWakelockSupported ?? false;
     final version = node?.version ?? '';
+    final via = ref.watch(nodeViasProvider)[widget.nodeId];
     return Scaffold(
       appBar: AppBar(title: Text(widget.label)),
       body: SafeArea(
@@ -157,6 +159,7 @@ class _NodeScreenState extends ConsumerState<NodeScreen> {
                     _row('Uptime', formatUptime(info.uptimeSeconds)),
                     if (info.battery != null) _row('Battery', formatBattery(info.battery!)),
                     if (version.isNotEmpty) _row('Version', version),
+                    if (via != null) _row('Via', via),
                     UpgradeTile(
                       key: ValueKey('upgrade-${widget.nodeId}'),
                       nodeId: widget.nodeId,

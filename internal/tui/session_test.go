@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/vt"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/client"
 	"github.com/MunifTanjim/argus/internal/session"
 	"github.com/MunifTanjim/argus/internal/transcript"
 )
@@ -54,6 +55,7 @@ func (c *recordingClient) States() <-chan bool             { return make(chan bo
 func (c *recordingClient) Reconnect()                      {}
 func (c *recordingClient) Close() error                    { return nil }
 func (c *recordingClient) Quarantined() bool               { return false }
+func (c *recordingClient) Paths() <-chan client.NodePath   { return nil }
 
 // count is how many calls to method were recorded.
 func (c *recordingClient) count(method string) int {

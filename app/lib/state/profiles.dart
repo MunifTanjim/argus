@@ -26,13 +26,15 @@ Future<GatewayCredentials> activateProfile(
     if (url == null || url.isEmpty) {
       throw StateError('direct profile has no url');
     }
-    return GatewayCredentials(url, p.token, e2eEnabled: p.e2eEnabled);
+    return GatewayCredentials(url, p.token,
+        e2eEnabled: p.e2eEnabled, nodeSsh: p.nodeSshSettings);
   }
   final keyId = p.keyId;
   final key = keyId == null ? null : await keys.get(keyId);
   if (key == null) throw StateError('profile references a missing SSH key');
   await activeKey.save(SshKey(key.pem, key.passphrase));
-  return GatewayCredentials(p.sshUrl, p.token, e2eEnabled: p.e2eEnabled);
+  return GatewayCredentials(p.sshUrl, p.token,
+      e2eEnabled: p.e2eEnabled, nodeSsh: p.nodeSshSettings);
 }
 
 /// Verify a profile end-to-end without committing it: open the real link (for

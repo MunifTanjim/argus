@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -95,6 +96,33 @@ func AcceptWS(w http.ResponseWriter, r *http.Request) (net.Conn, error) {
 	return newWSConn(c), nil
 }
 
+// ErrReadBudget is returned by a connection from AcceptWSLimit once it has
+// read its whole budget.
+var ErrReadBudget = errors.New("api: read budget exhausted")
+
+// AcceptWSLimit is AcceptWS for connections not yet authenticated: Read
+// returns at most limit bytes in total, however the remote splits them into
+// messages, then fails with ErrReadBudget. ResetReadLimit lifts the budget.
+func AcceptWSLimit(w http.ResponseWriter, r *http.Request, limit int64) (net.Conn, error) {
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+	if err != nil {
+		return nil, err
+	}
+	conn := newWSConn(c)
+	c.SetReadLimit(limit)
+	conn.budget.Store(limit)
+	return conn, nil
+}
+
+// ResetReadLimit lifts the read budget of a connection from AcceptWSLimit and
+// restores the normal message read limit. Other connections are left alone.
+func ResetReadLimit(conn net.Conn) {
+	if w, ok := conn.(*wsConn); ok {
+		w.budget.Store(-1)
+		w.c.SetReadLimit(wsReadLimit)
+	}
+}
+
 // BearerToken extracts the auth token from an HTTP request: the Authorization
 // "Bearer <token>" header, falling back to a "token" query parameter (browsers
 // cannot set custom headers on a WebSocket handshake).
@@ -132,15 +160,18 @@ type wsConn struct {
 	reader        io.Reader
 	readCancel    context.CancelFunc
 	readEOFed     bool
+	budget        atomic.Int64 // bytes Read may still return; negative is unlimited
 	wmu           sync.Mutex
 	dmu           sync.Mutex // guards the deadlines
 	readDeadline  time.Time
 	writeDeadline time.Time
 }
 
-func newWSConn(c *websocket.Conn) net.Conn {
+func newWSConn(c *websocket.Conn) *wsConn {
 	c.SetReadLimit(wsReadLimit)
-	return &wsConn{c: c}
+	w := &wsConn{c: c}
+	w.budget.Store(-1)
+	return w
 }
 
 var (
@@ -151,6 +182,21 @@ var (
 func (w *wsConn) Read(p []byte) (int, error) {
 	w.rmu.Lock()
 	defer w.rmu.Unlock()
+	budget := w.budget.Load()
+	if budget == 0 {
+		return 0, ErrReadBudget
+	}
+	if budget > 0 && int64(len(p)) > budget {
+		p = p[:budget]
+	}
+	n, err := w.read(p)
+	if budget > 0 {
+		w.budget.Add(-int64(n))
+	}
+	return n, err
+}
+
+func (w *wsConn) read(p []byte) (int, error) {
 	for {
 		if w.readEOFed {
 			return 0, io.EOF

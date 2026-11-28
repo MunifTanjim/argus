@@ -27,6 +27,7 @@ type Config struct {
 	Workspace WorkspaceConfig
 	TUI       TUIConfig
 	MCP       MCPConfig
+	P2P       P2PConfig
 	// LuaPath is the init.lua to load; empty when config is off.
 	LuaPath string
 }
@@ -145,6 +146,17 @@ type MCPConfig struct {
 	Port int
 }
 
+// P2PConfig configures direct client-to-node links.
+type P2PConfig struct {
+	Listen    []string // addresses the node listens on for direct clients
+	Advertise []string // URLs announced to clients, overriding derived ones
+	Enabled   bool
+	// Endpoints and SSH are client-side overrides keyed by node id or label.
+	Endpoints  map[string][]string
+	SSH        map[string]string
+	SSHCommand string
+}
+
 // Lock.Genesis is the base64 trust-log genesis this install is pinned to; "" = not configured (open/TOFU).
 type LockConfig struct {
 	Genesis string
@@ -185,6 +197,12 @@ var defaults = map[string]any{
 	"tui.mouse":                       "on",
 	"tui.verbose-transcript":          false,
 	"mcp.port":                        7734,
+	"p2p.listen":                      []string{},
+	"p2p.advertise":                   []string{},
+	"p2p.enabled":                     true,
+	"p2p.endpoints":                   map[string][]string{},
+	"p2p.ssh":                         map[string]string{},
+	"p2p.ssh-command":                 "argus bridge",
 }
 
 // Load configures v with argus's defaults, env binding, and config file. configPath,
@@ -326,6 +344,14 @@ func FromViper(v *viper.Viper) Config {
 		},
 		MCP: MCPConfig{
 			Port: v.GetInt("mcp.port"),
+		},
+		P2P: P2PConfig{
+			Listen:     v.GetStringSlice("p2p.listen"),
+			Advertise:  v.GetStringSlice("p2p.advertise"),
+			Enabled:    v.GetBool("p2p.enabled"),
+			Endpoints:  v.GetStringMapStringSlice("p2p.endpoints"),
+			SSH:        v.GetStringMapString("p2p.ssh"),
+			SSHCommand: v.GetString("p2p.ssh-command"),
 		},
 	}
 }

@@ -19,6 +19,31 @@ void main() {
     expect(back.token, 'tok');
   });
 
+  test('node ssh links round-trip and reach activation', () {
+    const p = Profile(
+      id: 'p1', name: 'box', mode: ProfileMode.ssh, token: 'tok',
+      host: 'h', keyId: 'k1',
+      nodeSsh: {'laptop': 'ssh://me@laptop:2222'},
+      nodeSshCommand: '/opt/argus bridge',
+    );
+    final back = Profile.fromJson('p1', p.toJson());
+    expect(back.nodeSsh, {'laptop': 'ssh://me@laptop:2222'});
+    expect(back.nodeSshCommand, '/opt/argus bridge');
+    final s = back.nodeSshSettings!;
+    expect(s.keyId, 'k1'); // the connection's key by default
+    expect(s.effectiveCommand, '/opt/argus bridge');
+    expect(
+      Profile.fromJson('p1', {...p.toJson(), 'nodeSshKeyId': 'k2'})
+          .nodeSshSettings!
+          .keyId,
+      'k2',
+    );
+    const none = Profile(id: 'p', name: 'n', mode: ProfileMode.direct,
+        token: 't', url: 'ws://h');
+    expect(none.nodeSshSettings, isNull);
+    expect(Profile.fromJson('p', none.toJson()).nodeSsh, isEmpty);
+  });
+
   test('direct profile keeps its url', () {
     const p = Profile(
         id: 'p2', name: 'd', mode: ProfileMode.direct, token: 't',

@@ -171,12 +171,17 @@ func isFrame(ev any) bool { _, ok := ev.(api.RelayFrame); return ok }
 
 func connectNode(t *testing.T, srv *Server, id string) (*api.Peer, *nodeTap) {
 	t.Helper()
+	return connectNodeCaps(t, srv, id, api.NodeCapabilities{})
+}
+
+func connectNodeCaps(t *testing.T, srv *Server, id string, caps api.NodeCapabilities) (*api.Peer, *nodeTap) {
+	t.Helper()
 	tap := &nodeTap{events: make(chan any, 1024)}
 	gwConn, nodeConn := net.Pipe()
 	peer := api.NewPeer(nodeConn, api.PeerOptions{
 		Dispatch: func(_ context.Context, method string, _ json.RawMessage) (any, error) {
 			if method == api.MethodNodeIdentify {
-				return api.IdentifyResult{ID: id, Label: id}, nil
+				return api.IdentifyResult{ID: id, Label: id, Capabilities: caps}, nil
 			}
 			return nil, nil
 		},

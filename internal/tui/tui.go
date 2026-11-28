@@ -17,6 +17,7 @@ import (
 
 	"github.com/MunifTanjim/argus/internal/api"
 	"github.com/MunifTanjim/argus/internal/bundle"
+	"github.com/MunifTanjim/argus/internal/client"
 	"github.com/MunifTanjim/argus/internal/config"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 )
@@ -27,6 +28,8 @@ type Client interface {
 	Call(method string, params, out any) error
 	Events() <-chan api.Notification
 	States() <-chan bool
+	// Paths reports each node's link; nil when the client has no direct links.
+	Paths() <-chan client.NodePath
 	Reconnect()
 	Close() error
 	// Quarantined reports whether this device is unpinned on a network that has a
@@ -76,7 +79,7 @@ func Run(client Client, gatewayURL string, logs *logbuf.Buffer, cfg config.TUICo
 	p := tea.NewProgram(m, tea.WithFilter(f.filter))
 	f.send = p.Send
 	go func() {
-		events, states := swap.Events(), swap.States()
+		events, states, paths := swap.Events(), swap.States(), swap.Paths()
 		for {
 			select {
 			case ev, ok := <-events:
@@ -89,6 +92,12 @@ func Run(client Client, gatewayURL string, logs *logbuf.Buffer, cfg config.TUICo
 					return
 				}
 				p.Send(connStateMsg{connected: connected})
+			case np, ok := <-paths:
+				if !ok {
+					paths = nil
+					continue
+				}
+				p.Send(nodePathMsg(np))
 			}
 		}
 	}()

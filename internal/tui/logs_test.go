@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/client"
 	"github.com/MunifTanjim/argus/internal/logbuf"
 )
 
@@ -20,6 +21,7 @@ func (logsStubClient) States() <-chan bool             { return make(chan bool) 
 func (logsStubClient) Reconnect()                      {}
 func (logsStubClient) Close() error                    { return nil }
 func (logsStubClient) Quarantined() bool               { return false }
+func (logsStubClient) Paths() <-chan client.NodePath   { return nil }
 
 func fillLogs(b *logbuf.Buffer, n int) {
 	for i := 0; i < n; i++ {

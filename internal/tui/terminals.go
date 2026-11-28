@@ -122,7 +122,7 @@ func attachTerminal(c *ctx, t api.Terminal, row string) tea.Cmd {
 	cols, rows := m.termDims()
 	emu, cur, frame := newScreenEmulator(cols, rows)
 	s := screenComp{
-		terminalID: t.ID, title: terminalTitle(t), node: nodeName(t.NodeLabel, t.NodeID), row: row,
+		terminalID: t.ID, title: terminalTitle(t), node: nodeName(t.NodeLabel, t.NodeID), nodeID: t.NodeID, row: row,
 		termID: newTermID(), term: emu, cursorState: cur, frame: frame, stop: make(chan struct{}),
 	}
 	go drainEmulator(s.term, s.stop)
@@ -177,7 +177,7 @@ func (p terminalNodePicker) draw(c *ctx, scr uv.Screen, _ uv.Rectangle) {
 	f.help = c.m.hints(f.innerWidth(), hint("↑/↓", "move"), hint("enter", "select"), hint("esc", "cancel"))
 	l := itemLines{key: "terminal-node-picker"}
 	for i, n := range p.nodes {
-		l.add(i, spawnChoiceRow(nodeName(n.Label, n.ID), "", i == p.cursor, f.innerWidth()))
+		l.add(i, spawnChoiceRow(nodeName(n.Label, n.ID), c.m.nodeVias[n.ID], i == p.cursor, f.innerWidth()))
 	}
 	f.parts = l.window(f.bodyCtx(c), p.cursor, f.bodyHeight())
 	c.hitRect(drawCenter(scr, area, f.render()))

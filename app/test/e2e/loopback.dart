@@ -13,7 +13,13 @@ typedef NodeHandler = List<int> Function(String method, Uint8List params);
 /// The response/notification sealing lives here (test-only); the production
 /// client `Channel` intentionally has no node-side seal.
 class LoopbackNode {
-  LoopbackNode(this.id, this.keyPair, this.handler, {this.advertisedIdentity});
+  LoopbackNode(
+    this.id,
+    this.keyPair,
+    this.handler, {
+    this.advertisedIdentity,
+    this.plaintext = false,
+  });
 
   final String id;
   final KeyPair keyPair;
@@ -23,8 +29,18 @@ class LoopbackNode {
   /// instead of the node's real Noise keypair public key. The Noise handshake
   /// still uses [keyPair]. Allows testing the trust gate in isolation.
   final String? advertisedIdentity;
-  Session? _session;
+
+  /// Plaintext channels: no handshake, unsealed bodies.
+  final bool plaintext;
+
+  // Per channel, so a relay and a direct channel to this node can coexist.
+  final _sessions = <String, Session>{};
+  final _sinks = <String, void Function(String line)>{};
+  final _byteSinks = <String, void Function(Uint8List framed)>{};
   String? _chanId;
+
+  /// The channel the latest handshake (or plaintext frame) opened.
+  String? get lastChanId => _chanId;
 
   /// When true, sealed requests are silently dropped after the handshake (no
   /// reply) — used to exercise the client's call timeout. Handshakes still work.
@@ -47,12 +63,23 @@ class LoopbackNode {
   Map<String, Object?>? capabilities;
 
   /// Every opened request, in arrival order.
-  final requests = <({String method, bool cbor, Uint8List params})>[];
+  final requests =
+      <({String method, bool cbor, Uint8List params, String chanId})>[];
 
   late void Function(String line) sendToClient;
   late void Function(Uint8List framed) sendBytesToClient;
 
-  Future<void> onClientFrame(RpcMessage m) async {
+  Uint8List _seal(String chanId, List<int> inner) =>
+      plaintext ? Uint8List.fromList(inner) : _sessions[chanId]!.seal(inner);
+
+  /// Handles a frame from the client. [reply] and [replyBytes] carry this
+  /// channel's frames back on the link the frame came from; the gateway's
+  /// sinks by default.
+  Future<void> onClientFrame(
+    RpcMessage m, {
+    void Function(String line)? reply,
+    void Function(Uint8List framed)? replyBytes,
+  }) async {
     final chanId = (m.route as Map)['chan_id'] as String;
     if (m.method == methodE2EHandshake) {
       await handshakeGate?.future;
@@ -62,23 +89,37 @@ class LoopbackNode {
         prologue: channelPrologue(id, chanId),
         msg1: msg1,
       );
-      _session = sess;
+      _sessions[chanId] = sess;
+      _sinks[chanId] = reply ?? (l) => sendToClient(l);
+      _byteSinks[chanId] = replyBytes ?? (f) => sendBytesToClient(f);
       _chanId = chanId;
-      sendToClient('${utf8.decode(marshalHandshakeFrame(chanId, msg2))}\n');
+      _sinks[chanId]!('${utf8.decode(marshalHandshakeFrame(chanId, msg2))}\n');
       return;
+    }
+    if (plaintext && !_sinks.containsKey(chanId)) {
+      _sinks[chanId] = reply ?? (l) => sendToClient(l);
+      _byteSinks[chanId] = replyBytes ?? (f) => sendBytesToClient(f);
+      _chanId = chanId;
     }
     if (dropRequests) return;
     // A real node drops undecryptable frames rather than crashing; mirror that.
     final Uint8List params;
     try {
-      params = Channel.noise(
-        chanId,
-        _session!,
-      ).openParams(RelayFrame.fromMessage(m));
+      final ch = plaintext
+          ? Channel.plain(chanId)
+          : Channel.noise(chanId, _sessions[chanId]!);
+      params = ch.openParams(RelayFrame.fromMessage(m));
     } catch (_) {
       return;
     }
-    requests.add((method: m.method!, cbor: m.cbor, params: params));
+    requests.add((
+      method: m.method!,
+      cbor: m.cbor,
+      params: params,
+      chanId: chanId,
+    ));
+    final sink = _sinks[chanId]!;
+    final byteSink = _byteSinks[chanId]!;
     (List<int>? ok, ({int code, String message})? err) handlerResult;
     if (m.method == 'node.identify') {
       // Answer node.identify with this node's id and (optional) trust-log tip,
@@ -113,14 +154,14 @@ class LoopbackNode {
               }
             : {'result': jsonDecode(utf8.decode(handlerResult.$1!))},
       );
-      sendBytesToClient(
+      byteSink(
         frameCbor(
           Uint8List.fromList(
             cbor.encode({
               'jsonrpc': '2.0',
               'id': int.parse(m.id!),
               'route': {'chan_id': chanId},
-              'body': _session!.seal(inner),
+              'body': _seal(chanId, inner),
             }),
           ),
         ),
@@ -132,8 +173,8 @@ class LoopbackNode {
             '{"error":{"code":${handlerResult.$2!.code},"message":${jsonEncode(handlerResult.$2!.message)}}}',
           )
         : utf8.encode('{"result":${utf8.decode(handlerResult.$1!)}}');
-    final body = base64.encode(_session!.seal(inner));
-    sendToClient(
+    final body = base64.encode(_seal(chanId, inner));
+    sink(
       '${jsonEncode({
         'jsonrpc': '2.0',
         'id': m.id == null ? null : int.parse(m.id!),
@@ -143,27 +184,30 @@ class LoopbackNode {
     );
   }
 
-  void emitNotification(String method, List<int> params) {
-    final body = base64.encode(_session!.seal(params));
-    sendToClient(
+  /// Sends a notification on [chanId], the latest channel by default.
+  void emitNotification(String method, List<int> params, {String? chanId}) {
+    final ch = chanId ?? _chanId!;
+    final body = base64.encode(_seal(ch, params));
+    (_sinks[ch] ?? sendToClient)(
       '${jsonEncode({
         'jsonrpc': '2.0',
         'method': method,
-        'route': {'chan_id': _chanId},
+        'route': {'chan_id': ch},
         'body': body,
       })}\n',
     );
   }
 
   void emitNotificationCbor(String method, Object? params) {
-    sendBytesToClient(
+    final ch = _chanId!;
+    (_byteSinks[ch] ?? sendBytesToClient)(
       frameCbor(
         Uint8List.fromList(
           cbor.encode({
             'jsonrpc': '2.0',
             'method': method,
-            'route': {'chan_id': _chanId},
-            'body': _session!.seal(cbor.encode(params)),
+            'route': {'chan_id': ch},
+            'body': _seal(ch, cbor.encode(params)),
           }),
         ),
       ),
@@ -248,6 +292,8 @@ class MultiNodeLoopbackLink implements RpcLink {
     Set<String>? failRelayOpen,
     Set<String>? lockDisabled,
     this.serverInfo,
+    this.p2pEndpoints = const {},
+    this.labels = const {},
   }) : _offline = offline ?? const {},
        _failRelayOpen = failRelayOpen ?? const {},
        _lockDisabled = lockDisabled ?? const {} {
@@ -277,6 +323,16 @@ class MultiNodeLoopbackLink implements RpcLink {
 
   /// The server.info result; server.info goes unanswered when null.
   final Map<String, Object?>? serverInfo;
+
+  /// Direct endpoints by node id. A node listed here is reported with them and
+  /// with the p2p capability in nodes.list.
+  final Map<String, List<String>> p2pEndpoints;
+
+  /// Labels by node id; `<id>-box` otherwise.
+  final Map<String, String> labels;
+
+  /// Every chan id passed to relay.close, in order.
+  final relayCloseCalls = <String>[];
 
   /// Every CBOR frame the client sent.
   final cborFrames = <RpcMessage>[];
@@ -351,12 +407,16 @@ class MultiNodeLoopbackLink implements RpcLink {
           for (final e in _nodes.entries)
             {
               'id': e.key,
-              'label': '${e.key}-box',
+              'label': labels[e.key] ?? '${e.key}-box',
               'identity_pubkey':
                   e.value.advertisedIdentity ??
                   base64.encode(e.value.keyPair.publicKey),
               'online': !_offline.contains(e.key),
               if (_lockDisabled.contains(e.key)) 'lock_disabled': true,
+              if (p2pEndpoints[e.key] != null) ...{
+                'p2p_endpoints': p2pEndpoints[e.key],
+                'capabilities': {'p2p': true},
+              },
             },
         ];
         _push(
@@ -390,6 +450,9 @@ class MultiNodeLoopbackLink implements RpcLink {
         );
         onRelayOpen?.call(nodeId);
       case 'ping':
+        _push(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': null}));
+      case 'relay.close':
+        relayCloseCalls.add((j['params'] as Map)['chan_id'] as String);
         _push(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': null}));
       case 'server.info':
         final info = serverInfo;
@@ -455,6 +518,147 @@ class MultiNodeLoopbackLink implements RpcLink {
 
   @override
   Future<void> close() async {
+    if (!_ctrl.isClosed) await _ctrl.close();
+  }
+}
+
+/// A node's direct listener as seen by one client connection: answers the
+/// direct requests (ping, plaintext admission) and carries the node's channel
+/// frames on this link.
+class LoopbackDirectLink implements RpcLink {
+  LoopbackDirectLink(
+    this.node, {
+    this.tokenHash,
+    this.badMac = false,
+    this.identifyOpener = false,
+  });
+
+  final LoopbackNode node;
+
+  /// The token hash plaintext admission accepts; null on an E2EE node.
+  final String? tokenHash;
+
+  /// Answers token.challenge with a MAC that does not prove the hash.
+  final bool badMac;
+
+  /// Sends a node.identify request before answering token.present, as a node
+  /// does to a master-token opener, and waits for the reply.
+  final bool identifyOpener;
+
+  /// Every line the client sent on this link.
+  final sent = <String>[];
+
+  /// The client's replies to this link's node.identify requests.
+  final identifyReplies = <RpcMessage>[];
+
+  final _ctrl = StreamController<RpcMessage>.broadcast();
+  Completer<void>? _identifyReply;
+  bool closed = false;
+
+  void _push(String line) {
+    for (final part in line.split('\n')) {
+      if (part.trim().isEmpty || _ctrl.isClosed) continue;
+      _ctrl.add(RpcMessage.fromJson(jsonDecode(part) as Map<String, dynamic>));
+    }
+  }
+
+  void _reply(Object? id, {Object? result, Map<String, Object?>? error}) =>
+      _push(
+        jsonEncode({
+          'jsonrpc': '2.0',
+          'id': id,
+          if (error != null) 'error': error else 'result': result,
+        }),
+      );
+
+  @override
+  Stream<RpcMessage> get incoming => _ctrl.stream;
+
+  @override
+  void sendBytes(Uint8List frame) {
+    if (closed) return;
+    final m = _fromCborFrame(frame);
+    node.onClientFrame(m, reply: _push, replyBytes: _pushBytes);
+  }
+
+  void _pushBytes(Uint8List f) {
+    if (!_ctrl.isClosed) _ctrl.add(_fromCborFrame(f));
+  }
+
+  @override
+  void send(String frame) {
+    if (closed) return;
+    for (final part in frame.split('\n')) {
+      if (part.trim().isEmpty) continue;
+      sent.add(part);
+      final j = jsonDecode(part) as Map<String, dynamic>;
+      final m = RpcMessage.fromJson(j);
+      if (m.route != null) {
+        node.onClientFrame(m, reply: _push, replyBytes: _pushBytes);
+      } else if (m.method != null) {
+        unawaited(_direct(m.method!, j['id'], j['params']));
+      } else if (m.id == 'identify') {
+        identifyReplies.add(m);
+        _identifyReply?.complete();
+      }
+    }
+  }
+
+  Future<void> _direct(String method, Object? id, Object? params) async {
+    final p = params is Map ? params : const {};
+    switch (method) {
+      case 'ping':
+        _reply(id);
+      case 'token.challenge':
+        final hash = tokenHash;
+        if (hash == null || p2pTag(hash, p['nonce'] as String) != p['tag']) {
+          _reply(id, error: {'code': -32600, 'message': 'not admitted'});
+          await close();
+          return;
+        }
+        final mac = badMac
+            ? p2pMac(
+                hash,
+                'someone-else',
+                p['chan_id'] as String,
+                p['nonce'] as String,
+              )
+            : p2pMac(
+                hash,
+                node.id,
+                p['chan_id'] as String,
+                p['nonce'] as String,
+              );
+        _reply(id, result: {'mac': mac});
+      case 'token.present':
+        if (identifyOpener) {
+          _identifyReply = Completer<void>();
+          _push(
+            jsonEncode({
+              'jsonrpc': '2.0',
+              'id': 'identify',
+              'method': 'node.identify',
+            }),
+          );
+          await _identifyReply!.future;
+        }
+        if (hashToken(p['token'] as String) != tokenHash) {
+          _reply(id, error: {'code': -32600, 'message': 'not admitted'});
+          await close();
+          return;
+        }
+        _reply(id);
+      default:
+        _reply(id, error: {'code': -32601, 'message': 'method not found'});
+    }
+  }
+
+  /// Ends the link from the node's side.
+  Future<void> drop() => close();
+
+  @override
+  Future<void> close() async {
+    closed = true;
     if (!_ctrl.isClosed) await _ctrl.close();
   }
 }

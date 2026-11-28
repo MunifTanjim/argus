@@ -85,6 +85,7 @@ type Peer struct {
 	mu      sync.Mutex
 	nextID  int
 	pending map[int]chan message
+	inline  map[int]func(Encoding, json.RawMessage, *RPCError)
 
 	dispatch     DispatchFunc
 	onNotify     func(Notification)
@@ -113,6 +114,7 @@ func NewPeer(rwc io.ReadWriteCloser, opts PeerOptions) *Peer {
 		rwc:          rwc,
 		bw:           bufio.NewWriter(rwc),
 		pending:      make(map[int]chan message),
+		inline:       make(map[int]func(Encoding, json.RawMessage, *RPCError)),
 		dispatch:     opts.Dispatch,
 		onNotify:     opts.OnNotify,
 		onRelayFrame: opts.OnRelayFrame,
@@ -199,6 +201,12 @@ func (p *Peer) Call(method string, params, out any) error {
 // CallContext is Call with a context: on cancel/deadline it abandons the request
 // and returns ctx.Err(), reclaiming the pending slot so a late reply isn't leaked.
 func (p *Peer) CallContext(ctx context.Context, method string, params, out any) error {
+	return p.CallContextInline(ctx, method, params, out, nil)
+}
+
+// CallContextInline is CallContext plus inline, which, when set, sees the
+// reply on the read loop before any later frame is read.
+func (p *Peer) CallContextInline(ctx context.Context, method string, params, out any, inline func(enc Encoding, result json.RawMessage, rpcErr *RPCError)) error {
 	enc, rawParams, err := EncodeParams(method, params, p.RemoteCBOR())
 	if err != nil {
 		return err
@@ -210,11 +218,15 @@ func (p *Peer) CallContext(ctx context.Context, method string, params, out any) 
 	idRaw := json.RawMessage(strconv.Itoa(id))
 	resCh := make(chan message, 1)
 	p.pending[id] = resCh
+	if inline != nil {
+		p.inline[id] = inline
+	}
 	p.mu.Unlock()
 
 	forget := func() {
 		p.mu.Lock()
 		delete(p.pending, id)
+		delete(p.inline, id)
 		p.mu.Unlock()
 	}
 
@@ -322,9 +334,14 @@ func (p *Peer) readLoop() {
 			}
 			p.mu.Lock()
 			ch := p.pending[id]
+			inline := p.inline[id]
 			delete(p.pending, id)
+			delete(p.inline, id)
 			p.mu.Unlock()
 			if ch != nil {
+				if inline != nil {
+					inline(m.enc, m.Result, m.Error)
+				}
 				ch <- m
 			}
 		}

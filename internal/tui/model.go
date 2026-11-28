@@ -71,6 +71,7 @@ type model struct {
 	terminalsDone bool                 // a terminal load has finished
 	nodeInfo      []api.NodeInfo       // nodes and their capabilities, from the last load
 	hosts         map[string]hostEntry // node id -> last host.info reply
+	nodeVias      map[string]string    // node id -> link it uses (gateway, tcp, ssh); absent: none
 	hostGen       int
 	width         int
 	height        int
@@ -180,6 +181,7 @@ func newModel(client Client, hasDark bool, logs *logbuf.Buffer) model {
 		termKeyCh:       make(chan termKey, termKeyBuf),
 		sessions:        make(map[string]session.Session),
 		hosts:           make(map[string]hostEntry),
+		nodeVias:        make(map[string]string),
 		transcriptCache: make(map[string]cachedTranscript),
 		listScroll:      make(map[string]int),
 		completions:     make(map[string]map[byte][]api.PromptCompletion),

@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show Random;
 import 'dart:typed_data';
 
 import 'package:cbor/simple.dart' as cbor_codec;
 import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:pointycastle/digests/sha1.dart';
 
 import '../pairing/pairing_uri.dart';
 import 'connection.dart';
@@ -31,6 +33,18 @@ String resolveClientUrl(String base) {
   }
   return u.replace(path: '/client').toString();
 }
+
+final _rng = Random.secure();
+
+/// The Sec-WebSocket-Accept a server answers [key] with (RFC 6455).
+@visibleForTesting
+String webSocketAccept(String key) => base64.encode(
+  SHA1Digest().process(
+    Uint8List.fromList(
+      utf8.encode('${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11'),
+    ),
+  ),
+);
 
 class WebSocketRpcLink implements RpcLink {
   WebSocketRpcLink._(WebSocket socket)
@@ -78,6 +92,61 @@ class WebSocketRpcLink implements RpcLink {
       headers: {'Authorization': 'Bearer ${c.token}'},
     ).timeout(timeout);
     return WebSocketRpcLink._(socket);
+  }
+
+  /// Connects to a node's direct endpoint: no credentials, no proxy, and no
+  /// redirects, so the connection reaches exactly [url] or fails.
+  static Future<WebSocketRpcLink> connectDirect(
+    String url, {
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    final u = Uri.parse(url);
+    if (u.scheme != 'ws' && u.scheme != 'wss') {
+      throw FormatException('direct endpoint must be ws:// or wss://', url);
+    }
+    final http = HttpClient()
+      ..findProxy = ((_) => 'DIRECT')
+      ..connectionTimeout = timeout;
+    try {
+      final key = base64.encode(
+        List<int>.generate(16, (_) => _rng.nextInt(256)),
+      );
+      final req = await http
+          .openUrl(
+            'GET',
+            u.replace(scheme: u.scheme == 'wss' ? 'https' : 'http'),
+          )
+          .timeout(timeout);
+      req.followRedirects = false;
+      req.headers
+        ..set(HttpHeaders.connectionHeader, 'Upgrade')
+        ..set(HttpHeaders.upgradeHeader, 'websocket')
+        ..set('Sec-WebSocket-Key', key)
+        ..set('Sec-WebSocket-Version', '13');
+      final res = await req.close().timeout(timeout);
+      final accept = res.headers.value('Sec-WebSocket-Accept');
+      if (res.statusCode != HttpStatus.switchingProtocols ||
+          accept != webSocketAccept(key)) {
+        (await res.detachSocket()).destroy();
+        throw WebSocketException(
+          'direct endpoint refused the upgrade',
+          res.statusCode,
+        );
+      }
+      final socket = await res.detachSocket();
+      http.close();
+      return WebSocketRpcLink._(
+        WebSocket.fromUpgradedSocket(
+          socket,
+          serverSide: false,
+          compression: CompressionOptions.compressionOff,
+        ),
+      );
+    } catch (_) {
+      // Ends any connection still being set up.
+      http.close(force: true);
+      rethrow;
+    }
   }
 
   void _onData(dynamic data) {

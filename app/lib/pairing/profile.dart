@@ -1,4 +1,5 @@
 import '../transport/library_key.dart';
+import '../transport/ssh_bridge.dart';
 import '../transport/ssh_gateway.dart';
 import 'pairing_uri.dart';
 
@@ -20,6 +21,9 @@ class Profile {
     this.gatewayPort,
     this.keyId,
     this.e2eEnabled = false,
+    this.nodeSsh = const {},
+    this.nodeSshCommand,
+    this.nodeSshKeyId,
   });
 
   final String id;
@@ -34,6 +38,25 @@ class Profile {
   final String? keyId; // ssh
   final bool e2eEnabled;
 
+  /// Node SSH destinations (`ssh://[user@]host[:port]`) by node id or label.
+  final Map<String, String> nodeSsh;
+
+  /// The remote command node SSH links run; null => `argus bridge`.
+  final String? nodeSshCommand;
+
+  /// The library key node SSH links log in with; null => [keyId].
+  final String? nodeSshKeyId;
+
+  /// The node SSH settings activation hands the connection, or null when no
+  /// node has a destination.
+  NodeSshSettings? get nodeSshSettings => nodeSsh.isEmpty
+      ? null
+      : NodeSshSettings(
+          targets: nodeSsh,
+          command: nodeSshCommand,
+          keyId: nodeSshKeyId ?? keyId,
+        );
+
   Map<String, dynamic> toJson() => {
         'name': name,
         'mode': mode.name,
@@ -45,6 +68,9 @@ class Profile {
         if (gatewayPort != null) 'gatewayPort': gatewayPort,
         if (keyId != null) 'keyId': keyId,
         if (e2eEnabled) 'e2eEnabled': true,
+        if (nodeSsh.isNotEmpty) 'nodeSsh': nodeSsh,
+        if (nodeSshCommand != null) 'nodeSshCommand': nodeSshCommand,
+        if (nodeSshKeyId != null) 'nodeSshKeyId': nodeSshKeyId,
       };
 
   /// The gateway ws url an ssh profile dials, with the default gateway port
@@ -68,6 +94,9 @@ class Profile {
         gatewayPort: j['gatewayPort'] as int?,
         keyId: j['keyId'] as String?,
         e2eEnabled: j['e2eEnabled'] == true,
+        nodeSsh: (j['nodeSsh'] as Map?)?.cast<String, String>() ?? const {},
+        nodeSshCommand: j['nodeSshCommand'] as String?,
+        nodeSshKeyId: j['nodeSshKeyId'] as String?,
       );
 }
 

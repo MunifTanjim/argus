@@ -114,6 +114,8 @@ type fakeNode struct {
 	// plaintext, when true, skips the Noise handshake: the first sealed (=cleartext)
 	// request frame lazily creates an identity channel instead.
 	plaintext bool
+	// plainChanID is the relay channel n.ch serves in plaintext mode.
+	plainChanID string
 	// tip is returned by node.identify over the authenticated channel.
 	tip []byte
 	// lockDisabled is advertised in the roster as LockDisabled.
@@ -124,6 +126,14 @@ type fakeNode struct {
 	// encodings; guarded by the gateway's mu.
 	identifyParams []json.RawMessage
 	encs           map[string][]api.Encoding
+	// endpoints and p2pCap are advertised in the roster as P2PEndpoints and
+	// capabilities.p2p.
+	endpoints []string
+	p2pCap    bool
+	// silent methods get no reply; their request ids are kept in silentIDs
+	// (guarded by the gateway's mu) so a test can answer them later.
+	silent    map[string]bool
+	silentIDs []*json.RawMessage
 }
 
 // fakeMultiGateway is one peer playing the gateway for several nodes: nodes.list
@@ -141,8 +151,17 @@ type fakeMultiGateway struct {
 	// gotHandshake is set when any e2e.handshake frame is received; used to assert
 	// that plaintext clients send none.
 	gotHandshake  bool
-	syncCallCount int  // incremented each time trustlog.sync is dispatched; guarded by mu
-	cbor          bool // reported as capabilities.cbor in server.info
+	syncCallCount int         // incremented each time trustlog.sync is dispatched; guarded by mu
+	cbor          bool        // reported as capabilities.cbor in server.info
+	p2p           bool        // reported as capabilities.p2p in server.info
+	relayClosed   chan string // chan_ids received in relay.close
+	relayOpens    int         // relay.open calls; guarded by mu
+	// relayOpenHook, when set, runs inside relay.open with the call count,
+	// before the reply is sent; guarded by mu.
+	relayOpenHook func(count int)
+	// sendMu serializes sealing on the node channels between the read loop and
+	// test goroutines that inject frames.
+	sendMu sync.Mutex
 }
 
 func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, net.Conn) {
@@ -151,6 +170,8 @@ func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, n
 	g := &fakeMultiGateway{
 		nodes:  map[string]*fakeNode{},
 		byChan: map[string]*fakeNode{},
+
+		relayClosed: make(chan string, 16),
 	}
 	for _, n := range nodes {
 		g.nodes[n.id] = n
@@ -172,10 +193,25 @@ func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, n
 				if n == nil {
 					return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unknown node"}
 				}
+				g.mu.Lock()
+				g.relayOpens++
+				count, hook := g.relayOpens, g.relayOpenHook
+				g.mu.Unlock()
+				if hook != nil {
+					hook(count)
+				}
 				g.nextCh++
 				chID := "c" + strconv.Itoa(g.nextCh)
 				g.byChan[chID] = n
 				return api.RelayOpenResult{ChanID: chID}, nil
+			case api.MethodRelayClose:
+				var p api.RelayCloseParams
+				_ = json.Unmarshal(params, &p)
+				select {
+				case g.relayClosed <- p.ChanID:
+				default:
+				}
+				return nil, nil
 			case api.MethodTrustLogSync:
 				g.mu.Lock()
 				g.syncCallCount++
@@ -191,8 +227,8 @@ func newFakeMultiGateway(t *testing.T, nodes ...*fakeNode) (*fakeMultiGateway, n
 				return api.TrustLogSyncResult{Entries: entries}, nil
 			case api.MethodServerInfo:
 				info := api.ServerInfo{Version: "test"}
-				if g.cbor {
-					info.Capabilities = &api.PeerCapabilities{CBOR: true}
+				if g.cbor || g.p2p {
+					info.Capabilities = &api.PeerCapabilities{CBOR: g.cbor, P2P: g.p2p}
 				}
 				return info, nil
 			}
@@ -220,6 +256,8 @@ func (g *fakeMultiGateway) nodeDescriptor(n *fakeNode) api.NodeDescriptor {
 		ID: n.id, Label: n.id + "-box", Online: true,
 		IdentityPubKey: base64.StdEncoding.EncodeToString(n.key.Public),
 		LockDisabled:   n.lockDisabled,
+		P2PEndpoints:   n.endpoints,
+		Capabilities:   api.NodeCapabilities{P2P: n.p2pCap},
 	}
 }
 
@@ -249,6 +287,8 @@ func (g *fakeMultiGateway) emitNodeEvent(evType string, n *fakeNode) {
 }
 
 func (g *fakeMultiGateway) onFrame(_ *api.Peer, f api.RelayFrame) {
+	g.sendMu.Lock()
+	defer g.sendMu.Unlock()
 	n := g.byChan[f.Route.ChanID]
 	if n == nil {
 		return
@@ -277,11 +317,12 @@ func (g *fakeMultiGateway) onFrame(_ *api.Peer, f api.RelayFrame) {
 		}
 		return
 	}
-	if n.ch == nil {
+	if n.ch == nil || n.plaintext && n.plainChanID != f.Route.ChanID {
 		if !n.plaintext {
 			return
 		}
 		n.ch = api.NewPlainChannel(f.Route.ChanID)
+		n.plainChanID = f.Route.ChanID
 	}
 	params, err := n.ch.OpenParams(f)
 	if err != nil {
@@ -301,7 +342,14 @@ func (g *fakeMultiGateway) onFrame(_ *api.Peer, f api.RelayFrame) {
 		n.identifyParams = append(n.identifyParams, params)
 	}
 	nodeCBOR := n.cbor
+	silent := n.silent[f.Method]
+	if silent {
+		n.silentIDs = append(n.silentIDs, f.ID)
+	}
 	g.mu.Unlock()
+	if silent {
+		return
+	}
 	if f.Method == api.MethodNodeIdentify {
 		res, _ := json.Marshal(api.IdentifyResult{ID: n.id, Tip: n.tip, Capabilities: api.NodeCapabilities{CBOR: nodeCBOR}})
 		rf, _ := n.ch.SealResponseFrame(api.EncodingJSON, f.ID, res, nil)

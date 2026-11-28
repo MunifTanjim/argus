@@ -1,8 +1,18 @@
+import '../transport/ssh_bridge.dart' show NodeSshSettings;
+
 class GatewayCredentials {
   final String url;
   final String token;
   final bool e2eEnabled;
-  const GatewayCredentials(this.url, this.token, {this.e2eEnabled = false});
+
+  /// The profile's node SSH links; not part of the pairing URI.
+  final NodeSshSettings? nodeSsh;
+  const GatewayCredentials(
+    this.url,
+    this.token, {
+    this.e2eEnabled = false,
+    this.nodeSsh,
+  });
 }
 
 String buildPairingUri(GatewayCredentials c) {

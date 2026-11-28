@@ -851,7 +851,7 @@ func TestPeerOpenedLockedUnauthorizedRejected(t *testing.T) {
 	bKP := mustKeyPair(t)
 	r := buildLockedResponder(t, mustKeyPair(t).Public) // b's key is not authorized
 	rosterKey(r.d, "b", bKP.Public)
-	r.notePeerOpened("enforce-test-chan", "b")
+	r.notePeerOpened("enforce-test-chan", "b", "")
 	if runClientHandshake(t, r, bKP) {
 		t.Fatal("locked store without the opener's key must reject the channel")
 	}
@@ -869,8 +869,8 @@ func TestPeerOpenedPlaintext(t *testing.T) {
 	r := d.newRelayResponder(nil)
 	gw, fromNode := gatewayUplink(t, r)
 
-	announcePeer(t, gw, "p1", "b")
-	res, rpcErr := callOver(t, api.NewPlainChannel("p1"), gw, fromNode, d.id, "test.peer", nil)
+	announcePeer(t, gw, "n1", "b")
+	res, rpcErr := callOver(t, api.NewPlainChannel("n1"), gw, fromNode, d.id, "test.peer", nil)
 	if rpcErr != nil {
 		t.Fatalf("test.peer: %v", rpcErr)
 	}
@@ -879,7 +879,7 @@ func TestPeerOpenedPlaintext(t *testing.T) {
 	}
 
 	// A client channel (no peer_opened) carries no peer node.
-	res, rpcErr = callOver(t, api.NewPlainChannel("p2"), gw, fromNode, d.id, "test.peer", nil)
+	res, rpcErr = callOver(t, api.NewPlainChannel("n2"), gw, fromNode, d.id, "test.peer", nil)
 	if rpcErr != nil {
 		t.Fatalf("test.peer: %v", rpcErr)
 	}
@@ -891,13 +891,13 @@ func TestPeerOpenedPlaintext(t *testing.T) {
 func TestPeerOpenedRecordsDoNotLeak(t *testing.T) {
 	d := newE2ETestNode(t)
 	r := d.newRelayResponder(nil)
-	r.notePeerOpened("x", "b")
+	r.notePeerOpened("x", "b", "")
 	r.closeChan("x") // relay.closed before any frame
 	if n := r.pendingPeerCountForTest(); n != 0 {
 		t.Fatalf("pending after close = %d, want 0", n)
 	}
 	for i := 0; i < maxPendingPeerOpened+10; i++ {
-		r.notePeerOpened("c"+strconv.Itoa(i), "b")
+		r.notePeerOpened("c"+strconv.Itoa(i), "b", "")
 	}
 	if n := r.pendingPeerCountForTest(); n > maxPendingPeerOpened {
 		t.Fatalf("pending = %d, want <= %d", n, maxPendingPeerOpened)
@@ -913,10 +913,10 @@ func TestPeerChannelGetsNoRegistryStream(t *testing.T) {
 	rosterKey(d, "b", bKP.Public)
 
 	cch := handshakeOver(t, r, gw, fromNode, "c1", mustKeyPair(t))
-	announcePeer(t, gw, "p1", "b")
-	handshakeOver(t, r, gw, fromNode, "p1", bKP)
-	if cs := r.lookup("p1"); cs == nil || r.channelPeer(cs) != "b" {
-		t.Fatalf("p1 = %+v, want a peer channel from b", cs)
+	announcePeer(t, gw, "n1", "b")
+	handshakeOver(t, r, gw, fromNode, "n1", bKP)
+	if cs := r.lookup("n1"); cs == nil || r.channelPeer(cs) != "b" {
+		t.Fatalf("n1 = %+v, want a peer channel from b", cs)
 	}
 
 	d.reg.ReconcileSessions("claude", discovered("%1"))
@@ -965,8 +965,8 @@ func TestPeerChannelPromotedWhenRosterCatchesUp(t *testing.T) {
 	bKP := mustKeyPair(t)
 
 	// b is not in the roster yet when its channel is opened.
-	announcePeer(t, gw, "p1", "b")
-	ch := handshakeOver(t, r, gw, fromNode, "p1", bKP)
+	announcePeer(t, gw, "n1", "b")
+	ch := handshakeOver(t, r, gw, fromNode, "n1", bKP)
 	if _, rpcErr := callOver(t, ch, gw, fromNode, d.id, api.MethodOrchSessionCurrent, json.RawMessage(`{}`)); rpcErr == nil || rpcErr.Code != api.CodeMethodNotFound {
 		t.Fatalf("orch.session.current before b is in the roster: rpcErr = %v, want method not found", rpcErr)
 	}

@@ -1,17 +1,25 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
+import 'dart:math' show Random;
 import 'dart:typed_data';
 
 import 'package:cbor/simple.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:pointycastle/digests/sha256.dart';
+import 'package:pointycastle/macs/hmac.dart';
+import 'package:pointycastle/api.dart' show KeyParameter;
 
+import '../transport/connection.dart' show RpcLink;
+import '../transport/frame_reader.dart' show FrameReader, JsonFrame;
 import '../transport/gateway_client.dart';
 import '../transport/jsonrpc.dart'
-    show RpcError, RpcMessage, cborToDart, jsonSafe;
+    show RpcError, RpcMessage, cborToDart, encodeRequest, jsonSafe;
 import '../transport/rpc_client.dart';
+import '../transport/ssh_bridge.dart'
+    show NodeBridge, SshNodeTarget, defaultNodeSshCommand, parseSshNodeTarget;
 import 'aggregate.dart';
-import 'bytes.dart' show bytesEqual, hexEncode;
+import 'bytes.dart' show bytesEqual, hexDecode, hexEncode;
 import 'channel.dart';
 import 'handshake.dart';
 import 'keypair.dart';
@@ -22,6 +30,9 @@ import 'trustlog/entry_store.dart' show EntryStore;
 import 'trustlog/superseding.dart' show detectSupersession;
 import 'trustlog/trust_store.dart';
 
+part 'p2p.dart';
+part 'ssh_link.dart';
+
 /// A node reachable through the blind gateway. [identityPubKey] is the node's
 /// base64 Curve25519 static key (its Noise responder identity).
 class NodeDescriptor {
@@ -31,6 +42,8 @@ class NodeDescriptor {
     required this.identityPubKey,
     this.online = true,
     this.lockDisabled = false,
+    this.p2p = false,
+    this.p2pEndpoints = const [],
   });
   final String id;
   final String? label;
@@ -40,6 +53,13 @@ class NodeDescriptor {
   /// The node turned off locked-mode enforcement for itself, so it accepts any
   /// device. Gateway-forgeable: a hint for which nodes to try, never trust.
   final bool lockDisabled;
+
+  /// The node declared the p2p capability.
+  final bool p2p;
+
+  /// Direct URLs the node accepts clients on. Gateway-forgeable: a hint for
+  /// where to dial; admission still authenticates the node.
+  final List<String> p2pEndpoints;
 }
 
 /// Tracks consecutive unreconciled ticks for a single node's tip.
@@ -52,15 +72,76 @@ class _TipMissState {
 /// Number of consecutive unreconciled ticks before the equivocation flag is set.
 const int _tipMissThreshold = 2;
 
+/// A channel to a node on one link: the gateway relay or a direct connection.
 class NodeChannel {
-  NodeChannel(this.nodeId, this.chanId, this.channel);
+  NodeChannel._(
+    this.nodeId,
+    this.chanId,
+    this.channel, {
+    required this.via,
+    required Object link,
+    required void Function(String line) send,
+    void Function(Uint8List framed)? sendBytes,
+    required void Function() onClose,
+    this.routeNotes = true,
+  }) : _link = link,
+       _send = send,
+       _sendBytes = sendBytes,
+       _onClose = onClose;
+
   final String nodeId;
   final String chanId;
   final Channel channel;
 
-  /// The gateway and the node both declared cbor; set after node.identify.
+  /// The link this channel travels on: `gateway`, `tcp` or `ssh`.
+  final String via;
+
+  // Frames are accepted only from this link.
+  final Object _link;
+  final void Function(String line) _send;
+  final void Function(Uint8List framed)? _sendBytes;
+  final void Function() _onClose;
+  final _done = Completer<void>();
+  bool _closed = false;
+
+  /// The link's cbor declarations allow CBOR; set after node.identify.
   bool cbor = false;
+
+  /// Notifications are delivered only while set. A standby or replaced link
+  /// still resolves replies to its calls.
+  bool routeNotes;
+
+  /// The link a pending switch replaces.
+  NodeChannel? replaces;
+
+  /// Completes once the link has ended, closed by the client or dropped.
+  Future<void> get done => _done.future;
+  bool get isDone => _done.isCompleted;
+
+  /// Writes a JSON frame.
+  void send(Uint8List frame) => _send('${utf8.decode(frame)}\n');
+
+  /// Writes a framed CBOR frame.
+  void sendCbor(Uint8List framed) => _sendBytes!(framed);
+
+  void _end() {
+    if (!_done.isCompleted) _done.complete();
+  }
+
+  /// Ends the channel and its link, and removes it from the client.
+  void close() {
+    if (_closed) return;
+    _closed = true;
+    _end();
+    _onClose();
+  }
 }
+
+typedef _Pending = ({
+  Completer<Uint8List> c,
+  NodeChannel nc,
+  void Function(({Uint8List? result, RpcError? error}) r)? inline,
+});
 
 typedef NodeEvent = ({
   String method,
@@ -91,7 +172,17 @@ class E2EClient implements GatewayClient {
     this.onTrustChainAdvance,
     bool plaintext = false,
     void Function(Uint8List)? sendBytes,
+    DirectDialer? directDialer,
+    String? p2pToken,
+    SshOpener? sshOpener,
+    Map<String, String> sshTargets = const {},
+    String sshCommand = defaultNodeSshCommand,
   }) : _sendBytes = sendBytes,
+       _directDialer = directDialer,
+       _p2pToken = p2pToken,
+       _sshOpener = sshOpener,
+       _sshTargets = sshTargets,
+       _sshCommand = sshCommand,
        _trust =
            trustStore ??
            (tofu
@@ -116,6 +207,102 @@ class E2EClient implements GatewayClient {
   final TrustStore? _trust;
   final Uint8List? _initialTrustChain;
   final bool _plaintext;
+
+  /// Dials direct endpoints; null keeps every node on the relay.
+  final DirectDialer? _directDialer;
+
+  /// The client token plaintext direct admission presents.
+  final String? _p2pToken;
+
+  /// Opens node SSH links; null or no [_sshTargets] keeps SSH off.
+  final SshOpener? _sshOpener;
+
+  /// SSH destinations by node id or label.
+  final Map<String, String> _sshTargets;
+
+  /// The remote command node SSH links run.
+  final String _sshCommand;
+
+  /// How often a node on the relay retries its upgrade.
+  static Duration p2pRetryInterval = const Duration(seconds: 60);
+
+  /// Keepalive on direct links, so a half-open link is detected.
+  static Duration p2pKeepaliveInterval = const Duration(seconds: 20);
+  static Duration p2pKeepaliveTimeout = const Duration(seconds: 10);
+  static int p2pKeepaliveFailures = 1;
+
+  /// How long a replaced link stays open for its pending calls.
+  static Duration switchSettleTimeout = const Duration(seconds: 5);
+
+  // The gateway connection, as a link identity.
+  static final _gatewayLink = Object();
+  bool _gatewayP2P = false;
+  Future<void> _serverInfo = Future.value();
+  final _upgrading = <String, Object>{};
+  final _upgradeWake = <String, Completer<void>>{};
+  // Bumped by retryUpgradesNow, so a wake during an attempt is not lost.
+  int _wakeGen = 0;
+  final _p2pWarned = <String>{};
+  final _paths = StreamController<NodePath>.broadcast();
+  final _reconciles = StreamController<NodeSessions>.broadcast();
+
+  /// Each node's link: on every open (gateway), switch and fallback, and an
+  /// empty via when the node loses its link (roster, trust, gateway loss).
+  Stream<NodePath> get nodePaths => _paths.stream;
+
+  /// A node's sessions from its new link after a switch; they replace the
+  /// node's sessions in the view, before the switch is reported on
+  /// [nodePaths].
+  Stream<NodeSessions> get sessionReconciles => _reconciles.stream;
+
+  /// The link each open node uses, by node id.
+  Map<String, String> get nodeVias => {
+    for (final e in _byNodeId.entries) e.key: e.value.via,
+  };
+
+  /// Retries every relay node's upgrade, and SSH for nodes on tcp, now (app
+  /// resume, a trusted host key).
+  void retryUpgradesNow() {
+    _wakeGen++;
+    _wakeUpgrades();
+  }
+
+  /// Opens and identifies a direct link to [node] on the first endpoint that
+  /// admits it, without switching the node onto it. Null when the node may
+  /// not be dialed or no endpoint answered.
+  Future<NodeChannel?> dialTcp(NodeDescriptor node) async {
+    final cur = _byNodeId[node.id];
+    Object? err;
+    for (final raw in _directEndpoints(node)) {
+      final u = Uri.tryParse(raw);
+      if (u == null ||
+          (u.scheme != 'ws' && u.scheme != 'wss') ||
+          u.host.isEmpty) {
+        _logOnce(
+          'endpoint\x00$raw',
+          'node ${node.id}: ignoring direct endpoint "$raw": not a ws or wss URL',
+        );
+        continue;
+      }
+      try {
+        final nc = _plaintext
+            ? await _dialPlainEndpoint(node, raw)
+            : await _dialEndpoint(node, raw);
+        nc.replaces = cur;
+        return nc;
+      } catch (e) {
+        err = e;
+      }
+    }
+    if (err != null) {
+      _logOnce(
+        '${node.id}\x00$err',
+        'node ${node.id} direct link unavailable: $err',
+      );
+    }
+    return null;
+  }
+
   final _entryStore = EntryStore();
   // Last unplaced count that triggered a warning. 0 means no active warning;
   // reset to 0 when the count returns to 0 so a later recurrence is reported again.
@@ -178,8 +365,8 @@ class E2EClient implements GatewayClient {
   late final RpcClient _gateway;
 
   final _byChanId = <String, NodeChannel>{};
-  final _handshakes = <String, Completer<Uint8List>>{};
-  final _pending = <String, Completer<Uint8List>>{};
+  final _handshakes = <String, ({Object link, Completer<Uint8List> c})>{};
+  final _pending = <String, _Pending>{};
   final _events = StreamController<NodeEvent>.broadcast();
   int _nextId = 0;
   bool _closed = false;
@@ -319,15 +506,16 @@ class E2EClient implements GatewayClient {
   /// It returns once the trust log is loaded; the channels keep opening in the
   /// background.
   Future<void> connect() async {
-    final info = _sendBytes == null
-        ? null
-        : _gateway
-              .call('server.info')
-              .then(_hasCbor)
-              .catchError((_) => false);
+    final serverInfo = _gateway
+        .call('server.info')
+        .then<Object?>((i) => i, onError: (Object _) => null);
+    _serverInfo = serverInfo.then((i) {
+      final caps = i is Map ? i['capabilities'] : null;
+      _gatewayP2P = caps is Map && caps['p2p'] == true;
+    });
     final res = await _gateway.call('nodes.list');
     final nodes = (res is Map ? res['nodes'] : null) as List? ?? const [];
-    if (info != null) _gatewayCbor = await info;
+    if (_sendBytes != null) _gatewayCbor = _hasCbor(await serverInfo);
     if (_trust != null) {
       // Rollback anchor: re-verify the last-known-good chain before pulling, so the
       // gateway's chain must be a monotonic extension (a stale/shorter chain is
@@ -414,6 +602,7 @@ class E2EClient implements GatewayClient {
         _loseNode(desc.id);
         return;
       }
+      _emitPath(desc.id, nc.via);
       registered.complete();
       // Record identity pub hex so checkTipConsistency can distinguish
       // "was connected, now offline" from "never connected", then read the
@@ -439,6 +628,7 @@ class E2EClient implements GatewayClient {
           level: 900,
         );
       }
+      _startUpgrade(desc.id);
     } catch (e) {
       developer.log(
         'skipping node ${desc.id}: open channel failed: $e',
@@ -455,6 +645,8 @@ class E2EClient implements GatewayClient {
   Future<void> _adoptNode(NodeDescriptor desc) async {
     await _trustLoaded.future;
     if (_closed || !_eligible(desc)) return;
+    // An open node keeps its link; a later upgrade uses its new endpoints.
+    if (_byNodeId.containsKey(desc.id)) _roster[desc.id] = desc;
     await _openNode(desc);
   }
 
@@ -463,8 +655,14 @@ class E2EClient implements GatewayClient {
   /// accumulate equivocation misses. Mirrors Go E2EClient.loseNode.
   void _loseNode(String id) {
     final desc = _roster.remove(id);
+    _upgrading.remove(id);
+    final wake = _upgradeWake.remove(id);
+    if (wake != null && !wake.isCompleted) wake.complete();
     final nc = _byNodeId.remove(id);
-    if (nc != null) _byChanId.remove(nc.chanId);
+    if (nc != null) {
+      nc.close();
+      _emitPath(id, '');
+    }
     if (desc != null && desc.identityPubKey.isNotEmpty) {
       try {
         final key = hexEncode(base64.decode(desc.identityPubKey));
@@ -1059,12 +1257,21 @@ class E2EClient implements GatewayClient {
   }
 
   NodeDescriptor _parseNodeDescriptor(Map<String, dynamic> n) {
+    final caps = n['capabilities'];
+    final eps = n['p2p_endpoints'];
     return NodeDescriptor(
       id: n['id'] as String? ?? '',
       label: n['label'] as String?,
       identityPubKey: n['identity_pubkey'] as String? ?? '',
       online: n['online'] as bool? ?? true,
       lockDisabled: n['lock_disabled'] as bool? ?? false,
+      p2p: caps is Map && caps['p2p'] == true,
+      p2pEndpoints: eps is List
+          ? [
+              for (final e in eps)
+                if (e is String) e,
+            ]
+          : const [],
     );
   }
 
@@ -1220,15 +1427,18 @@ class E2EClient implements GatewayClient {
     }
   }
 
-  Future<NodeChannel> openChannel(NodeDescriptor node) async {
+  /// Opens a relay channel to [node]. A [standby] channel delivers no
+  /// notifications until a switch makes it the node's link.
+  Future<NodeChannel> openChannel(
+    NodeDescriptor node, {
+    bool standby = false,
+  }) async {
     final res = await _gateway
         .call('relay.open', {'node_id': node.id})
         .timeout(handshakeTimeout);
     final chanId = (res as Map)['chan_id'] as String;
     if (_plaintext) {
-      final nc = NodeChannel(node.id, chanId, Channel.plain(chanId));
-      _byChanId[chanId] = nc;
-      return nc;
+      return _relayChannel(node.id, chanId, Channel.plain(chanId), standby);
     }
     final pub = base64.decode(node.identityPubKey);
     final (hs, msg1) = await HandshakeState.initiate(
@@ -1237,29 +1447,79 @@ class E2EClient implements GatewayClient {
       prologue: channelPrologue(node.id, chanId),
     );
     final hc = Completer<Uint8List>();
-    _handshakes[chanId] = hc;
-    _writeFrame(marshalHandshakeFrame(chanId, msg1));
+    _handshakes[chanId] = (link: _gatewayLink, c: hc);
+    _send('${utf8.decode(marshalHandshakeFrame(chanId, msg1))}\n');
     final Uint8List msg2;
     try {
       msg2 = await hc.future.timeout(handshakeTimeout);
     } finally {
       _handshakes.remove(chanId);
     }
-    final nc = NodeChannel(
+    return _relayChannel(
       node.id,
       chanId,
       Channel.noise(chanId, hs.finish(msg2)),
+      standby,
+    );
+  }
+
+  NodeChannel _relayChannel(
+    String nodeId,
+    String chanId,
+    Channel channel,
+    bool standby,
+  ) {
+    late final NodeChannel nc;
+    nc = NodeChannel._(
+      nodeId,
+      chanId,
+      channel,
+      via: viaGateway,
+      link: _gatewayLink,
+      send: _send,
+      sendBytes: _sendBytes,
+      routeNotes: !standby,
+      onClose: () {
+        _unregister(nc);
+        if (_closed) return;
+        unawaited(
+          _gateway
+              .call('relay.close', {'chan_id': chanId})
+              .catchError((Object _) => null),
+        );
+      },
     );
     _byChanId[chanId] = nc;
     return nc;
   }
 
+  /// Removes [nc] from the maps and fails the calls waiting on it.
+  void _unregister(NodeChannel nc) {
+    if (_byChanId[nc.chanId] == nc) _byChanId.remove(nc.chanId);
+    if (_byNodeId[nc.nodeId] == nc) _byNodeId.remove(nc.nodeId);
+    _failPending(nc, StateError('channel to ${nc.nodeId} closed'));
+  }
+
+  void _failPending(NodeChannel nc, Object err) {
+    final ids = [
+      for (final e in _pending.entries)
+        if (e.value.nc == nc) e.key,
+    ];
+    for (final id in ids) {
+      final c = _pending.remove(id)!.c;
+      if (!c.isCompleted) c.completeError(err);
+    }
+  }
+
+  int _pendingOn(NodeChannel nc) =>
+      _pending.values.where((p) => p.nc == nc).length;
+
   Duration callTimeoutFor(String method) =>
       method == 'server.upgrade' ? upgradeCallTimeout : callTimeout;
 
   Future<Uint8List> callNode(NodeChannel nc, String method, List<int> params) =>
-      _call(method, (id) {
-        _writeFrame(nc.channel.sealRequestFrame(id, method, nc.nodeId, params));
+      _call(method, nc, (id) {
+        nc.send(nc.channel.sealRequestFrame(id, method, nc.nodeId, params));
       });
 
   Future<Uint8List> _callNodeCbor(
@@ -1268,19 +1528,28 @@ class E2EClient implements GatewayClient {
     Object? params,
   ) {
     final body = Uint8List.fromList(cbor.encode(params));
-    return _call(method, (id) {
-      _sendBytes!(nc.channel.sealRequestCbor(id, method, nc.nodeId, body));
+    return _call(method, nc, (id) {
+      nc.sendCbor(nc.channel.sealRequestCbor(id, method, nc.nodeId, body));
     });
   }
 
-  /// Registers a pending reply for a fresh request id, then sends the sealed
-  /// request via [send]; the reply resolves to the raw result JSON bytes.
-  Future<Uint8List> _call(String method, void Function(int id) send) {
+  /// Registers a pending reply on [nc] for a fresh request id, then sends the
+  /// sealed request via [send]; the reply resolves to the raw result JSON
+  /// bytes. [inline] sees the reply before any later frame on the link.
+  Future<Uint8List> _call(
+    String method,
+    NodeChannel nc,
+    void Function(int id) send, {
+    void Function(({Uint8List? result, RpcError? error}) r)? inline,
+  }) {
     if (_closed) return Future.error(StateError('client closed'));
+    if (nc.isDone) {
+      return Future.error(StateError('channel to ${nc.nodeId} closed'));
+    }
     final idn = ++_nextId;
     final id = idn.toString();
     final c = Completer<Uint8List>();
-    _pending[id] = c;
+    _pending[id] = (c: c, nc: nc, inline: inline);
     send(idn);
     return c.future.timeout(
       callTimeoutFor(method),
@@ -1294,18 +1563,20 @@ class E2EClient implements GatewayClient {
   void _onMessage(RpcMessage m) {
     final route = m.route;
     if (route is Map && route['chan_id'] is String) {
-      _onRelay(m, route['chan_id'] as String);
+      _onRelay(m, route['chan_id'] as String, _gatewayLink);
     } else {
       if (!_gatewayCtrl.isClosed) _gatewayCtrl.add(m);
     }
   }
 
-  void _onRelay(RpcMessage m, String chanId) {
+  /// Handles a channel frame that arrived on [link]; a frame for a channel on
+  /// another link is dropped.
+  void _onRelay(RpcMessage m, String chanId, Object link) {
     if (m.method == methodE2EHandshake) {
-      final c = _handshakes[chanId];
-      if (c != null && !c.isCompleted) {
+      final h = _handshakes[chanId];
+      if (h != null && h.link == link && !h.c.isCompleted) {
         try {
-          c.complete(handshakeFromFrame(RelayFrame.fromMessage(m)));
+          h.c.complete(handshakeFromFrame(RelayFrame.fromMessage(m)));
         } catch (_) {
           /* malformed handshake: leave pending -> openChannel times out */
         }
@@ -1313,27 +1584,38 @@ class E2EClient implements GatewayClient {
       return;
     }
     final nc = _byChanId[chanId];
-    if (nc == null) return;
+    if (nc == null || nc._link != link || nc.isDone) return;
     final f = RelayFrame.fromMessage(m);
     if (m.id != null && m.method == null) {
-      final waiter = _pending[m.id];
-      if (waiter == null || waiter.isCompleted) return;
+      final p = _pending[m.id];
+      if (p == null || p.nc != nc || p.c.isCompleted) {
+        // A late reply (its call timed out) is opened and discarded, so the
+        // channel's nonces stay in step.
+        try {
+          nc.channel.openResponse(f);
+        } catch (_) {}
+        return;
+      }
+      final ({Uint8List? result, RpcError? error}) r;
       try {
-        final r = nc.channel.openResponse(f);
-        _pending.remove(m.id);
-        if (r.error != null) {
-          waiter.completeError(r.error!);
-        } else {
-          waiter.complete(r.result!); // non-null on the non-error path
-        }
+        r = nc.channel.openResponse(f);
       } catch (_) {
         // injected/garbage or desynced frame: drop it, keep the pending slot so
         // the genuine reply (which decrypts at the still-unadvanced nonce) resolves.
+        return;
+      }
+      _pending.remove(m.id);
+      p.inline?.call(r);
+      if (r.error != null) {
+        p.c.completeError(r.error!);
+      } else {
+        p.c.complete(r.result!); // non-null on the non-error path
       }
     } else if (m.method != null && m.id == null) {
       try {
+        // Opened even when dropped, so the channel's nonces stay in step.
         final params = nc.channel.openParams(f);
-        if (!_events.isClosed) {
+        if (nc.routeNotes && !_events.isClosed) {
           _events.add((
             method: m.method!,
             params: params,
@@ -1347,12 +1629,27 @@ class E2EClient implements GatewayClient {
     }
   }
 
-  void _writeFrame(Uint8List frameBytes) =>
-      _send('${utf8.decode(frameBytes)}\n');
+  /// Ends every link. Each open node is reported as having none.
+  void _closeLinks() {
+    _wakeUpgrades();
+    _upgrading.clear();
+    final open = _byNodeId.keys.toList();
+    final chans = {..._byNodeId.values, ..._byChanId.values};
+    _byNodeId.clear();
+    for (final id in open) {
+      _emitPath(id, '');
+    }
+    for (final nc in chans) {
+      nc.close();
+    }
+    if (!_paths.isClosed) _paths.close();
+    if (!_reconciles.isClosed) _reconciles.close();
+  }
 
   void _onDone() {
     if (_closed) return;
     _closed = true;
+    _closeLinks();
     _gateway.close();
     if (!_gatewayCtrl.isClosed) _gatewayCtrl.close();
     _failAll(StateError('gateway link closed'));
@@ -1360,7 +1657,10 @@ class E2EClient implements GatewayClient {
   }
 
   void _failAll(Object e) {
-    for (final c in [..._handshakes.values, ..._pending.values]) {
+    for (final c in [
+      for (final h in _handshakes.values) h.c,
+      for (final p in _pending.values) p.c,
+    ]) {
       if (!c.isCompleted) c.completeError(e);
     }
     _handshakes.clear();
@@ -1373,6 +1673,7 @@ class E2EClient implements GatewayClient {
     _closed = true;
     if (!_trustLoaded.isCompleted) _trustLoaded.complete();
     _resyncTimer?.cancel();
+    _closeLinks();
     await _sub.cancel();
     await _gatewayNotifSub?.cancel();
     _gateway.close();

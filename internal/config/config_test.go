@@ -449,3 +449,40 @@ func TestMCPPortFromEnv(t *testing.T) {
 		t.Fatalf("mcp.port from env = %d, want 0", got)
 	}
 }
+
+func TestP2PConfigDefaults(t *testing.T) {
+	isolateConfigDir(t)
+	c := load(t, "")
+	if !c.P2P.Enabled || c.P2P.SSHCommand != "argus bridge" {
+		t.Errorf("p2p = %+v, want enabled with ssh-command 'argus bridge'", c.P2P)
+	}
+	if len(c.P2P.Listen) != 0 || len(c.P2P.Advertise) != 0 || len(c.P2P.Endpoints) != 0 || len(c.P2P.SSH) != 0 {
+		t.Errorf("p2p = %+v, want empty lists and maps", c.P2P)
+	}
+}
+
+func TestP2PConfigFromFile(t *testing.T) {
+	path := writeConfig(t, `
+p2p:
+  enabled: false
+  listen: [":7443"]
+  advertise: ["wss://box.example:7443"]
+  ssh-command: "argus bridge --x"
+  endpoints:
+    home: ["wss://home.example:7443", "wss://10.0.0.2:7443"]
+  ssh:
+    work: "ssh://me@work.example"
+`)
+	c := load(t, path)
+	want := config.P2PConfig{
+		Enabled:    false,
+		Listen:     []string{":7443"},
+		Advertise:  []string{"wss://box.example:7443"},
+		SSHCommand: "argus bridge --x",
+		Endpoints:  map[string][]string{"home": {"wss://home.example:7443", "wss://10.0.0.2:7443"}},
+		SSH:        map[string]string{"work": "ssh://me@work.example"},
+	}
+	if !reflect.DeepEqual(c.P2P, want) {
+		t.Errorf("p2p = %+v, want %+v", c.P2P, want)
+	}
+}

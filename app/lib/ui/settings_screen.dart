@@ -124,8 +124,12 @@ class SettingsScreen extends ConsumerWidget {
                       ),
                       const SizedBox(height: 24),
                       ref.watch(serverInfoProvider).maybeWhen(
-                            data: (info) =>
-                                info == null ? _unavailable : _serverInfo(info),
+                            data: (info) => info == null
+                                ? _unavailable
+                                : _serverInfo(
+                                    info,
+                                    ref.watch(nodeViasProvider),
+                                  ),
                             loading: () => _versionRow,
                             orElse: () => _unavailable,
                           ),
@@ -197,7 +201,7 @@ const _unavailable = _LabeledField(
 );
 
 /// Renders the server version plus the connected-node list from server.info.
-Widget _serverInfo(ServerInfo info) {
+Widget _serverInfo(ServerInfo info, Map<String, String> vias) {
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -223,7 +227,7 @@ Widget _serverInfo(ServerInfo info) {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   for (final n in info.nodes)
-                    Text(_nodeLine(n), style: _monoStyle),
+                    Text(_nodeLine(n, vias[n.id]), style: _monoStyle),
                 ],
               ),
       ),
@@ -231,10 +235,12 @@ Widget _serverInfo(ServerInfo info) {
   );
 }
 
-/// One node as "label · version · no tmux" (or "outdated"), omitting absent parts.
-String _nodeLine(NodeRef n) => [
+/// One node as "label · version · via tcp · no tmux" (or "outdated"),
+/// omitting absent parts.
+String _nodeLine(NodeRef n, String? via) => [
       n.label,
       if (n.version.isNotEmpty) n.version,
+      if (via != null) 'via $via',
       if (n.outdated) 'outdated, needs $minNodeVersion+'
       else if (!n.spawnSupported) 'no tmux',
     ].join(' · ');

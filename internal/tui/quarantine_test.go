@@ -7,6 +7,7 @@ import (
 	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/MunifTanjim/argus/internal/api"
+	"github.com/MunifTanjim/argus/internal/client"
 	"github.com/MunifTanjim/argus/internal/session"
 )
 
@@ -18,6 +19,7 @@ func (c *stubQuarantinedClient) States() <-chan bool             { return nil }
 func (c *stubQuarantinedClient) Reconnect()                      {}
 func (c *stubQuarantinedClient) Close() error                    { return nil }
 func (c *stubQuarantinedClient) Quarantined() bool               { return c.q }
+func (c *stubQuarantinedClient) Paths() <-chan client.NodePath   { return nil }
 
 func quarantinedModel(q bool, sessions ...session.Session) model {
 	m := modelWith(sessions...)

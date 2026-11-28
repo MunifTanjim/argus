@@ -14,6 +14,7 @@ import 'state/profiles.dart';
 import 'state/push.dart';
 import 'transport/connection.dart';
 import 'ui/home_shell.dart';
+import 'ui/node_ssh_prompter.dart';
 import 'ui/profiles_screen.dart';
 import 'ui/route_observer.dart';
 import 'ui/sign_out.dart';
@@ -41,8 +42,16 @@ Future<void> main(List<String> args) async {
     if (args.contains('--unifiedpush-bg')) return;
   }
   _registerAssetLicenses();
-  runApp(const ProviderScope(child: ArgusApp()));
+  runApp(ProviderScope(
+    overrides: [
+      nodeSshPrompterProvider
+          .overrideWithValue(DialogNodeSshPrompter(_navigatorKey)),
+    ],
+    child: const ArgusApp(),
+  ));
 }
+
+final _navigatorKey = GlobalKey<NavigatorState>();
 
 void _registerAssetLicenses() {
   LicenseRegistry.addLicense(() async* {
@@ -67,7 +76,6 @@ class ArgusApp extends ConsumerStatefulWidget {
 class _ArgusAppState extends ConsumerState<ArgusApp>
     with WidgetsBindingObserver {
   bool _loaded = false;
-  final _navigatorKey = GlobalKey<NavigatorState>();
 
   @override
   void initState() {
@@ -98,10 +106,16 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
     // Timers are frozen while backgrounded, so a pending backoff retry won't
     // fire on its own. On resume, kick a stuck connection back to life now
     // instead of waiting it out (a healthy link is left alone — keepalive
-    // verifies it).
+    // verifies it). A healthy link retries its nodes' direct links at once.
     if (state != AppLifecycleState.resumed) return;
+    noteAppResumed();
     final mgr = ref.read(gatewayProvider);
-    if (mgr != null && mgr.state != ConnState.connected) mgr.reconnectNow();
+    if (mgr == null) return;
+    if (mgr.state != ConnState.connected) {
+      mgr.reconnectNow();
+    } else {
+      resumeDirectLinks(mgr.client);
+    }
   }
 
   @override

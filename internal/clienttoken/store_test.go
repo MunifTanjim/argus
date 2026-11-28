@@ -25,7 +25,7 @@ func TestAuthorizePromotesPendingAndWritesFile(t *testing.T) {
 	tok := mustToken(t)
 
 	ch := s.Pend(tok)
-	if _, err := os.Stat(s.path(hashToken(tok))); !os.IsNotExist(err) {
+	if _, err := os.Stat(s.path(HashToken(tok))); !os.IsNotExist(err) {
 		t.Fatalf("pending token must not have a file yet")
 	}
 
@@ -37,7 +37,7 @@ func TestAuthorizePromotesPendingAndWritesFile(t *testing.T) {
 	default:
 		t.Fatalf("waiter channel should be closed after Authorize")
 	}
-	if _, err := os.Stat(s.path(hashToken(tok))); err != nil {
+	if _, err := os.Stat(s.path(HashToken(tok))); err != nil {
 		t.Fatalf("token file should exist after promotion: %v", err)
 	}
 	// Still authorized once active (file-backed).
@@ -73,7 +73,7 @@ func TestListAndRemoveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(recs) != 1 || recs[0].Token != hashToken(tok) {
+	if len(recs) != 1 || recs[0].Token != HashToken(tok) {
 		t.Fatalf("List = %+v, want one record (hashed id) for %s", recs, tok)
 	}
 	if recs[0].CreatedAt == "" {
@@ -110,7 +110,7 @@ func TestTokenHashedAtRest(t *testing.T) {
 		t.Fatalf("want exactly one token file, got %d", len(entries))
 	}
 	name := entries[0].Name()
-	if name != hashToken(tok)+".json" {
+	if name != HashToken(tok)+".json" {
 		t.Fatalf("on-disk name %q is not the hashed id", name)
 	}
 	if strings.Contains(name, tok) {
@@ -156,5 +156,26 @@ func TestCreatedAtUsesInjectedClock(t *testing.T) {
 	recs, _ := s.List()
 	if len(recs) != 1 || recs[0].CreatedAt != fixed.Format(time.RFC3339) {
 		t.Fatalf("created_at = %q, want %q", recs[0].CreatedAt, fixed.Format(time.RFC3339))
+	}
+}
+
+func TestHashTokenExported(t *testing.T) {
+	s := New(t.TempDir())
+	tok := mustToken(t)
+	s.Pend(tok)
+	if !s.Authorize(tok) {
+		t.Fatalf("authorize failed")
+	}
+	if _, err := os.Stat(s.path(HashToken(tok))); err != nil {
+		t.Fatalf("file should be named by HashToken: %v", err)
+	}
+	if !s.Has(HashToken(tok)) {
+		t.Fatalf("Has should report a stored token id")
+	}
+	if err := s.Remove(HashToken(tok)); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if s.Has(HashToken(tok)) {
+		t.Fatalf("Has should be false after Remove")
 	}
 }

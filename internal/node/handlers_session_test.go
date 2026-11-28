@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -1071,5 +1072,21 @@ func TestResumeOfARunningPanelessSessionOpensIt(t *testing.T) {
 	}
 	if r := res.(api.ResumeResult); r.SessionID != live.ID {
 		t.Fatalf("got %#v, want SessionID=%q", r, live.ID)
+	}
+}
+
+func TestIdentifyReportsP2PEndpoints(t *testing.T) {
+	d := newNode(map[session.TmuxServer]*tmux.Client{
+		session.TmuxServerArgus: tmux.New("argus-p2p-test"),
+	})
+	r, _ := d.handleNodeIdentify(context.Background(), nil)
+	if got := r.(api.IdentifyResult).P2PEndpoints; len(got) != 0 {
+		t.Fatalf("default p2p endpoints = %v, want none", got)
+	}
+	want := []string{"wss://a.example:7443", "wss://b.example:7443"}
+	d.SetP2PEndpoints(want)
+	r, _ = d.handleNodeIdentify(context.Background(), nil)
+	if got := r.(api.IdentifyResult).P2PEndpoints; !reflect.DeepEqual(got, want) {
+		t.Fatalf("p2p endpoints = %v, want %v", got, want)
 	}
 }

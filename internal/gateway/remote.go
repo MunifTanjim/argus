@@ -10,6 +10,7 @@ type RemoteSource struct {
 	identityPubKey     string
 	signerPubKey       string
 	lockDisabled       bool
+	p2pEndpoints       []string
 	caps               api.NodeCapabilities
 	peer               *api.Peer
 }
@@ -18,8 +19,8 @@ func NewRemoteSource(id api.IdentifyResult, peer *api.Peer) *RemoteSource {
 	return &RemoteSource{
 		id: id.ID, label: id.Label, version: id.Version,
 		identityPubKey: id.IdentityPubKey, signerPubKey: id.SignerPubKey,
-		lockDisabled: id.LockDisabled,
-		caps:         id.Capabilities, peer: peer,
+		lockDisabled: id.LockDisabled, p2pEndpoints: id.P2PEndpoints,
+		caps: id.Capabilities, peer: peer,
 	}
 }
 
@@ -30,5 +31,6 @@ func (r *RemoteSource) Capabilities() api.NodeCapabilities { return r.caps }
 func (r *RemoteSource) IdentityPubKey() string             { return r.identityPubKey }
 func (r *RemoteSource) SignerPubKey() string               { return r.signerPubKey }
 func (r *RemoteSource) LockDisabled() bool                 { return r.lockDisabled }
+func (r *RemoteSource) P2PEndpoints() []string             { return r.p2pEndpoints }
 
 func (r *RemoteSource) Done() <-chan struct{} { return r.peer.Done() }

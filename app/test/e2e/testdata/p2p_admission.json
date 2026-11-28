@@ -1,0 +1,9 @@
+{
+  "token": "argus-test-token-0123456789",
+  "token_hash": "340ded328441d068e108508ed2193b3784e2792fa616684e3e972c9d1be42a81",
+  "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "node_id": "node-1",
+  "chan_id": "p0123456789abcdef",
+  "tag": "cb6afe08445030f58b5f496dd9301eeb764c37d3e517b5ce18c26db267417694",
+  "mac": "b29071f5ac7f39d7d01aad45e1728112d4986c2b86cf9d52a407629a2d2f7384"
+}

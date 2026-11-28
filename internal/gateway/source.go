@@ -23,6 +23,8 @@ type Source interface {
 	SignerPubKey() string
 	// LockDisabled reports that the node turned off locked-mode enforcement for itself.
 	LockDisabled() bool
+	// P2PEndpoints are the node's direct URLs, as it reported them. Empty when none.
+	P2PEndpoints() []string
 	// Done is closed when the source disconnects.
 	Done() <-chan struct{}
 }

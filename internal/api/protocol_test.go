@@ -1,7 +1,10 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -55,7 +58,7 @@ func TestTerminalWireShape(t *testing.T) {
 		t.Errorf("Terminal = %s\nwant %s", b, want)
 	}
 	b, _ = json.Marshal(NodeCapabilities{SpawnSession: true, Terminal: true, HostWakelock: true})
-	if string(b) != `{"spawn_session":true,"terminal":true,"host_wakelock":true,"cbor":false,"cross_node_orch":0}` {
+	if string(b) != `{"spawn_session":true,"terminal":true,"host_wakelock":true,"cbor":false,"cross_node_orch":0,"p2p":false}` {
 		t.Errorf("NodeCapabilities = %s", b)
 	}
 	b, _ = json.Marshal(TerminalOpenParams{TermID: "t1", TerminalID: "@1", Cols: 80, Rows: 24})
@@ -113,7 +116,7 @@ func TestNodeCapabilitiesKeepUnknownKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := string(b), `{"cbor":false,"cross_node_orch":0,"future_cap":{"level":2},"host_wakelock":true,"spawn_session":true,"terminal":false}`; got != want {
+	if got, want := string(b), `{"cbor":false,"cross_node_orch":0,"future_cap":{"level":2},"host_wakelock":true,"p2p":false,"spawn_session":true,"terminal":false}`; got != want {
 		t.Fatalf("got %s, want %s", got, want)
 	}
 }
@@ -175,5 +178,43 @@ func TestMessageJSONOmitsEmptyActors(t *testing.T) {
 	b, _ = json.Marshal(Message{Child: &Actor{Node: "a", Key: "codex:1"}, AnsweredBy: &Actor{Node: "b", Key: "codex:2"}})
 	if !strings.Contains(string(b), `"child":{"node":"a","key":"codex:1"}`) || !strings.Contains(string(b), `"answered_by":{"node":"b","key":"codex:2"}`) {
 		t.Fatalf("actors not objects: %s", b)
+	}
+}
+
+// TestP2PTagAndMACVector checks plaintext p2p admission against the golden
+// vector other clients share.
+func TestP2PTagAndMACVector(t *testing.T) {
+	raw, err := os.ReadFile("testdata/p2p_admission.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct {
+		Token     string `json:"token"`
+		TokenHash string `json:"token_hash"`
+		Nonce     string `json:"nonce"`
+		NodeID    string `json:"node_id"`
+		ChanID    string `json:"chan_id"`
+		Tag       string `json:"tag"`
+		MAC       string `json:"mac"`
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	if sum := sha256.Sum256([]byte(v.Token)); hex.EncodeToString(sum[:]) != v.TokenHash {
+		t.Fatal("vector token_hash is not SHA-256(token)")
+	}
+	tag, err := P2PTag(v.TokenHash, v.Nonce)
+	if err != nil || tag != v.Tag {
+		t.Fatalf("P2PTag = %q, %v; want %q", tag, err, v.Tag)
+	}
+	mac, err := P2PMAC(v.TokenHash, v.NodeID, v.ChanID, v.Nonce)
+	if err != nil || mac != v.MAC {
+		t.Fatalf("P2PMAC = %q, %v; want %q", mac, err, v.MAC)
+	}
+	if _, err := P2PTag("not hex", v.Nonce); err == nil {
+		t.Fatal("P2PTag with a non-hex hash: want error")
+	}
+	if _, err := P2PMAC("", v.NodeID, v.ChanID, v.Nonce); err == nil {
+		t.Fatal("P2PMAC with an empty hash: want error")
 	}
 }

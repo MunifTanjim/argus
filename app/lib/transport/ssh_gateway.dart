@@ -32,6 +32,16 @@ int parsePort(String s, {String? source}) {
   return p;
 }
 
+/// A user or host starting with `-` would be read as an ssh option.
+void rejectDashTarget(String user, String host, String raw) {
+  if (user.startsWith('-')) {
+    throw FormatException("ssh url user must not start with '-'", raw);
+  }
+  if (host.startsWith('-')) {
+    throw FormatException("ssh url host must not start with '-'", raw);
+  }
+}
+
 SshGatewayConfig parseSshGatewayUrl(String raw) {
   final u = Uri.parse(raw.trim());
   if (u.scheme != 'ssh') {
@@ -44,6 +54,7 @@ SshGatewayConfig parseSshGatewayUrl(String raw) {
     throw FormatException(
         'ssh gateway url takes no path (it dials the gateway directly)', raw);
   }
+  rejectDashTarget(u.userInfo, u.host, raw);
   final portParam = u.queryParameters['port'];
   final gatewayPort = (portParam == null || portParam.isEmpty)
       ? kDefaultGatewayPort

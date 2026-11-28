@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -50,9 +52,16 @@ type Server struct {
 	// nodeOpening counts the channels each node uplink is opening, so the
 	// channel limit holds while an open is between its check and addChannel.
 	nodeOpening map[*api.Peer]int
-	entries     *trustlog.EntryStore // retained trust-log entries (blind)
-	nextChan    atomic.Uint64        // chan_id allocator
-	log         *slog.Logger         // relay lifecycle logging; nil disables
+	// clientConns tracks live /client connections by token hash so revoking a
+	// token can close them.
+	clientConns map[string]map[net.Conn]struct{}
+	// afterClientAccept is a test hook run between WebSocket accept and tracking.
+	afterClientAccept func()
+	// nodeP2P marks node uplinks that declared the p2p capability.
+	nodeP2P  map[*api.Peer]*tokenFeed
+	entries  *trustlog.EntryStore // retained trust-log entries (blind)
+	nextChan atomic.Uint64        // chan_id allocator
+	log      *slog.Logger         // relay lifecycle logging; nil disables
 }
 
 // NewServer builds a gateway Server over agg using the relay path for all connections.
@@ -62,6 +71,8 @@ func NewServer(agg *Aggregator, nodeAuth, clientAuth func(token string) bool) *S
 		pairWaiters: map[string]<-chan struct{}{},
 		channels:    map[string]*relayChannel{},
 		nodePeers:   map[string]*api.Peer{},
+		nodeP2P:     map[*api.Peer]*tokenFeed{},
+		clientConns: map[string]map[net.Conn]struct{}{},
 		entries:     trustlog.NewEntryStore(),
 
 		nodeKeepaliveInterval: api.DefaultKeepaliveInterval,
@@ -133,18 +144,69 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) clientHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tok := api.BearerToken(r)
+		// A pending token is promoted by its first authorization.
+		promotes := s.clientTokens != nil && tok != "" && tok != s.master && !s.clientTokens.Has(clienttoken.HashToken(tok))
 		if s.clientAuth != nil && !s.clientAuth(tok) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
+		}
+		if promotes && s.clientTokens.Has(clienttoken.HashToken(tok)) {
+			s.PublishTokenList()
 		}
 		conn, err := api.AcceptWS(w, r)
 		if err != nil {
 			return
 		}
+		if s.afterClientAccept != nil {
+			s.afterClientAccept()
+		}
 		admin := s.master != "" && tok == s.master
-		ctx := api.WithPrincipal(context.Background(), api.Principal{Admin: admin})
+		var hash string
+		if tok != "" {
+			hash = clienttoken.HashToken(tok)
+			s.trackClientConn(hash, conn)
+			defer s.untrackClientConn(hash, conn)
+			// A removal before tracking is invisible to closeClientsWithToken.
+			if !admin && s.clientTokens != nil && !s.clientTokens.Has(hash) {
+				_ = conn.Close()
+				return
+			}
+		}
+		ctx := api.WithPrincipal(context.Background(), api.Principal{Admin: admin, TokenHash: hash})
 		s.clientSrv.ServeConnContext(ctx, conn)
 	})
+}
+
+func (s *Server) trackClientConn(hash string, c net.Conn) {
+	s.relayMu.Lock()
+	defer s.relayMu.Unlock()
+	if s.clientConns[hash] == nil {
+		s.clientConns[hash] = map[net.Conn]struct{}{}
+	}
+	s.clientConns[hash][c] = struct{}{}
+}
+
+func (s *Server) untrackClientConn(hash string, c net.Conn) {
+	s.relayMu.Lock()
+	defer s.relayMu.Unlock()
+	delete(s.clientConns[hash], c)
+	if len(s.clientConns[hash]) == 0 {
+		delete(s.clientConns, hash)
+	}
+}
+
+// closeClientsWithToken closes every /client connection that authenticated with
+// the token hash. The connection teardown drops its relay channels.
+func (s *Server) closeClientsWithToken(hash string) {
+	s.relayMu.Lock()
+	conns := make([]net.Conn, 0, len(s.clientConns[hash]))
+	for c := range s.clientConns[hash] {
+		conns = append(conns, c)
+	}
+	s.relayMu.Unlock()
+	for _, c := range conns {
+		_ = c.Close()
+	}
 }
 
 // registerPush wires the gateway's push surface. Only push.vapidKey is served:
@@ -257,6 +319,8 @@ func (s *Server) registerClientAdmin(srv *api.Server) {
 		if err := s.clientTokens.Remove(p.Token); err != nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: err.Error()}
 		}
+		s.closeClientsWithToken(p.Token)
+		s.PublishTokenList()
 		return nil, nil
 	}))
 }
@@ -431,6 +495,7 @@ func (s *Server) removeNodePeer(id string, peer *api.Peer) {
 	if s.nodePeers[id] == peer {
 		delete(s.nodePeers, id)
 	}
+	delete(s.nodeP2P, peer)
 	s.relayMu.Unlock()
 	s.dropChannelsWhere("node uplink closed", func(ch *relayChannel) bool { return ch.node == peer || ch.client == peer })
 }
@@ -462,7 +527,7 @@ func (s *Server) buildClientServer() *api.Server {
 
 	srv.Handle(api.MethodServerInfo, func(context.Context, json.RawMessage) (any, error) {
 		configured := s.pushPortStatus != nil && s.pushPortStatus()
-		return api.ServerInfo{Version: s.version, StartedAt: api.StartedAtRFC3339(), Nodes: s.agg.Nodes(), PushPortConfigured: configured, Capabilities: &api.PeerCapabilities{CBOR: true}}, nil
+		return api.ServerInfo{Version: s.version, StartedAt: api.StartedAtRFC3339(), Nodes: s.agg.Nodes(), PushPortConfigured: configured, Capabilities: &api.PeerCapabilities{CBOR: true, P2P: true}}, nil
 	})
 
 	srv.Handle(api.MethodNodesList, func(context.Context, json.RawMessage) (any, error) {
@@ -484,6 +549,9 @@ func (s *Server) buildClientServer() *api.Server {
 		if !ok || !isPeer {
 			return nil, &api.RPCError{Code: api.CodeInternalError, Message: "no client peer"}
 		}
+		if pr := api.PrincipalFrom(ctx); !pr.Admin && pr.TokenHash != "" && s.clientTokens != nil && !s.clientTokens.Has(pr.TokenHash) {
+			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "unauthorized: token revoked"}
+		}
 		p, err := api.Decode[api.RelayOpenParams](params)
 		if err != nil {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "invalid params: " + err.Error()}
@@ -504,6 +572,12 @@ func (s *Server) buildClientServer() *api.Server {
 			return nil, &api.RPCError{Code: api.CodeInvalidRequest, Message: "too many open channels for this client"}
 		}
 		chanID := "c" + strconv.FormatUint(s.nextChan.Add(1), 10)
+		if s.isP2P(nodePeer) {
+			hash := api.PrincipalFrom(ctx).TokenHash
+			if err := nodePeer.Notify(api.MethodChannelOpened, api.ChannelOpenedParams{ChanID: chanID, TokenHash: hash}); err != nil {
+				return nil, &api.RPCError{Code: api.CodeInternalError, Message: "notify node: " + err.Error()}
+			}
+		}
 		s.addChannel(chanID, clientPeer, nodePeer, false)
 		return api.RelayOpenResult{ChanID: chanID}, nil
 	})
@@ -650,14 +724,23 @@ func (s *Server) serveNode(conn net.Conn) {
 	idCtx, idCancel := context.WithTimeout(context.Background(), nodeIdentifyTimeout)
 	defer idCancel()
 	var id api.IdentifyResult
-	if err := peer.CallContext(idCtx, api.MethodNodeIdentify, api.IdentifyParams{Capabilities: &api.PeerCapabilities{CBOR: true}}, &id); err != nil || id.ID == "" {
+	if err := peer.CallContext(idCtx, api.MethodNodeIdentify, api.IdentifyParams{Capabilities: &api.PeerCapabilities{CBOR: true, P2P: true}}, &id); err != nil || id.ID == "" {
 		return
 	}
 
 	s.agg.AddSource(NewRemoteSource(id, peer))
 	selfID.Store(&id.ID)
+	feed := &tokenFeed{}
+	if id.Capabilities.P2P {
+		s.relayMu.Lock()
+		s.nodeP2P[peer] = feed
+		s.relayMu.Unlock()
+	}
 	s.addNodePeer(id.ID, peer)
 	defer s.removeNodePeer(id.ID, peer)
+	if id.Capabilities.P2P {
+		s.sendTokenList(peer, feed, true)
+	}
 
 	// Nodes get the same roster stream as clients so they can address peers.
 	rosterEvents, rosterCancel := s.agg.SubscribeRoster()
@@ -719,9 +802,79 @@ func (s *Server) openNodeChannel(openerID string, opener *api.Peer, targetID str
 		s.relayMu.Unlock()
 	}()
 	chanID := "c" + strconv.FormatUint(s.nextChan.Add(1), 10)
-	if err := target.Notify(api.MethodRelayPeerOpened, api.RelayPeerOpenedParams{ChanID: chanID, FromNode: openerID}); err != nil {
+	var err error
+	if s.isP2P(target) {
+		hash := ""
+		if s.master != "" {
+			hash = clienttoken.HashToken(s.master)
+		}
+		err = target.Notify(api.MethodChannelOpened, api.ChannelOpenedParams{ChanID: chanID, TokenHash: hash, NodeID: openerID})
+	} else {
+		err = target.Notify(api.MethodRelayPeerOpened, api.RelayPeerOpenedParams{ChanID: chanID, FromNode: openerID})
+	}
+	if err != nil {
 		return nil, &api.RPCError{Code: api.CodeInternalError, Message: "notify target node: " + err.Error()}
 	}
 	s.addChannel(chanID, opener, target, true)
 	return api.RelayOpenResult{ChanID: chanID}, nil
+}
+
+func (s *Server) isP2P(p *api.Peer) bool {
+	s.relayMu.Lock()
+	defer s.relayMu.Unlock()
+	return s.nodeP2P[p] != nil
+}
+
+// tokenHashes returns the sorted hashes of the paired client tokens. The master
+// token is not in the store, so it never appears.
+func (s *Server) tokenHashes() []string {
+	hashes := []string{}
+	if s.clientTokens == nil {
+		return hashes
+	}
+	recs, err := s.clientTokens.List()
+	if err != nil {
+		s.logger().Warn("list client tokens", "err", err)
+		return hashes
+	}
+	for _, r := range recs {
+		hashes = append(hashes, r.Token)
+	}
+	sort.Strings(hashes)
+	return hashes
+}
+
+// tokenFeed serializes token.list.changed writes to one node and remembers the
+// last list it sent. Each send computes the list under the lock, so a later send
+// cannot be overtaken by an earlier one.
+type tokenFeed struct {
+	mu   sync.Mutex
+	last []string
+	sent bool
+}
+
+func (s *Server) sendTokenList(p *api.Peer, f *tokenFeed, force bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	hashes := s.tokenHashes()
+	if !force && f.sent && slices.Equal(hashes, f.last) {
+		return
+	}
+	f.last, f.sent = hashes, true
+	_ = p.Notify(api.MethodTokenListChanged, api.TokenListChangedParams{Hashes: hashes})
+}
+
+// PublishTokenList sends the paired client token hashes to every p2p-capable
+// node whose last list differs. Writes happen off the caller's goroutine so a
+// stalled node cannot block it.
+func (s *Server) PublishTokenList() {
+	s.relayMu.Lock()
+	feeds := make(map[*api.Peer]*tokenFeed, len(s.nodeP2P))
+	for p, f := range s.nodeP2P {
+		feeds[p] = f
+	}
+	s.relayMu.Unlock()
+	for p, f := range feeds {
+		go s.sendTokenList(p, f, false)
+	}
 }

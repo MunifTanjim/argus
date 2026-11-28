@@ -31,6 +31,7 @@ import (
 	"github.com/MunifTanjim/argus/internal/node"
 	"github.com/MunifTanjim/argus/internal/push"
 	"github.com/MunifTanjim/argus/internal/selfupgrade"
+	"github.com/MunifTanjim/argus/internal/tailnet"
 	"github.com/MunifTanjim/argus/internal/tunnel"
 )
 
@@ -172,8 +173,16 @@ func runStart(ctx context.Context, stop context.CancelFunc, cmd *cobra.Command, 
 		opts := startMCP(cfg, d, adapter.InstallOptions{ArgusBin: cfg.Bin, Socket: node.ModSocketPath(cfg.Socket)}, logger.Scoped("mcp").L)
 		d.UseMCP(opts)
 		go d.ReconcileHooks(logger.Scoped("hooks").L, opts)
+		d.SetMasterToken(cfg.Token)
+		if len(cfg.P2P.Listen) > 0 || len(cfg.P2P.Advertise) > 0 {
+			d.SetP2PEndpointSource(p2pEndpointSource(cfg, tailnet.Local()))
+		}
+		d.SetTailnet(tailnet.Local())
 		if err := connectGateway(ctx, cfg, d); err != nil {
 			return fail(cmd, err)
+		}
+		if len(cfg.P2P.Listen) > 0 {
+			d.ListenP2P(ctx, cfg.P2P.Listen)
 		}
 	}
 
@@ -453,6 +462,17 @@ func watchParent(r io.Reader, stop context.CancelFunc) {
 
 // connectGateway dials an upstream gateway in the background to enroll the node as a
 // source. No-op when no --gateway is set.
+// p2pEndpointSource computes the direct URLs a node announces, asking
+// tailscaled for its addresses each time, so URLs missing while tailscaled is
+// not up yet are announced on a later uplink connect.
+func p2pEndpointSource(cfg *config.Config, t tailnet.Daemon) func(context.Context) []string {
+	return func(ctx context.Context) []string {
+		tctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		return tailnet.Advertised(tctx, t, cfg.P2P.Listen, cfg.P2P.Advertise, logger.Scoped("p2p").L)
+	}
+}
+
 func connectGateway(ctx context.Context, cfg *config.Config, d *node.Node) error {
 	if !uplinkMode(cfg) {
 		return nil
