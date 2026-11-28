@@ -54,6 +54,7 @@ Future<GatewayClient> buildE2EClient(
   ChainLoader loadChain = loadChainInBackground,
   void Function(GatewayClient client)? onTrustAdvance,
   void Function(Uint8List)? sendBytes,
+  DirectDialer? directDialer,
 }) async {
   final identity = await identityStore.loadOrCreate();
   final Uint8List? seed;
@@ -79,6 +80,7 @@ Future<GatewayClient> buildE2EClient(
     identity,
     trustStore: trust,
     sendBytes: sendBytes,
+    directDialer: directDialer,
     // Re-sync the trust log periodically so mid-session revocations take effect
     // (channels to now-unauthorized nodes are dropped), persisting each advance.
     trustResyncInterval: const Duration(seconds: 30),
@@ -140,6 +142,20 @@ final trustChainStoreProvider = Provider<TrustChainStore>(
 );
 
 final credentialsProvider = StateProvider<GatewayCredentials?>((ref) => null);
+
+/// The link each open node's channel uses (`gateway`, `tcp`), by node id. A
+/// node without a link is absent.
+final nodeViasProvider = StateProvider<Map<String, String>>((ref) => const {});
+
+/// Retries the upgrade of every node on the relay now: the retry timer is
+/// frozen while the app is in the background.
+void resumeDirectLinks(GatewayClient? client) {
+  if (client is E2EClient) client.retryUpgradesNow();
+}
+
+/// Dials a node's direct endpoint.
+Future<RpcLink> dialDirect(String url, Duration timeout) =>
+    WebSocketRpcLink.connectDirect(url, timeout: timeout);
 
 final sshKeyStoreProvider = Provider<SshKeyStore>(
   (ref) => SshKeyStore(const FlutterSecureKv()),
@@ -224,6 +240,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
   final projects = ref.read(projectsProvider.notifier);
   final terminals = ref.read(terminalsProvider.notifier);
   final rosterRevision = ref.read(rosterRevisionProvider.notifier);
+  final nodeVias = ref.read(nodeViasProvider.notifier);
   final keyStore = ref.read(sshKeyStoreProvider);
   final hostKeys = ref.read(hostKeyStoreProvider);
   final push = ref.read(pushControllerProvider);
@@ -252,6 +269,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
             onTrustAdvance: (client) => trustSignature.state =
                 trustSignatureOf(trustSummaryOf(client)),
             sendBytes: sendBytes,
+            directDialer: dialDirect,
           )
         : Future(() async {
             final client = E2EClient(
@@ -260,11 +278,31 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
               KeyPair(Uint8List(32), Uint8List(32)),
               plaintext: true,
               sendBytes: sendBytes,
+              directDialer: dialDirect,
+              p2pToken: creds.token,
             );
             await client.connect();
             return client;
           }),
     onConnected: (client) async {
+      if (client is E2EClient) {
+        nodeVias.state = client.nodeVias;
+        client.sessionReconciles.listen(
+          (r) => store.mergeNode(r.nodeId, parseSessions(r.sessions)),
+        );
+        client.nodePaths.listen((p) {
+          final prev = nodeVias.state[p.nodeId] ?? '';
+          nodeVias.state = {
+            for (final e in nodeVias.state.entries)
+              if (e.key != p.nodeId) e.key: e.value,
+            if (p.via.isNotEmpty) p.nodeId: p.via,
+          };
+          // The node dropped the old link's terminal attaches.
+          if (prev.isNotEmpty && p.via.isNotEmpty && p.via != prev) {
+            unawaited(terminals.load(client));
+          }
+        });
+      }
       // Not awaited, so an open session subscribes as soon as the link is up
       // instead of after every node's list.
       final gen = ++loadGen;
@@ -322,6 +360,7 @@ final gatewayProvider = Provider<ConnectionManager?>((ref) {
     Future.microtask(() {
       equivocation.state = false;
       trustSignature.state = '';
+      nodeVias.state = const {};
       sessionsLoading.state = false;
       store.clear();
       projects.clear();

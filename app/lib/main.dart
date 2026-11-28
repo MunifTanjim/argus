@@ -98,10 +98,15 @@ class _ArgusAppState extends ConsumerState<ArgusApp>
     // Timers are frozen while backgrounded, so a pending backoff retry won't
     // fire on its own. On resume, kick a stuck connection back to life now
     // instead of waiting it out (a healthy link is left alone — keepalive
-    // verifies it).
+    // verifies it). A healthy link retries its nodes' direct links at once.
     if (state != AppLifecycleState.resumed) return;
     final mgr = ref.read(gatewayProvider);
-    if (mgr != null && mgr.state != ConnState.connected) mgr.reconnectNow();
+    if (mgr == null) return;
+    if (mgr.state != ConnState.connected) {
+      mgr.reconnectNow();
+    } else {
+      resumeDirectLinks(mgr.client);
+    }
   }
 
   @override

@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../e2e/aggregate.dart' show splitCompositeId;
+import '../e2e/e2e_client.dart' show followNodeSwitches;
 import '../models/entry.dart';
 import '../transport/jsonrpc.dart';
 import '../transport/gateway_client.dart';
@@ -67,15 +69,25 @@ class TranscriptController implements TranscriptSubscription {
   final String? agentId;
 
   StreamSubscription<RpcMessage>? _sub;
+  StreamSubscription<Object?>? _switchSub;
 
   void start() {
     _sub = client.notifications.listen((m) => dispatchDelta(m, store));
+    // The node drops the old link's subscriptions when it moves to another.
+    _switchSub = followNodeSwitches(
+      client,
+      splitCompositeId(sessionId).$1,
+      _resubscribe,
+    );
     subscribeTranscript(client, store, sessionId: sessionId, agentId: agentId);
   }
 
-  @override
-  void dispose() {
-    _sub?.cancel();
+  void _resubscribe() {
+    _unsubscribe();
+    subscribeTranscript(client, store, sessionId: sessionId, agentId: agentId);
+  }
+
+  void _unsubscribe() {
     final sub = store.currentSubId;
     if (sub != null) {
       // best-effort; ignore failures on a possibly-dead link.
@@ -83,5 +95,12 @@ class TranscriptController implements TranscriptSubscription {
           .call('transcript.unsubscribe', {'sub_id': sub}).catchError(
               (_) => null);
     }
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    _switchSub?.cancel();
+    _unsubscribe();
   }
 }
